@@ -9,7 +9,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTextDetector, TEXT_INPUT_W, TEXT_INPUT_H, type TextDetector } from "../../vision/text.js";
-import { detectOverlays } from "../../pipeline/overlays.js";
+import { detectOverlays, growOverlays } from "../../pipeline/overlays.js";
+import { sourceVideo } from "../../pipeline/render.js";
+import type { SourceOverlay } from "@reelsaw/shared";
 import { materialize, type CaseResult, type MediaSource, type Suite, type EvalContext } from "../framework.js";
 
 type Box = [number, number, number, number];
@@ -51,6 +53,7 @@ export const overlaysSuite: Suite = {
     } catch (err) {
       return [{ id: "(model)", pass: false, skipped: `text model unavailable: ${(err as Error).message.slice(0, 120)} (pnpm models:download)` }];
     }
+    const allBoxes: Box[] = [];
     for (const f of spec.frames) {
       const rgb = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", path.join(dir, f.file), "-vf", `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
       const boxes = (await det.detect(new Uint8Array(rgb))).map((b) => [b.x1, b.y1, b.x2, b.y2] as Box);
@@ -58,7 +61,33 @@ export const overlaysSuite: Suite = {
       const cov = Object.fromEntries(f.labels.map((l) => [l.name, Number(unionCoverage(l.box, boxes).toFixed(2))]));
       const missed = want.filter((l) => cov[l.name]! < 0.5).map((l) => l.name);
       out.push({ id: `frame-${f.t}s`, pass: missed.length === 0, metrics: { boxes: boxes.length, ...cov }, notes: missed.length ? `missed ${missed.join(", ")}` : "" });
+      allBoxes.push(...boxes);
     }
+    // mask residual: a narrow band core (what the frequency grid finds) grown from the boxes actually
+    // seen, then the renderer's blur mask applied to every frame: no labelled caption/handle text may
+    // remain detectable. Regression for "captions visible outside the blur" (long lines, 2nd lines).
+    {
+      const core: SourceOverlay = { x1: 0.3, x2: 0.7, y1: 0.67, y2: 0.74, kind: "caption", coverage: 0.9 };
+      const grown = growOverlays([core], allBoxes.map(([x1, y1, x2, y2]) => ({ x1, y1, x2, y2 })), { quantile: 1 });
+      const mask = sourceVideo(grown, TEXT_INPUT_W, TEXT_INPUT_H, 1);
+      let residual = 0;
+      const leaks: string[] = [];
+      for (const f of spec.frames) {
+        const graph = `[0:v]scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}[s];${mask.prefix.replace("[0:v]", "[s]")}${mask.labels[0]}null[o]`;
+        const rgb = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", path.join(dir, f.file), "-filter_complex", graph, "-map", "[o]", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+        const left = (await det.detect(new Uint8Array(rgb))).map((b) => [b.x1, b.y1, b.x2, b.y2] as Box);
+        for (const l of f.labels.filter((x) => x.name === "caption" || x.name === "handle")) {
+          const c = unionCoverage(l.box, left);
+          if (c > 0.15) {
+            residual++;
+            leaks.push(`${f.t}s ${l.name} ${c.toFixed(2)}`);
+          }
+        }
+      }
+      const g = grown[0]!;
+      out.push({ id: "mask-residual", pass: residual === 0, metrics: { residual, regionW: Number((g.x2 - g.x1).toFixed(2)), regionH: Number((g.y2 - g.y1).toFixed(2)) }, notes: leaks.join("; ") });
+    }
+
     for (const a of spec.aggregate) {
       let media: string;
       try {

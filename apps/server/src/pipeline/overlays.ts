@@ -52,7 +52,7 @@ export async function detectOverlays(
     for (const b of boxes) {
       for (let gy = Math.floor(b.y1 * GY); gy < Math.ceil(b.y2 * GY); gy++) for (let gx = Math.floor(b.x1 * GX); gx < Math.ceil(b.x2 * GX); gx++) cells.add(gy * GX + gx);
     }
-    return { scene: sceneOf(t), cells };
+    return { scene: sceneOf(t), cells, boxes };
   });
   const valid = grids.filter((g): g is NonNullable<typeof g> => !!g);
   if (!valid.length) return { overlays: [], frames: 0, scenes: 0 };
@@ -114,5 +114,72 @@ export async function detectOverlays(
       coverage: Number(maxFreq.toFixed(2)),
     });
   }
-  return { overlays, frames: valid.length, scenes: sceneIds.size };
+  // the frequency grid only finds the band's core (centred subtitles are short most of the time);
+  // grow each region to the long lines and second lines actually seen in it
+  const grown = growOverlays(overlays, valid.flatMap((g) => g.boxes), { quantile: 0.995 });
+  return { overlays: grown, frames: valid.length, scenes: sceneIds.size };
+}
+
+const quant = (xs: number[], q: number) => {
+  const s = xs.slice().sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))]!;
+};
+
+/**
+ * Grow overlay regions to cover the text boxes that belong to them: boxes overlapping a region or
+ * stacked right against it (a second subtitle line), horizontally near it. Extents use a high
+ * quantile so a stray detection can't blow the region up. Iterates so a second line pulls in a third.
+ */
+export function growOverlays(overlays: SourceOverlay[], boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>, opts: { quantile?: number; pad?: number } = {}): SourceOverlay[] {
+  const q = opts.quantile ?? 0.995;
+  const pad = opts.pad ?? 0.006;
+  const inCore = (b: { x1: number; y1: number; x2: number; y2: number }, c: SourceOverlay) => {
+    const cx = (b.x1 + b.x2) / 2;
+    const cy = (b.y1 + b.y2) / 2;
+    return cx >= c.x1 && cx <= c.x2 && cy >= c.y1 && cy <= c.y2;
+  };
+  return overlays.map((o0, idx) => {
+    // boxes that sit in another region's core belong to it (a logo next to the subtitle band)
+    const own = boxes.filter((b) => !overlays.some((other, j) => j !== idx && inCore(b, other)));
+    let o = { ...o0 };
+    for (let iter = 0; iter < 3; iter++) {
+      const members = own.filter((b) => {
+        const h = b.y2 - b.y1;
+        const vGap = Math.max(0, o.y1 - b.y2, b.y1 - o.y2);
+        // horizontal test against the ORIGINAL core: centred subtitle lines always overlap it, while
+        // chaining through the growing region would drift into neighbouring text
+        const overlapsCore = b.x2 > o0.x1 && b.x1 < o0.x2;
+        return vGap <= 0.6 * h && overlapsCore;
+      });
+      if (members.length < (opts.quantile === 1 ? 1 : 3)) break;
+      const next = {
+        ...o,
+        x1: Math.max(0, Math.min(o.x1, quant(members.map((b) => b.x1), 1 - q) - pad)),
+        x2: Math.min(1, Math.max(o.x2, quant(members.map((b) => b.x2), q) + pad)),
+        y1: Math.max(0, Math.min(o.y1, quant(members.map((b) => b.y1), 1 - q) - pad)),
+        y2: Math.min(1, Math.max(o.y2, quant(members.map((b) => b.y2), q) + pad)),
+      };
+      const changed = Math.abs(next.x1 - o.x1) + Math.abs(next.x2 - o.x2) + Math.abs(next.y1 - o.y1) + Math.abs(next.y2 - o.y2) > 0.002;
+      o = next;
+      if (!changed) break;
+    }
+    return { ...o, x1: Number(o.x1.toFixed(3)), x2: Number(o.x2.toFixed(3)), y1: Number(o.y1.toFixed(3)), y2: Number(o.y2.toFixed(3)) };
+  });
+}
+
+/** Text boxes in a clip's own time range (one ffmpeg pass at `fps`), for per-clip region growth. */
+export async function sampleClipText(deps: { detector: TextDetector; ffmpegPath: string; signal?: AbortSignal }, source: string, startSec: number, durationSec: number, fps = 2) {
+  const frameBytes = TEXT_INPUT_W * TEXT_INPUT_H * 3;
+  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", startSec.toFixed(3), "-t", durationSec.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
+  const boxes: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  let buf = Buffer.alloc(0);
+  for await (const chunk of ff.stdout) {
+    buf = Buffer.concat([buf, chunk as Buffer]);
+    while (buf.length >= frameBytes) {
+      const frame = new Uint8Array(buf.subarray(0, frameBytes));
+      buf = buf.subarray(frameBytes);
+      boxes.push(...(await deps.detector.detect(frame)));
+    }
+  }
+  return boxes;
 }

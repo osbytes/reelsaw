@@ -9,6 +9,7 @@ import { StageContext, cleanupWorkdir } from "./common.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
+import { growOverlays, sampleClipText } from "./overlays.js";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { transcribe as aiTranscribe } from "ai";
@@ -146,7 +147,18 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
   const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true } });
   // burned-in captions / watermarks: keep them out of speaker crops, blur whatever is still visible
-  const overlays: SourceOverlay[] = settings.sourceText === "keep" ? [] : (transcriptMeta?.overlays ?? []);
+  let overlays: SourceOverlay[] = settings.sourceText === "keep" ? [] : (transcriptMeta?.overlays ?? []);
+  if (overlays.length && svc.text) {
+    // the project scan samples the whole video sparsely; this clip may show a longer line or a
+    // second line it never saw. Re-detect inside the clip and grow the regions to every box seen.
+    const clipBoxes = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, clip.startSec, duration).catch((err) => {
+      log.warn({ err }, "per-clip text scan failed; using project regions");
+      return [];
+    });
+    const grown = growOverlays(overlays, clipBoxes, { quantile: 1, pad: 0.008 });
+    log.info({ projectRegions: overlays, clipRegions: grown, clipBoxes: clipBoxes.length }, "burned-in text regions");
+    overlays = grown;
+  }
   const avoid = overlays.map((o) => ({ y1: o.y1, y2: o.y2 }));
   const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);

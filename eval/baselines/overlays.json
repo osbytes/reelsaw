@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-15T18:54:18.406Z",
+  "updatedAt": "2026-10-15T19:37:44.117Z",
   "cases": {
     "frame-30s": true,
     "frame-112s": true,
@@ -7,7 +7,8 @@
     "frame-300s": true,
     "frame-640s": false,
     "frame-905s": true,
-    "aggregate-apollo-100-220": true
+    "aggregate-apollo-100-220": true,
+    "mask-residual": true
   },
   "metrics": {
     "captionCoverage": {

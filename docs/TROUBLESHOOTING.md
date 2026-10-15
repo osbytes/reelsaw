@@ -102,6 +102,11 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 - **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across
   shots. With no detected shot changes only the top 15% / bottom 40% are trusted (a shirt print was flagged
   otherwise). `reelsaw overlays <projectId> [--store]` re-scans an existing project.
+- **Blur regions must cover the longest line, not the typical one.** Centred subtitles vary in width, so a
+  frequency grid only finds the band's core; ends of long lines and second lines leaked past the blur (39/133
+  sampled frames). Regions now grow to the boxes seen in them (`growOverlays`, core-anchored so they don't
+  chain into nearby logos), and each render re-detects inside its own clip. Measured by masking frames and
+  re-running the detector (eval `overlays/mask-residual`): 0 frames with caption text left.
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
 
