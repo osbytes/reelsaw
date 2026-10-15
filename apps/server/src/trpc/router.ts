@@ -13,6 +13,7 @@ import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
+import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 
 function publicClip(c: schema.Clip) {
   return {
@@ -144,7 +145,7 @@ export const appRouter = router({
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true } });
+      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true } });
       return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null };
     }),
 
@@ -197,10 +198,10 @@ export const appRouter = router({
         for (const c of clips) {
           if (c.status === "done") continue;
           // a user-made clip whose AI preparation never finished goes back through clip.prepare
-          if (c.status === "preparing" || (c.origin !== "ai" && !c.scores && c.score === 0)) {
+          if (needsPrepare(c)) {
             await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
             await db.update(schema.clips).set({ status: "preparing", error: null }).where(eq(schema.clips.id, c.id));
-            await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: c.origin === "manual-ai" ? "ai" : "exact" });
+            await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
             continue;
           }
           await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
@@ -242,6 +243,24 @@ export const appRouter = router({
       }),
 
     /** Keep the transcript, discard clips, pick new moments (optionally with new settings). */
+    /** Hide or keep text burned into the source (captions, logos); re-renders finished clips. */
+    setSourceText: protectedProcedure.input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep"]) })).mutation(async ({ ctx, input }) => {
+      const { svc } = ctx;
+      const db = svc.database.db;
+      const p = await ownedProject(db, ctx.user.id, input.id);
+      await db.update(schema.projects).set({ settings: { ...p.settings, sourceText: input.sourceText }, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+      let rerendered = 0;
+      for (const c of await listClips(db, p.id)) {
+        if (c.status !== "done" && c.status !== "failed") continue;
+        await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
+        await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+        await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
+        rerendered++;
+      }
+      if (rerendered && (p.status === "done" || p.status === "failed")) await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+      return { ok: true, rerendered };
+    }),
+
     /** oEmbed title/thumbnail for the new-project preview, before anything is created. */
     peek: protectedProcedure.input(z.object({ url: z.url() })).query(async ({ input }) => peekUrlMeta(input.url)),
 
@@ -504,12 +523,19 @@ export const appRouter = router({
       if (!c) throw new TRPCError({ code: "NOT_FOUND" });
       const p = await ownedProject(db, ctx.user.id, c.projectId);
       await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-      await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
       if (p.status === "done" || p.status === "failed") {
         await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
       }
+      if (needsPrepare(c)) {
+        // never prepared (e.g. the model was down): redo preparation, which renders afterwards
+        await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
+        await db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+        await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+        return { ok: true, step: "prepare" as const };
+      }
+      await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
       await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-      return { ok: true };
+      return { ok: true, step: "render" as const };
     }),
   }),
 });

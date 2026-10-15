@@ -64,6 +64,13 @@
       "when": 1792082924453,
       "tag": "0008_clip_diagnostics",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792087110600,
+      "tag": "0009_transcript_overlays",
+      "breakpoints": true
     }
   ]
 }

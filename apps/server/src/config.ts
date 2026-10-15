@@ -82,6 +82,12 @@ export const envSchema = z.object({
   OTEL_ENABLED: boolFalse,
 
   // resource governor (see resources.ts)
+  // a running job with no progress event for this long is reported (log + UI) as stalled
+  STALL_MINUTES: z.coerce.number().int().min(2).default(15),
+  // on SIGTERM, wait this long for running jobs to finish before exiting (deploys stop interrupting renders)
+  SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
+  // also append logs to this file (survives container re-creation); stdout stays the primary stream
+  LOG_FILE: z.string().optional(),
   MAX_CPU_PERCENT: z.coerce.number().min(10).max(100).default(90), // % of all CPU time busy (measured, any OS)
   MIN_FREE_MEM_MB: z.coerce.number().int().min(0).default(512),
   MIN_FREE_DISK_MB: z.coerce.number().int().min(0).default(2048),
@@ -90,6 +96,9 @@ export const envSchema = z.object({
   // face detection for automatic layout (vision/faces.ts)
   FACE_DETECTION: boolTrue,
   FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ultraface-rfb-320.onnx")),
+  // burned-in caption / watermark detection (PP-OCRv4 text detector); false = never hide source text
+  TEXT_DETECTION: boolTrue,
+  TEXT_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ppocrv4-det.onnx")),
   LAYOUT_MIN_FACE_RATIO: z.coerce.number().min(0).max(1).default(0.6), // share of frames that must contain a face
   LAYOUT_MIN_FACE_SIZE: z.coerce.number().min(0).max(1).default(0.18), // median face height / frame height
 

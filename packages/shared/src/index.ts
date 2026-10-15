@@ -120,6 +120,10 @@ export interface DetectedSegment {
   cx: number;
   cy: number;
   cx2?: number;
+  /** median face height (fraction of source height), for speaker-sized crops */
+  size?: number;
+  size2?: number;
+  cy2?: number;
   /** crop centre over time, ~1 point/s: [absolute seconds, x] (offset already applied) */
   track?: Array<[number, number]>;
   /** manual offset that was applied */
@@ -162,6 +166,8 @@ export const projectSettingsSchema = styleSchema.extend({
   maxClips: z.number().int().min(1).max(50).optional(),
   minClipSeconds: z.number().int().min(5).max(180).default(20),
   maxClipSeconds: z.number().int().min(10).max(300).default(60),
+  /** Text burned into the source (captions, logos): "hide" keeps it out of crops and masks the rest. */
+  sourceText: z.enum(["hide", "keep"]).default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
   /** @deprecated use captionY */
@@ -251,6 +257,10 @@ export const PROJECT_EVENT_TYPES = [
   "clip.rendering",
   "clip.done",
   "clip.failed",
+  /** a clip job attempt ended without finishing (error, crash, restart) and will be retried */
+  "clip.retrying",
+  /** no progress for a long time on a running clip/stage (watchdog) */
+  "job.stalled",
   "project.done",
   "project.failed",
 ] as const;
@@ -329,3 +339,64 @@ export const CAPTION_FONT_FRAC = 68 / 1920;
 export const HOOK_FONT_FRAC = 60 / 1920;
 /** Default max line seconds for a given words-per-line setting. */
 export const lineSecondsFor = (wordsPerLine: number) => (wordsPerLine <= 2 ? 1.0 : 1.8);
+
+// ---------- burned-in text + crop geometry (shared by the renderer and the editor preview) ----------
+
+/** Text burned into the source (captions, watermarks), normalized source coordinates. */
+export interface SourceOverlay {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** caption = changes over time (subtitles); watermark = always there (channel logo, handle) */
+  kind: "caption" | "watermark";
+  /** fraction of sampled frames showing text here */
+  coverage: number;
+}
+
+/**
+ * Crop window for one speaker in a stacked/split layout, sized to the face instead of the full
+ * source height: centres the speaker (a full-height 9:8 crop of a wide shot is ~60% of the frame and
+ * cannot centre a face near the edge) and, when `avoid` bands are given, keeps burned-in captions out
+ * of the crop. Returns source pixels; x is chosen per point by the caller (`cropX`).
+ */
+export function speakerCrop(srcW: number, srcH: number, aspect: number, face: { cy: number; size: number }, avoid: Array<{ y1: number; y2: number }> = []): { w: number; h: number; y: number } {
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  // ~3.2 face-heights tall: head and shoulders, the usual podcast-clip framing
+  let h = clamp((face.size || 0.3) * 3.2, 0.42, 1) * srcH;
+  let w = h * aspect;
+  if (w > srcW) {
+    w = srcW;
+    h = w / aspect;
+  }
+  const faceY = face.cy * srcH;
+  let y = clamp(faceY - 0.42 * h, 0, srcH - h);
+  for (const b of avoid) {
+    const b1 = b.y1 * srcH - 2;
+    const b2 = b.y2 * srcH + 2;
+    if (y + h <= b1 || y >= b2) continue; // no overlap
+    if (faceY < b1) {
+      // speaker above the band: end the crop just above it (shrink if needed, never below 35% of the source)
+      const room = b1 - y;
+      if (room >= 0.35 * srcH) h = Math.min(h, room);
+      else {
+        h = Math.max(0.35 * srcH, Math.min(h, b1));
+        y = Math.max(0, b1 - h);
+      }
+    } else if (faceY > b2) {
+      // speaker below: start just under it
+      const ny = b2;
+      if (srcH - ny >= 0.35 * srcH) {
+        y = ny;
+        h = Math.min(h, srcH - ny);
+      }
+    }
+    w = h * aspect;
+  }
+  return { w: Math.round(w), h: Math.round(h), y: Math.round(clamp(y, 0, srcH - h)) };
+}
+
+/** Left edge of a crop of width `w` centred on normalized x `cx`, kept inside the frame. */
+export function cropX(srcW: number, w: number, cx: number) {
+  return Math.max(0, Math.min(srcW - w, cx * srcW - w / 2));
+}

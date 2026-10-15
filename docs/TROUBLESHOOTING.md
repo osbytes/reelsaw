@@ -6,6 +6,9 @@ Everything here runs against the live stack; nothing needs a rebuild.
 ## 1. First five minutes
 
 ```sh
+docker compose exec app reelsaw stuck                  # everything unfinished: age, last event, live jobs, problems
+docker compose exec app reelsaw recover <clipId|projectId>  # re-run the right step (prepare vs render) / reconcile
+docker compose exec app reelsaw logs <id> [n]          # log lines for a project/clip/job, from the log file (survives redeploys)
 docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, live jobs, errors
 docker compose exec app reelsaw events <projectId> 50  # what the pipeline emitted, in order
 docker compose exec app reelsaw clip <clipId>          # one clip: bounds, layout segments, last render's cuts + reasons
@@ -37,10 +40,10 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   `jobId`; errors under `err` with stack. `LOG_LEVEL=debug` adds per-cut decisions. With `OTEL_ENABLED=true` each line
   gets `trace_id`/`span_id`, so a log line jumps straight to its trace.
 - **Evals** (no DB, no render):
-  - `eval:transcription`: WER and entity recall per transcription setup (`eval/cases.json`, synthesized audio).
+  - `eval:transcription`: model × bias × correction comparison matrix (`eval/fixtures/transcription/cases.json`).
   - `eval:cuts`: real problem cuts as fixtures (`reelsaw cuts <clipId> --fixture /data/fixtures`), graded clean /
     kept / broken by transcribing the cut result independently of the search's own verifier.
-    Run in the stack: `docker compose exec app node /app/server/dist/eval/cuts.js /data/fixtures`.
+    Run: `pnpm eval cuts` (see [EVALS.md](EVALS.md)).
 - **Browser checks** (agent sessions): the Chrome extension runs in a background tab, where timers and media are
   throttled; responsive layouts were checked by loading the page into a 390 px iframe and measuring
   `scrollWidth` / elements wider than the viewport.
@@ -87,6 +90,37 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   next drag.
 - Inline-block spans swallow trailing spaces (karaoke "howyour"): put the space outside the scaled span.
 
+## Lessons: framing and burned-in text
+
+- **Split crops must be speaker-sized.** A full-height 9:8 crop of a wide two-shot is ~60% of the frame and pins
+  edge speakers off-centre; `speakerCrop` (@reelsaw/shared, used by renderer and preview) sizes each crop to
+  ~3.2 face-heights and keeps it out of burned-in text bands.
+- **Face detectors see posters.** UltraFace returned a wall object as a face (score ~0.88, identical box every
+  frame) and split paired it with the real speaker. `dropStaticFaces` removes face clusters that never move.
+- **Speakers disappear for seconds** (drinking, turning away). Split holds through short one-face stretches when the
+  visible face matches one of the split speakers; otherwise the layout flips for a sip.
+- **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across
+  shots. With no detected shot changes only the top 15% / bottom 40% are trusted (a shirt print was flagged
+  otherwise). `reelsaw overlays <projectId> [--store]` re-scans an existing project.
+- **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
+  separately. ffmpeg errors now lead with the failing lines instead of the banner.
+
+## Lessons: stuck jobs (manual clip, 2026-10-15)
+
+What happened: a manual clip's AI preparation ran while Ollama was down, the clip ended up queued for render
+without its metadata, two deploys killed the render, and the cut search ran for minutes without a progress event.
+It looked frozen and the evidence was gone with the container's logs. What changed:
+
+- **Recoverability:** `needsPrepare` routes an unprepared user clip back through `clip.prepare` from every path
+  (render worker, re-render, retry, reconciler, `reelsaw recover`). Deploys drain: `SHUTDOWN_GRACE_SECONDS=300` +
+  compose `stop_grace_period: 330s`, so a rebuild waits for running renders instead of burning a retry.
+- **Triagability:** retried jobs log `previousAttempt` (our error or pg-boss "job heartbeat timeout" =
+  interrupted) and post a `clip.retrying` event; the reconciler's watchdog posts `job.stalled` after
+  `STALL_MINUTES` without events; the cut search reports progress per cut and attempt; logs also go to
+  `LOG_FILE` (`/data/logs/reelsaw.log`, daily rotation, 7 kept) so `reelsaw logs <id>` works after redeploys.
+- **Dependencies down:** boot fail-fast (exit 78) on an unreachable model server is intended; on a host where
+  Ollama is started by hand, check `curl localhost:11434/api/version` first.
+
 ## 7. Next improvements (not built yet)
 
 1. **Dev loop without image rebuilds:** a compose `dev` profile that mounts `apps/*/src` and runs `tsx watch`; most
@@ -96,3 +130,10 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
    diffed (`reelsaw replay analyze <projectId>`), and build a selection eval from human-labelled moments.
 4. **Stuck-job detector** in the reconciler: an active job past its expected duration becomes a visible event.
 5. **More fixtures:** export every refused cut automatically (with consent) so `eval:cuts` grows from real failures.
+
+## 8. Evals and regression cases
+
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (selection, framing, overlays,
+cuts, transcription, selection-model) against committed fixtures and baselines and exits non-zero on a
+regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
+pull more data from: [EVALS.md](EVALS.md).

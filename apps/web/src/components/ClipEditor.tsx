@@ -8,7 +8,7 @@ import { VerticalPreview, type Framing, type PreviewLayout } from "./VerticalPre
 import { StyleControls, Segmented } from "./StyleControls";
 import { Timeline, normalizeSections, MODE_COLOR, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
 import { useHistory } from "../lib/history";
-import { formatTime, resolveStyle, type DetectedSegment, type LayoutSection, type ProjectSettings, type SectionMode, type Style, type StyleOverride, type Word } from "@reelsaw/shared";
+import { formatTime, resolveStyle, type DetectedSegment, type LayoutSection, type ProjectSettings, type SectionMode, type SourceOverlay, type Style, type StyleOverride, type Word } from "@reelsaw/shared";
 
 export interface EditorClip {
   id: string;
@@ -35,6 +35,8 @@ interface Props {
   settings: ProjectSettings;
   words: Word[];
   sceneCuts: number[];
+  /** burned-in source text the render will blur / avoid (empty when the project keeps it) */
+  overlays: SourceOverlay[];
   clip: EditorClip;
   onClose: () => void;
 }
@@ -123,7 +125,7 @@ function TimeField({ value, onCommit, label }: { value: number; onCommit: (t: nu
  * timeline (words, clip range, layout sections + transitions), precise trim controls, and tabs for
  * layout, caption style (this clip or all clips), text and transcript-based trimming.
  */
-export function ClipEditor({ projectId, sourceVideoUrl, durationSec, srcW, srcH, settings, words, sceneCuts, clip, onClose }: Props) {
+export function ClipEditor({ projectId, sourceVideoUrl, durationSec, srcW, srcH, settings, words, sceneCuts, overlays, clip, onClose }: Props) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -324,7 +326,15 @@ export function ClipEditor({ projectId, sourceVideoUrl, durationSec, srcW, srcH,
     }
     // centre crops start at the middle; tracked crops at the detected face (minus any offset already baked into the render)
     const base = layout === "center" ? 0.5 : x - (det?.offsetX ?? 0);
-    return { layout, cx: Math.max(0, Math.min(1, base + (sec.offsetX ?? 0))), cy: det?.cy ?? 0.45, cx2: det?.cx2 !== undefined ? det.cx2 - (det.offsetX ?? 0) + (sec.offsetX ?? 0) : undefined };
+    return {
+      layout,
+      cx: Math.max(0, Math.min(1, base + (sec.offsetX ?? 0))),
+      cy: det?.cy ?? 0.45,
+      cx2: det?.cx2 !== undefined ? det.cx2 - (det.offsetX ?? 0) + (sec.offsetX ?? 0) : undefined,
+      cy2: det?.cy2,
+      size: det?.size,
+      size2: det?.size2,
+    };
   }, [current, sections, secIdx, clip.layoutSegments, clip.layout]);
 
   const panSection = (dx: number) => {
@@ -431,6 +441,7 @@ export function ClipEditor({ projectId, sourceVideoUrl, durationSec, srcW, srcH,
                   hook={hook}
                   emphasis={emphasis}
                   onPan={tab === "layout" ? panSection : undefined}
+                  overlays={overlays}
                   alwaysShowHook={tab === "captions" && !playing}
                   onStyleChange={(p) => setStyle(p, "drag-text")}
                   showSafeZones={safe}

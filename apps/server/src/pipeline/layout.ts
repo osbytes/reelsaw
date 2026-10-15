@@ -22,6 +22,8 @@ export interface LayoutDecision {
   track: Array<{ t: number; x: number; y: number }>;
   /** Second speaker's track for the split layout. */
   track2?: Array<{ t: number; x: number; y: number }>;
+  /** Per-speaker median face heights for split crops (first = track, second = track2). */
+  speakerSizes?: [number, number];
   faceCount: number;
 }
 
@@ -100,11 +102,11 @@ export function decideLayout(
   }
   // two people on screen most of the time (interview / podcast wide shot) → one crop per speaker
   const twoFaces = samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08).length / Math.max(1, samples.length);
-  if (twoFaces >= 0.6) {
+  if (twoFaces >= 0.5) {
     const pair = assignPair(samples);
     const t1 = tripodTrack(pair.a, sceneCuts);
     const t2 = tripodTrack(pair.b, sceneCuts);
-    return { ...base, track: t1, track2: t2, layout: "split", reason: `two faces in ${Math.round(twoFaces * 100)}% of frames` };
+    return { ...base, track: t1, track2: t2, speakerSizes: pairSizes(pair), layout: "split", reason: `two faces in ${Math.round(twoFaces * 100)}% of frames` };
   }
   if (faceSize < config.LAYOUT_MIN_FACE_SIZE || inCorner) {
     return { ...base, layout: "stack", reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
@@ -116,6 +118,11 @@ export function decideLayout(
  * Split the two largest faces per frame into a consistent left/right pair by x position so each
  * speaker gets a stable track.
  */
+function pairSizes(pair: { a: FaceSample[]; b: FaceSample[] }): [number, number] {
+  const sz = (xs: FaceSample[]) => Number(median(xs.filter((s) => s.box).map((s) => s.box!.y2 - s.box!.y1)).toFixed(3));
+  return [sz(pair.a), sz(pair.b)];
+}
+
 function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSample[] } {
   const a: FaceSample[] = [];
   const b: FaceSample[] = [];
@@ -266,7 +273,12 @@ export function segmentLayouts(
     const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08;
     return two ? "split" : big ? "face" : "none";
   });
+  // a second speaker who briefly disappears (drinks, turns away, leans out) shouldn't flip the
+  // layout: "split" holds while two faces were seen in ≥35% of the surrounding ±3 s
+  const hold = Math.max(2, Math.round(3 * (samples.length > 1 ? (samples.length - 1) / Math.max(0.01, samples.at(-1)!.t - samples[0]!.t) : 4)));
   const state = raw.map((_, i) => {
+    const wide = raw.slice(Math.max(0, i - hold), i + hold + 1);
+    if (wide.filter((w) => w === "split").length / wide.length >= 0.35) return "split" as const;
     const win = raw.slice(Math.max(0, i - 2), i + 3);
     const counts = { face: 0, split: 0, none: 0 };
     for (const w of win) counts[w as keyof typeof counts]++;
@@ -298,6 +310,22 @@ export function segmentLayouts(
     const inside = samples.filter((s) => s.t >= start && s.t < end);
     const decision = decideLayout(inside.length ? inside : samples, config, cuts.filter((c) => c > start && c < end).map((c) => c));
     segs.push({ start, end, decision });
+  }
+  // a short one-face stretch beside a split, where the visible face IS one of the split's speakers
+  // (same place, same size), is the same two-person shot with the other speaker momentarily
+  // undetected (drinking, turned away): keep it split instead of flipping layouts for a few seconds
+  for (let i = 0; i < segs.length; i++) {
+    const sg = segs[i]!;
+    if (sg.decision.layout === "split" || sg.end - sg.start > 8 || !sg.decision.track.length) continue;
+    const nb = [segs[i - 1], segs[i + 1]].find((n) => n?.decision.layout === "split" && n.decision.track2?.length);
+    if (!nb) continue;
+    const me = trackCenter(sg.decision.track);
+    const a = trackCenter(nb.decision.track);
+    const b = trackCenter(nb.decision.track2);
+    const [sa, sb] = nb.decision.speakerSizes ?? [nb.decision.faceSize, nb.decision.faceSize];
+    const same = (c: { x: number }, size: number) => Math.abs(c.x - me.x) < 0.08 && Math.abs(size - sg.decision.faceSize) <= 0.4 * Math.max(size, sg.decision.faceSize);
+    if (!same(a, sa) && !same(b, sb)) continue;
+    segs[i] = { ...sg, decision: { ...nb.decision, reason: `${nb.decision.reason}; held through ${Math.round(sg.end - sg.start)}s with one speaker undetected` } };
   }
   // merge neighbours with the same layout
   const merged: LayoutSegment[] = [];
@@ -375,7 +403,7 @@ export function forcedDecision(samples: FaceSample[], layout: Layout, config: Pi
   const base = decideLayout(samples, config, sceneCuts);
   if (layout === "split" && !base.track2) {
     const pair = assignPair(samples);
-    return { ...base, layout, reason: "manual", track: tripodTrack(pair.a, sceneCuts), track2: tripodTrack(pair.b, sceneCuts) };
+    return { ...base, layout, reason: "manual", track: tripodTrack(pair.a, sceneCuts), track2: tripodTrack(pair.b, sceneCuts), speakerSizes: pairSizes(pair) };
   }
   return { ...base, layout, reason: "manual" };
 }
@@ -458,4 +486,48 @@ export function sparseTrack(track: LayoutDecision["track"], start: number, end: 
     last = p.t;
   }
   return out.slice(0, 400);
+}
+
+/**
+ * Drop "faces" that never move: posters, photos, logos on the wall. UltraFace returns the same box,
+ * frame after frame, for a printed face, while a real person drifts and the detector jitters on them.
+ * Boxes are clustered by centre across the clip; a cluster seen in enough frames whose centre and
+ * size barely vary is treated as static and removed from every sample.
+ */
+export function dropStaticFaces(samples: FaceSample[], opts = { radius: 0.05, minFrames: 8, maxStd: 0.0025 }): { samples: FaceSample[]; dropped: Array<{ x: number; y: number; frames: number }> } {
+  type Cluster = { x: number; y: number; members: FaceBox[] };
+  const clusters: Cluster[] = [];
+  for (const s of samples)
+    for (const b of s.boxes) {
+      const cx = (b.x1 + b.x2) / 2;
+      const cy = (b.y1 + b.y2) / 2;
+      const c = clusters.find((k) => Math.abs(k.x - cx) < opts.radius && Math.abs(k.y - cy) < opts.radius);
+      if (c) {
+        c.members.push(b);
+        c.x += (cx - c.x) / c.members.length;
+        c.y += (cy - c.y) / c.members.length;
+      } else clusters.push({ x: cx, y: cy, members: [b] });
+    }
+  const std = (xs: number[]) => {
+    const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+    return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+  };
+  const isStatic = new Set<FaceBox>();
+  const dropped: Array<{ x: number; y: number; frames: number }> = [];
+  for (const c of clusters) {
+    if (c.members.length < opts.minFrames) continue;
+    const xs = c.members.map((b) => (b.x1 + b.x2) / 2);
+    const ys = c.members.map((b) => (b.y1 + b.y2) / 2);
+    const hs = c.members.map((b) => b.y2 - b.y1);
+    if (std(xs) < opts.maxStd && std(ys) < opts.maxStd && std(hs) < opts.maxStd) {
+      for (const b of c.members) isStatic.add(b);
+      dropped.push({ x: Number(c.x.toFixed(3)), y: Number(c.y.toFixed(3)), frames: c.members.length });
+    }
+  }
+  if (!isStatic.size) return { samples, dropped };
+  const out = samples.map((s) => {
+    const boxes = s.boxes.filter((b) => !isStatic.has(b));
+    return { ...s, boxes, box: boxes[0] ?? null };
+  });
+  return { samples: out, dropped };
 }

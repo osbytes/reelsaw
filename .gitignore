@@ -6,7 +6,9 @@ data
 .DS_Store
 # downloaded / generated artifacts (see `pnpm models:download` and eval/generate-audio.sh)
 apps/server/models/*.onnx
-eval/audio/
 # local tool state
 .claude/
 coverage/
+# eval runner: cached media / model calls and generated reports (fixtures + baselines are tracked)
+eval/.cache/
+eval/reports/

@@ -46,8 +46,19 @@ export function snapCandidate(
 ): ClipCandidate | null {
   const starts = segments.map((s) => s.start);
   const ends = segments.map((s) => s.end);
-  let start = nearest(starts, c.startSec, 2.5) ?? c.startSec;
+  // Snap to sentence boundaries. Long sentences (6-7 s in podcasts) often leave the model's pick
+  // more than 2.5 s from any boundary; then use the sentence it falls inside: start at its start,
+  // end at its end (extending), or at the previous sentence end if extending would break the max.
+  const inside = (t: number) => segments.find((sg) => t > sg.start && t < sg.end);
+  let start = nearest(starts, c.startSec, 2.5) ?? inside(c.startSec)?.start ?? c.startSec;
   let end = nearest(ends, c.endSec, 2.5) ?? c.endSec;
+  if (nearest(ends, c.endSec, 2.5) === undefined) {
+    const sg = inside(c.endSec);
+    const prevEnd = ends.filter((e) => e <= c.endSec).pop();
+    if (sg) end = sg.end - start <= settings.maxClipSeconds || prevEnd === undefined ? sg.end : prevEnd;
+    // in a pause or after the last sentence (outro music): end with the last thing said
+    else if (prevEnd !== undefined && prevEnd > start) end = prevEnd;
+  }
   // scene cuts within 0.6s make cleaner edits than mid-shot cuts
   const sc = nearest(sceneCuts, start, 0.6);
   if (sc !== undefined && sc <= start) start = sc;

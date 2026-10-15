@@ -8,12 +8,14 @@ import type { Services } from "../services.js";
 import { StageContext, cleanupWorkdir } from "./common.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
+import { needsPrepare, prepareModeOf } from "./manual.js";
+import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { transcribe as aiTranscribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
 import { toWords } from "./transcript.js";
-import { sampleFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { resolveStyle, type DetectedSegment, type ClipDiagnostics } from "@reelsaw/shared";
+import { sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
+import { resolveStyle, speakerCrop, cropX, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 
 const OUT_W = 1080;
@@ -29,7 +31,14 @@ const FIT_CHAIN = (w: number, h: number) =>
  * Build the ffmpeg filter chain for a resolved layout.
  * `track` (normalized face centers over clip time) drives the moving crop for "face" and "stack".
  */
-export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: LayoutDecision["track"] = [], track2: LayoutDecision["track"] = []): { chain: string; width: number; height: number } {
+/** Extra framing inputs: face size per speaker and burned-in text bands to keep out of speaker crops. */
+export interface FrameGeometry {
+  size?: number;
+  size2?: number;
+  avoid?: Array<{ y1: number; y2: number }>;
+}
+
+export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: LayoutDecision["track"] = [], track2: LayoutDecision["track"] = [], geo: FrameGeometry = {}): { chain: string; width: number; height: number } {
   if (layout === "none") {
     const w = Math.round(srcW / 2) * 2;
     const h = Math.round(srcH / 2) * 2;
@@ -43,40 +52,41 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
   const cropH = Math.min(srcH, Math.round((srcW * 16) / 9));
   const xs = track.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcW - cropW, p.x * srcW - cropW / 2)) }));
   const xExpr = !xs.length ? `(iw-${cropW})/2` : piecewiseExpr(xs, 2);
+  const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
 
   if (layout === "split") {
-    // two speakers: each gets a 1080×960 crop (full source height, 9:8), stacked
+    // two speakers stacked, each crop sized to its face (≈3 face-heights) so it can actually centre
+    // the speaker; a full-height 9:8 crop of a wide shot is ~60% of the frame and pins edge faces
     const halfH = OUT_H / 2;
-    const cW = Math.min(srcW, Math.round((srcH * OUT_W) / halfH));
-    const mk = (tr: LayoutDecision["track"]) => {
-      const pts = tr.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcW - cW, p.x * srcW - cW / 2)) }));
-      return pts.length ? piecewiseExpr(pts, 2) : `(iw-${cW})/2`;
+    const mk = (tr: LayoutDecision["track"], size: number | undefined, label: string, out: string) => {
+      const c = speakerCrop(srcW, srcH, OUT_W / halfH, { cy: trackCenter(tr).y, size: size ?? 0.3 }, geo.avoid);
+      const w = even(c.w);
+      const h = even(c.h);
+      const pts = tr.map((p) => ({ t: p.t, v: cropX(srcW, w, p.x) }));
+      const x = pts.length ? piecewiseExpr(pts, 2) : `(iw-${w})/2`;
+      return `[${label}]crop=${w}:${h}:x='${x}':y=${c.y},scale=${OUT_W}:${halfH}:flags=lanczos[${out}]`;
     };
+    const t2 = track2.length ? track2 : track;
     return {
-      chain:
-        `[0:v]split=2[a][b];` +
-        `[a]crop=${cW}:${srcH}:x='${mk(track)}':y=0,scale=${OUT_W}:${halfH}:flags=lanczos[as];` +
-        `[b]crop=${cW}:${srcH}:x='${mk(track2.length ? track2 : track)}':y=0,scale=${OUT_W}:${halfH}:flags=lanczos[bs];` +
-        `[as][bs]vstack,setsar=1`,
+      chain: `[0:v]split=2[a][b];` + `${mk(track, geo.size, "a", "as")};` + `${mk(t2, geo.size2 ?? geo.size, "b", "bs")};` + `[as][bs]vstack,setsar=1`,
       width: OUT_W,
       height: OUT_H,
     };
   }
   if (layout === "stack") {
-    // top: whole frame letterboxed to 1080 wide; bottom: zoomed crop around the face filling the rest
+    // top: whole frame letterboxed to 1080 wide; bottom: speaker crop sized to the (small) face
     const topH = Math.round((OUT_W * srcH) / srcW / 2) * 2;
     const botH = OUT_H - topH;
-    const zoomH = Math.round(srcH * 0.55);
-    const zoomW = Math.round((zoomH * OUT_W) / botH);
-    const zx = track.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcW - zoomW, p.x * srcW - zoomW / 2)) }));
-    const zy = track.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcH - zoomH, p.y * srcH - zoomH / 2)) }));
+    const c = speakerCrop(srcW, srcH, OUT_W / botH, { cy: trackCenter(track).y, size: geo.size ?? 0.17 }, geo.avoid);
+    const zoomW = even(c.w);
+    const zoomH = even(c.h);
+    const zx = track.map((p) => ({ t: p.t, v: cropX(srcW, zoomW, p.x) }));
     const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `(iw-${zoomW})/2`;
-    const zyExpr = zy.length ? piecewiseExpr(zy, 2) : `(ih-${zoomH})/2`;
     return {
       chain:
         `[0:v]split=2[top][bot];` +
         `[top]scale=${OUT_W}:${topH}:flags=lanczos[tops];` +
-        `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y='${zyExpr}',scale=${OUT_W}:${botH}:flags=lanczos[bots];` +
+        `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${c.y},scale=${OUT_W}:${botH}:flags=lanczos[bots];` +
         `[tops][bots]vstack,setsar=1`,
       width: OUT_W,
       height: OUT_H,
@@ -101,7 +111,13 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   const clip = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId)) });
   const log = ctx.log.child({ clipId });
   if (!clip) return; // deleted; nothing to do
-  if (clip.status === "preparing") return; // clip.prepare enqueues the render once metadata/bounds are ready
+  if (needsPrepare(clip)) {
+    // clip.prepare renders it once metadata/bounds exist; make sure that job exists and stop here
+    if (clip.status !== "preparing") await db.update(schema.clips).set({ status: "preparing", updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    if (!(await svc.queue.hasLiveJob(QUEUES.prepare, clipId))) await svc.queue.enqueue(QUEUES.prepare, { projectId, clipId, mode: prepareModeOf(clip) });
+    log.warn("render requested before the clip was prepared; sent back to clip.prepare");
+    return;
+  }
 
   if (clip.status === "done" && clip.outputKey && (await svc.storage.exists(clip.outputKey))) {
     await finalizeProjectIfDone(svc, projectId);
@@ -128,12 +144,19 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   const sections = (clip.layoutSections ?? []).map((sc) => ({ start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode, offsetX: sc.offsetX }));
   const timeline = coverTimeline(duration, sections, defaultMode);
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
-  const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true } });
+  const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true } });
+  // burned-in captions / watermarks: keep them out of speaker crops, blur whatever is still visible
+  const overlays: SourceOverlay[] = settings.sourceText === "keep" ? [] : (transcriptMeta?.overlays ?? []);
+  const avoid = overlays.map((o) => ({ y1: o.y1, y2: o.y2 }));
+  const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
     await ctx.progress(0.02, `Detecting faces for clip ${clip.index + 1}`, { clipId });
     samples = await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: sourcePath, startSec: clip.startSec, durationSec: duration, signal: ctx.signal, sampleFps: 4 });
+    const filtered = dropStaticFaces(samples);
+    if (filtered.dropped.length) log.info({ dropped: filtered.dropped }, "ignoring static faces (posters/photos)");
+    samples = filtered.samples;
   }
   // a single-segment clip in "none" keeps its aspect; anything mixed is 9:16 so pieces can be concatenated
   let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces);
@@ -152,7 +175,9 @@ export async function renderClip(ctx: StageContext, clipId: string) {
       reason: sg.decision.reason,
       cx: Number(c1.x.toFixed(3)),
       cy: Number(c1.y.toFixed(3)),
-      ...(c2 ? { cx2: Number(c2.x.toFixed(3)) } : {}),
+      ...(c2 ? { cx2: Number(c2.x.toFixed(3)), cy2: Number(c2.y.toFixed(3)) } : {}),
+      size: Number((sg.decision.speakerSizes?.[0] ?? sg.decision.faceSize).toFixed(3)),
+      ...(sg.decision.speakerSizes ? { size2: sg.decision.speakerSizes[1] } : {}),
       ...(sg.decision.track.length > 1 ? { track: sparseTrack(sg.decision.track, sg.start, sg.end, clip.startSec) } : {}),
       ...(sg.offsetX ? { offsetX: sg.offsetX } : {}),
     };
@@ -165,12 +190,14 @@ export async function renderClip(ctx: StageContext, clipId: string) {
       layoutInfo: { reason: segments.length > 1 ? summary : first.decision.reason, faceRatio: first.decision.faceRatio, faceSize: first.decision.faceSize },
     })
     .where(eq(schema.clips.id, clipId));
-  const { chain, width, height } = layoutFilter(first.decision.layout, srcW, srcH, first.decision.track, first.decision.track2 ?? []);
+  const { chain, width, height } = layoutFilter(first.decision.layout, srcW, srcH, first.decision.track, first.decision.track2 ?? [], geoOf(first.decision));
 
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   // optional jump cuts for accepted disfluencies; everything downstream works in post-cut time
   // accepted disfluencies are always cut (jump cuts verified per seam; unverifiable cuts are skipped)
-  const cutResult = await planClipCuts(svc, { startSec: clip.startSec, endSec: clip.endSec }, transcript ?? null, sourcePath, ctx.signal, log);
+  const cutResult = await planClipCuts(svc, { startSec: clip.startSec, endSec: clip.endSec }, transcript ?? null, sourcePath, ctx.signal, log, (i, n, attempt) =>
+    void ctx.progress(0.05, `Verifying disfluency cut ${i + 1}/${n}${attempt > 1 ? ` (try ${attempt})` : ""}`, { clipId }).catch(() => {}),
+  );
   for (const sk of cutResult.skipped) log.warn({ span: [sk.range.start, sk.range.end], reason: sk.reason }, "disfluency cut skipped");
   for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end] }, "disfluency cut");
   const cuts = cutResult.cuts;
@@ -206,12 +233,13 @@ export async function renderClip(ctx: StageContext, clipId: string) {
       }
     }
     const XF = 0.02; // crossfade length; each audio piece (but the last) is trimmed this much longer so the fade consumes it
+    const src = sourceVideo(overlays, srcW, srcH, pieces.length);
     const parts = pieces.map((pc, i) => {
       const d = pc.seg.decision;
-      const chainI = suffixLabels(layoutFilter(d.layout === "none" ? "fit" : d.layout, srcW, srcH, localTrack(d.track, pc.start, pc.end), d.track2 ? localTrack(d.track2, pc.start, pc.end) : []).chain, `s${i}`, `[t${i}]`);
+      const chainI = suffixLabels(layoutFilter(d.layout === "none" ? "fit" : d.layout, srcW, srcH, localTrack(d.track, pc.start, pc.end), d.track2 ? localTrack(d.track2, pc.start, pc.end) : [], geoOf(d)).chain, `s${i}`, `[t${i}]`);
       const aEnd = i < pieces.length - 1 ? Math.min(duration, pc.end + XF) : pc.end;
       return (
-        `[0:v]trim=start=${pc.start.toFixed(3)}:end=${pc.end.toFixed(3)},setpts=PTS-STARTPTS[t${i}];${chainI}[v${i}];` +
+        `${src.labels[i]}trim=start=${pc.start.toFixed(3)}:end=${pc.end.toFixed(3)},setpts=PTS-STARTPTS[t${i}];${chainI}[v${i}];` +
         `[0:a]atrim=start=${pc.start.toFixed(3)}:end=${aEnd.toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`
       );
     });
@@ -228,10 +256,11 @@ export async function renderClip(ctx: StageContext, clipId: string) {
       }
       audio = audio.replace(/;$/, "");
     }
-    graph = `${parts.join(";")};${vInputs}concat=n=${pieces.length}:v=1:a=0[cv];${audio};[cv]ass='${escapeFilterPath(assPath)}'[v]`;
+    graph = `${src.prefix}${parts.join(";")};${vInputs}concat=n=${pieces.length}:v=1:a=0[cv];${audio};[cv]ass='${escapeFilterPath(assPath)}'[v]`;
     audioMap = ["-map", "[ca]"];
   } else {
-    graph = `${chain},ass='${escapeFilterPath(assPath)}'[v]`;
+    const src = sourceVideo(overlays, srcW, srcH, 1);
+    graph = `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},ass='${escapeFilterPath(assPath)}'[v]`;
     audioMap = ["-map", "0:a:0?"];
   }
   await svc.media.ffmpeg(
@@ -304,7 +333,15 @@ export interface ClipCutPlan extends RefineResult {
  * Accepted disfluency flags inside a clip → verified jump cuts (clip-relative seconds). Shared by
  * the renderer and the `cuts` CLI command so a cut can be debugged without a full render.
  */
-export async function planClipCuts(svc: Services, clip: { startSec: number; endSec: number }, transcript: Pick<Transcript, "flags" | "rawWords" | "words"> | null, sourcePath: string, signal?: AbortSignal, log?: Logger): Promise<ClipCutPlan> {
+export async function planClipCuts(
+  svc: Services,
+  clip: { startSec: number; endSec: number },
+  transcript: Pick<Transcript, "flags" | "rawWords" | "words"> | null,
+  sourcePath: string,
+  signal?: AbortSignal,
+  log?: Logger,
+  onProgress?: (cut: number, total: number, attempt: number) => void,
+): Promise<ClipCutPlan> {
   const duration = clip.endSec - clip.startSec;
   const requested = cutRanges(transcript?.flags ?? [], clip.startSec, clip.endSec);
   if (!requested.length) return { requested, cuts: [], skipped: [] };
@@ -317,6 +354,7 @@ export async function planClipCuts(svc: Services, clip: { startSec: number; endS
   const alignOptions = svc.ai.transcriptionOptions(alignModelId) as Record<string, JSONObject>;
   const refined = await refineCuts(
     {
+      onProgress,
       log: log?.child({ module: "cuts" }),
       ffmpegPath: svc.config.FFMPEG_PATH,
       signal,
@@ -332,4 +370,33 @@ export async function planClipCuts(svc: Services, clip: { startSec: number; endS
     clipWords,
   );
   return { requested, ...refined };
+}
+
+/**
+ * Source video labels for the filtergraph. With burned-in text to hide, the source is masked once
+ * (each text region blurred in place) and split for every consumer; otherwise every consumer reads
+ * [0:v] directly.
+ */
+export function sourceVideo(overlays: SourceOverlay[], srcW: number, srcH: number, consumers: number): { prefix: string; labels: string[] } {
+  if (!overlays.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };
+  const parts: string[] = [];
+  let cur = "[0:v]";
+  overlays.forEach((o, i) => {
+    // pad a little: detector boxes hug the glyphs, glows and outlines extend past them
+    const padX = 0.01 * srcW;
+    const padY = 0.012 * srcH;
+    const x = Math.max(0, Math.floor(o.x1 * srcW - padX));
+    const y = Math.max(0, Math.floor(o.y1 * srcH - padY));
+    const w = Math.min(srcW - x, Math.ceil((o.x2 - o.x1) * srcW + 2 * padX));
+    const h = Math.min(srcH - y, Math.ceil((o.y2 - o.y1) * srcH + 2 * padY));
+    if (w < 4 || h < 4) return;
+    // boxblur caps each plane's radius at half its size; chroma planes are half resolution (yuv420p)
+    const r = Math.max(1, Math.min(40, Math.floor(Math.min(w, h) / 2) - 1));
+    const rc = Math.max(1, Math.min(r, Math.floor(Math.min(w, h) / 4) - 1));
+    parts.push(`${cur}split=2[mk${i}a][mk${i}b];[mk${i}b]crop=${w}:${h}:${x}:${y},boxblur=luma_radius=${r}:luma_power=3:chroma_radius=${rc}:chroma_power=3[mk${i}c];[mk${i}a][mk${i}c]overlay=${x}:${y}[mk${i}]`);
+    cur = `[mk${i}]`;
+  });
+  if (!parts.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };
+  const labels = Array.from({ length: consumers }, (_, i) => `[src${i}]`);
+  return { prefix: `${parts.join(";")};${cur}split=${consumers}${labels.join("")};`, labels };
 }

@@ -18,8 +18,15 @@
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
  *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies) with status
+ *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
+ *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
+ *   logs    <id> [n=60]                     log lines mentioning a project/clip/job id from LOG_FILE (survives redeploys)
+ *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
+ *                                           --store saves them (renders then hide them)
  */
 import { eq, desc, and, inArray } from "drizzle-orm";
+import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
+import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
 import { transcribe as aiTranscribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
@@ -27,6 +34,7 @@ import { createServices, shutdownServices, type Services } from "./services.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
+import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { formatTime } from "@reelsaw/shared";
 
@@ -124,6 +132,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const db = svc.database.db;
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]!) });
     if (!c) throw new Error("clip not found");
+    if (needsPrepare(c)) throw new Error("clip was never prepared; use `reelsaw recover` instead");
     await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
     await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
     await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(and(eq(schema.projects.id, c.projectId), inArray(schema.projects.status, ["done", "failed"])));
@@ -195,6 +204,97 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(`${r.model} hears (rendered ${start.toFixed(1)}s +${dur.toFixed(1)}s):\n${r.text}`);
   },
 
+  async stuck(svc) {
+    const db = svc.database.db;
+    const projects = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]) });
+    if (!projects.length) return console.log("nothing in progress");
+    const ago = (d?: Date | null) => (d ? `${Math.round((Date.now() - d.getTime()) / 60_000)}m` : "-");
+    for (const p of projects) {
+      const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
+      const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; singleton_key: string; started_on: Date | null; output: unknown }>(
+        `select name, state, retry_count, singleton_key, started_on, output from pgboss.job where data->>'projectId' = $1 and state in ('created','retry','active') order by created_on`,
+        [p.id],
+      );
+      console.log(`\n${p.id}  ${p.status}/${p.stage ?? "-"}  last event ${last?.type ?? "-"} ${ago(last?.createdAt)} ago  "${p.title.slice(0, 50)}"`);
+      const clips = (await db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id) })).filter((c) => c.status !== "done" && c.status !== "failed");
+      const jobFor = (key: string) => jobs.rows.filter((j) => j.singleton_key === key);
+      table(
+        clips.map((c) => {
+          const js = jobFor(c.id);
+          const problems = [needsPrepare(c) && c.status !== "preparing" ? "unprepared" : "", !js.length ? "NO JOB" : "", js.some((j) => j.retry_count > 0) ? "retried" : ""].filter(Boolean).join(",");
+          return { clip: c.id.slice(0, 8), status: c.status, origin: c.origin, jobs: js.map((j) => `${j.name}:${j.state}#${j.retry_count}`).join(" "), running: js[0] ? ago(js[0].started_on) : "", problems };
+        }),
+      );
+      for (const j of jobs.rows.filter((j) => j.retry_count > 0)) console.log(`  ${j.name} ${j.singleton_key.slice(0, 8)} previous attempt: ${JSON.stringify(j.output).slice(0, 160)}`);
+    }
+    console.log("\nfix: reelsaw recover <clipId|projectId>");
+  },
+
+  async recover(svc) {
+    const db = svc.database.db;
+    const id = pos[0]!;
+    const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id) });
+    if (c) {
+      await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
+      await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
+      await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(and(eq(schema.projects.id, c.projectId), inArray(schema.projects.status, ["done", "failed"])));
+      if (needsPrepare(c)) {
+        await db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+        await svc.queue.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
+        return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
+      }
+      await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+      await svc.queue.enqueue(QUEUES.render, { projectId: c.projectId, clipId: c.id });
+      return console.log(`queued render for clip ${c.id.slice(0, 8)}`);
+    }
+    const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
+    if (!p) throw new Error("no clip or project with that id");
+    const r = await reconcile(svc);
+    console.log(`reconciled: re-enqueued ${r.requeued} job(s). Failed projects need the UI "Retry" (or status ${p.status} is already terminal).`);
+  },
+
+  async logs(svc) {
+    const id = pos[0]!;
+    const n = Number(pos[1] ?? 60);
+    const file = svc.config.LOG_FILE;
+    if (!file) throw new Error("LOG_FILE is not set; container logs: docker compose logs app | grep " + id);
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const dir = path.dirname(file);
+    const base = path.basename(file).replace(/\.log$/, "");
+    const files = (await fs.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith(base)).sort();
+    const hits: string[] = [];
+    for (const f of files) for (const line of (await fs.readFile(path.join(dir, f), "utf8")).split("\n")) if (line.includes(id)) hits.push(line);
+    for (const line of hits.slice(-n)) {
+      try {
+        const d = JSON.parse(line) as Record<string, unknown> & { time: string; level: number; msg: string; err?: { message?: string } };
+        const lvl = ({ 20: "DBG", 30: "INF", 40: "WRN", 50: "ERR", 60: "FTL" } as Record<number, string>)[d.level] ?? String(d.level);
+        const { time, level: _l, msg, app: _a, role: _r, pid: _p, hostname: _h, err, ...rest } = d;
+        console.log(`${time.slice(5, 19).replace("T", " ")} ${lvl} ${msg} ${JSON.stringify(rest).slice(0, 220)}${err?.message ? `\n    err: ${err.message.slice(0, 300)}` : ""}`);
+      } catch {
+        console.log(line.slice(0, 300));
+      }
+    }
+    if (!hits.length) console.log(`no lines mention ${id} in ${files.join(", ") || file}`);
+  },
+
+  async overlays(svc) {
+    const id = pos[0]!;
+    const db = svc.database.db;
+    if (!svc.text) throw new Error("TEXT_DETECTION is off");
+    const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
+    if (!p?.durationSec) throw new Error("project not ingested");
+    const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { sceneCuts: true } });
+    const t0 = Date.now();
+    const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH }, await sourcePath(svc, id), p.durationSec, t?.sceneCuts ?? []);
+    console.log(`${scan.frames} frames across ${scan.scenes} shots in ${Date.now() - t0} ms`);
+    table(scan.overlays.map((o) => ({ kind: o.kind, x: `${o.x1}-${o.x2}`, y: `${o.y1}-${o.y2}`, coverage: o.coverage })));
+    if (flag("store") !== undefined || args.includes("--store")) {
+      await db.update(schema.transcripts).set({ overlays: scan.overlays }).where(eq(schema.transcripts.projectId, id));
+      console.log("stored; re-render clips to apply");
+    }
+  },
+
   async flags(svc) {
     const t = await svc.database.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, pos[0]!), columns: { flags: true } });
     const from = Number(pos[1] ?? 0);
@@ -210,10 +310,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <status|events|clip|rerender|cuts|align|hear|flags> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <status|events|clip|rerender|stuck|recover|logs|cuts|align|hear|flags|overlays> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
-  const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1" });
+  const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });
   try {
     await fn(svc);
   } finally {

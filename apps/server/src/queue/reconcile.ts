@@ -1,4 +1,5 @@
-import { inArray } from "drizzle-orm";
+import { inArray, eq, desc } from "drizzle-orm";
+import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { QUEUES, type QueueName } from "./boss.js";
@@ -30,9 +31,11 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
       const clips = await db.query.clips.findMany({ where: (t, { eq }) => eq(t.projectId, p.id) });
       for (const c of clips) {
         if (c.status === "done" || c.status === "failed") continue;
-        if (c.status === "preparing") {
+        if (needsPrepare(c)) {
           if (await svc.queue.hasLiveJob(QUEUES.prepare, c.id)) continue;
-          await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: c.origin === "manual-ai" ? "ai" : "exact" });
+          if (c.status !== "preparing") await db.update(schema.clips).set({ status: "preparing" }).where(eq(schema.clips.id, c.id));
+          await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
+          await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
           requeued++;
           continue;
         }
@@ -66,9 +69,44 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
 }
 
 export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
-  const tick = () => reconcile(svc).catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
+  const tick = () =>
+    reconcile(svc)
+      .then(() => detectStalls(svc, svc.config.STALL_MINUTES))
+      .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();
   const timer = setInterval(tick, intervalMs);
   timer.unref();
   return () => clearInterval(timer);
+}
+
+/**
+ * Watchdog: a running project or clip that has emitted no event for STALL_MINUTES is reported once
+ * (structured warn + a `job.stalled` event the UI shows), with what it was last doing and the live
+ * job's age, so "stuck" is visible and explainable instead of a silent spinner.
+ */
+export async function detectStalls(svc: Services, minutes: number): Promise<number> {
+  const db = svc.database.db;
+  const log = svc.log.child({ module: "watchdog" });
+  const cutoff = new Date(Date.now() - minutes * 60_000);
+  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]) });
+  let stalled = 0;
+  for (const p of active) {
+    const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
+    if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
+    const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; started_on: Date | null; singleton_key: string }>(
+      `select name, state, retry_count, started_on, singleton_key from pgboss.job where data->>'projectId' = $1 and state in ('created','retry','active') order by created_on`,
+      [p.id],
+    );
+    const info = {
+      projectId: p.id,
+      status: p.status,
+      idleMinutes: Math.round((Date.now() - last.createdAt.getTime()) / 60_000),
+      lastEvent: { type: last.type, payload: last.payload },
+      liveJobs: jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key, runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null })),
+    };
+    log.warn(info, jobs.rows.length ? "no progress from running job" : "active project has no live job");
+    await svc.events.emit(p.id, "job.stalled", { idleMinutes: info.idleMinutes, lastEvent: last.type, liveJobs: info.liveJobs.length, hint: jobs.rows.length ? "still running; check `reelsaw status`" : "no job; the reconciler will re-enqueue it" });
+    stalled++;
+  }
+  return stalled;
 }

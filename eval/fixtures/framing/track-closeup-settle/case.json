@@ -1,0 +1,10 @@
+{
+  "kind": "track",
+  "note": "Single-speaker close-up (source 1:46-2:01): the tripod camera must end up centred on the face, without fast pans.",
+  "source": { "id": "apollo-100-220", "url": "https://www.youtube.com/watch?v=9hSfOfgrl1I", "start": 100, "end": 220, "sha256": "304dbcb335978293835bcb18841c44f09f591d9987bfe33c2af1fde31bc04bf1", "localPath": "/data/projects/51eb110e-aa09-4b5d-a8e9-712fab566502/source.mp4" },
+  "start": 6.2,
+  "end": 21.4,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": { "settleSec": 2, "maxErrPx": 30, "maxPanPxPerSec": 1200 }
+}

@@ -12,6 +12,23 @@ import type { PipelineStage, RefineStep } from "@reelsaw/shared";
 
 type Job<T> = { id: string; data: T; retryCount: number; signal: AbortSignal };
 
+/**
+ * Why did the previous attempt of this job end? pg-boss keeps it in `output`: our thrown error, or
+ * "job heartbeat timeout" when the worker died (crash, deploy, OOM). Logged on every retry so a
+ * retried job explains itself.
+ */
+async function previousAttempt(svc: Services, jobId: string): Promise<string | undefined> {
+  try {
+    const r = await svc.database.pool.query<{ output: { message?: string; value?: { message?: string } } | null }>("select output from pgboss.job where id = $1", [jobId]);
+    const o = r.rows[0]?.output;
+    const msg = o?.message ?? o?.value?.message;
+    return msg ? String(msg).slice(0, 500) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const interrupted = (reason?: string) => !!reason && /heartbeat|expired|abort/i.test(reason);
+
 function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn: (ctx: StageContext) => Promise<void>) {
   return async (jobs: Job<ProjectJob>[]) => {
     const job = jobs[0]!;
@@ -20,7 +37,8 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
     const attempt = job.retryCount + 1;
     const log = svc.log.child({ module: "worker", queue, jobId: job.id, projectId });
     try {
-      log.info({ attempt, maxAttempts: max + 1 }, "job start");
+      const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
+      log.info({ attempt, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
       const t0 = Date.now();
       await withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
         fn(new StageContext(svc, projectId, stage, job.signal)),
@@ -75,7 +93,9 @@ export async function startWorkers(svc: Services) {
     const max = svc.queue.retryLimitOf(QUEUES.prepare);
     const log = svc.log.child({ module: "worker", queue: QUEUES.prepare, jobId: job.id, projectId, clipId, mode });
     try {
-      log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1 }, "job start");
+      const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
+      log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
+      if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "prepare", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
       await withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => prepareClip(new StageContext(svc, projectId, "render", job.signal), clipId, mode));
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
@@ -91,7 +111,9 @@ export async function startWorkers(svc: Services) {
     const max = svc.queue.retryLimitOf(QUEUES.render);
     const log = svc.log.child({ module: "worker", queue: QUEUES.render, jobId: job.id, projectId, clipId });
     try {
-      log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1 }, "job start");
+      const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
+      log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
+      if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "render", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
       await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, () =>
         renderClip(new StageContext(svc, projectId, "render", job.signal), clipId),
       );

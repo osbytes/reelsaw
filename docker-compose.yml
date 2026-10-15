@@ -22,6 +22,8 @@ services:
   app:
     build: .
     image: reelsaw:latest
+    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
+    stop_grace_period: 330s
     restart: unless-stopped
     depends_on:
       db:
@@ -34,6 +36,9 @@ services:
       PORT: "3000"
       DATA_DIR: /data
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
+      # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
+      LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "true"
       RUN_WORKERS: ${RUN_WORKERS_IN_APP:-true}
     ports:
@@ -45,6 +50,8 @@ services:
   worker:
     build: .
     image: reelsaw:latest
+    # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
+    stop_grace_period: 330s
     restart: unless-stopped
     profiles: ["workers"]
     depends_on:
@@ -57,6 +64,9 @@ services:
       DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
       DATA_DIR: /data
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
+      # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
+      LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "false"
       RUN_WORKERS: "true"
     volumes:

@@ -1,0 +1,37 @@
+{
+  "updatedAt": "2026-10-15T18:54:18.406Z",
+  "cases": {
+    "frame-30s": true,
+    "frame-112s": true,
+    "frame-126s": true,
+    "frame-300s": true,
+    "frame-640s": false,
+    "frame-905s": true,
+    "aggregate-apollo-100-220": true
+  },
+  "metrics": {
+    "captionCoverage": {
+      "value": 0.58,
+      "better": "higher",
+      "tolerance": 0.05
+    },
+    "handleCoverage": {
+      "value": 0.58,
+      "better": "higher",
+      "tolerance": 0.05
+    },
+    "logoCoverage": {
+      "value": 0.22,
+      "better": "higher",
+      "tolerance": 0.05
+    },
+    "framePassRate": {
+      "value": 0.83,
+      "better": "higher"
+    },
+    "aggregatePass": {
+      "value": 1,
+      "better": "higher"
+    }
+  }
+}

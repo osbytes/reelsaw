@@ -1,0 +1,360 @@
+{
+  "video": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+  "note": "Clip-channel re-upload of a podcast: burned-in captions (y\u22480.68-0.72), 'YT/APOLLO' handle under them, 'WISDOM' / 'M|W' logo bottom-left. Scene text (cap logos, wall sign) must not be treated as overlays. Boxes are [x1,y1,x2,y2] normalized, drawn by hand with some slack. The corner logo is faint and small: single-frame detection is reported but not required (the whole-video aggregation must still find it).",
+  "frames": [
+    {
+      "file": "frames/t30.jpg",
+      "t": 30,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.12,
+            0.67,
+            0.61,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.45,
+            0.73,
+            0.55,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.0,
+            0.92,
+            0.07,
+            0.98
+          ],
+          "required": false
+        },
+        {
+          "name": "cap-text",
+          "kind": "scene",
+          "box": [
+            0.47,
+            0.12,
+            0.59,
+            0.18
+          ]
+        }
+      ]
+    },
+    {
+      "file": "frames/t112.jpg",
+      "t": 112,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.15,
+            0.67,
+            0.44,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.45,
+            0.73,
+            0.55,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.03,
+            0.92,
+            0.12,
+            0.98
+          ],
+          "required": false
+        },
+        {
+          "name": "cap-text",
+          "kind": "scene",
+          "box": [
+            0.45,
+            0.07,
+            0.57,
+            0.13
+          ]
+        }
+      ]
+    },
+    {
+      "file": "frames/t126.jpg",
+      "t": 126,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.25,
+            0.67,
+            0.66,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.44,
+            0.73,
+            0.56,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.02,
+            0.9,
+            0.12,
+            0.96
+          ],
+          "required": false
+        },
+        {
+          "name": "wall-sign",
+          "kind": "scene",
+          "box": [
+            0.52,
+            0.17,
+            0.59,
+            0.29
+          ]
+        }
+      ]
+    },
+    {
+      "file": "frames/t300.jpg",
+      "t": 300,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.27,
+            0.67,
+            0.66,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.44,
+            0.73,
+            0.56,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.0,
+            0.91,
+            0.11,
+            0.97
+          ],
+          "required": false
+        },
+        {
+          "name": "cap-text",
+          "kind": "scene",
+          "box": [
+            0.65,
+            0.09,
+            0.73,
+            0.16
+          ]
+        }
+      ]
+    },
+    {
+      "file": "frames/t640.jpg",
+      "t": 640,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.12,
+            0.67,
+            0.28,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.44,
+            0.73,
+            0.56,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.0,
+            0.92,
+            0.12,
+            0.99
+          ],
+          "required": false
+        },
+        {
+          "name": "cap-text",
+          "kind": "scene",
+          "box": [
+            0.52,
+            0.03,
+            0.65,
+            0.11
+          ]
+        }
+      ]
+    },
+    {
+      "file": "frames/t905.jpg",
+      "t": 905,
+      "labels": [
+        {
+          "name": "caption",
+          "kind": "caption",
+          "box": [
+            0.21,
+            0.67,
+            0.79,
+            0.73
+          ]
+        },
+        {
+          "name": "handle",
+          "kind": "watermark",
+          "box": [
+            0.44,
+            0.73,
+            0.56,
+            0.78
+          ]
+        },
+        {
+          "name": "logo",
+          "kind": "watermark",
+          "box": [
+            0.0,
+            0.92,
+            0.07,
+            0.98
+          ],
+          "required": false
+        }
+      ]
+    }
+  ],
+  "aggregate": [
+    {
+      "id": "apollo-100-220",
+      "source": {
+        "id": "apollo-100-220",
+        "url": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+        "start": 100,
+        "end": 220,
+        "sha256": "304dbcb335978293835bcb18841c44f09f591d9987bfe33c2af1fde31bc04bf1",
+        "localPath": "/data/projects/51eb110e-aa09-4b5d-a8e9-712fab566502/source.mp4"
+      },
+      "sceneCuts": [],
+      "expectOverlays": [
+        {
+          "name": "caption-band",
+          "box": [
+            0.3,
+            0.675,
+            0.6,
+            0.72
+          ]
+        },
+        {
+          "name": "handle",
+          "box": [
+            0.46,
+            0.735,
+            0.54,
+            0.77
+          ]
+        },
+        {
+          "name": "logo",
+          "box": [
+            0.02,
+            0.92,
+            0.07,
+            0.96
+          ]
+        }
+      ],
+      "mustNotCover": [
+        {
+          "name": "wall-sign",
+          "box": [
+            0.53,
+            0.18,
+            0.58,
+            0.28
+          ]
+        },
+        {
+          "name": "cap-text",
+          "box": [
+            0.46,
+            0.07,
+            0.57,
+            0.13
+          ]
+        },
+        {
+          "name": "speaker-faces-band",
+          "box": [
+            0.3,
+            0.2,
+            0.7,
+            0.45
+          ]
+        },
+        {
+          "name": "right-speaker-body",
+          "box": [
+            0.79,
+            0.5,
+            0.88,
+            0.66
+          ]
+        }
+      ],
+      "note": "Scene detection finds no cuts in this re-upload, so aggregation runs in single-shot mode; text that stays put on a speaker (e.g. a can or shirt print) must still not become an overlay: blurring it smudges the person."
+    }
+  ]
+}

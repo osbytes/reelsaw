@@ -297,6 +297,13 @@ export function NewProjectPage() {
                     onChange={(e) => patch({ instructions: e.target.value || undefined })}
                   />
                 </div>
+                <label className="flex items-start gap-2 text-sm" title="Detected automatically with an on-device text detector">
+                  <input type="checkbox" className="mt-1" checked={s.sourceText !== "keep"} onChange={(e) => patch({ sourceText: e.target.checked ? "hide" : "keep" })} />
+                  <span>
+                    Hide captions and logos already burned into the video
+                    <span className="block text-xs text-muted">Kept out of speaker crops where possible, blurred elsewhere, so they don't appear next to (or twice under) your captions.</span>
+                  </span>
+                </label>
                 <p className="text-xs text-muted">Fillers, repeats and false starts are removed from captions and cut from the video automatically. Review them on the transcript after processing.</p>
               </div>
             )}

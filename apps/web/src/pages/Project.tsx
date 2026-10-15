@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSubscription } from "@trpc/tanstack-react-query";
 import { useNavigate, useParams } from "react-router";
-import { RefreshCw, Trash2, AlertTriangle, Sparkles, Check, Loader2, Film, Wand2, MoreHorizontal, PackageOpen } from "lucide-react";
+import { RefreshCw, Trash2, AlertTriangle, Sparkles, Check, Loader2, Film, Wand2, MoreHorizontal, PackageOpen, Captions } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useTRPC } from "../lib/trpc";
 import { StatusBadge, ProgressBar } from "../components/ui";
@@ -28,6 +28,7 @@ export function ProjectPage() {
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
+  const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
   const [progress, setProgress] = useState<{ stage: string; value: number; message?: string } | null>(null);
@@ -203,6 +204,16 @@ export function ProjectPage() {
           </span>
         )}
       </div>
+      {(p.transcript?.overlays?.length ?? 0) > 0 && (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <Captions className="h-3.5 w-3.5" />
+          The source has burned-in {p.transcript!.overlays!.some((o) => o.kind === "caption") ? "captions" : "text"}
+          {p.transcript!.overlays!.length > 1 ? " and logos" : ""}: {p.settings.sourceText === "keep" ? "shown in clips." : "kept out of crops and blurred in clips."}
+          <button className="text-accent-2 hover:underline disabled:opacity-50" disabled={setSourceText.isPending} onClick={() => setSourceText.mutateAsync({ id, sourceText: p.settings.sourceText === "keep" ? "hide" : "keep" }).then(invalidate)}>
+            {p.settings.sourceText === "keep" ? "Hide it (re-renders clips)" : "Show it instead (re-renders clips)"}
+          </button>
+        </p>
+      )}
       {p.error && (
         <p className="flex items-start gap-2 text-sm text-danger">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {p.error}
@@ -297,6 +308,7 @@ export function ProjectPage() {
             settings={p.settings}
             words={p.transcript.words}
             sceneCuts={p.transcript.sceneCuts ?? []}
+            overlays={p.settings.sourceText === "keep" ? [] : (p.transcript.overlays ?? [])}
             clip={clip}
             onClose={() => setEditing(null)}
           />
@@ -313,6 +325,8 @@ function describe(e: ProjectEvent): string {
   if (e.type === "project.failed") return String(p.error ?? "");
   if (e.type === "clip.created") return String(p.title ?? "");
   if (e.type === "clip.failed") return String(p.error ?? "");
+  if (e.type === "clip.retrying") return `${p.step} attempt ${p.attempt}/${p.max} after: ${p.reason}`;
+  if (e.type === "job.stalled") return `no progress for ${p.idleMinutes} min (last: ${p.lastEvent}); ${p.hint}`;
   return Object.entries(p)
     .filter(([k]) => !["clipId"].includes(k))
     .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)

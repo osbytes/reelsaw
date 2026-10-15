@@ -10,6 +10,7 @@ import { createQueue, type Queue } from "./queue/boss.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createResourceGovernor, type ResourceGovernor } from "./resources.js";
 import { loadFaceDetector, type FaceDetector } from "./vision/faces.js";
+import { loadTextDetector, type TextDetector } from "./vision/text.js";
 import { createLogger, type Logger } from "./log.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
@@ -27,6 +28,8 @@ export interface Services {
   queue: Queue;
   auth: Auth;
   resources: ResourceGovernor;
+  /** null when TEXT_DETECTION=false; then burned-in source text is never hidden. */
+  text: TextDetector | null;
   /** null when FACE_DETECTION=false; then "auto" layout degrades to "fit". */
   faces: FaceDetector | null;
 }
@@ -49,7 +52,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // the logger comes first (from raw env, before validation) so config errors are logged too
   const fmt = env.LOG_FORMAT === "json" || env.LOG_FORMAT === "pretty" ? env.LOG_FORMAT : "auto";
   const role = env.REELSAW_CLI === "1" ? "cli" : env.RUN_HTTP === "false" ? "worker" : env.RUN_WORKERS === "false" ? "api" : "app";
-  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt }, { role });
+  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
   const bootLog = log.child({ module: "boot" });
   const step = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
     try {
@@ -107,6 +110,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
+  const text = await step(config.TEXT_DETECTION ? "text detector (PP-OCRv4 ONNX)" : "text detector (disabled)", async () => {
+    if (!config.TEXT_DETECTION) return null;
+    try {
+      return await loadTextDetector(config.TEXT_MODEL_PATH);
+    } catch (err) {
+      throw new Error(`cannot load ${config.TEXT_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set TEXT_DETECTION=false.`);
+    }
+  });
+
   const storage = await step(`storage (${config.STORAGE_DRIVER})`, async () => {
     const s = createStorage(config, paths);
     await s.check();
@@ -134,12 +146,13 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db));
 
-  return { log, config, paths, otel, database, storage, ai, media, events, queue, auth, resources, faces };
+  return { log, config, paths, otel, database, storage, ai, media, events, queue, auth, resources, faces, text };
 }
 
 export async function shutdownServices(s: Services) {
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));
   await s.faces?.release().catch(() => {});
+  await s.text?.release().catch(() => {});
   await s.events.stop().catch(() => {});
   await s.database.close().catch(() => {});
   await s.otel.shutdown().catch(() => {});

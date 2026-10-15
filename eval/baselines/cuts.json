@@ -1,0 +1,22 @@
+{
+  "updatedAt": "2026-10-15T18:42:20.396Z",
+  "cases": {
+    "into-coarticulated": true,
+    "pay-repeat": true
+  },
+  "metrics": {
+    "clean": {
+      "value": 2,
+      "better": "higher"
+    },
+    "broken": {
+      "value": 0,
+      "better": "lower"
+    },
+    "asrCallsPerCase": {
+      "value": 4,
+      "better": "lower",
+      "tolerance": 2
+    }
+  }
+}

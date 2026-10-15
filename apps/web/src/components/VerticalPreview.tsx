@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, type Style } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -8,6 +8,10 @@ export interface Framing {
   cx: number;
   cy: number;
   cx2?: number;
+  cy2?: number;
+  /** median face height (fraction of source height) for speaker-sized split/stack crops */
+  size?: number;
+  size2?: number;
 }
 export interface PreviewWord {
   text: string;
@@ -35,6 +39,8 @@ interface Props {
   /** drag the picture to re-centre the crop; delta is in source-width fractions */
   onPan?: (deltaX: number) => void;
   showSafeZones?: boolean;
+  /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
+  overlays?: SourceOverlay[];
   className?: string;
 }
 
@@ -46,7 +52,7 @@ const SNAP = 0.025;
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, showSafeZones, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, showSafeZones, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
@@ -55,6 +61,8 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   const [snappedX, setSnappedX] = useState(false);
   const framingRef = useRef(framing);
   framingRef.current = framing;
+  const overlaysRef = useRef(overlays ?? []);
+  overlaysRef.current = overlays ?? [];
 
   useEffect(() => {
     const el = boxRef.current;
@@ -81,7 +89,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
         const ctx = c.getContext("2d");
         if (ctx) {
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          paint(ctx, W, H, source, srcW, srcH, framingRef.current);
+          paint(ctx, W, H, source, srcW, srcH, framingRef.current, overlaysRef.current);
         }
       }
       raf = requestAnimationFrame(draw);
@@ -119,7 +127,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
       const dx = e.clientX - panX.current;
       panX.current = e.clientX;
       // dragging the picture right moves the crop window left
-      if (dx) onPan(-(dx / W) * cropFraction(framing.layout, srcW, srcH, W, boxRef.current.clientHeight));
+      if (dx) onPan(-(dx / W) * cropFraction(framing, srcW, srcH, W, boxRef.current.clientHeight));
       return;
     }
     if (!drag || !boxRef.current || !onStyleChange) return;
@@ -188,7 +196,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
             const isEm = em.has(emphasisKey(w.text));
             return (
               <span key={i}>
-                <span style={active ? { color: style.highlightColor, display: "inline-block", transform: "scale(1.12)" } : isEm ? { color: style.emphasisColor, display: "inline-block", transform: "scale(1.12)" } : undefined}>{t}</span>
+                <span style={active ? { color: style.highlightColor, fontSize: "1.12em" } : isEm ? { color: style.emphasisColor, fontSize: "1.12em" } : undefined}>{t}</span>
                 {i < line.length - 1 ? " " : ""}
               </span>
             );
@@ -213,11 +221,11 @@ function SafeZones() {
 }
 
 /** Width of the crop window as a fraction of the source width, per layout (mirrors paint()). */
-function cropFraction(layout: PreviewLayout, srcW: number, srcH: number, W: number, H: number) {
-  if (layout === "split") return Math.min(1, (srcH * W) / (H / 2) / srcW);
-  if (layout === "stack") {
+function cropFraction(f: Framing, srcW: number, srcH: number, W: number, H: number) {
+  if (f.layout === "split") return speakerCrop(srcW, srcH, W / (H / 2), { cy: f.cy, size: f.size ?? 0.3 }).w / srcW;
+  if (f.layout === "stack") {
     const botH = H - (W * srcH) / srcW;
-    return Math.min(1, (srcH * 0.55 * W) / Math.max(1, botH) / srcW);
+    return speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }).w / srcW;
   }
   return Math.min(1, (srcH * 9) / 16 / srcW);
 }
@@ -230,7 +238,7 @@ function ready(src: HTMLVideoElement | HTMLImageElement | null): src is HTMLVide
   return src.complete && src.naturalWidth > 0;
 }
 
-function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVideoElement | HTMLImageElement | null, sw0: number, sh0: number, f: Framing) {
+function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVideoElement | HTMLImageElement | null, sw0: number, sh0: number, f: Framing, overlays: SourceOverlay[]) {
   ctx.filter = "none";
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
@@ -242,13 +250,40 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
   const srcW = src instanceof HTMLVideoElement ? src.videoWidth : src.naturalWidth || sw0;
   const srcH = src instanceof HTMLVideoElement ? src.videoHeight : src.naturalHeight || sh0;
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const draw = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) => {
+  const raw = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) => {
     try {
       ctx.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
     } catch {
       /* frame not decodable yet */
     }
   };
+  // draw a source window, then blur any burned-in text inside it (mirrors the renderer's mask)
+  const draw = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) => {
+    raw(sx, sy, sw, sh, dx, dy, dw, dh);
+    const prevFilter = ctx.filter;
+    for (const o of overlays) {
+      const ox1 = Math.max(sx, o.x1 * srcW - 0.01 * srcW);
+      const oy1 = Math.max(sy, o.y1 * srcH - 0.012 * srcH);
+      const ox2 = Math.min(sx + sw, o.x2 * srcW + 0.01 * srcW);
+      const oy2 = Math.min(sy + sh, o.y2 * srcH + 0.012 * srcH);
+      if (ox2 <= ox1 || oy2 <= oy1) continue;
+      const kx = dw / sw;
+      const ky = dh / sh;
+      const rx = dx + (ox1 - sx) * kx;
+      const ry = dy + (oy1 - sy) * ky;
+      const rw = (ox2 - ox1) * kx;
+      const rh = (oy2 - oy1) * ky;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rx, ry, rw, rh);
+      ctx.clip();
+      ctx.filter = `blur(${Math.max(2, Math.min(rw, rh) / 4)}px)`;
+      raw(sx, sy, sw, sh, dx, dy, dw, dh);
+      ctx.restore();
+    }
+    ctx.filter = prevFilter;
+  };
+  const avoid = overlays.map((o) => ({ y1: o.y1, y2: o.y2 }));
 
   switch (f.layout) {
     case "fit":
@@ -265,12 +300,12 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       return;
     }
     case "split": {
+      // speaker-sized crops, same geometry as the renderer (speakerCrop in @reelsaw/shared)
       const halfH = H / 2;
-      const cW = Math.min(srcW, (srcH * W) / halfH);
-      const x1 = clamp(f.cx * srcW - cW / 2, 0, srcW - cW);
-      const x2 = clamp((f.cx2 ?? 1 - f.cx) * srcW - cW / 2, 0, srcW - cW);
-      draw(x1, 0, cW, srcH, 0, 0, W, halfH);
-      draw(x2, 0, cW, srcH, 0, halfH, W, halfH);
+      const a = speakerCrop(srcW, srcH, W / halfH, { cy: f.cy, size: f.size ?? 0.3 }, avoid);
+      const b = speakerCrop(srcW, srcH, W / halfH, { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 }, avoid);
+      draw(cropX(srcW, a.w, f.cx), a.y, a.w, a.h, 0, 0, W, halfH);
+      draw(cropX(srcW, b.w, f.cx2 ?? 1 - f.cx), b.y, b.w, b.h, 0, halfH, W, halfH);
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fillRect(0, halfH - 0.5, W, 1);
       return;
@@ -279,11 +314,8 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       const topH = (W * srcH) / srcW;
       const botH = H - topH;
       draw(0, 0, srcW, srcH, 0, 0, W, topH);
-      const zoomH = srcH * 0.55;
-      const zoomW = Math.min(srcW, (zoomH * W) / botH);
-      const zx = clamp(f.cx * srcW - zoomW / 2, 0, srcW - zoomW);
-      const zy = clamp(f.cy * srcH - zoomH / 2, 0, srcH - zoomH);
-      draw(zx, zy, zoomW, zoomH, 0, topH, W, botH);
+      const z = speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }, avoid);
+      draw(cropX(srcW, z.w, f.cx), z.y, z.w, z.h, 0, topH, W, botH);
       return;
     }
     default: {

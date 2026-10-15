@@ -17,6 +17,7 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     WEB_DIST=/app/web \
     FACE_MODEL_PATH=/app/server/models/ultraface-rfb-320.onnx \
+    TEXT_MODEL_PATH=/app/server/models/ppocrv4-det.onnx \
     PORT=3000
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl python3 \
@@ -24,6 +25,7 @@ RUN apt-get update \
  && chmod +x /usr/local/bin/yt-dlp \
  && mkdir -p /app/server/models \
  && curl -fsSL -o /app/server/models/ultraface-rfb-320.onnx https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx \
+ && curl -fsSL -o /app/server/models/ppocrv4-det.onnx https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx \
  && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/server /app/server

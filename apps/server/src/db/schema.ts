@@ -10,7 +10,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics } from "@reelsaw/shared";
+import type { ProjectSettings, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay } from "@reelsaw/shared";
 
 // ---------- Better Auth core tables ----------
 
@@ -147,6 +147,8 @@ export const transcripts = pgTable("transcripts", {
   refine: jsonb("refine").$type<RefineStatus>().notNull().default({}),
   segments: jsonb("segments").$type<TranscriptSegment[]>().notNull(),
   sceneCuts: jsonb("scene_cuts").$type<number[]>(),
+  /** captions / watermarks burned into the source video */
+  overlays: jsonb("overlays").$type<SourceOverlay[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

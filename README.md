@@ -155,20 +155,20 @@ Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optio
 
 ### Disfluencies
 
-Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions always drop accepted disfluencies; the project option "Cut stutters & fillers from the video" also removes them from the audio/video with jump cuts. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is re-aligned by transcribing a 3 s window around it (`TRANSCRIPT_ALIGN_MODEL`, a bigger whisper is cheap here), each boundary then moves to the quietest 5 ms frame in the gap beside the neighbouring word on a zero crossing, and finally the seam audio is rendered on its own, transcribed, and the cut is kept only if both neighbours are still heard and the deleted words are not. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
+Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
 
 ### Eval
 
-`eval/cases.json` holds short scripts with known entities; `eval/generate-audio.sh` synthesizes them with macOS text-to-speech so the ground truth is exact. The harness reports WER, entity recall, false entity insertions and how many corrections were auto-applied vs flagged, for every combination of model × vocabulary bias × LLM correction:
+Regression evals live in one runner with pluggable suites (transcription, cuts, overlays, framing, selection); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
 
 ```bash
-./eval/generate-audio.sh
-DATABASE_URL=x BETTER_AUTH_SECRET=xxxxxxxxxxxxxxxx OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_API_KEY=local \
-AI_MODEL=compat:qwen2.5:14b OPENAI_COMPATIBLE_BASE_URL=http://localhost:11434/v1 \
-pnpm --filter @reelsaw/server eval:transcription -- --models openai:Systran/faster-whisper-small,openai:Systran/faster-whisper-medium
+pnpm eval                 # all suites
+pnpm eval cuts framing    # some suites
+pnpm eval --offline       # skip suites that need models
+pnpm eval --update        # accept new numbers as the baseline
 ```
 
-Add real recordings by dropping an mp3 into `eval/audio/` and a case with the reference text.
+The transcription suite synthesizes its cases with macOS text-to-speech so the ground truth is exact (`eval/generate-audio.sh`), and reports WER, entity recall and false entity insertions per model × vocabulary bias × LLM correction.
 
 Results on the bundled cases (43 entity mentions, Speaches on CPU, qwen2.5:14b as judge):
 

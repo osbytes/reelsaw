@@ -1,0 +1,99 @@
+{
+  "source": {
+    "projectId": "40bdc5ed-9100-4124-bfe2-b09b2ae8d1e4",
+    "clipId": "1da70354-f391-493d-a244-cb89fb3252c4",
+    "at": 405.4634146341464,
+    "url": "https://www.youtube.com/watch?v=nCpr5SBD8CQ"
+  },
+  "range": {
+    "start": 1.493,
+    "end": 1.735
+  },
+  "deleted": [
+    "pay"
+  ],
+  "words": [
+    {
+      "text": "when",
+      "start": -0.275,
+      "end": 0.047
+    },
+    {
+      "text": "laid",
+      "start": 0.047,
+      "end": 0.368
+    },
+    {
+      "text": "out",
+      "start": 0.368,
+      "end": 0.609
+    },
+    {
+      "text": "against",
+      "start": 0.609,
+      "end": 1.172
+    },
+    {
+      "text": "your",
+      "start": 1.172,
+      "end": 1.493
+    },
+    {
+      "text": "pay",
+      "start": 1.493,
+      "end": 1.735
+    },
+    {
+      "text": "actual",
+      "start": 1.735,
+      "end": 2.217
+    },
+    {
+      "text": "pay",
+      "start": 2.217,
+      "end": 2.458
+    },
+    {
+      "text": "dates.",
+      "start": 2.458,
+      "end": 2.94
+    },
+    {
+      "text": "So",
+      "start": 3.42,
+      "end": 3.563
+    },
+    {
+      "text": "you",
+      "start": 3.563,
+      "end": 3.778
+    },
+    {
+      "text": "can",
+      "start": 3.778,
+      "end": 3.993
+    },
+    {
+      "text": "see",
+      "start": 3.993,
+      "end": 4.208
+    },
+    {
+      "text": "the",
+      "start": 4.208,
+      "end": 4.423
+    },
+    {
+      "text": "gap",
+      "start": 4.423,
+      "end": 4.637
+    },
+    {
+      "text": "forming",
+      "start": 4.637,
+      "end": 5.139
+    }
+  ],
+  "note": "\"against your pay actual pay dates\": repeated \"pay\" (repair)",
+  "expect": "clean"
+}

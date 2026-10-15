@@ -1,0 +1,27 @@
+{
+  "updatedAt": "2026-10-15T18:38:43.977Z",
+  "cases": {
+    "copia-budget": true,
+    "brightline-coffee": true,
+    "reelsaw-stack": true,
+    "qwen-anthropic": true,
+    "podcast-names": true
+  },
+  "metrics": {
+    "meanWer": {
+      "value": 0.043,
+      "better": "lower",
+      "tolerance": 0.02
+    },
+    "meanEntityRecall": {
+      "value": 0.95,
+      "better": "higher",
+      "tolerance": 0.05
+    },
+    "falseInsertions": {
+      "value": 0,
+      "better": "lower",
+      "tolerance": 0
+    }
+  }
+}

@@ -45,7 +45,8 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info({ signal: sig }, "shutting down");
-    setTimeout(() => process.exit(1), 40_000).unref();
+    log.info({ graceSeconds: config.SHUTDOWN_GRACE_SECONDS }, "waiting for running jobs to finish");
+    setTimeout(() => process.exit(1), (config.SHUTDOWN_GRACE_SECONDS + 15) * 1000).unref();
     stopReconciler?.();
     server?.close();
     await shutdownServices(svc);

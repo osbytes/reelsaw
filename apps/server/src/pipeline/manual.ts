@@ -57,10 +57,20 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
   }
 }
 
+/**
+ * A user-made clip whose AI preparation never completed (no reasoning note, no scores). Rendering it
+ * would produce an untitled clip with the wrong bounds for "ai" mode, so every path that would render
+ * it (render worker, re-render, retry, reconciler) routes it back through clip.prepare instead.
+ */
+export function needsPrepare(c: { origin: string; status: string; reasoning: string; scores: unknown }) {
+  return c.status === "preparing" || (c.origin !== "ai" && !c.reasoning && !c.scores);
+}
+export const prepareModeOf = (c: { origin: string }) => (c.origin === "manual-ai" ? ("ai" as const) : ("exact" as const));
+
 export async function prepareClip(ctx: StageContext, clipId: string, mode: "exact" | "ai") {
   const { svc, db, projectId } = ctx;
   const clip = await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId) });
-  if (!clip || clip.status !== "preparing") return; // deleted, or already prepared before a crash
+  if (!clip || !needsPrepare(clip)) return; // deleted, or already prepared before a crash
   const project = await ctx.project();
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   if (!transcript) throw new Error("Transcript missing");

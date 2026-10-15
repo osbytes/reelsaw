@@ -94,7 +94,8 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     },
     async stop() {
       if (!started) return;
-      await boss.stop({ graceful: true, timeout: 30_000, close: false });
+      // graceful: stop fetching, let running jobs finish (deploys shouldn't kill a 5-minute render)
+      await boss.stop({ graceful: true, timeout: config.SHUTDOWN_GRACE_SECONDS * 1000, close: false });
       started = false;
     },
     enqueue(queue, data) {

@@ -1,0 +1,14 @@
+{
+  "updatedAt": "2026-10-15T18:54:16.488Z",
+  "cases": {
+    "repair-mmss": true,
+    "apollo/chunking": true,
+    "apollo/snapping": true
+  },
+  "metrics": {
+    "passRate": {
+      "value": 1,
+      "better": "higher"
+    }
+  }
+}

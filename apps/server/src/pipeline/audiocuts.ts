@@ -30,6 +30,8 @@ export interface RefineResult {
 }
 export interface CutDeps {
   log?: Logger;
+  /** called before each verification so long searches show progress (cut index, total, attempt) */
+  onProgress?: (cut: number, total: number, attempt: number) => void;
   ffmpegPath: string;
   /** transcribe an mp3 buffer; returns words with timestamps relative to the buffer start */
   transcribe: (audio: Buffer) => Promise<Word[]>;
@@ -174,7 +176,8 @@ export async function refineCuts(
   const minCut = opts.minCut ?? 0.05;
   const cuts: CutRange[] = [];
   const skipped: RefineResult["skipped"] = [];
-  for (const r of ranges) {
+  for (const [ri, r] of ranges.entries()) {
+    deps.onProgress?.(ri, ranges.length, 1);
     const deleted = words.filter((w) => w.start >= r.start - 0.02 && w.end <= r.end + 0.02);
     const prev = words.filter((w) => w.end <= r.start + 0.02 && w.start < r.start).sort((a, b) => b.end - a.end)[0];
     const next = words.filter((w) => w.start >= r.end - 0.02 && w.end > r.end).sort((a, b) => a.start - b.start)[0];
@@ -281,7 +284,9 @@ export async function refineCuts(
     const reasons: string[] = [];
     const del = deleted.map((w) => norm(w.text));
     type Verdict = { ok: boolean; prevOk: boolean; nextOk: boolean; partial: boolean };
+    let attempt = 0;
     const verify = async (cut: CutRange): Promise<Verdict> => {
+      deps.onProgress?.(ri, ranges.length, ++attempt);
       const heard = (await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => norm(w.text));
       const stillThere = del.length === 1 ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0]) : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
       const prevOk = !prev || heard.includes(norm(prev.text));

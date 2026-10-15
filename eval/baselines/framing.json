@@ -1,0 +1,23 @@
+{
+  "updatedAt": "2026-10-15T18:54:16.497Z",
+  "cases": {
+    "split-wide-two-speakers": true,
+    "track-closeup-settle": true
+  },
+  "metrics": {
+    "worstSpeakerOffset": {
+      "value": 0,
+      "better": "lower",
+      "tolerance": 0.03
+    },
+    "worstTrackErrPx": {
+      "value": 5.5,
+      "better": "lower",
+      "tolerance": 6
+    },
+    "passRate": {
+      "value": 1,
+      "better": "higher"
+    }
+  }
+}

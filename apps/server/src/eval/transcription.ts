@@ -1,5 +1,7 @@
 /**
- * Transcription eval: WER and entity recall across whisper models × vocabulary bias × LLM correction.
+ * Transcription comparison matrix: WER and entity recall across whisper models × vocabulary bias × LLM
+ * correction. For pass/fail regression checks use the `transcription` suite of the eval runner
+ * (`pnpm eval transcription`); this script is for choosing models/options.
  *
  *   DATABASE_URL=x BETTER_AUTH_SECRET=xxxxxxxxxxxxxxxx OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_API_KEY=local \
  *   AI_MODEL=compat:qwen2.5:14b OPENAI_COMPATIBLE_BASE_URL=http://localhost:11434/v1 \
@@ -28,14 +30,14 @@ const argv = (name: string, def: string) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1]! : def;
 };
-const casesPath = path.resolve(argv("cases", "../../eval/cases.json"));
+const casesPath = path.resolve(argv("cases", "../../eval/fixtures/transcription/cases.json"));
 const models = argv("models", process.env.TRANSCRIPTION_MODEL ?? "openai:whisper-1").split(",");
 const only = argv("only", "");
 
 const config = loadConfig();
 const ai = createAi(config, createLogger({ LOG_LEVEL: config.LOG_LEVEL, LOG_FORMAT: config.LOG_FORMAT }, { role: "eval" }));
 const cases = (JSON.parse(await fs.readFile(casesPath, "utf8")) as Case[]).filter((c) => !only || c.id === only);
-const audioDir = path.join(path.dirname(casesPath), "audio");
+const audioDir = path.resolve(argv("audio", "../../eval/.cache/transcription-audio")); // eval/generate-audio.sh
 
 const normTokens = (s: string) =>
   s

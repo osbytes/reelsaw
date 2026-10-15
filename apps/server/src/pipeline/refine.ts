@@ -1,3 +1,5 @@
+import { detectOverlays } from "./overlays.js";
+import type { SourceOverlay } from "@reelsaw/shared";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -68,7 +70,7 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[] },
+  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[] },
 ) {
   const db = svc.database.db;
   const allDone = await db.transaction(async (tx) => {
@@ -100,6 +102,7 @@ export async function mergeRefine(
         text: segments.map((s) => s.text).join(" "),
         refine,
         ...(result.sceneCuts !== undefined ? { sceneCuts: result.sceneCuts } : {}),
+        ...(result.overlays !== undefined ? { overlays: result.overlays } : {}),
       })
       .where(eq(schema.transcripts.projectId, projectId));
     return REFINE_STEPS.every((s) => refine[s] === "done" || refine[s] === "failed");
@@ -182,8 +185,20 @@ export async function refineScenes(ctx: StageContext) {
   const project = await ctx.project();
   const sourcePath = await ctx.ensureSource(project);
   const sceneCuts = project.width ? await svc.media.detectScenes(sourcePath, 0.35, ctx.signal) : [];
-  ctx.log.info({ step: "scenes", cuts: sceneCuts.length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts });
+  // burned-in captions / watermarks: best effort, never fails the step
+  let overlays: SourceOverlay[] = [];
+  if (svc.text && project.width && project.durationSec) {
+    try {
+      const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, project.durationSec, sceneCuts);
+      overlays = scan.overlays;
+      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, overlays }, "on-screen text scan");
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
+    }
+  }
+  ctx.log.info({ step: "scenes", cuts: sceneCuts.length, overlays: overlays.length }, "refine step done");
+  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays });
 }
 
 /** Called by the worker when a refine job has exhausted its retries. */

@@ -16,6 +16,8 @@ export type { Logger };
 export interface LogConfig {
   LOG_LEVEL?: string;
   LOG_FORMAT?: "json" | "pretty" | "auto";
+  /** also write JSON lines here, rotated daily (7 kept), so logs survive container re-creation */
+  LOG_FILE?: string;
 }
 
 export function createLogger(env: LogConfig, base: Record<string, unknown> = {}): Logger {
@@ -28,6 +30,15 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {})
     redact: { paths: ["*.password", "*.apiKey", "*.authorization", "*.cookie", "headers.cookie", "headers.authorization"], censor: "[redacted]" },
     serializers: { err: pino.stdSerializers.err },
   };
-  if (pretty) return pino({ ...opts, transport: { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } });
-  return pino(opts);
+  const console = pretty ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } : { target: "pino/file", options: { destination: 1 } };
+  if (!env.LOG_FILE) return pretty ? pino({ ...opts, transport: console }) : pino(opts);
+  return pino({
+    ...opts,
+    transport: {
+      targets: [
+        { ...console, level: opts.level as string },
+        { target: "pino-roll", level: opts.level as string, options: { file: env.LOG_FILE, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" } },
+      ],
+    },
+  });
 }

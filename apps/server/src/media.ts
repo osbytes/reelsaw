@@ -29,7 +29,13 @@ export class CommandError extends Error {
     public code: number | null,
     public stderr: string,
   ) {
-    super(`${cmd} exited with ${code}: ${stderr.slice(-2000)}`);
+    // lead with the lines that say what went wrong; ffmpeg prints a long banner first
+    const key = stderr
+      .split("\n")
+      .filter((l) => /error|invalid|fail|cannot|no such|unable|not found|unknown/i.test(l))
+      .slice(-6)
+      .join("\n");
+    super(`${cmd} exited with ${code}: ${key ? `${key}\n--- tail ---\n` : ""}${stderr.slice(-1200)}`);
   }
 }
 

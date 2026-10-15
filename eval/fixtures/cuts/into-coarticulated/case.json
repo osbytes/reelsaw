@@ -1,0 +1,89 @@
+{
+  "source": {
+    "projectId": "40bdc5ed-9100-4124-bfe2-b09b2ae8d1e4",
+    "clipId": "1da70354-f391-493d-a244-cb89fb3252c4",
+    "at": 419.69201438848927,
+    "url": "https://www.youtube.com/watch?v=nCpr5SBD8CQ"
+  },
+  "range": {
+    "start": 3,
+    "end": 3.277
+  },
+  "deleted": [
+    "into"
+  ],
+  "words": [
+    {
+      "text": "no",
+      "start": -0.052,
+      "end": 0.087
+    },
+    {
+      "text": "leftover",
+      "start": 0.087,
+      "end": 0.642
+    },
+    {
+      "text": "category",
+      "start": 0.642,
+      "end": 1.197
+    },
+    {
+      "text": "for",
+      "start": 1.197,
+      "end": 1.405
+    },
+    {
+      "text": "money",
+      "start": 1.405,
+      "end": 1.752
+    },
+    {
+      "text": "to",
+      "start": 1.752,
+      "end": 1.89
+    },
+    {
+      "text": "quietly",
+      "start": 1.89,
+      "end": 2.376
+    },
+    {
+      "text": "disappear",
+      "start": 2.376,
+      "end": 3
+    },
+    {
+      "text": "into",
+      "start": 3,
+      "end": 3.277
+    },
+    {
+      "text": "between",
+      "start": 3.277,
+      "end": 3.763
+    },
+    {
+      "text": "now",
+      "start": 3.763,
+      "end": 3.971
+    },
+    {
+      "text": "and",
+      "start": 3.971,
+      "end": 4.179
+    },
+    {
+      "text": "your",
+      "start": 4.179,
+      "end": 4.456
+    },
+    {
+      "text": "next",
+      "start": 4.456,
+      "end": 4.734
+    }
+  ],
+  "note": "\"disappear into between\": \"into\" glued to \"disappear\"; whisper timings drift, LM prior refills it",
+  "expect": "clean"
+}

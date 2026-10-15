@@ -10,7 +10,8 @@
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
     "start": "pnpm --filter @reelsaw/server start",
     "mock-ai": "node scripts/mock-ai.mjs",
-    "models:download": "mkdir -p apps/server/models && curl -fsSL -o apps/server/models/ultraface-rfb-320.onnx https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx"
+    "eval": "pnpm --filter @reelsaw/server eval",
+    "models:download": "mkdir -p apps/server/models && curl -fsSL -o apps/server/models/ultraface-rfb-320.onnx https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx && curl -fsSL -o apps/server/models/ppocrv4-det.onnx https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx"
   },
   "devDependencies": {
     "typescript": "5.9.3"
