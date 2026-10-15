@@ -1,0 +1,103 @@
+[
+  {
+    "id": "copia-budget",
+    "meta": {
+      "title": "Stop Living Paycheck To Paycheck",
+      "uploader": "Copia",
+      "description": "Copia is a budgeting app that shows where your money goes. Try Copia free at copiacash.com",
+      "tags": [
+        "Copia",
+        "budgeting"
+      ]
+    },
+    "entities": [
+      "Copia"
+    ],
+    "text": "Here is the thing about budgeting. Most apps show you a pie chart and call it a day. Copia does something different. Copia lays out every paycheck against every bill so you can see the gap before it hits. When I opened Copia for the first time I finally understood why my balance went to zero every month. So if you are tired of guessing, give Copia a try."
+  },
+  {
+    "id": "brightline-coffee",
+    "meta": {
+      "title": "How Brightline Coffee dials in espresso on the La Marzocco Linea",
+      "uploader": "Brightline Coffee",
+      "description": "Our head roaster walks through dialing in on the La Marzocco Linea with a Fellow Opus grinder and the Acaia Lunar scale.",
+      "tags": [
+        "La Marzocco",
+        "Fellow Opus",
+        "Acaia"
+      ]
+    },
+    "entities": [
+      "Brightline Coffee",
+      "La Marzocco",
+      "Linea",
+      "Fellow Opus",
+      "Acaia"
+    ],
+    "text": "At Brightline Coffee every shot starts on the La Marzocco Linea. The Linea holds temperature better than anything else we have used. We grind on the Fellow Opus and weigh every dose on the Acaia scale. If the Acaia says eighteen grams, that is what goes in. So when people ask what makes Brightline Coffee consistent, it is the Linea, the Fellow Opus, and the Acaia, in that order."
+  },
+  {
+    "id": "reelsaw-stack",
+    "meta": {
+      "title": "Reelsaw: pg-boss, Hono and Drizzle in production",
+      "uploader": "Reelsaw",
+      "description": "How Reelsaw uses pg-boss for queues, Hono for the API, Drizzle for Postgres and Speaches for local whisper.",
+      "tags": [
+        "pg-boss",
+        "Hono",
+        "Drizzle",
+        "Speaches"
+      ]
+    },
+    "entities": [
+      "Reelsaw",
+      "pg-boss",
+      "Hono",
+      "Drizzle",
+      "Speaches",
+      "Ollama"
+    ],
+    "text": "Reelsaw is a small TypeScript service. Every job goes through pg-boss, which keeps the queue in Postgres. The HTTP layer is Hono, and all database access goes through Drizzle. For transcription we run Speaches locally, and the language model comes from Ollama. If Speaches goes down, pg-boss simply retries the job later. That is the whole Reelsaw architecture."
+  },
+  {
+    "id": "qwen-anthropic",
+    "meta": {
+      "title": "Qwen vs Claude for structured output",
+      "uploader": "The Model Report",
+      "description": "Comparing Qwen 2.5 from Alibaba and Claude from Anthropic on JSON tasks, plus a look at Gemma from Google DeepMind.",
+      "tags": [
+        "Qwen",
+        "Anthropic",
+        "Gemma"
+      ]
+    },
+    "entities": [
+      "Qwen",
+      "Anthropic",
+      "Claude",
+      "Gemma",
+      "Alibaba",
+      "DeepMind"
+    ],
+    "text": "This week I compared Qwen and Claude on structured output. Qwen is the open model from Alibaba, and Claude comes from Anthropic. Both handled JSON schemas well, but Claude was more consistent on long prompts. I also tried Gemma from DeepMind, and Gemma struggled once the schema got nested. My takeaway is that Qwen is the best open option and Anthropic still leads on reliability."
+  },
+  {
+    "id": "podcast-names",
+    "meta": {
+      "title": "Episode 42 with Priyanka Venkatesh and Tomasz Zieli\u0144ski",
+      "uploader": "Founders Table",
+      "description": "Priyanka Venkatesh of Lumora and Tomasz Zieli\u0144ski of Kestrel Robotics on hiring.",
+      "tags": [
+        "Lumora",
+        "Kestrel Robotics"
+      ]
+    },
+    "entities": [
+      "Priyanka Venkatesh",
+      "Tomasz Zieli\u0144ski",
+      "Lumora",
+      "Kestrel Robotics"
+    ],
+    "text": "Today I am joined by Priyanka Venkatesh, who runs Lumora, and Tomasz Zieli\u0144ski from Kestrel Robotics. Priyanka, let us start with you. How did Lumora make its first ten hires? And Tomasz, Kestrel Robotics grew from four people to forty in a year. What did Kestrel Robotics get right that most startups get wrong?"
+  }
+]

@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "origin" text DEFAULT 'ai' NOT NULL;

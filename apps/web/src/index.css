@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0d12;
+  --color-panel: #12151c;
+  --color-panel-2: #181c25;
+  --color-border: #262b36;
+  --color-text: #e6e8ee;
+  --color-muted: #8b93a7;
+  --color-accent: #f5c518;
+  --color-accent-2: #7c9cff;
+  --color-danger: #ff6b6b;
+  --color-ok: #4ade80;
+}
+
+html, body, #root { height: 100%; overflow: hidden; }
+body { @apply bg-bg text-text antialiased; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+@utility btn { @apply inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed; }
+@utility btn-primary { @apply btn bg-accent text-black hover:brightness-110; }
+@utility btn-ghost { @apply btn border border-border bg-panel hover:bg-panel-2; }
+@utility btn-danger { @apply btn border border-danger/40 text-danger hover:bg-danger/10; }
+@utility input { @apply w-full rounded-md border border-border bg-panel-2 px-3 py-2 text-sm outline-none focus:border-accent-2; }
+@utility label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted; }
+@utility menu-item { @apply flex cursor-default select-none items-center gap-2 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-panel-2 data-[disabled]:opacity-50; }
+@utility menu-hint { @apply ml-auto pl-3 text-xs text-muted; }
+@utility card { @apply rounded-lg border border-border bg-panel; }

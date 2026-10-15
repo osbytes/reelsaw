@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.env
+*.log
+.DS_Store
+# downloaded / generated artifacts (see `pnpm models:download` and eval/generate-audio.sh)
+apps/server/models/*.onnx
+eval/audio/
+# local tool state
+.claude/
+coverage/

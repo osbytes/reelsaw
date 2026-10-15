@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  onnxruntime-node: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.113'
+  - '@ai-sdk/google@4.0.95'
+  - '@ai-sdk/openai@4.0.93'
+  - ai@7.0.140
+  - lucide-react@1.57.0
+  - pg-boss@12.38.0

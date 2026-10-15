@@ -1,0 +1,115 @@
+# Compose project name pins container/volume names (reelsaw_*) regardless of the checkout folder.
+name: reelsaw
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reelsaw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reelsaw}
+      POSTGRES_DB: reelsaw
+    ports:
+      - "${POSTGRES_PORT:-127.0.0.1:5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reelsaw -d reelsaw"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    image: reelsaw:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
+      PORT: "3000"
+      DATA_DIR: /data
+      FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      RUN_HTTP: "true"
+      RUN_WORKERS: ${RUN_WORKERS_IN_APP:-true}
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - data:/data
+
+  # Optional extra workers. Scale with: docker compose --profile workers up -d --scale worker=2
+  worker:
+    build: .
+    image: reelsaw:latest
+    restart: unless-stopped
+    profiles: ["workers"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
+      DATA_DIR: /data
+      FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
+      RUN_HTTP: "false"
+      RUN_WORKERS: "true"
+    volumes:
+      - data:/data
+
+  # Optional S3-compatible storage for local testing: docker compose --profile minio up -d
+  minio:
+    image: minio/minio:latest
+    profiles: ["minio"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-reelsaw}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-reelsaw123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio:/data
+
+  # ---- Fully local AI ----
+  # Ollama has no speech-to-text, so transcription runs on Speaches (faster-whisper behind an
+  # OpenAI-compatible API with word timestamps):  docker compose --profile local-ai up -d
+  # On macOS run Ollama natively (Metal GPU) and point OPENAI_COMPATIBLE_BASE_URL at
+  # http://host.docker.internal:11434/v1. On Linux you can add the container:  --profile ollama
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    # GPU (NVIDIA): uncomment
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu   # use :latest-cuda with an NVIDIA GPU
+    profiles: ["local-ai"]
+    restart: unless-stopped
+    environment:
+      WHISPER__MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      LOG_LEVEL: info
+    volumes:
+      - speaches:/home/ubuntu/.cache/huggingface
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:
+  data:
+  minio:
+  ollama:
+  speaches:

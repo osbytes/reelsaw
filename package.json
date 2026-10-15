@@ -1,0 +1,18 @@
+{
+  "name": "reelsaw",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "predev": "pnpm --filter @reelsaw/shared build",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm --filter @reelsaw/shared build && pnpm -r typecheck",
+    "db:generate": "pnpm --filter @reelsaw/server db:generate",
+    "start": "pnpm --filter @reelsaw/server start",
+    "mock-ai": "node scripts/mock-ai.mjs",
+    "models:download": "mkdir -p apps/server/models && curl -fsSL -o apps/server/models/ultraface-rfb-320.onnx https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
