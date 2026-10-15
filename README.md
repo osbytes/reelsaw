@@ -19,6 +19,9 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 - **Bulk export** – "Export all" zips every rendered clip with platform-ready metadata: a paste-ready `.txt` (title, description, tags, caption), a `.youtube.json` (YouTube Data API v3 `videos.insert` body, private by default) and a `.tiktok.json` (Content Posting API `post_info`, `SELF_ONLY`) per clip, plus `manifest.json`, `clips.csv` and a README. Descriptions carry a timestamped link to the exact moment in the parent video; the README explains YouTube Studio's per-Short "Related video" field, which no upload API exposes.
 - **Horizontal scale** – run extra `worker` containers; all coordination goes through Postgres.
 - **Fail-fast boot (12-factor)** – every service is built in `main`, self-checks, and the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable, or the DB is down. No deferred "works until the first job" surprises.
+- **LLM call capture** – `LLM_TRACE=logs` writes every prompt/response (tokens, latency, project/clip/stage/call) as structured logs; `LLM_TRACE=langfuse` sends a trace per job and a generation per call to Langfuse. Implemented as AI SDK model middleware, so every call is captured.
+- **Active speaker framing** – two people in a wide shot: the crop follows whoever is talking (mouth motion correlated with the audio envelope, so a listener drinking or nodding isn't mistaken for the speaker; minimum 2.5 s per shot), falling back to a split when detection isn't confident. Force Split on the editor's layout track to keep both.
+- **Audio-aligned captions** – caption words are force-aligned to the clip audio (wav2vec2), so karaoke highlights land on the syllable rather than ASR estimates.
 - **Optional OpenTelemetry** – `OTEL_ENABLED=true` turns on OTLP traces + metrics for HTTP, Postgres, outbound fetch, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp executions and each pipeline stage.
 
 ## Quick start
@@ -122,6 +125,17 @@ Durability model:
 
 ## Development
 
+Live-reload loop in Docker (source mounted, no image rebuilds; rebuild the dev image only when dependencies change):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile local-ai up -d app
+open http://localhost:5173      # Vite + HMR; /api and /media proxied to the server (tsx watch)
+docker compose exec app reelsaw stuck
+```
+
+Models for running outside Docker: `pnpm models:download` (face, on-screen text, voice activity, forced alignment; ~105 MB).
+
+
 ```bash
 pnpm install
 docker compose up -d db
@@ -155,7 +169,7 @@ Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optio
 
 ### Disfluencies
 
-Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
+Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Long pauses are shortened too (project setting **Pauses**: natural 0.6 s, tight 0.35 s, or keep), detected with Silero VAD on the clip audio. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is first located by CTC forced alignment (wav2vec2, exact word boundaries at 20 ms from the audio plus the known words, ~0.2 s on CPU) and verified with one transcription of the seam; only if that fails is it re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
 
 ### Eval
 
@@ -199,7 +213,6 @@ Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUB
 See [docs/RESEARCH.md](docs/RESEARCH.md) for the competitor audit and research review behind these priorities. Top items:
 
 - Punch-in zooms on the emphasis words.
-- Silero VAD silence trimming; windowed CTC forced alignment for cut seams.
-- Active-speaker selection in split/face layouts (diarization mapped to face tracks, later Light-ASD ONNX) and a saliency fallback when no face is visible.
+- Active speaker: more labelled two-way conversation cases; a learned audio-visual model (Light-ASD ONNX) if the synchrony heuristic plateaus. Saliency fallback when no face is visible.
 - SRT/VTT export.
 - Direct publishing to YouTube Shorts / TikTok / Instagram.

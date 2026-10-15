@@ -1,0 +1,19 @@
+{
+  "note": "Shot cuts verified by eye (frames 0.3 s either side). Times are relative to the section start. Low-contrast, desaturated footage: hard cuts score 0.17-0.28 vs ~0.0015 for ordinary frames, so a fixed 0.35 threshold finds none.",
+  "cases": [
+    {
+      "id": "apollo-dark-podcast",
+      "source": {
+        "id": "apollo-100-220",
+        "url": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+        "start": 100,
+        "end": 220,
+        "sha256": "304dbcb335978293835bcb18841c44f09f591d9987bfe33c2af1fde31bc04bf1",
+        "localPath": "/data/projects/51eb110e-aa09-4b5d-a8e9-712fab566502/source.mp4"
+      },
+      "gradeUntil": 60,
+      "expectCuts": [0.367, 13.733, 18.333, 21.1, 39.433, 51.967, 54.967],
+      "tolerance": 0.25
+    }
+  ]
+}

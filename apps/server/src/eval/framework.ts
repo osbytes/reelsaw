@@ -137,14 +137,16 @@ export interface MediaSource {
  * works, so suites can mark cases skipped.
  */
 export async function materialize(ctx: EvalContext, source: MediaSource): Promise<string> {
-  const out = path.join(ctx.cacheDir, "media", `${source.id}.mp4`);
+  // v2: sections are cut frame-accurately (v1 stream-copied from a local file, which starts at the
+  // previous keyframe and shifted every section-relative label by up to a few seconds)
+  const out = path.join(ctx.cacheDir, "media", `${source.id}.v2.mp4`);
   if (existsSync(out)) return out;
   await fs.mkdir(path.dirname(out), { recursive: true });
   const cfg = ctx.config();
   const dur = (source.end - source.start).toFixed(3);
   const tmp = `${out}.part.mp4`;
   if (source.localPath && existsSync(source.localPath)) {
-    await exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(source.start), "-i", source.localPath, "-t", dur, "-c", "copy", "-avoid_negative_ts", "make_zero", tmp]);
+    await exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(source.start), "-i", source.localPath, "-t", dur, "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "160k", tmp]);
   } else {
     if (ctx.offline) throw new Error(`media ${source.id} not cached and --offline is set`);
     try {

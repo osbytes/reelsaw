@@ -1,0 +1,20 @@
+{
+  "note": "Two-person wide shots with known talkers (from the transcript: the left speaker's monologue 'I learned this with Alex Hormozi last year…'). The right speaker drinks from a can during it, which fooled a motion-only detector.",
+  "cases": [
+    {
+      "id": "apollo-left-monologue-drinking",
+      "source": {
+        "id": "apollo-100-220",
+        "url": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+        "start": 100,
+        "end": 220,
+        "sha256": "304dbcb335978293835bcb18841c44f09f591d9987bfe33c2af1fde31bc04bf1",
+        "localPath": "/data/projects/51eb110e-aa09-4b5d-a8e9-712fab566502/source.mp4"
+      },
+      "segment": [21.1, 39.43],
+      "speakers": [0.134, 0.817],
+      "truth": [{ "start": 0, "end": 18.33, "who": 0 }],
+      "minAgreement": 0.85
+    }
+  ]
+}

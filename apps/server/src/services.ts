@@ -4,6 +4,9 @@ import { loadConfig, makePaths, ConfigError, type Config, type Paths } from "./c
 import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { createAi, type AiService } from "./ai/registry.js";
+import { createAsr, type Asr } from "./ai/asr.js";
+import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
+import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
@@ -11,6 +14,8 @@ import { createAuth, type Auth } from "./auth.js";
 import { createResourceGovernor, type ResourceGovernor } from "./resources.js";
 import { loadFaceDetector, type FaceDetector } from "./vision/faces.js";
 import { loadTextDetector, type TextDetector } from "./vision/text.js";
+import { loadVad, type Vad } from "./audio/vad.js";
+import { loadAligner, type Aligner } from "./audio/align.js";
 import { createLogger, type Logger } from "./log.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
@@ -23,11 +28,19 @@ export interface Services {
   database: Database;
   storage: Storage;
   ai: AiService;
+  /** LLM call capture (LLM_TRACE) */
+  llmTrace: LlmTracer;
+  /** cached speech-to-text (content-addressed) */
+  asr: Asr;
   media: MediaTools;
   events: EventBus;
   queue: Queue;
   auth: Auth;
   resources: ResourceGovernor;
+  /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
+  aligner: Aligner | null;
+  /** null when VAD=false; then pauses are never trimmed. */
+  vad: Vad | null;
   /** null when TEXT_DETECTION=false; then burned-in source text is never hidden. */
   text: TextDetector | null;
   /** null when FACE_DETECTION=false; then "auto" layout degrades to "fit". */
@@ -95,8 +108,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return m;
   });
 
+  const llmTrace = await step("llm call capture", async () => {
+    const t = await createLlmTracer(config, log);
+    if (env.REELSAW_CLI !== "1") await t.check();
+    if (t.sinks.length) log.info({ module: "llm", sinks: t.sinks }, "capturing LLM calls");
+    return t;
+  });
+
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
-    const a = createAi(config, log.child({ module: "ai" }));
+    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware);
     await a.check();
     return a;
   });
@@ -108,6 +128,30 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     } catch (err) {
       throw new Error(`cannot load ${config.FACE_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set FACE_DETECTION=false.`);
     }
+  });
+
+  const vad = await step(config.VAD ? "voice activity detector (Silero VAD)" : "voice activity detector (disabled)", async () => {
+    if (!config.VAD) return null;
+    try {
+      return await loadVad(config.VAD_MODEL_PATH);
+    } catch (err) {
+      throw new Error(`cannot load ${config.VAD_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set VAD=false.`);
+    }
+  });
+
+  const aligner = await step(config.ALIGNER ? "forced aligner (wav2vec2 CTC)" : "forced aligner (disabled)", async () => {
+    if (!config.ALIGNER) return null;
+    try {
+      return await loadAligner(config.ALIGN_MODEL_DIR);
+    } catch (err) {
+      throw new Error(`cannot load ${config.ALIGN_MODEL_DIR}: ${(err as Error).message}. Run "pnpm models:download" or set ALIGNER=false.`);
+    }
+  });
+
+  const asr = await step("asr cache", async () => {
+    const a = createAsr(ai, config.TRANSCRIPTION_MODEL, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }));
+    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
+    return a;
   });
 
   const text = await step(config.TEXT_DETECTION ? "text detector (PP-OCRv4 ONNX)" : "text detector (disabled)", async () => {
@@ -146,13 +190,16 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db));
 
-  return { log, config, paths, otel, database, storage, ai, media, events, queue, auth, resources, faces, text };
+  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, auth, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));
   await s.faces?.release().catch(() => {});
   await s.text?.release().catch(() => {});
+  await s.vad?.release().catch(() => {});
+  await s.aligner?.release().catch(() => {});
+  await s.llmTrace.shutdown();
   await s.events.stop().catch(() => {});
   await s.database.close().catch(() => {});
   await s.otel.shutdown().catch(() => {});

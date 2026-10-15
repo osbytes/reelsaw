@@ -1,3 +1,4 @@
+import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { createProviderRegistry, customProvider, type LanguageModel, type TranscriptionModel } from "ai";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
@@ -38,7 +39,7 @@ export function providerOf(id: string): string {
   return id.split(":")[0]!;
 }
 
-export function createAi(config: Config, log: Logger): AiService {
+export function createAi(config: Config, log: Logger, middleware?: LanguageModelMiddleware | null): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
   let registry: Promise<Registry> | undefined;
 
@@ -148,7 +149,11 @@ export function createAi(config: Config, log: Logger): AiService {
   }
 
   return {
-    languageModel: async (id = config.AI_MODEL) => (await resolve("language", id)) as LanguageModel,
+    languageModel: async (id = config.AI_MODEL) => {
+      const model = (await resolve("language", id)) as Exclude<LanguageModel, string>;
+      // LLM_TRACE capture (logs / Langfuse) wraps every model handed out
+      return middleware ? (wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware }) as LanguageModel) : model;
+    },
     transcriptionModel: async (id = config.TRANSCRIPTION_MODEL) => (await resolve("transcription", id)) as TranscriptionModel,
     transcriptionOptions: (id = config.TRANSCRIPTION_MODEL) => {
       const p = providerOf(id);

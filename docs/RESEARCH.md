@@ -131,7 +131,7 @@ Impact and effort are scored 1–5. Rank is ordered by roughly impact ÷ effort.
 
 ## Top 10 next moves (prioritised)
 
-> **Status (2026-10-15):** #1 (map → pool → rank), #2 (rubric sub-scores + focus + length buckets + maxClips) and #3 (emphasis captions + readability rules + safe-zone overlay) are implemented. Per-scene reframe overrides (#10, manual part) and drag-to-recentre are implemented too.
+> **Status (2026-10-15):** #1 (map → pool → rank), #2 (rubric sub-scores + focus + length buckets + maxClips) and #3 (emphasis captions + readability rules + safe-zone overlay) are implemented. Per-scene reframe overrides (#10, manual part) and drag-to-recentre are implemented too. #4 (Silero VAD pause trimming) and #5 (CTC forced alignment for cut seams, wav2vec2-base-960h, Apache-2.0) followed.
 
 1. **Map → pool → rank clip selection** (B4, B5): overlapping topic-segment chunks, rubric scoring with k=3 median, pairwise tournament with position swap, and a count driven by threshold plus `maxClips`. This fixes "lost in the middle" and replaces top-up passes. *AI SDK, about 1 week.*
 2. **Rubric sub-scores + prompted/topic clipping + length bucket** (A #1, #4): matches the OpusClip, Riverside and Vizard UX. *Low effort.*

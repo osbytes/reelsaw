@@ -1,0 +1,28 @@
+# Dev loop: source mounted into the app container, live reload, no image rebuilds.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile local-ai up -d app
+#   open http://localhost:5173        (Vite dev server with HMR; /api and /media proxied to the server)
+#
+# Server: `tsx watch` restarts on changes to apps/server/src (this interrupts running jobs; they retry).
+# Shared: `tsc --watch` rebuilds packages/shared/dist. Web: Vite HMR. CLI: `docker compose exec app reelsaw …`
+# Rebuild the dev image only when dependencies change: `docker compose -f … -f docker-compose.dev.yml build app`.
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    image: reelsaw-dev:latest
+    stop_grace_period: 15s
+    environment:
+      NODE_ENV: development
+      SHUTDOWN_GRACE_SECONDS: "10"
+      LOG_FORMAT: pretty
+    ports:
+      - "${DEV_WEB_PORT:-5173}:5173"
+    volumes:
+      - ./apps/server/src:/app/apps/server/src
+      - ./apps/server/drizzle:/app/apps/server/drizzle
+      - ./apps/web/src:/app/apps/web/src
+      - ./apps/web/index.html:/app/apps/web/index.html
+      - ./packages/shared/src:/app/packages/shared/src
+      - ./eval:/app/eval

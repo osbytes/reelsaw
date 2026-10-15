@@ -85,5 +85,10 @@
     }
   ],
   "note": "\"disappear into between\": \"into\" glued to \"disappear\"; whisper timings drift, LM prior refills it",
-  "expect": "clean"
+  "expect": "clean",
+  "verifiedCut": {
+    "start": 3.36,
+    "end": 3.712,
+    "note": "cut verified clean by whisper-medium on the rendered seam; the deleted word lies inside it"
+  }
 }

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
 import type { Logger } from "./log.js";
+import { parseSceneScores, pickSceneCuts } from "./pipeline/scenes.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -47,7 +48,8 @@ export interface MediaTools {
   ytdlp(args: string[], opts?: RunOptions): Promise<RunResult>;
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
-  detectScenes(input: string, threshold?: number, signal?: AbortSignal): Promise<number[]>;
+  /** Shot cuts (seconds). `floor` = minimum scene score; cuts must also stand out from local motion. */
+  detectScenes(input: string, floor?: number, signal?: AbortSignal): Promise<number[]>;
   /** Verifies every binary executes. */
   check(): Promise<void>;
 }
@@ -127,25 +129,28 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       await ffmpeg(["-i", input, "-f", "segment", "-segment_time", String(chunkSeconds), "-c", "copy", "-reset_timestamps", "1", outPattern], { signal });
     },
 
-    async detectScenes(input, threshold = 0.35, signal) {
-      const cuts: number[] = [];
+    async detectScenes(input, floor = 0.1, signal) {
+      // per-frame scene scores on a small copy (fast, and plenty for shot changes), then adaptive
+      // peak picking: fixed thresholds miss every cut in dark or low-contrast footage (see scenes.ts)
+      const lines: string[] = [];
       try {
         await run(
           config.FFMPEG_PATH,
-          ["-hide_banner", "-nostdin", "-i", input, "-vf", `select='gt(scene,${threshold})',showinfo`, "-vsync", "vfr", "-f", "null", "-"],
+          ["-hide_banner", "-nostdin", "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
           {
             signal,
             onStderr: (line) => {
-              const m = /pts_time:(\d+(?:\.\d+)?)/.exec(line);
-              if (m) cuts.push(Number(m[1]));
+              if (line.includes("pts_time:") || line.includes("scene_score=")) lines.push(line);
             },
           },
         );
       } catch (err) {
         if (signal?.aborted) throw err;
         log.warn({ err }, "scene detection failed, continuing without scene cuts");
+        return [];
       }
-      return cuts;
+      const { times, scores } = parseSceneScores(lines);
+      return pickSceneCuts(times, scores, { floor });
     },
 
     async check() {

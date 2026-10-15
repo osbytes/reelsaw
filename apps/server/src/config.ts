@@ -83,6 +83,14 @@ export const envSchema = z.object({
 
   // resource governor (see resources.ts)
   // a running job with no progress event for this long is reported (log + UI) as stalled
+  // LLM call capture: none | logs | langfuse (comma-separated for several)
+  LLM_TRACE: z.string().default("none"),
+  LLM_TRACE_MAX_CHARS: z.coerce.number().int().min(200).default(4000),
+  LANGFUSE_PUBLIC_KEY: z.string().optional(),
+  LANGFUSE_SECRET_KEY: z.string().optional(),
+  LANGFUSE_BASE_URL: z.string().url().default("https://cloud.langfuse.com"),
+  // speech-to-text results cache (DATA_DIR/cache/asr); entries older than this are pruned at boot
+  ASR_CACHE_DAYS: z.coerce.number().int().min(0).default(14),
   STALL_MINUTES: z.coerce.number().int().min(2).default(15),
   // on SIGTERM, wait this long for running jobs to finish before exiting (deploys stop interrupting renders)
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
@@ -98,6 +106,12 @@ export const envSchema = z.object({
   FACE_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ultraface-rfb-320.onnx")),
   // burned-in caption / watermark detection (PP-OCRv4 text detector); false = never hide source text
   TEXT_DETECTION: boolTrue,
+  // voice activity detection (Silero VAD) for tightening long pauses; false = never trim silence
+  VAD: boolTrue,
+  // CTC forced alignment (wav2vec2) for exact word boundaries at disfluency cuts; false = whisper-only search
+  ALIGNER: boolTrue,
+  ALIGN_MODEL_DIR: z.string().default(path.resolve(process.cwd(), "models/wav2vec2-base-960h")),
+  VAD_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/silero-vad.onnx")),
   TEXT_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ppocrv4-det.onnx")),
   LAYOUT_MIN_FACE_RATIO: z.coerce.number().min(0).max(1).default(0.6), // share of frames that must contain a face
   LAYOUT_MIN_FACE_SIZE: z.coerce.number().min(0).max(1).default(0.18), // median face height / frame height

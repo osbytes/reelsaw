@@ -133,6 +133,10 @@ export interface DetectedSegment {
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
+  /** caption words re-timed by forced alignment */
+  captionTiming?: { aligned: number; total: number; medianShiftMs: number; ms: number };
+  /** silence trimmed by the pause setting */
+  pauses?: { cuts: number; removedSec: number; maxPause: number };
   layout: string;
   cuts: {
     applied: Array<{ start: number; end: number }>;
@@ -166,6 +170,8 @@ export const projectSettingsSchema = styleSchema.extend({
   maxClips: z.number().int().min(1).max(50).optional(),
   minClipSeconds: z.number().int().min(5).max(180).default(20),
   maxClipSeconds: z.number().int().min(10).max(300).default(60),
+  /** Long pauses inside clips: shortened to 0.6 s (natural) / 0.35 s (tight) with jump cuts, or kept. */
+  pauses: z.enum(["off", "natural", "tight"]).default("natural"),
   /** Text burned into the source (captions, logos): "hide" keeps it out of crops and masks the rest. */
   sourceText: z.enum(["hide", "keep"]).default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */

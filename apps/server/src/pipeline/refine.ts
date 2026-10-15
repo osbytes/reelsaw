@@ -184,7 +184,7 @@ export async function refineScenes(ctx: StageContext) {
   await markRunning(ctx, "scenes");
   const project = await ctx.project();
   const sourcePath = await ctx.ensureSource(project);
-  const sceneCuts = project.width ? await svc.media.detectScenes(sourcePath, 0.35, ctx.signal) : [];
+  const sceneCuts = project.width ? await svc.media.detectScenes(sourcePath, undefined, ctx.signal) : [];
   // burned-in captions / watermarks: best effort, never fails the step
   let overlays: SourceOverlay[] = [];
   if (svc.text && project.width && project.durationSec) {

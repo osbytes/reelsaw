@@ -254,6 +254,19 @@ export function NewProjectPage() {
               <p className="mt-1 text-xs text-muted">No target count is given to the AI; weak moments are dropped instead of padding the list.</p>
             </div>
             <div>
+              <label className="label">Pauses</label>
+              <Segmented
+                value={s.pauses}
+                onChange={(v) => patch({ pauses: v })}
+                options={[
+                  { value: "natural", label: "Natural", title: "Pauses longer than 0.6 s are shortened" },
+                  { value: "tight", label: "Tight", title: "Pauses longer than 0.35 s are shortened (fast, punchy pacing)" },
+                  { value: "off", label: "Keep", title: "Leave pauses as recorded" },
+                ]}
+              />
+              <p className="mt-1 text-xs text-muted">Silence is detected on-device and removed with jump cuts, like the filler-word cuts.</p>
+            </div>
+            <div>
               <label className="label">Find clips about (optional)</label>
               <input
                 className="input"

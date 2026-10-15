@@ -14,6 +14,7 @@ import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from
 import { z } from "zod";
 import { clipCandidateSchema, rubricTotal, type ClipCandidate, type ClipScores, type TranscriptSegment } from "@reelsaw/shared";
 import { fmtTs } from "./transcript.js";
+import { withLlmContext } from "../ai/trace.js";
 import type { Logger } from "../log.js";
 
 // ---------- small helpers ----------
@@ -114,6 +115,10 @@ export interface LlmOpts {
  * failure, then one plain-text attempt for servers that reject response_format.
  */
 async function llmJson<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
+  return withLlmContext({ call: `analyze.${name}` }, () => llmJsonInner(o, prompt, schema, name, temperature, salvage));
+}
+
+async function llmJsonInner<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
   const common = { model: o.model, prompt, abortSignal: o.signal, maxRetries: 2, temperature } as const;
   try {
     const { output } = await generateText({ ...common, output: Output.object({ schema, name }), telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}`, recordInputs: false, recordOutputs: false } });

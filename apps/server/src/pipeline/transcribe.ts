@@ -1,7 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { eq, asc } from "drizzle-orm";
-import { transcribe as aiTranscribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
@@ -58,7 +57,7 @@ export async function transcribe(ctx: StageContext) {
   const done = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), columns: { index: true } });
   const doneIdx = new Set(done.map((c) => c.index));
 
-  const model = await svc.ai.transcriptionModel();
+  await svc.ai.transcriptionModel(); // fail fast if the model id is wrong
   const entities = extractEntities(project.sourceMeta, project.settings.vocabulary);
   const provider = providerOf(svc.config.TRANSCRIPTION_MODEL);
   const providerOptions = svc.ai.transcriptionOptions() as Record<string, JSONObject>;
@@ -77,14 +76,7 @@ export async function transcribe(ctx: StageContext) {
       if (i === undefined) return;
       ctx.throwIfAborted();
       const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-      const result = await aiTranscribe({
-        model,
-        audio,
-        providerOptions,
-        abortSignal: ctx.signal,
-        maxRetries: 3,
-        telemetry: { isEnabled: svc.otel.enabled, functionId: "transcribe.chunk", recordOutputs: false },
-      });
+      const result = await svc.asr.transcribe(audio, { modelId: svc.config.TRANSCRIPTION_MODEL, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
       await ctx.db
         .insert(schema.transcriptChunks)
         .values({
@@ -94,7 +86,7 @@ export async function transcribe(ctx: StageContext) {
           offsetSec: offsets[i]!,
           language: result.language ?? null,
           text: result.text,
-          segments: result.segments.map((s) => ({ text: s.text, start: s.startSecond, end: s.endSecond })),
+          segments: result.segments.map((sg) => ({ text: sg.text, start: sg.startSecond, end: sg.endSecond })),
         })
         .onConflictDoNothing();
       completed++;

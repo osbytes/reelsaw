@@ -10,10 +10,12 @@ import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
 import { growOverlays, sampleClipText } from "./overlays.js";
+import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
+import { alignWordTimes } from "../audio/align.js";
+import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
+import { spawn } from "node:child_process";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
-import { transcribe as aiTranscribe } from "ai";
-import type { JSONObject } from "@ai-sdk/provider";
 import { toWords } from "./transcript.js";
 import { sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { resolveStyle, speakerCrop, cropX, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
@@ -171,7 +173,53 @@ export async function renderClip(ctx: StageContext, clipId: string) {
     samples = filtered.samples;
   }
   // a single-segment clip in "none" keeps its aspect; anything mixed is 9:16 so pieces can be concatenated
+  // clip audio once (16 kHz mono): speaker detection, pause trimming, caption alignment
+  let clipAudio: Float32Array | null = null;
+  if (svc.vad || svc.aligner) {
+    clipAudio = await clipPcm(svc.config.FFMPEG_PATH, sourcePath, clip.startSec, duration, ctx.signal).catch((err) => {
+      if (ctx.signal.aborted) throw err;
+      log.warn({ err }, "could not extract clip audio; no speaker detection, pause trimming or caption alignment");
+      return null;
+    });
+  }
+  const speechProbs = svc.vad && clipAudio ? await svc.vad.probabilities(clipAudio) : null;
   let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces);
+  // two people on screen: follow whoever is talking when detection is confident, otherwise keep the
+  // split. No setting: a section forced to Split in the editor (manual) is always left alone.
+  if (svc.faces && speechProbs && segments.some((sg) => sg.decision.layout === "split" && !sg.manual)) {
+    const expanded: typeof segments = [];
+    for (const sg of segments) {
+      if (sg.decision.layout !== "split" || sg.manual || !sg.decision.track2?.length || sg.end - sg.start < 3) {
+        expanded.push(sg);
+        continue;
+      }
+      try {
+        const a = trackCenter(sg.decision.track).x;
+        const b = trackCenter(sg.decision.track2).x;
+        const tl = await activeSpeakers({ faces: svc.faces, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, clip.startSec + sg.start, sg.end - sg.start, [a, b], speechAt(speechProbs, sg.start), envelopeAt(clipAudio!, sg.start));
+        const confident = tl.confidence >= 0.5;
+        log.info({ segment: [sg.start, sg.end], confidence: tl.confidence, runs: tl.runs, used: confident && tl.runs.length > 0 }, "active speaker detection");
+        if (!confident || !tl.runs.length) {
+          expanded.push(sg);
+          continue;
+        }
+        for (const r of tl.runs) {
+          const tr = r.who === 0 ? sg.decision.track : sg.decision.track2;
+          expanded.push({
+            start: sg.start + r.start,
+            end: sg.start + r.end,
+            manual: false,
+            decision: { ...sg.decision, layout: "face", track: tr, track2: undefined, faceSize: sg.decision.speakerSizes?.[r.who] ?? sg.decision.faceSize, reason: `active speaker ${r.who === 0 ? "left" : "right"} (confidence ${tl.confidence})` },
+          });
+        }
+      } catch (err) {
+        if (ctx.signal.aborted) throw err;
+        log.warn({ err }, "active speaker detection failed; keeping split");
+        expanded.push(sg);
+      }
+    }
+    segments = expanded;
+  }
   if (segments.length > 1) segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
   const first = segments[0]!;
   const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
@@ -212,12 +260,54 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   );
   for (const sk of cutResult.skipped) log.warn({ span: [sk.range.start, sk.range.end], reason: sk.reason }, "disfluency cut skipped");
   for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end] }, "disfluency cut");
-  const cuts = cutResult.cuts;
+  // long pauses: shortened with jump cuts (VAD on the clip audio), merged with the disfluency cuts
+  let pauseInfo: ClipDiagnostics["pauses"];
+  let cuts = cutResult.cuts;
+  const maxPause = settings.pauses === "off" ? 0 : settings.pauses === "tight" ? 0.35 : 0.6;
+  if (speechProbs && maxPause > 0) {
+    try {
+      const segs = speechSegments(speechProbs);
+      const silence = pauseCuts(segs, duration, { maxPause });
+      cuts = mergeRanges([...cuts, ...silence]);
+      pauseInfo = { cuts: silence.length, removedSec: Number(silence.reduce((n, c) => n + c.end - c.start, 0).toFixed(2)), maxPause };
+      if (silence.length) log.info(pauseInfo, "trimming pauses");
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      log.warn({ err }, "pause detection failed; keeping pauses");
+    }
+  }
   const plan = cutPlan(duration, cuts);
   const outDuration = cuts.length ? plan.newDuration : duration;
-  const words = (transcript?.words ?? [])
+  let clipWordsRel = (transcript?.words ?? [])
     .filter((w) => w.end > clip.startSec && w.start < clip.endSec)
-    .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }))
+    .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }));
+  let captionTiming: ClipDiagnostics["captionTiming"];
+  if (svc.aligner && clipAudio && clipWordsRel.length) {
+    // karaoke highlights follow the audio: force-align the as-heard words (fillers included, they're
+    // in the audio) and give each caption word the timing of the heard word it came from
+    try {
+      const t0 = Date.now();
+      const heard = (transcript?.rawWords ?? transcript?.words ?? [])
+        .filter((w) => w.end > clip.startSec && w.start < clip.endSec)
+        .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }));
+      const res = await alignWordTimes(svc.aligner, clipAudio, heard);
+      const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
+      let used = 0;
+      const byOrig = heard.map((h, i) => ({ h, a: res.words[i]! }));
+      clipWordsRel = clipWordsRel.map((w) => {
+        const m = byOrig.find((x) => norm(x.h.text) === norm(w.text) && Math.abs(x.h.start - w.start) < 0.6);
+        if (!m) return w;
+        used++;
+        return { ...w, start: m.a.start, end: m.a.end };
+      });
+      captionTiming = { aligned: used, total: clipWordsRel.length, medianShiftMs: res.medianShiftMs, ms: Date.now() - t0 };
+      log.info(captionTiming, "caption words aligned to audio");
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      log.warn({ err }, "caption alignment failed; using transcript timings");
+    }
+  }
+  const words = clipWordsRel
     .filter((w) => !cuts.some((c) => w.start >= c.start - 0.001 && w.end <= c.end + 0.001))
     .map((w) => ({ text: w.text, start: plan.mapTime(w.start), end: Math.max(plan.mapTime(w.start) + 0.05, plan.mapTime(w.end)) }));
   if (cuts.length) log.info({ cuts: cuts.length, inSec: Number(duration.toFixed(2)), outSec: Number(outDuration.toFixed(2)) }, "applying jump cuts");
@@ -298,6 +388,8 @@ export async function renderClip(ctx: StageContext, clipId: string) {
 
   const diagnostics: ClipDiagnostics = {
     renderedAt: new Date().toISOString(),
+    ...(pauseInfo ? { pauses: pauseInfo } : {}),
+    ...(captionTiming ? { captionTiming } : {}),
     layout: summary,
     cuts: {
       applied: cutResult.cuts.map((c) => ({ start: Number((c.start + clip.startSec).toFixed(3)), end: Number((c.end + clip.startSec).toFixed(3)) })),
@@ -362,17 +454,17 @@ export async function planClipCuts(
     .filter((w) => w.end > clip.startSec - 1 && w.start < clip.endSec + 1)
     .map((w) => ({ text: w.text, start: w.start - clip.startSec, end: w.end - clip.startSec }));
   const alignModelId = svc.config.TRANSCRIPT_ALIGN_MODEL ?? svc.config.TRANSCRIPTION_MODEL;
-  const alignModel = await svc.ai.transcriptionModel(alignModelId);
-  const alignOptions = svc.ai.transcriptionOptions(alignModelId) as Record<string, JSONObject>;
+
   const refined = await refineCuts(
     {
       onProgress,
+      ...(svc.aligner ? { align: (pcm: Float32Array, ws: string[]) => svc.aligner!.align(pcm, ws) } : {}),
       log: log?.child({ module: "cuts" }),
       ffmpegPath: svc.config.FFMPEG_PATH,
       signal,
       transcribe: async (audio) => {
-        const res = await aiTranscribe({ model: alignModel, audio, providerOptions: alignOptions, abortSignal: signal, maxRetries: 2 });
-        return toWords(res.segments.map((sg) => ({ text: sg.text, startSecond: sg.startSecond, endSecond: sg.endSecond })));
+        const res = await svc.asr.transcribe(audio, { modelId: alignModelId, signal });
+        return toWords(res.segments);
       },
     },
     sourcePath,
@@ -411,4 +503,31 @@ export function sourceVideo(overlays: SourceOverlay[], srcW: number, srcH: numbe
   if (!parts.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };
   const labels = Array.from({ length: consumers }, (_, i) => `[src${i}]`);
   return { prefix: `${parts.join(";")};${cur}split=${consumers}${labels.join("")};`, labels };
+}
+
+/** Union of possibly overlapping ranges, sorted. */
+export function mergeRanges(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+  const sorted = ranges.filter((r) => r.end > r.start).sort((a, b) => a.start - b.start);
+  const out: Array<{ start: number; end: number }> = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end + 0.02) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+/** 16 kHz mono float PCM of a clip's audio (VAD input). */
+function clipPcm(ffmpegPath: string, source: string, start: number, duration: number, signal?: AbortSignal): Promise<Float32Array> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", String(VAD_SR), "-f", "f32le", "pipe:1"], { signal });
+    p.stdout.on("data", (d: Buffer) => chunks.push(d));
+    p.on("error", reject);
+    p.on("close", (code) => {
+      if (code !== 0) return reject(new Error(`ffmpeg exited ${code} extracting clip audio`));
+      const b = Buffer.concat(chunks);
+      resolve(new Float32Array(b.buffer, b.byteOffset, Math.floor(b.byteLength / 4)));
+    });
+  });
 }

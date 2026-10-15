@@ -1,0 +1,9 @@
+{
+  "updatedAt": "2026-10-15T20:08:30.882Z",
+  "cases": {
+    "pay-repeat+1.5s@1": true,
+    "into-coarticulated+2s@2.4": true,
+    "into-coarticulated+0.8s@1.2": true
+  },
+  "metrics": {}
+}

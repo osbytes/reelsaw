@@ -21,6 +21,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 
 | Symptom | Look at | Usual cause |
 |---|---|---|
+| Shot changes missing (layout, snapping, text filter act as if one shot) | `reelsaw scenes <projectId>` | Old fixed-threshold detector on dark footage; `--store` the adaptive result |
 | Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes after heartbeat expiry (~15 s) + retry backoff. Each restart burns a retry. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under 45. |
@@ -126,15 +127,18 @@ It looked frozen and the evidence was gone with the container's logs. What chang
 - **Dependencies down:** boot fail-fast (exit 78) on an unreachable model server is intended; on a host where
   Ollama is started by hand, check `curl localhost:11434/api/version` first.
 
-## 7. Next improvements (not built yet)
+## 7. Improvements: done and next
 
-1. **Dev loop without image rebuilds:** a compose `dev` profile that mounts `apps/*/src` and runs `tsx watch`; most
-   iterations here cost 1–3 min of rebuild + restart, which also interrupted jobs.
-2. **ASR cache keyed by audio hash** in the cut search and evals: repeated verifications of the same seam are free.
-3. **LLM I/O capture** (`DEBUG_LLM=1`): store prompt/response per stage call so an analysis run can be replayed and
-   diffed (`reelsaw replay analyze <projectId>`), and build a selection eval from human-labelled moments.
-4. **Stuck-job detector** in the reconciler: an active job past its expected duration becomes a visible event.
-5. **More fixtures:** export every refused cut automatically (with consent) so `eval:cuts` grows from real failures.
+Done: dev loop without rebuilds (`docker-compose.dev.yml`), content-addressed ASR cache (`DATA_DIR/cache/asr`),
+stall watchdog (`job.stalled`), CTC forced alignment for cut boundaries, adaptive shot-cut detection, VAD pause
+trimming.
+
+Also done: LLM call capture (`LLM_TRACE=logs|langfuse`), audio-aligned caption timing, active speaker framing.
+
+Next:
+1. **Replay** captured LLM calls (`reelsaw replay analyze <projectId>`) and a selection eval from labelled moments.
+2. **More fixtures:** export every refused cut automatically so `eval cuts` grows from real failures.
+3. **Speaker cases:** label real back-and-forth conversations for `eval speakers` (one monologue case today).
 
 ## 8. Evals and regression cases
 

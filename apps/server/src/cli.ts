@@ -21,6 +21,7 @@
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
  *   logs    <id> [n=60]                     log lines mentioning a project/clip/job id from LOG_FILE (survives redeploys)
+ *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  */
@@ -28,8 +29,6 @@ import { eq, desc, and, inArray } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
 import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
-import { transcribe as aiTranscribe } from "ai";
-import type { JSONObject } from "@ai-sdk/provider";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
@@ -65,8 +64,8 @@ function ffmpegWav(svc: Services, input: string, start: number, dur: number): Pr
 
 async function words(svc: Services, audio: Buffer) {
   const id = svc.config.TRANSCRIPT_ALIGN_MODEL ?? svc.config.TRANSCRIPTION_MODEL;
-  const res = await aiTranscribe({ model: await svc.ai.transcriptionModel(id), audio, providerOptions: svc.ai.transcriptionOptions(id) as Record<string, JSONObject> });
-  return { model: id, text: res.text, words: toWords(res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond }))) };
+  const res = await svc.asr.transcribe(audio, { modelId: id });
+  return { model: id, text: res.text, words: toWords(res.segments) };
 }
 
 async function sourcePath(svc: Services, projectId: string) {
@@ -278,6 +277,20 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!hits.length) console.log(`no lines mention ${id} in ${files.join(", ") || file}`);
   },
 
+  async scenes(svc) {
+    const id = pos[0]!;
+    const db = svc.database.db;
+    const t0 = Date.now();
+    const cuts = await svc.media.detectScenes(await sourcePath(svc, id));
+    const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { sceneCuts: true } });
+    console.log(`${cuts.length} shot cuts in ${Date.now() - t0} ms (stored: ${t?.sceneCuts?.length ?? 0})`);
+    console.log(cuts.slice(0, 40).map((c) => formatTime(c)).join(" ") + (cuts.length > 40 ? " …" : ""));
+    if (args.includes("--store")) {
+      await db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, id));
+      console.log("stored; re-run `reelsaw overlays <id> --store` and re-render clips to use them");
+    }
+  },
+
   async overlays(svc) {
     const id = pos[0]!;
     const db = svc.database.db;
@@ -310,7 +323,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <status|events|clip|rerender|stuck|recover|logs|cuts|align|hear|flags|overlays> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <status|events|clip|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

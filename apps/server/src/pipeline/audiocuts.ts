@@ -35,6 +35,8 @@ export interface CutDeps {
   ffmpegPath: string;
   /** transcribe an mp3 buffer; returns words with timestamps relative to the buffer start */
   transcribe: (audio: Buffer) => Promise<Word[]>;
+  /** CTC forced alignment (16 kHz float PCM + known words → spans relative to the PCM start) */
+  align?: (pcm: Float32Array, words: string[]) => Promise<Array<{ text: string; start?: number; end?: number; score?: number }>>;
   signal?: AbortSignal;
 }
 
@@ -185,6 +187,81 @@ export async function refineCuts(
       skipped.push({ range: r, reason: "no words inside the span" });
       continue;
     }
+    let accepted: CutRange | null = null;
+    const reasons: string[] = [];
+    const del = deleted.map((w) => norm(w.text));
+    type Verdict = { ok: boolean; prevOk: boolean; nextOk: boolean; partial: boolean };
+    let attempt = 0;
+    const verify = async (cut: CutRange): Promise<Verdict> => {
+      deps.onProgress?.(ri, ranges.length, ++attempt);
+      const heard = (await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => norm(w.text));
+      const stillThere = del.length === 1 ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0]) : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
+      const prevOk = !prev || heard.includes(norm(prev.text));
+      const nextOk = !next || heard.includes(norm(next.text));
+      // leftovers: anything heard between the neighbours (a cut that takes "in" but leaves "-to"
+      // reads as "disappear to between": no whole "into", but not clean either)
+      let leftover = "";
+      if (prev && next && prevOk && nextOk) {
+        const pi = heard.lastIndexOf(norm(prev.text), heard.indexOf(norm(next.text)));
+        const ni = heard.indexOf(norm(next.text), Math.max(0, pi));
+        if (pi >= 0 && ni > pi + 1) leftover = heard.slice(pi + 1, ni).join(" ");
+      }
+      if (prevOk && nextOk && !stillThere && !leftover) return { ok: true, prevOk, nextOk, partial: false };
+      // The seam check can be fooled by the recogniser's language model ("disappear ___ between"
+      // gets "into" filled back in). Cross-check acoustically: if the removed piece, heard on its
+      // own, IS the deleted word(s), the cut is right.
+      let removed: string[] = [];
+      if (prevOk && nextOk && stillThere && !leftover) {
+        removed = (await deps.transcribe(await pieceMp3(deps, source, clipStart + cut.start, cut.end - cut.start))).map((w) => norm(w.text)).filter(Boolean);
+        if (del.every((t) => soundsLike(removed, t))) {
+          deps.log?.info({ span: [r.start, r.end], seamHeard: heard.join(" "), removedHeard: removed.join(" ") }, "seam check fooled by language model; removed audio confirms the cut");
+          return { ok: true, prevOk, nextOk, partial: false };
+        }
+      }
+      reasons.push(`${cut.start.toFixed(3)}-${cut.end.toFixed(3)}: heard "${heard.join(" ")}" (prev ${prevOk ? "ok" : "lost"}, next ${nextOk ? "ok" : "lost"}, deleted ${stillThere ? "audible" : "gone"}${leftover ? `, leftover "${leftover}"` : ""}${removed.length ? `, removed piece "${removed.join(" ")}"` : ""})`);
+      return { ok: false, prevOk, nextOk, partial: prevOk && nextOk };
+    };
+
+    // 0. CTC forced alignment: exact word boundaries from the audio + the words we know are there
+    //    (20 ms resolution, ~0.2 s, no transcription call). One or two verified candidates usually
+    //    settle it; otherwise fall through to the whisper-based search below.
+    if (deps.align && opts.verify !== false) {
+      try {
+        const ctc = await ctcBoundaries(deps, source, clipStart, duration, words, deleted, prev, next);
+        if (ctc) {
+          deps.log?.debug({ span: [r.start, r.end], ctc }, "ctc alignment");
+          const a0 = Math.max(0, ctc.prevEnd - 0.15);
+          const a1 = Math.min(duration, ctc.nextStart + 0.15);
+          const samples = await pcm(deps, source, clipStart + a0, a1 - a0);
+          const qs = ctc.dStart - ctc.prevEnd > 0.02 ? quietest(samples, ctc.prevEnd - a0, ctc.dStart + 0.02 - a0) : null;
+          const qe = ctc.nextStart - ctc.dEnd > 0.02 ? quietest(samples, ctc.dEnd - 0.02 - a0, ctc.nextStart - a0) : null;
+          const ctcCand: CutRange[] = [];
+          const push = (st: number, en: number) => {
+            const c = { start: Number(st.toFixed(4)), end: Number(en.toFixed(4)) };
+            if (c.end - c.start >= minCut && !ctcCand.some((x) => Math.abs(x.start - c.start) < 0.012 && Math.abs(x.end - c.end) < 0.012)) ctcCand.push(c);
+          };
+          push(qs ? qs.t + a0 : ctc.dStart, qe ? qe.t + a0 : ctc.dEnd); // quiet points beside the aligned word
+          push(ctc.prevEnd + 0.01, ctc.nextStart - 0.01); // everything between the aligned neighbours
+          push(ctc.dStart - 0.03, ctc.dEnd + 0.03);
+          for (const c of ctcCand.slice(0, 3)) {
+            const v = await verify(c);
+            if (v.ok) {
+              accepted = c;
+              break;
+            }
+          }
+        }
+      } catch (err) {
+        if (deps.signal?.aborted) throw err;
+        deps.log?.warn({ err }, "ctc alignment failed, using the whisper-based search");
+      }
+      if (accepted) {
+        deps.log?.debug({ span: [r.start, r.end], cut: [accepted.start, accepted.end], tries: attempt }, "cut accepted via ctc alignment");
+        cuts.push(accepted);
+        continue;
+      }
+    }
+
     // 1. re-align on a short window
     const w0 = Math.max(0, r.start - 1.5);
     const w1 = Math.min(duration, r.end + 1.5);
@@ -280,41 +357,6 @@ export async function refineCuts(
     add(prevEnd + 0.005, nextStart - 0.005); // everything between the neighbours
     const MAX_TRIES = opts.verify === false ? 1 : 8;
 
-    let accepted: CutRange | null = null;
-    const reasons: string[] = [];
-    const del = deleted.map((w) => norm(w.text));
-    type Verdict = { ok: boolean; prevOk: boolean; nextOk: boolean; partial: boolean };
-    let attempt = 0;
-    const verify = async (cut: CutRange): Promise<Verdict> => {
-      deps.onProgress?.(ri, ranges.length, ++attempt);
-      const heard = (await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => norm(w.text));
-      const stillThere = del.length === 1 ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0]) : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
-      const prevOk = !prev || heard.includes(norm(prev.text));
-      const nextOk = !next || heard.includes(norm(next.text));
-      // leftovers: anything heard between the neighbours (a cut that takes "in" but leaves "-to"
-      // reads as "disappear to between": no whole "into", but not clean either)
-      let leftover = "";
-      if (prev && next && prevOk && nextOk) {
-        const pi = heard.lastIndexOf(norm(prev.text), heard.indexOf(norm(next.text)));
-        const ni = heard.indexOf(norm(next.text), Math.max(0, pi));
-        if (pi >= 0 && ni > pi + 1) leftover = heard.slice(pi + 1, ni).join(" ");
-      }
-      if (prevOk && nextOk && !stillThere && !leftover) return { ok: true, prevOk, nextOk, partial: false };
-      // The seam check can be fooled by the recogniser's language model ("disappear ___ between"
-      // gets "into" filled back in). Cross-check acoustically: if the removed piece, heard on its
-      // own, IS the deleted word(s), the cut is right.
-      let removed: string[] = [];
-      if (prevOk && nextOk && stillThere && !leftover) {
-        removed = (await deps.transcribe(await pieceMp3(deps, source, clipStart + cut.start, cut.end - cut.start))).map((w) => norm(w.text)).filter(Boolean);
-        if (del.every((t) => soundsLike(removed, t))) {
-          deps.log?.info({ span: [r.start, r.end], seamHeard: heard.join(" "), removedHeard: removed.join(" ") }, "seam check fooled by language model; removed audio confirms the cut");
-          return { ok: true, prevOk, nextOk, partial: false };
-        }
-      }
-      reasons.push(`${cut.start.toFixed(3)}-${cut.end.toFixed(3)}: heard "${heard.join(" ")}" (prev ${prevOk ? "ok" : "lost"}, next ${nextOk ? "ok" : "lost"}, deleted ${stillThere ? "audible" : "gone"}${leftover ? `, leftover "${leftover}"` : ""}${removed.length ? `, removed piece "${removed.join(" ")}"` : ""})`);
-      return { ok: false, prevOk, nextOk, partial: prevOk && nextOk };
-    };
-
     // a) fixed candidates, nearest the alignments first
     let partial: CutRange | null = null;
     let tries = 0;
@@ -357,4 +399,39 @@ export async function refineCuts(
     cuts.push(cut);
   }
   return { cuts, skipped };
+}
+
+/**
+ * Exact boundaries of the deleted word(s) and their neighbours by forced alignment of the transcript
+ * words around the span. The window is built from whole words (with margin) so the text matches the
+ * audio at both edges; clip-relative seconds. Null when alignment can't place the needed words.
+ */
+async function ctcBoundaries(deps: CutDeps, source: string, clipStart: number, duration: number, words: Word[], deleted: Word[], prev: Word | undefined, next: Word | undefined): Promise<{ dStart: number; dEnd: number; prevEnd: number; nextStart: number } | null> {
+  const s0 = deleted[0]!.start;
+  const s1 = deleted[deleted.length - 1]!.end;
+  const ctxWords = words.filter((w) => w.end > s0 - 2.2 && w.start < s1 + 2.2);
+  if (!ctxWords.length) return null;
+  const a0 = Math.max(0, ctxWords[0]!.start - 0.5);
+  const a1 = Math.min(duration, ctxWords[ctxWords.length - 1]!.end + 0.5);
+  const raw = await runFfmpeg(deps.ffmpegPath, ["-ss", (clipStart + a0).toFixed(3), "-t", (a1 - a0).toFixed(3), "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"], deps.signal);
+  const pcmF = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
+  const spans = await deps.align!(pcmF, ctxWords.map((w) => w.text));
+  const idx = (w: Word | undefined) => (w ? ctxWords.indexOf(w) : -1);
+  const di = deleted.map((d) => idx(d));
+  const pi = idx(prev);
+  const ni = idx(next);
+  const span = (i: number) => (i >= 0 ? spans[i] : undefined);
+  const first = span(di[0]!);
+  const last = span(di[di.length - 1]!);
+  if (first?.start === undefined || last?.end === undefined) return null;
+  // a confident alignment has letter log-probs near 0; very low scores mean the text doesn't match
+  if ((first.score ?? 0) < -3 || (last.score ?? 0) < -3) return null;
+  const p = span(pi);
+  const n = span(ni);
+  return {
+    dStart: a0 + first.start,
+    dEnd: a0 + last.end,
+    prevEnd: a0 + (p?.end ?? Math.max(0, first.start - 0.15)),
+    nextStart: a0 + (n?.start ?? last.end + 0.15),
+  };
 }

@@ -45,6 +45,7 @@
     "better-auth": "^1.7.7",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
+    "langfuse": "3.39.2",
     "onnxruntime-node": "^1.30.0",
     "pg": "^8.23.1",
     "pg-boss": "^12.38.0",

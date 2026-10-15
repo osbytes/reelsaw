@@ -9,6 +9,7 @@
  * A case passes when the verdict matches `expect` (default "clean"; "kept" is accepted for cases
  * labelled `"expect": "clean-or-kept"`). ASR calls are cached by audio hash.
  */
+import { loadAligner, type Aligner } from "../../audio/align.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Word } from "@reelsaw/shared";
@@ -25,6 +26,9 @@ interface Case {
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9']+/g, "");
+
+let alignerP: Promise<Aligner> | undefined;
+const getAligner = (dir: string) => (alignerP ??= loadAligner(dir));
 
 export const cutsSuite: Suite = {
   name: "cuts",
@@ -52,7 +56,15 @@ export const cutsSuite: Suite = {
           if (Date.now() - t > 200) uncached++;
           return r.words;
         };
-        const res = await refineCuts({ ffmpegPath: cfg.FFMPEG_PATH, transcribe: hear, log: ctx.verbose ? ctx.log : undefined }, wav, 0, dur, [c.range], c.words);
+        const aligner = cfg.ALIGNER ? await getAligner(cfg.ALIGN_MODEL_DIR).catch(() => null) : null;
+        const res = await refineCuts(
+          { ffmpegPath: cfg.FFMPEG_PATH, transcribe: hear, ...(aligner ? { align: (pcm: Float32Array, ws: string[]) => aligner.align(pcm, ws) } : {}), log: ctx.verbose ? ctx.log : undefined },
+          wav,
+          0,
+          dur,
+          [c.range],
+          c.words,
+        );
         const cut = res.cuts[0];
         const prev = c.words.filter((w) => w.end <= c.range.start + 0.02).at(-1);
         const next = c.words.find((w) => w.start >= c.range.end - 0.02);

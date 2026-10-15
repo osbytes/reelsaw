@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-15T18:42:20.396Z",
+  "updatedAt": "2026-10-15T20:11:51.706Z",
   "cases": {
     "into-coarticulated": true,
     "pay-repeat": true
@@ -14,7 +14,7 @@
       "better": "lower"
     },
     "asrCallsPerCase": {
-      "value": 4,
+      "value": 2,
       "better": "lower",
       "tolerance": 2
     }

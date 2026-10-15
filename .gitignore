@@ -5,7 +5,7 @@ data
 *.log
 .DS_Store
 # downloaded / generated artifacts (see `pnpm models:download` and eval/generate-audio.sh)
-apps/server/models/*.onnx
+apps/server/models/
 # local tool state
 .claude/
 coverage/

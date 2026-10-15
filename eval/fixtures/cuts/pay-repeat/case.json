@@ -95,5 +95,10 @@
     }
   ],
   "note": "\"against your pay actual pay dates\": repeated \"pay\" (repair)",
-  "expect": "clean"
+  "expect": "clean",
+  "verifiedCut": {
+    "start": 1.804,
+    "end": 2.047,
+    "note": "cut verified clean by whisper-medium on the rendered seam; the deleted word lies inside it"
+  }
 }

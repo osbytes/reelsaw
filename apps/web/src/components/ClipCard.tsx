@@ -98,7 +98,7 @@ export function ClipCard({
               {clip.layoutOverride || clip.layoutSections?.length ? " · manual" : ""}
             </span>
           )}
-          {clip.diagnostics && clip.diagnostics.cuts.applied.length + clip.diagnostics.cuts.skipped.length > 0 && <CutsBadge d={clip.diagnostics} />}
+          {clip.diagnostics && (clip.diagnostics.cuts.applied.length + clip.diagnostics.cuts.skipped.length > 0 || (clip.diagnostics.pauses?.cuts ?? 0) > 0) && <CutsBadge d={clip.diagnostics} />}
           {clip.origin && clip.origin !== "ai" && (
             <span className="rounded bg-accent-2/15 px-1.5 py-0.5 text-accent-2" title={clip.origin === "manual" ? "Exact range you selected in the transcript" : "AI picked this inside your transcript selection"}>
               {clip.origin === "manual" ? "Your selection" : "AI pick from selection"}
@@ -191,10 +191,16 @@ function CutsBadge({ d }: { d: ClipDiagnostics }) {
         <button className={`rounded px-1.5 py-0.5 ${skipped ? "bg-accent/15 text-accent" : "bg-panel-2"}`} title="Disfluency jump cuts in the last render">
           ✂ {d.cuts.applied.length} cut{d.cuts.applied.length === 1 ? "" : "s"}
           {skipped ? ` · ${skipped} kept` : ""}
+          {d.pauses?.cuts ? ` · ${d.pauses.removedSec.toFixed(1)}s pauses` : ""}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content side="bottom" align="start" sideOffset={6} className="z-50 max-w-md space-y-2 rounded-md border border-border bg-panel p-3 text-xs shadow-xl outline-none">
+          {d.pauses?.cuts ? (
+            <p>
+              Shortened {d.pauses.cuts} pause{d.pauses.cuts === 1 ? "" : "s"} to {d.pauses.maxPause}s, {d.pauses.removedSec.toFixed(1)}s of silence removed.
+            </p>
+          ) : null}
           {d.cuts.applied.map((c, i) => (
             <p key={`a${i}`} className="text-ok">
               Cut {formatTime(c.start)} ({(c.end - c.start).toFixed(2)}s), verified by re-transcribing the seam
