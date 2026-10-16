@@ -59,7 +59,7 @@ export function SettingsPage() {
           title: "Runtime",
           rows: [
             ["Storage", s.storage],
-            ["Render concurrency", String(s.renderConcurrency)],
+            ["Render concurrency", s.renderConcurrency.mode === "auto" ? `Automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}` : `${s.renderConcurrency.max} (fixed)`],
             ["Max upload", `${s.maxUploadMb} MB`],
             ["Sign-ups", s.allowSignup ? "open" : "closed"],
             ["OpenTelemetry", s.otel ? "on" : "off"],

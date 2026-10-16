@@ -225,7 +225,7 @@ export const appRouter = router({
       faceDetection: !!ctx.svc.faces,
       allowSignup: ctx.svc.config.ALLOW_SIGNUP,
       maxUploadMb: ctx.svc.config.MAX_UPLOAD_MB,
-      renderConcurrency: ctx.svc.config.RENDER_CONCURRENCY,
+      renderConcurrency: { ...ctx.svc.resources.renders(), max: ctx.svc.resources.maxRenders() },
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,
       resources: await ctx.svc.resources.snapshot(),

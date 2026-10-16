@@ -106,7 +106,8 @@ export async function startWorkers(svc: Services) {
     }
   });
 
-  await boss.work<RenderJob>(QUEUES.render, { ...common, localConcurrency: svc.config.RENDER_CONCURRENCY }, async (jobs: Job<RenderJob>[]) => {
+  // slots up to the machine's ceiling; renderSlot() decides how many actually run (CPU and memory now)
+  await boss.work<RenderJob>(QUEUES.render, { ...common, localConcurrency: svc.resources.maxRenders() }, async (jobs: Job<RenderJob>[]) => {
     const job = jobs[0]!;
     const { projectId, clipId, gen } = job.data;
     const max = svc.queue.retryLimitOf(QUEUES.render);
@@ -115,9 +116,14 @@ export async function startWorkers(svc: Services) {
       const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
       log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
       if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "render", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
-      await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, () =>
-        renderClip(new StageContext(svc, projectId, "render", job.signal), clipId, gen),
-      );
+      const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
+      try {
+        await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, () =>
+          renderClip(new StageContext(svc, projectId, "render", job.signal), clipId, gen),
+        );
+      } finally {
+        release();
+      }
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
@@ -126,5 +132,5 @@ export async function startWorkers(svc: Services) {
     }
   });
 
-  svc.log.info({ module: "worker", queues: Object.values(QUEUES), renderConcurrency: svc.config.RENDER_CONCURRENCY }, "workers listening");
+  svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
 }

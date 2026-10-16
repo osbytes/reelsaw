@@ -36,8 +36,17 @@ export interface ResourceGovernor {
    * so pg-boss can retry with backoff instead of holding the slot forever.
    */
   acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<void>;
-  /** ffmpeg -threads value so concurrent renders share the CPUs instead of each grabbing all of them. */
+  /** ffmpeg -threads value: the CPUs shared by the renders running right now. */
   ffmpegThreads(): number;
+  /**
+   * Wait for a render slot. With RENDER_CONCURRENCY=auto a render starts while fewer are running
+   * than the CPUs allow (~CPUS_PER_RENDER cores each) and memory would stay above MIN_FREE_MEM_MB
+   * with one more (~RENDER_MEM_MB); one render may always run. A number pins the limit instead.
+   */
+  renderSlot(opts: { signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<() => void>;
+  /** upper bound on concurrent renders in this process (worker slots to register) */
+  maxRenders(): number;
+  renders(): { running: number; limit: number; mode: "auto" | "fixed" };
   check(): Promise<void>;
 }
 
@@ -52,8 +61,25 @@ function cpuTimes() {
   return { idle, total };
 }
 
+/** Cores one render keeps busy (x264 encode + decode + filters) and the memory it needs. */
+export const CPUS_PER_RENDER = 2;
+export const RENDER_MEM_MB = 1200;
+const MAX_AUTO_RENDERS = 8;
+
+/** How many renders may run now: pure, for tests. */
+export function renderLimit(p: { cpus: number; memAvailableMB: number; running: number; minFreeMemMB: number; fixed?: number }): number {
+  if (p.fixed) return p.fixed;
+  const byCpu = Math.min(MAX_AUTO_RENDERS, Math.max(1, Math.floor(p.cpus / CPUS_PER_RENDER)));
+  // memory already counts the renders running; room for how many more?
+  const more = Math.floor((p.memAvailableMB - p.minFreeMemMB) / RENDER_MEM_MB);
+  return Math.max(1, Math.min(byCpu, p.running + Math.max(0, more)));
+}
+
 export function createResourceGovernor(config: Config, dataDir: string, log: Logger): ResourceGovernor {
   const cpus = Math.max(1, os.availableParallelism());
+  const fixed = config.RENDER_CONCURRENCY === "auto" ? undefined : config.RENDER_CONCURRENCY;
+  let running = 0;
+  let lastLimit = fixed ?? 1;
   let lastSnapshot: ResourceSnapshot | undefined;
   let lastAt = 0;
   let prevTimes = cpuTimes();
@@ -148,7 +174,39 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
     },
 
     ffmpegThreads() {
-      return Math.max(1, Math.floor(cpus / Math.max(1, config.RENDER_CONCURRENCY)));
+      return Math.max(1, Math.floor(cpus / Math.max(1, running)));
+    },
+
+    maxRenders() {
+      return fixed ?? Math.min(MAX_AUTO_RENDERS, Math.max(1, Math.floor(cpus / CPUS_PER_RENDER)));
+    },
+
+    renders() {
+      return { running, limit: lastLimit, mode: fixed ? "fixed" : "auto" };
+    },
+
+    async renderSlot({ signal, onWait }) {
+      const started = Date.now();
+      let lastReason = "";
+      for (;;) {
+        if (signal?.aborted) throw new Error("job aborted while waiting for a render slot");
+        const s = await sample();
+        lastLimit = renderLimit({ cpus, memAvailableMB: s.memAvailableMB, running, minFreeMemMB: config.MIN_FREE_MEM_MB, fixed });
+        if (running < lastLimit) {
+          running++;
+          let released = false;
+          return () => {
+            if (!released) (released = true), running--;
+          };
+        }
+        if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000) throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot (${running} running)`);
+        const reason = `${running} render${running === 1 ? "" : "s"} running, room for ${lastLimit} (${s.cpus} CPUs, ${s.memAvailableMB} MB free)`;
+        if (reason !== lastReason) {
+          lastReason = reason;
+          onWait?.(`Waiting for a render slot: ${reason}`);
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     },
 
     async check() {
@@ -156,7 +214,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       if (s.diskFreeMB >= 0 && s.diskFreeMB < config.MIN_FREE_DISK_MB) {
         throw new Error(`only ${s.diskFreeMB} MB free in ${dataDir}; MIN_FREE_DISK_MB=${config.MIN_FREE_DISK_MB}`);
       }
-      log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, ffmpegThreads: this.ffmpegThreads() }, "resources");
+      log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}` }, "resources");
     },
   };
 }

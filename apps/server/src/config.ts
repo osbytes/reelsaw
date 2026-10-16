@@ -29,7 +29,8 @@ export const envSchema = z.object({
   RUN_WORKERS: boolTrue,
   RUN_HTTP: boolTrue,
   ALLOW_SIGNUP: boolTrue,
-  RENDER_CONCURRENCY: z.coerce.number().int().min(1).default(2),
+  // "auto" (default): renders start while CPU and memory allow (see resources.ts); a number pins it
+  RENDER_CONCURRENCY: z.union([z.literal("auto"), z.coerce.number().int().min(1)]).default("auto"),
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
 
   AI_MODEL: z.string().default("openai:gpt-4o-mini"),
