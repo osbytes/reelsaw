@@ -173,7 +173,11 @@ export const projectSettingsSchema = styleSchema.extend({
   /** Long pauses inside clips: shortened to 0.6 s (natural) / 0.35 s (tight) with jump cuts, or kept. */
   pauses: z.enum(["off", "natural", "tight"]).default("natural"),
   /** Text burned into the source (captions, logos): "hide" keeps it out of crops and masks the rest. */
-  sourceText: z.enum(["hide", "keep"]).default("hide"),
+  /**
+   * Text already in the video: hide = blur detected captions/logos, except in presentations (slide
+   * decks, screen shares) where on-screen text is the content; always = blur even then; keep = never.
+   */
+  sourceText: z.enum(["hide", "keep", "always"]).default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
   /** @deprecated use captionY */
@@ -352,6 +356,23 @@ export const lineSecondsFor = (wordsPerLine: number) => (wordsPerLine <= 2 ? 1.0
 // ---------- burned-in text + crop geometry (shared by the renderer and the editor preview) ----------
 
 /** Text burned into the source (captions, watermarks), normalized source coordinates. */
+/** How text-heavy the source is, from the overlay scan. */
+export interface TextProfile {
+  /** frames sampled */
+  frames: number;
+  /** frames that are mostly text: slides, documents, paragraphs of text */
+  textHeavy: number;
+  /** most of the video is text-heavy: on-screen text is the content, not something to hide */
+  presentation: boolean;
+}
+
+/** Whether renders blur detected source text, given the project setting and the scan's profile. */
+export function masksSourceText(sourceText: "hide" | "keep" | "always" | undefined, profile: TextProfile | null | undefined): boolean {
+  if (sourceText === "keep") return false;
+  if (sourceText === "always") return true;
+  return !profile?.presentation;
+}
+
 export interface SourceOverlay {
   x1: number;
   y1: number;
@@ -361,6 +382,10 @@ export interface SourceOverlay {
   kind: "caption" | "watermark";
   /** fraction of sampled frames showing text here */
   coverage: number;
+  /** render-time only: clip-relative [start, end] windows when this text is on screen (absent = always) */
+  windows?: Array<[number, number]>;
+  /** render-time only: share of the clip this text is on screen */
+  share?: number;
 }
 
 /**

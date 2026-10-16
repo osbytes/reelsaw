@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-15T19:37:44.117Z",
+  "updatedAt": "2026-10-16T02:32:05.115Z",
   "cases": {
     "frame-30s": true,
     "frame-112s": true,
@@ -8,7 +8,9 @@
     "frame-640s": false,
     "frame-905s": true,
     "aggregate-apollo-100-220": true,
-    "mask-residual": true
+    "mask-residual": true,
+    "aggregate-chia-demo": true,
+    "aggregate-webinar-slides": true
   },
   "metrics": {
     "captionCoverage": {
@@ -31,7 +33,7 @@
       "better": "higher"
     },
     "aggregatePass": {
-      "value": 1,
+      "value": 3,
       "better": "higher"
     }
   }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo } from "../lib/uploads";
 import { ChevronRight } from "lucide-react";
 import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented } from "../components/ui";
@@ -46,9 +47,25 @@ export function NewProjectPage() {
   const settingsQ = useQuery(trpc.settings.get.queryOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
 
-  const [mode, setMode] = useState<"url" | "upload">("url");
-  const [url, setUrl] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
+  const [search] = useSearchParams();
+  const loc = useLocation();
+  const [file, setFile] = useState<File | null>(() => peekPendingFile());
+  const [mode, setMode] = useState<"url" | "upload">(() => (file ? "upload" : "url"));
+  const [url, setUrl] = useState(() => search.get("url") ?? "");
+  useEffect(() => {
+    const f = takePendingFile();
+    if (f) {
+      setFile(f);
+      setMode("upload");
+    }
+    const u = search.get("url");
+    if (u) {
+      setUrl(u);
+      setMode("url");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.key]);
   const [title, setTitle] = useState("");
   const [s, setS] = useState<ProjectSettings>(defaultProjectSettings);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -111,22 +128,7 @@ export function NewProjectPage() {
     };
   }, [objectUrl]);
 
-  function uploadFile(f: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/upload");
-      xhr.withCredentials = true;
-      xhr.setRequestHeader("x-filename", encodeURIComponent(f.name));
-      xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
-      xhr.upload.onprogress = (e) => e.lengthComputable && setUploadPct(e.loaded / e.total);
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve((JSON.parse(xhr.responseText) as { uploadId: string }).uploadId);
-        else reject(new Error(xhr.responseText || `upload failed (${xhr.status})`));
-      };
-      xhr.onerror = () => reject(new Error("upload failed"));
-      xhr.send(f);
-    });
-  }
+  const uploadFile = (f: File) => postUpload(f, setUploadPct);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -199,8 +201,17 @@ export function NewProjectPage() {
                 </>
               ) : (
                 <>
-                  <label className="flex cursor-pointer flex-col items-center gap-1 rounded-[12px] border-2 border-dashed border-line2 px-4 py-6 text-center text-sm text-ink2 hover:border-acc">
-                    <span className="font-semibold text-ink">{file ? file.name : "Choose a video file"}</span>
+                  <label
+                    data-own-drop
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const f = [...e.dataTransfer.files].find(isVideo);
+                      if (f) setFile(f);
+                    }}
+                    className="flex cursor-pointer flex-col items-center gap-1 rounded-[12px] border-2 border-dashed border-line2 px-4 py-6 text-center text-sm text-ink2 hover:border-acc"
+                  >
+                    <span className="font-semibold text-ink">{file ? file.name : "Choose or drop a video file"}</span>
                     <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${settingsQ.data?.maxUploadMb ?? "—"} MB`}</span>
                     <input className="hidden" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   </label>

@@ -9,7 +9,7 @@ import { StageContext, cleanupWorkdir } from "./common.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
-import { growOverlays, sampleClipText } from "./overlays.js";
+import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
 import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
@@ -17,8 +17,8 @@ import { spawn } from "node:child_process";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { toWords } from "./transcript.js";
-import { sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { resolveStyle, speakerCrop, cropX, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
+import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
+import { resolveStyle, speakerCrop, cropX, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 
 const OUT_W = 1080;
@@ -147,21 +147,30 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   const sections = (clip.layoutSections ?? []).map((sc) => ({ start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode, offsetX: sc.offsetX }));
   const timeline = coverTimeline(duration, sections, defaultMode);
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
-  const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true } });
+  const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true, textProfile: true } });
   // burned-in captions / watermarks: keep them out of speaker crops, blur whatever is still visible
-  let overlays: SourceOverlay[] = settings.sourceText === "keep" ? [] : (transcriptMeta?.overlays ?? []);
+  // presentations (slide decks, screen shares) keep their text unless the user asked to hide it anyway
+  let overlays: SourceOverlay[] = masksSourceText(settings.sourceText, transcriptMeta?.textProfile) ? (transcriptMeta?.overlays ?? []) : [];
+  // per-clip text scan: grows/times burned-in text regions, and finds slides to show whole in auto framing
+  const needsTextScan = !!svc.text && (overlays.length > 0 || timeline.some((pc) => pc.mode === "auto"));
+  const frames = needsTextScan
+    ? await sampleClipText({ detector: svc.text!, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, clip.startSec, duration).catch((err) => {
+        log.warn({ err }, "per-clip text scan failed; using project regions");
+        return [];
+      })
+    : [];
   if (overlays.length && svc.text) {
     // the project scan samples the whole video sparsely; this clip may show a longer line or a
     // second line it never saw. Re-detect inside the clip and grow the regions to every box seen.
-    const clipBoxes = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, clip.startSec, duration).catch((err) => {
-      log.warn({ err }, "per-clip text scan failed; using project regions");
-      return [];
-    });
-    const grown = growOverlays(overlays, clipBoxes, { quantile: 1, pad: 0.008 });
-    log.info({ projectRegions: overlays, clipRegions: grown, clipBoxes: clipBoxes.length }, "burned-in text regions");
-    overlays = grown;
+    const clipBoxes = frames.filter((f) => !f.slide).flatMap((f) => f.boxes);
+    const grown = mergeRegions(growOverlays(overlays, clipBoxes, { quantile: 1, pad: 0.008 }));
+    // blur only while the text is on screen; regions never seen in this clip are dropped
+    const timed = overlayWindows(grown, frames, duration).filter((o) => !o.windows || o.windows.length > 0);
+    log.info({ projectRegions: overlays, clipRegions: timed, clipBoxes: clipBoxes.length, slides: frames.filter((f) => f.slide).length }, "burned-in text regions");
+    overlays = timed;
   }
-  const avoid = overlays.map((o) => ({ y1: o.y1, y2: o.y2 }));
+  // keep speaker crops clear only of text that is on screen for much of the clip; brief text is just blurred
+  let avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
   const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
@@ -171,6 +180,16 @@ export async function renderClip(ctx: StageContext, clipId: string) {
     const filtered = dropStaticFaces(samples);
     if (filtered.dropped.length) log.info({ dropped: filtered.dropped }, "ignoring static faces (posters/photos)");
     samples = filtered.samples;
+  }
+  // never blur a face: a region that keeps landing on one (while it is "on") is scene texture, not an overlay
+  if (overlays.length && samples.length) {
+    const active = (o: SourceOverlay, t: number) => !o.windows || o.windows.some(([a, b]) => t >= a && t <= b);
+    const { kept, dropped } = dropFaceOverlaps(overlays, samples.map((sm) => ({ t: sm.t, faces: sm.boxes })), { active });
+    if (dropped.length) {
+      log.info({ dropped }, "text regions over faces dropped");
+      overlays = kept;
+      avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
+    }
   }
   // a single-segment clip in "none" keeps its aspect; anything mixed is 9:16 so pieces can be concatenated
   // clip audio once (16 kHz mono): speaker detection, pause trimming, caption alignment
@@ -219,6 +238,12 @@ export async function renderClip(ctx: StageContext, clipId: string) {
       }
     }
     segments = expanded;
+  }
+  // slides and documents in auto sections are shown whole: cropping a 16:9 slide to 9:16 cuts the text
+  const textRuns = textHeavyRuns(frames, 2, duration, sceneCuts);
+  if (textRuns.length) {
+    segments = fitTextHeavy(segments, textRuns);
+    log.info({ textRuns }, "text-heavy spans shown whole");
   }
   if (segments.length > 1) segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
   const first = segments[0]!;
@@ -497,7 +522,9 @@ export function sourceVideo(overlays: SourceOverlay[], srcW: number, srcH: numbe
     // boxblur caps each plane's radius at half its size; chroma planes are half resolution (yuv420p)
     const r = Math.max(1, Math.min(40, Math.floor(Math.min(w, h) / 2) - 1));
     const rc = Math.max(1, Math.min(r, Math.floor(Math.min(w, h) / 4) - 1));
-    parts.push(`${cur}split=2[mk${i}a][mk${i}b];[mk${i}b]crop=${w}:${h}:${x}:${y},boxblur=luma_radius=${r}:luma_power=3:chroma_radius=${rc}:chroma_power=3[mk${i}c];[mk${i}a][mk${i}c]overlay=${x}:${y}[mk${i}]`);
+    // timed regions: the blurred patch is only composited while the text is on screen
+    const enable = o.windows?.length ? `:enable='${o.windows.map(([a, b]) => `between(t,${a},${b})`).join("+")}'` : "";
+    parts.push(`${cur}split=2[mk${i}a][mk${i}b];[mk${i}b]crop=${w}:${h}:${x}:${y},boxblur=luma_radius=${r}:luma_power=3:chroma_radius=${rc}:chroma_power=3[mk${i}c];[mk${i}a][mk${i}c]overlay=${x}:${y}${enable}[mk${i}]`);
     cur = `[mk${i}]`;
   });
   if (!parts.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };

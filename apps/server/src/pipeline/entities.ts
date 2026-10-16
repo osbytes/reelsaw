@@ -271,6 +271,21 @@ export interface CorrectionResult {
 }
 
 /** Rebuild the corrected word list from the as-heard words plus every auto/accepted flag. */
+/** Replacement text → one caption word per token, the span's time shared out by token length. */
+function spreadWords(text: string, start: number, end: number): Word[] {
+  const toks = text.split(/\s+/).filter(Boolean);
+  if (toks.length <= 1) return [{ text, start, end }];
+  const total = toks.reduce((a, t) => a + t.length + 1, 0);
+  const out: Word[] = [];
+  let t = start;
+  for (const [k, tok] of toks.entries()) {
+    const e = k === toks.length - 1 ? end : t + ((end - start) * (tok.length + 1)) / total;
+    out.push({ text: tok, start: Number(t.toFixed(3)), end: Number(e.toFixed(3)) });
+    t = e;
+  }
+  return out;
+}
+
 export function applyFlags(rawWords: Word[], flags: TranscriptFlag[]): Word[] {
   const active = flags.filter((f) => f.status === "auto" || f.status === "accepted").sort((a, b) => a.wordIndex - b.wordIndex);
   const out: Word[] = [];
@@ -282,9 +297,10 @@ export function applyFlags(rawWords: Word[], flags: TranscriptFlag[]): Word[] {
     if (f && f.wordIndex === i) {
       const first = rawWords[i]!;
       const last = rawWords[Math.min(rawWords.length - 1, i + f.span - 1)]!;
-      const trailing = /[.,!?;:]$/.exec(last.text)?.[0] ?? "";
+      // manual corrections are typed with their own punctuation; detector fixes inherit the sentence's
+      const trailing = f.subkind === "manual" ? "" : (/[.,!?;:]$/.exec(last.text)?.[0] ?? "");
       const text = f.replacement ?? f.suggested;
-      if (text.trim()) out.push({ text: text + trailing, start: first.start, end: last.end });
+      if (text.trim()) out.push(...spreadWords(text.trim() + (trailing && !/[.,!?;:]$/.test(text.trim()) ? trailing : ""), first.start, last.end));
       else if (trailing && out.length) out[out.length - 1] = { ...out[out.length - 1]!, text: out[out.length - 1]!.text.replace(/[.,!?;:]$/, "") + trailing }; // deletion: keep the sentence punctuation
       i += f.span;
       fi++;

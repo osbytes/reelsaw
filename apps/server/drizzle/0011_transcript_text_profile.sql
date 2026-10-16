@@ -1,0 +1,1 @@
+ALTER TABLE "transcripts" ADD COLUMN "text_profile" jsonb;

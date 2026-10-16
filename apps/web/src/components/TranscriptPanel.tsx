@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2 } from "lucide-react";
+import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2, Link2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
+import { useLocation } from "react-router";
+import { readHash, writeHash, linkWith } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word } from "@reelsaw/shared";
@@ -116,6 +118,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [pick, setPick] = useState<{ start: number; end: number; top: number; left: number } | null>(null);
+  // correcting the selected words: the bar turns into a text field (selection kept while typing)
+  const [fixText, setFixText] = useState<string | null>(null);
+  const fixing = useRef(false);
+  fixing.current = fixText !== null;
+  useEffect(() => setFixText(null), [pick?.start, pick?.end]);
   const createClip = useMutation(trpc.clips.create.mutationOptions());
   const addCut = useMutation(trpc.transcripts.addCut.mutationOptions());
   const toast = useToast();
@@ -142,6 +149,25 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       toast(`Restored${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`);
     } catch (err) {
       toast((err as Error).message);
+    }
+  }
+  const addCorrection = useMutation(trpc.transcripts.addCorrection.mutationOptions());
+  const selectedText = (p: { start: number; end: number }) =>
+    words
+      .filter((w) => w.start >= p.start - 0.02 && w.end <= p.end + 0.02)
+      .map((w) => w.text)
+      .join(" ");
+  async function correctSelection() {
+    if (!pick || fixText === null || !fixText.trim()) return;
+    try {
+      const r = await addCorrection.mutateAsync({ projectId, start: pick.start, end: pick.end, text: fixText.trim() });
+      window.getSelection()?.removeAllRanges();
+      setFixText(null);
+      setPick(null);
+      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      toast(r.rerendered ? `Corrected · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Corrected");
+    } catch {
+      /* error shown in the bar */
     }
   }
   async function cutSelection() {
@@ -177,7 +203,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   useEffect(() => {
     const onChange = () => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) setPick(null);
+      if ((!sel || sel.isCollapsed) && !fixing.current) setPick(null);
     };
     document.addEventListener("selectionchange", onChange);
     return () => document.removeEventListener("selectionchange", onChange);
@@ -289,12 +315,12 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     // a flag hidden by the current filter has no anchor yet: show everything, retry after render
     if (!visibleFlag(f)) {
       setFilter("all");
-      if (tries < 5) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
+      if (tries < 20) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
       return;
     }
     const el = flagRefs.current[f.id];
     if (!el) {
-      if (tries < 5) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
+      if (tries < 20) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
       return;
     }
     setFollowing(false);
@@ -373,6 +399,74 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFlag]);
   useEffect(() => () => (audioRef.current?.pause(), onLoop?.(null)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // ----- deep links: #fix=<id> pins a fix, #sel=<start>-<end> selects a range (both kept in sync) -----
+  const hydrated = useRef(false);
+  const copyLink = (params: Record<string, string>) =>
+    navigator.clipboard
+      .writeText(linkWith(params))
+      .then(() => toast("Link copied"))
+      .catch(() => toast("Couldn’t copy the link"));
+  const selectRange = (a: number, b: number, tries = 0) => {
+    const v = viewportRef.current;
+    const content = contentRef.current;
+    const spans = content ? [...content.querySelectorAll<HTMLElement>("[data-s]")].filter((el) => Number(el.dataset.s) >= a - 0.02 && Number(el.dataset.e) <= b + 0.02) : [];
+    if (!v || !spans.length) {
+      if (tries < 20) requestAnimationFrame(() => selectRange(a, b, tries + 1));
+      return;
+    }
+    setFollowing(false);
+    programmaticUntil.current = Date.now() + 900;
+    scrollWithin(v, spans[0]!, { block: "center", behavior: "auto" });
+    const r = document.createRange();
+    r.setStartBefore(spans[0]!);
+    r.setEndAfter(spans.at(-1)!);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+    requestAnimationFrame(readSelection);
+  };
+  const applyHash = () => {
+    const h = readHash();
+    const fix = h.get("fix");
+    const range = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(h.get("sel") ?? "");
+    if (fix) {
+      window.getSelection()?.removeAllRanges();
+      setPick(null);
+      const i = orderedFlags.findIndex((f) => f.id === fix);
+      if (i >= 0) jumpToFlag(i);
+      else if (deletedFlags.some((d) => d.id === fix)) {
+        setFilter("deleted");
+        setListOpen(true);
+      }
+    } else if (range) {
+      // a pinned popover would swallow the new selection: close it first
+      setPinnedFlag(null);
+      setOpenFlag(null);
+      requestAnimationFrame(() => selectRange(Number(range[1]), Number(range[2])));
+    }
+  };
+  useEffect(() => {
+    if (hydrated.current || !segments.length) return;
+    hydrated.current = true;
+    applyHash();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments.length]);
+  // later hash changes (a pasted link, back/forward) re-apply; our own replaceState writes don't reach the router
+  const { hash: routeHash } = useLocation();
+  const lastHash = useRef(routeHash);
+  useEffect(() => {
+    if (!hydrated.current || routeHash === lastHash.current) return;
+    lastHash.current = routeHash;
+    applyHash();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeHash]);
+  useEffect(() => {
+    if (hydrated.current) writeHash({ fix: pinnedFlag, ...(pinnedFlag ? { sel: null } : {}) });
+  }, [pinnedFlag]);
+  useEffect(() => {
+    if (hydrated.current) writeHash({ sel: pick ? `${pick.start.toFixed(2)}-${pick.end.toFixed(2)}` : null });
+  }, [pick?.start, pick?.end]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onPinClose = () => {
     setPinnedFlag(null);
     setOpenFlag(null);
@@ -515,6 +609,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                           onDecide={(d) => decide(flag.id, d)}
                           onDelete={() => void deleteOne(flag)}
                           deleting={delFlag.isPending}
+                          onCopyLink={() => copyLink({ fix: flag.id })}
                           loop={
                             onLoop
                               ? {
@@ -572,7 +667,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                     <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
                       <span className="block truncate text-[13px] text-ink2">{f.kind === "disfluency" ? `“${f.heard}”` : `${f.heard} → ${f.replacement ?? f.suggested}`}</span>
                       <span className="block text-[11px] text-ink3">
-                        <span className="font-mono">{formatTime(f.start)}</span> · {f.kind === "disfluency" ? cutKind(f) : "name fix"} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        <span className="font-mono">{formatTime(f.start)}</span> · {f.kind === "disfluency" ? cutKind(f) : f.subkind === "manual" ? "your correction" : "name fix"} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                       </span>
                     </button>
                     <button className="btn-ghost px-2.5 py-1 text-xs" disabled={restore.isPending} onClick={() => void restoreOne(f.id)}>
@@ -614,7 +709,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                           )}
                         </span>
                         <span className="block text-[11px] text-ink3">
-                          <span className="font-mono">{formatTime(f.start)}</span> · {isCut ? cutKind(f) : "name fix"} · {Math.round(f.confidence * 100)}%
+                          <span className="font-mono">{formatTime(f.start)}</span> · {isCut ? cutKind(f) : f.subkind === "manual" ? "your correction" : "name fix"} · {Math.round(f.confidence * 100)}%
                         </span>
                       </span>
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-ink ${tone}`}>{label}</span>
@@ -631,8 +726,31 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         <div
           className="absolute z-30 w-max max-w-[calc(100%-12px)] -translate-x-1/2 rounded-[12px] bg-ink p-1 text-xs text-bg shadow-pop"
           style={{ top: pick.top, left: pick.left }}
-          onMouseDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => !(e.target as HTMLElement).closest("input") && e.preventDefault()}
         >
+          {fixText !== null ? (
+            <div className="flex items-center gap-1">
+              <span className="pl-2 pr-1 text-[11px] opacity-70">Should read</span>
+              <input
+                autoFocus
+                aria-label="Corrected text"
+                className="w-[min(360px,60vw)] rounded-[8px] bg-white/10 px-2 py-1.5 text-[13px] text-bg outline-none placeholder:text-bg/50 focus:bg-white/15"
+                value={fixText}
+                onChange={(e) => setFixText(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") void correctSelection();
+                  if (e.key === "Escape") setFixText(null);
+                }}
+              />
+              <button className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40" disabled={addCorrection.isPending || !fixText.trim()} onClick={() => void correctSelection()}>
+                {addCorrection.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null} Save
+              </button>
+              <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => setFixText(null)} aria-label="Cancel correction">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
           <div className="flex items-center gap-1 whitespace-nowrap">
             <span className="px-2 font-mono">{(pick.end - pick.start).toFixed(1)}s</span>
             <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => onSeek(pick.start)} aria-label="Play selection" title="Play from the start of the selection">
@@ -645,6 +763,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               <Sparkles className="inline h-3.5 w-3.5" /> AI pick
             </button>
             <span className="mx-0.5 h-4 w-px bg-white/20" />
+            <button className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10" onClick={() => setFixText(selectedText(pick))} title="Fix mistranscribed words: captions use your text">
+              ✎ Correct
+            </button>
             <button
               className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40"
               disabled={addCut.isPending}
@@ -652,6 +773,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               title="Remove these words from the video and captions of every clip that contains them"
             >
               {addCut.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "✂"} Cut
+            </button>
+            <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => copyLink({ sel: `${pick.start.toFixed(2)}-${pick.end.toFixed(2)}` })} aria-label="Copy link to this selection" title="Copy link to this selection">
+              <Link2 className="h-3.5 w-3.5" />
             </button>
             <button
               className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
@@ -664,8 +788,10 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
+          )}
           {pick.end - pick.start < 8 && <p className="px-2 pb-1 pt-0.5 text-[11px] opacity-70">{pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}</p>}
           {createClip.error && <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>}
+          {addCorrection.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCorrection.error.message}</p>}
           {addCut.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCut.error.message}</p>}
         </div>
       )}
@@ -708,9 +834,11 @@ function FlagWord({
   loop,
   onDelete,
   deleting,
+  onCopyLink,
 }: {
   onDelete?: () => void;
   deleting?: boolean;
+  onCopyLink?: () => void;
   loop?: { on: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
   word: Word;
   flag: TranscriptFlag;
@@ -811,10 +939,15 @@ function FlagWord({
           <div className="flex items-center gap-2">
             <span className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${isDeletion ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{isDeletion ? "✂" : "Aa"}</span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : "Name / term fix"}</div>
+              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : flag.subkind === "manual" ? "Your correction" : "Name / term fix"}</div>
               <div className="text-xs text-ink3">{where}</div>
             </div>
             <span className={`chip ${stateTone}`}>{stateLabel}</span>
+            {onCopyLink && (
+              <button className="text-ink3 hover:text-ink" onClick={onCopyLink} aria-label="Copy link to this fix" title="Copy link to this fix">
+                <Link2 className="h-4 w-4" />
+              </button>
+            )}
             {pinned && (
               <button className="text-ink2 hover:text-ink" onClick={() => onPin(false)} aria-label="Close">
                 <X className="h-4 w-4" />
@@ -881,6 +1014,11 @@ function FlagWord({
           {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} />}
           {decision && <p className="text-xs text-ink2">Staged. Apply from the bar at the bottom of the transcript.</p>}
           <div className="flex flex-wrap items-center gap-1.5">
+            {flag.subkind === "manual" && !isDeletion && (
+              <button className="btn-primary px-2.5 py-1.5 text-xs" disabled={!text.trim() || text.trim() === shown} onClick={accept} title="Stage the new text; apply from the bar">
+                <Check className="h-3.5 w-3.5" /> Save text
+              </button>
+            )}
             {flag.subkind !== "manual" && (
               <>
                 <button className="btn-primary px-2.5 py-1.5 text-xs" onClick={accept}>

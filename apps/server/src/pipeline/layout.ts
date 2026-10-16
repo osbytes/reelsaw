@@ -531,3 +531,53 @@ export function dropStaticFaces(samples: FaceSample[], opts = { radius: 0.05, mi
   });
   return { samples: out, dropped };
 }
+
+/**
+ * Spans where text fills the frame (slides, documents, paragraphs): runs of text-heavy frames at
+ * least `minRun` long, snapped to a nearby scene cut so the switch lands on the shot change.
+ */
+export function textHeavyRuns(frames: Array<{ t: number; textHeavy: boolean }>, fps: number, duration: number, sceneCuts: number[], minRun = 2): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  let start: number | null = null;
+  for (const f of frames) {
+    if (f.textHeavy && start === null) start = f.t;
+    if (!f.textHeavy && start !== null) {
+      runs.push([start, f.t]);
+      start = null;
+    }
+  }
+  if (start !== null) runs.push([start, duration]);
+  const snap = (t: number) => {
+    const c = sceneCuts.find((x) => Math.abs(x - t) <= 1 / fps + 0.25);
+    return c ?? t;
+  };
+  return runs
+    .map(([a, b]) => [a <= 1 / fps ? 0 : snap(a), b >= duration - 1 / fps ? duration : snap(b)] as [number, number])
+    .filter(([a, b]) => b - a >= minRun);
+}
+
+/** Auto segments show text-heavy spans whole (Whole frame) instead of cropping into the text. */
+export function fitTextHeavy(segments: ResolvedSegment[], runs: Array<[number, number]>, minPiece = 1.5): ResolvedSegment[] {
+  if (!runs.length) return segments;
+  const out: ResolvedSegment[] = [];
+  for (const sg of segments) {
+    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none") {
+      out.push(sg);
+      continue;
+    }
+    let t = sg.start;
+    for (const [a0, b0] of runs) {
+      const a = Math.max(a0, sg.start);
+      const b = Math.min(b0, sg.end);
+      if (b - a < minPiece) continue;
+      // a sliver before the run is folded into it rather than becoming its own flash of a crop
+      if (a - t >= minPiece) out.push({ ...sg, start: t, end: a });
+      const from = a - t < minPiece ? t : a;
+      out.push({ start: from, end: b, manual: false, decision: { ...staticDecision("fit", "text fills the frame (slide or document)") } });
+      t = b;
+    }
+    if (sg.end - t >= minPiece) out.push({ ...sg, start: t, end: sg.end });
+    else if (out.length) out[out.length - 1]!.end = sg.end;
+  }
+  return out;
+}

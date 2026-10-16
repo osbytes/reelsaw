@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X } from "lucide-react";
+import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
+import { readHash, writeHash, linkWith, fmtSec } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
@@ -248,7 +249,13 @@ export function ClipEditor(props: Props) {
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(clip.startSec);
   const [buffering, setBuffering] = useState(true);
-  const [tab, setTab] = useState<Tab>("captions");
+  // deep link: #tab=<tab>&t=<seconds into the clip>
+  const TABS: Tab[] = ["captions", "framing", "text", "cuts", "transcript"];
+  const [tab, setTab] = useState<Tab>(() => {
+    const h = readHash().get("tab") as Tab | null;
+    return h && TABS.includes(h) ? h : "captions";
+  });
+  useEffect(() => writeHash({ tab: tab === "captions" ? null : tab }), [tab]);
   const [safe, setSafe] = useState(true);
   const [platform, setPlatform] = useState<Platform>("tiktok");
   const [kwDraft, setKwDraft] = useState("");
@@ -283,6 +290,7 @@ export function ClipEditor(props: Props) {
   const rangeRef = useRef(range);
   rangeRef.current = range;
   const update = useMutation(trpc.clips.update.mutationOptions());
+  const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
   const updateStyle = useMutation(trpc.projects.updateStyle.mutationOptions());
 
   const setRange = (r: [number, number], key?: string) => {
@@ -311,7 +319,9 @@ export function ClipEditor(props: Props) {
     const onWaiting = () => setBuffering(true);
     const onReady = () => setBuffering(false);
     const onMeta = () => {
-      v.currentTime = rangeRef.current[0];
+      const t = Number(readHash().get("t"));
+      const [a, b] = rangeRef.current;
+      v.currentTime = Number.isFinite(t) && t > 0 ? Math.min(b - 0.05, a + t) : a;
     };
     const evs: Array<[string, () => void]> = [
       ["timeupdate", onTime],
@@ -337,6 +347,11 @@ export function ClipEditor(props: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    if (playing) return;
+    const id = setTimeout(() => writeHash({ t: current > range[0] + 0.05 ? fmtSec(current - range[0]) : null }), 400);
+    return () => clearTimeout(id);
+  }, [current, playing, range]);
   const seek = (t: number) => {
     const v = videoRef.current;
     if (!v) return;
@@ -908,14 +923,31 @@ export function ClipEditor(props: Props) {
         {pauses?.cuts ? ` ${pauses.cuts} pause${pauses.cuts === 1 ? "" : "s"} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).` : ""}
       </p>
       {cuts.map(({ f, label, tone, reason }) => (
-        <button key={f.id} onClick={() => seek(Math.max(range[0], f.start - 1))} className="flex flex-col gap-1 rounded-[12px] border border-line p-2.5 text-left hover:bg-sunk">
+        <div
+          key={f.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => seek(Math.max(range[0], f.start - 1))}
+          onKeyDown={(e) => e.key === "Enter" && seek(Math.max(range[0], f.start - 1))}
+          className="flex cursor-pointer flex-col gap-1 rounded-[12px] border border-line p-2.5 text-left hover:bg-sunk"
+        >
           <div className="flex items-center gap-2">
             <s className="text-[13px] font-semibold">{f.heard}</s>
             <span className="font-mono text-[11px] text-ink3">{fmtPrecise(f.start - range[0])}</span>
             <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
           </div>
           <span className="text-xs leading-snug text-ink2">{reason}</span>
-        </button>
+          <a
+            href={`/p/${projectId}#fix=${f.id}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="w-max text-xs font-semibold text-acc-text no-underline"
+            title="Review this cut in the project transcript (new tab)"
+          >
+            Open in transcript ↗
+          </a>
+        </div>
       ))}
       <p className="text-[11px] text-ink3">Accept or reject cuts in the project transcript; they apply to every clip that contains them.</p>
     </div>
@@ -1000,6 +1032,24 @@ export function ClipEditor(props: Props) {
             </option>
           ))}
         </select>
+        {overlays.length > 0 && (
+          <span className="flex items-center gap-1.5 rounded-full bg-acc-soft px-2.5 py-1 text-ink" title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours">
+            <span className="font-mono text-[10px]">CC</span> Burned-in text blurred
+            <button
+              className="font-semibold text-acc-text disabled:opacity-50"
+              disabled={setSourceText.isPending}
+              onClick={() =>
+                setSourceText
+                  .mutateAsync({ id: projectId, sourceText: "keep" })
+                  .then((r) => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) }).then(() => toast(`Source text kept · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}`)))
+                  .catch((err) => toast((err as Error).message))
+              }
+              title="Show the source's own text in every clip of this project (re-renders them)"
+            >
+              Show it
+            </button>
+          </span>
+        )}
       </div>
       <div className="flex flex-wrap items-center justify-center gap-1.5">
         <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current - FRAME))} title="Previous frame (←)">
@@ -1121,6 +1171,19 @@ export function ClipEditor(props: Props) {
           <PanelLeft className="h-4 w-4" />
         </button>
       )}
+      <button
+        className={`${hb} hidden sm:grid`}
+        onClick={() =>
+          navigator.clipboard
+            .writeText(linkWith({ ...(tab !== "captions" ? { tab } : {}), ...(current > range[0] + 0.05 ? { t: fmtSec(current - range[0]) } : {}) }))
+            .then(() => toast("Link copied"))
+            .catch(() => toast("Couldn’t copy the link"))
+        }
+        title="Copy a link to this clip at the playhead"
+        aria-label="Copy link"
+      >
+        <Link2 className="h-4 w-4" />
+      </button>
       <button className={`${hb} hidden sm:grid`} onClick={() => setKeysOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
         <Keyboard className="h-4 w-4" />
       </button>

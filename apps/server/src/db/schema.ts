@@ -10,7 +10,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay } from "@reelsaw/shared";
+import type { ProjectSettings, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 // ---------- Better Auth core tables ----------
 
@@ -143,6 +143,8 @@ export const transcripts = pgTable("transcripts", {
   rawWords: jsonb("raw_words").$type<Word[]>(),
   flags: jsonb("flags").$type<TranscriptFlag[]>().notNull().default([]),
   /** soft-deleted fixes, newest last; kept out of `flags` so nothing downstream applies them. Restorable. */
+  /** how text-heavy the source is (slides, documents); presentations skip masking by default */
+  textProfile: jsonb("text_profile").$type<TextProfile>(),
   deletedFlags: jsonb("deleted_flags").$type<Array<TranscriptFlag & { deletedAt: string }>>().notNull().default([]),
   entities: jsonb("entities").$type<string[]>().notNull().default([]),
   /** per-step status of the refine stage (entities / disfluency / scenes) */

@@ -70,7 +70,9 @@ export function ClipCard({
   onRerender,
   onSeek,
   onPlay,
+  onCopyLink,
 }: {
+  onCopyLink?: () => void;
   clip: ClipView;
   projectId: string;
   progress?: number;
@@ -107,7 +109,7 @@ export function ClipCard({
   const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <article className={`flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active ? "border-acc" : "border-line"}`}>
+    <article data-clip={clip.id} className={`scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active ? "border-acc" : "border-line"}`}>
       <div className="flex gap-3">
         <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
@@ -227,6 +229,11 @@ export function ClipCard({
         <button className={ghost} onClick={copy}>
           Copy text
         </button>
+        {onCopyLink && (
+          <button className={ghost} onClick={onCopyLink} title="Copy a link that opens this clip">
+            Link
+          </button>
+        )}
         {done && clip.videoUrl ? (
           <a className={`${ghost} no-underline`} href={`${clip.videoUrl}?download`}>
             Download

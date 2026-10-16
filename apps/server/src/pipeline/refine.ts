@@ -1,5 +1,5 @@
 import { detectOverlays } from "./overlays.js";
-import type { SourceOverlay } from "@reelsaw/shared";
+import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -70,7 +70,7 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[] },
+  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile },
 ) {
   const db = svc.database.db;
   const allDone = await db.transaction(async (tx) => {
@@ -86,10 +86,12 @@ export async function mergeRefine(
       let incoming = carryDecisions(flags.filter((f) => f.kind === kind && !isManual(f)), result.flags);
       // fixes the user deleted stay deleted when the detector finds them again
       incoming = incoming.filter((f) => !(t.deletedFlags ?? []).some((d) => d.kind === f.kind && d.wordIndex === f.wordIndex && d.span === f.span));
-      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => (k.kind === "entity" || isManual(k)) && overlaps(k, f)));
+      // nothing the detector finds may overlap a fix the user made by hand
+      incoming = incoming.filter((f) => !kept.some((k) => isManual(k) && overlaps(k, f)));
+      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => k.kind === "entity" && overlaps(k, f)));
       else {
         // entity flags win: drop disfluency flags that overlap a new entity span
-        flags = kept.filter((k) => !(k.kind === "disfluency" && incoming.some((f) => overlaps(k, f))));
+        flags = kept.filter((k) => !(k.kind === "disfluency" && !isManual(k) && incoming.some((f) => overlaps(k, f))));
         incoming = incoming;
       }
       flags = [...(kind === "entity" ? flags : kept), ...incoming].sort((a, b) => a.wordIndex - b.wordIndex);
@@ -107,6 +109,7 @@ export async function mergeRefine(
         refine,
         ...(result.sceneCuts !== undefined ? { sceneCuts: result.sceneCuts } : {}),
         ...(result.overlays !== undefined ? { overlays: result.overlays } : {}),
+        ...(result.textProfile !== undefined ? { textProfile: result.textProfile } : {}),
       })
       .where(eq(schema.transcripts.projectId, projectId));
     return REFINE_STEPS.every((s) => refine[s] === "done" || refine[s] === "failed");
@@ -191,18 +194,20 @@ export async function refineScenes(ctx: StageContext) {
   const sceneCuts = project.width ? await svc.media.detectScenes(sourcePath, undefined, ctx.signal) : [];
   // burned-in captions / watermarks: best effort, never fails the step
   let overlays: SourceOverlay[] = [];
+  let textProfile: TextProfile | undefined;
   if (svc.text && project.width && project.durationSec) {
     try {
-      const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal }, sourcePath, project.durationSec, sceneCuts);
+      const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal, faces: svc.faces }, sourcePath, project.durationSec, sceneCuts);
       overlays = scan.overlays;
-      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, overlays }, "on-screen text scan");
+      textProfile = scan.textProfile;
+      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, textProfile: scan.textProfile, overlays }, "on-screen text scan");
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
     }
   }
   ctx.log.info({ step: "scenes", cuts: sceneCuts.length, overlays: overlays.length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays });
+  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays, textProfile });
 }
 
 /** Called by the worker when a refine job has exhausted its retries. */

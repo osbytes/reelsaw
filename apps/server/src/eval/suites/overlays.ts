@@ -17,7 +17,7 @@ import { materialize, type CaseResult, type MediaSource, type Suite, type EvalCo
 type Box = [number, number, number, number];
 interface Labels {
   frames: Array<{ file: string; t: number; labels: Array<{ name: string; kind: "caption" | "watermark" | "scene"; box: Box; required?: boolean }> }>;
-  aggregate: Array<{ id: string; source: MediaSource; sceneCuts: number[]; expectOverlays: Array<{ name: string; box: Box }>; mustNotCover: Array<{ name: string; box: Box }> }>;
+  aggregate: Array<{ id: string; source: MediaSource; sceneCuts: number[]; expectOverlays: Array<{ name: string; box: Box }>; mustNotCover: Array<{ name: string; box: Box }>; expectPresentation?: boolean }>;
 }
 
 /** Fraction of `target` covered by the union of `boxes` (grid sampling, exact enough for grading). */
@@ -105,11 +105,13 @@ export const overlaysSuite: Suite = {
       const missing = a.expectOverlays.filter((e) => covered[e.name]! < 0.6).map((e) => e.name);
       // a region is a false positive if it covers much of a forbidden area, or sits mostly inside one
       const falsePos = a.mustNotCover.filter((e) => leaked[e.name]! > 0.2 || regions.some((r) => unionCoverage(r, [e.box]) >= 0.5)).map((e) => e.name);
+      // slide decks / screen shares must be recognised (masking off by default), and other videos must not be
+      const wrongKind = a.expectPresentation !== undefined && scan.textProfile.presentation !== a.expectPresentation;
       out.push({
         id: `aggregate-${a.id}`,
-        pass: !missing.length && !falsePos.length,
-        metrics: { regions: regions.length, frames: scan.frames, ...Object.fromEntries(Object.entries(covered).map(([k, v]) => [`hit:${k}`, v])), ...Object.fromEntries(Object.entries(leaked).map(([k, v]) => [`fp:${k}`, v])), sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
-        notes: [missing.length ? `missed ${missing.join(", ")}` : "", falsePos.length ? `false positive on ${falsePos.join(", ")}` : "", JSON.stringify(scan.overlays.map((o) => [o.kind, o.x1, o.y1, o.x2, o.y2]))].filter(Boolean).join("; "),
+        pass: !missing.length && !falsePos.length && !wrongKind,
+        metrics: { regions: regions.length, frames: scan.frames, textHeavy: `${scan.textProfile.textHeavy}/${scan.textProfile.frames}`, ...Object.fromEntries(Object.entries(covered).map(([k, v]) => [`hit:${k}`, v])), ...Object.fromEntries(Object.entries(leaked).map(([k, v]) => [`fp:${k}`, v])), sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+        notes: [missing.length ? `missed ${missing.join(", ")}` : "", falsePos.length ? `false positive on ${falsePos.join(", ")}` : "", wrongKind ? `presentation=${scan.textProfile.presentation}, expected ${a.expectPresentation}` : "", JSON.stringify(scan.overlays.map((o) => [o.kind, o.x1, o.y1, o.x2, o.y2]))].filter(Boolean).join("; "),
       });
     }
     return out;

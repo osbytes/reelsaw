@@ -4,6 +4,7 @@ import { useSubscription } from "@trpc/tanstack-react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ClipEditor, type EditorClip } from "../components/ClipEditor";
+import { masksSourceText } from "@reelsaw/shared";
 
 /** Full-screen editor route: /p/:id/clips/:clipId. Live render progress comes from the project's event stream. */
 export function ClipEditorPage() {
@@ -63,10 +64,10 @@ export function ClipEditorPage() {
       segments={p.transcript.segments}
       flags={p.transcript.flags ?? []}
       sceneCuts={p.transcript.sceneCuts ?? []}
-      overlays={p.settings.sourceText === "keep" ? [] : (p.transcript.overlays ?? [])}
+      overlays={masksSourceText(p.settings.sourceText, p.transcript.textProfile) ? (p.transcript.overlays ?? []) : []}
       clip={clip as EditorClip}
       renderProgress={progress}
-      onExit={() => nav(`/p/${p.id}`)}
+      onExit={() => nav(`/p/${p.id}#card=${clip.id}`)}
     />
   );
 }

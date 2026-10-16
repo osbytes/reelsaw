@@ -71,7 +71,27 @@ export function ProjectsPage() {
             return (
               <Link key={p.id} to={`/p/${p.id}`} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
                 <div className="film relative aspect-video">
-                  {p.thumbnailUrl && <img src={p.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+                  {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
+                    <img src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!} alt="" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
+                  )}
+                  {p.clipThumbs.length > 0 && (
+                    // the first few clips as a little fanned stack of 9:16 cards over the source thumbnail
+                    <div className="absolute bottom-2 left-2 flex h-[62%] items-end">
+                      {p.clipThumbs.map((src, i) => (
+                        <img
+                          key={src}
+                          src={src}
+                          alt=""
+                          loading="lazy"
+                          className="h-full rounded-[6px] object-cover shadow-[0_4px_12px_rgba(0,0,0,.45)] ring-2 ring-white/90 transition-transform duration-200 group-hover:translate-y-[-2px]"
+                          style={{ aspectRatio: "9 / 16", marginLeft: i ? "-14%" : 0, zIndex: 10 - i, transform: `rotate(${(i - (p.clipThumbs.length - 1) / 2) * 4}deg)` }}
+                        />
+                      ))}
+                      {p.clipsDone > p.clipThumbs.length && (
+                        <span className="z-10 mb-1 ml-1.5 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">+{p.clipsDone - p.clipThumbs.length}</span>
+                      )}
+                    </div>
+                  )}
                   {p.durationSec ? <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">{formatTime(p.durationSec)}</span> : null}
                   {active && (
                     <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">

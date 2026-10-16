@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { TRPCError, tracked } from "@trpc/server";
@@ -66,6 +66,54 @@ function publicProject(p: schema.Project) {
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
+}
+
+/**
+ * A fix the user made by hand over the raw words in [start, end]: a cut (kind disfluency, empty
+ * text) or a correction (kind entity, replacement text). Overlapping fixes are absorbed into it and
+ * come back if it is deleted. Cuts refuse to swallow name fixes; corrections replace anything.
+ */
+async function addManualFix(svc: Services, userId: string, input: { projectId: string; start: number; end: number; rerender: boolean }, what: { kind: "disfluency" | "entity"; text: string }) {
+  const db = svc.database.db;
+  const p = await ownedProject(db, userId, input.projectId);
+  const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
+  if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+  const raw = t.rawWords ?? t.words;
+  const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
+  if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
+  let from = idx[0]!.i;
+  let to = idx.at(-1)!.i;
+  const hits = (f: TranscriptFlag) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
+  if (what.kind === "disfluency" && t.flags.some((f) => f.kind === "entity" && hits(f))) throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a correction. Delete that first, or select around it." });
+  // cuts grow to cover overlapping cuts; a correction replaces exactly the words you selected
+  const merged = t.flags.filter(hits);
+  if (what.kind === "disfluency")
+    for (const f of merged) {
+      from = Math.min(from, f.wordIndex);
+      to = Math.max(to, f.wordIndex + f.span - 1);
+    }
+  else if (merged.some((f) => f.wordIndex < from || f.wordIndex + f.span - 1 > to))
+    throw new TRPCError({ code: "BAD_REQUEST", message: "The selection cuts through another fix. Select all of its words, or delete it first." });
+  const span = raw.slice(from, to + 1);
+  const flag: TranscriptFlag = {
+    id: randomUUID(),
+    kind: what.kind,
+    subkind: "manual",
+    wordIndex: from,
+    span: span.length,
+    start: span[0]!.start,
+    end: span.at(-1)!.end,
+    heard: span.map((w) => w.text).join(" "),
+    suggested: what.text,
+    ...(what.text ? { replacement: what.text } : {}),
+    confidence: 1,
+    status: "accepted",
+    // a growing cut swallows other cuts' contents; a correction keeps each fix whole so deleting it restores them as they were
+    absorbed: merged.flatMap((f) => (what.kind === "disfluency" && f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
+  };
+  const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
+  const rerendered = await saveFlags(svc, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
+  return { ok: true, flagId: flag.id, rerendered };
 }
 
 type DeletedFlag = TranscriptFlag & { deletedAt: string };
@@ -168,6 +216,27 @@ export const appRouter = router({
     })),
   }),
 
+  /** ⌘K palette: projects and clips whose title (or a clip's hook / caption) contains the query. */
+  search: protectedProcedure.input(z.object({ q: z.string().trim().min(1).max(100) })).query(async ({ ctx, input }) => {
+    const db = ctx.svc.database.db;
+    const like = `%${input.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+    const mine = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, createdAt: true } });
+    const ids = mine.map((p) => p.id);
+    const projects = mine.filter((p) => p.title.toLowerCase().includes(input.q.toLowerCase())).slice(0, 8);
+    const clips = ids.length
+      ? await db.query.clips.findMany({
+          where: and(inArray(schema.clips.projectId, ids), or(ilike(schema.clips.title, like), ilike(schema.clips.hook, like), ilike(schema.clips.caption, like))),
+          columns: { id: true, projectId: true, title: true, hook: true, index: true, status: true, startSec: true, endSec: true, thumbnailKey: true },
+          limit: 12,
+        })
+      : [];
+    const titleOf = new Map(mine.map((p) => [p.id, p.title]));
+    return {
+      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec })),
+      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, index: c.index, status: c.status, startSec: c.startSec, endSec: c.endSec, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
+    };
+  }),
+
   projects: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
@@ -175,16 +244,24 @@ export const appRouter = router({
       const clipRows = rows.length
         ? await db.query.clips.findMany({
             where: inArray(schema.clips.projectId, rows.map((r) => r.id)),
-            columns: { projectId: true, status: true, thumbnailKey: true, id: true },
+            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true },
           })
         : [];
       return rows.map((p) => {
         const mine = clipRows.filter((c) => c.projectId === p.id);
         const firstThumb = mine.find((c) => c.thumbnailKey);
+        const clipThumbs = mine
+          .filter((c) => c.thumbnailKey && c.status === "done")
+          .sort((a, b) => a.index - b.index)
+          .slice(0, 3)
+          .map((c) => `/media/clips/${p.id}/${c.id}.jpg`);
         return {
           ...publicProject(p),
           clipCount: mine.length,
           clipsDone: mine.filter((c) => c.status === "done").length,
+          // the source's own thumbnail stays the card image; clip thumbnails stack on top of it
+          sourceThumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
+          clipThumbs,
           thumbnailUrl: firstThumb ? `/media/clips/${p.id}/${firstThumb.id}.jpg` : ((p.sourceMeta?.thumbnail as string | undefined) ?? null),
         };
       });
@@ -194,7 +271,7 @@ export const appRouter = router({
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, deletedFlags: true } });
+      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true, deletedFlags: true } });
       return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null };
     }),
 
@@ -293,7 +370,7 @@ export const appRouter = router({
 
     /** Keep the transcript, discard clips, pick new moments (optionally with new settings). */
     /** Hide or keep text burned into the source (captions, logos); re-renders finished clips. */
-    setSourceText: protectedProcedure.input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep"]) })).mutation(async ({ ctx, input }) => {
+    setSourceText: protectedProcedure.input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep", "always"]) })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
       const db = svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
@@ -453,52 +530,11 @@ export const appRouter = router({
     /** Mark a span of the transcript to cut from the video (a manual disfluency flag, already accepted). */
     addCut: protectedProcedure
       .input(z.object({ projectId: z.string(), start: z.number().min(0), end: z.number().min(0), rerender: z.boolean().default(true) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const db = svc.database.db;
-        const p = await ownedProject(db, ctx.user.id, input.projectId);
-        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
-        if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
-        const raw = t.rawWords ?? t.words;
-        const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
-        if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
-        let from = idx[0]!.i;
-        let to = idx.at(-1)!.i;
-        const hits = (f: (typeof t.flags)[number]) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
-        if (t.flags.some((f) => f.kind === "entity" && hits(f))) throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a name fix. Reject that fix first, or select around it." });
-        // existing cuts inside or touching the selection merge into the new one
-        const merged = t.flags.filter((f) => f.kind === "disfluency" && hits(f));
-        for (const f of merged) {
-          from = Math.min(from, f.wordIndex);
-          to = Math.max(to, f.wordIndex + f.span - 1);
-        }
-        const span = raw.slice(from, to + 1);
-        const flag = {
-          id: randomUUID(),
-          kind: "disfluency" as const,
-          subkind: "manual" as const,
-          wordIndex: from,
-          span: span.length,
-          start: span[0]!.start,
-          end: span.at(-1)!.end,
-          heard: span.map((w) => w.text).join(" "),
-          suggested: "",
-          confidence: 1,
-          status: "accepted" as const,
-          // remember the detector flags this replaces so deleting the cut brings them back
-          absorbed: merged.flatMap((f) => (f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
-        };
-        const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
-        const words = applyFlags(raw, flags);
-        const segments = toSentences(words);
-        await db
-          .update(schema.transcripts)
-          .set({ words, rawWords: raw, flags, segments, text: segments.map((s) => s.text).join(" ") })
-          .where(eq(schema.transcripts.projectId, p.id));
-        const rerendered = input.rerender ? await rerenderOverlapping(svc, p, [{ start: flag.start, end: flag.end }]) : 0;
-        await svc.events.emit(p.id, "stage.started", { stage: "review", changed: 1, rerendered });
-        return { ok: true, flagId: flag.id, rerendered };
-      }),
+      .mutation(({ ctx, input }) => addManualFix(ctx.svc, ctx.user.id, input, { kind: "disfluency", text: "" })),
+    /** Correct mistranscribed words: captions use `text` for the selected span (a manual entity flag, already accepted). */
+    addCorrection: protectedProcedure
+      .input(z.object({ projectId: z.string(), start: z.number().min(0), end: z.number().min(0), text: z.string().trim().min(1).max(200), rerender: z.boolean().default(true) }))
+      .mutation(({ ctx, input }) => addManualFix(ctx.svc, ctx.user.id, input, { kind: "entity", text: input.text })),
     /** Soft-delete a fix: it moves to deletedFlags (restorable). A manual cut gives back the detector fixes it replaced. */
     deleteFlag: protectedProcedure
       .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))

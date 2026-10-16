@@ -2,17 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSubscription } from "@trpc/tanstack-react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
 import { describeEvent, type Tone } from "../lib/activity";
+import { writeHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ConfirmDialog, ProgressBar } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { TranscriptPanel } from "../components/TranscriptPanel";
-import { formatTime, PIPELINE_STAGES, type ProjectEvent } from "@reelsaw/shared";
+import { formatTime, masksSourceText, PIPELINE_STAGES, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 const STAGE_INDEX: Record<string, number> = { queued: -1, ingesting: 0, transcribing: 1, refining: 2, analyzing: 3, rendering: 4, done: 5, failed: 99 };
@@ -145,6 +146,48 @@ export function ProjectPage() {
     else v.pause();
   };
 
+  // ----- deep links: #clip=<id> opens the preview, #card=<id> highlights a card, #t=<sec> seeks the source -----
+  const hash = useHashParams();
+  const hashClip = hash.get("clip");
+  const hashCard = hash.get("card");
+  const hashT = hash.get("t");
+  const clipsLoaded = !!q.data;
+  const focusCard = (id: string, toTab = false) => {
+    setActiveClip(id);
+    setDrawer(true);
+    if (toTab) setMtab("clips");
+    requestAnimationFrame(() => document.querySelector(`[data-clip="${id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  };
+  useEffect(() => {
+    if (!clipsLoaded) return;
+    const c = hashClip ? q.data!.clips.find((x) => x.id === hashClip) : undefined;
+    if (c) setPreview(c as ClipView);
+    const card = hashCard ?? hashClip;
+    if (card) focusCard(card, !!hashCard && !hashClip);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipsLoaded, hashClip, hashCard]);
+  useEffect(() => {
+    const v = sourceRef.current;
+    const t = Number(hashT);
+    if (!v || !hashT || !Number.isFinite(t)) return;
+    const go = () => {
+      v.currentTime = t;
+      setSrcTime(t);
+    };
+    if (v.readyState >= 1) go();
+    else v.addEventListener("loadedmetadata", go, { once: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hashT, clipsLoaded]);
+  useEffect(() => {
+    if (clipsLoaded) writeHash({ clip: preview?.id ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview?.id]);
+  const copyLink = (params: Record<string, string>) =>
+    navigator.clipboard
+      .writeText(linkWith(params))
+      .then(() => toast("Link copied"))
+      .catch(() => toast("Couldn’t copy the link"));
+  
   // Space plays / pauses the source video anywhere on the page except while typing
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -174,6 +217,8 @@ export function ProjectPage() {
     failed: ["▲", "bg-err-soft text-err"],
   };
   const overlays = p.transcript?.overlays ?? [];
+  const presentation = !!p.transcript?.textProfile?.presentation;
+  const masking = overlays.length > 0 && masksSourceText(p.settings.sourceText, p.transcript?.textProfile);
   const hasCaptions = overlays.some((o) => o.kind === "caption");
   const host = (() => {
     try {
@@ -361,6 +406,9 @@ export function ProjectPage() {
           <span className="ml-auto whitespace-nowrap font-mono text-xs text-ink2">
             {formatTime(srcTime)} / {formatTime(dur)}
           </span>
+          <button className="btn-quiet px-1.5 py-1 text-ink3" onClick={() => copyLink({ t: fmtSec(srcTime) })} title="Copy link to this moment" aria-label="Copy link to this moment">
+            <Link2 className="h-3.5 w-3.5" />
+          </button>
         </div>
         <div
           className="relative h-[26px] cursor-pointer"
@@ -376,20 +424,25 @@ export function ProjectPage() {
           ))}
           <div className="absolute top-0.5 h-[22px] w-0.5 rounded-[1px] bg-ink" style={{ left: pct(srcTime) }} />
         </div>
-        {overlays.length > 0 && (
+        {(overlays.length > 0 || presentation) && (
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-acc-soft px-2.5 py-1.5 text-xs text-ink2">
-            <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{hasCaptions ? "CC" : "TXT"}</span>
+            <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{presentation ? "SLIDES" : hasCaptions ? "CC" : "TXT"}</span>
             <span className="min-w-0 flex-[1_1_160px] text-ink">
-              Burned-in {hasCaptions ? "captions" : "text"}
-              {overlays.length > 1 ? " and logos" : ""} {p.settings.sourceText === "keep" ? "are shown in clips." : "are hidden in clips."}
+              {presentation && p.settings.sourceText !== "always"
+                ? "Looks like a slide presentation, so on-screen text is kept and slides are shown whole."
+                : presentation && p.settings.sourceText === "always"
+                  ? "Burned-in text is hidden, even though this looks like a slide presentation."
+                  : `Burned-in ${hasCaptions ? "captions" : "text"}${overlays.length > 1 ? " and logos" : ""} ${masking ? "are hidden in clips." : "are shown in clips."}`}
             </span>
-            <button
-              className="text-xs font-semibold text-acc-text disabled:opacity-50"
-              disabled={setSourceText.isPending}
-              onClick={() => setSourceText.mutateAsync({ id, sourceText: p.settings.sourceText === "keep" ? "hide" : "keep" }).then(invalidate)}
-            >
-              {p.settings.sourceText === "keep" ? "Hide them" : "Show them"} (re-renders)
-            </button>
+            {(presentation ? overlays.length > 0 || p.settings.sourceText === "always" : true) && (
+              <button
+                className="text-xs font-semibold text-acc-text disabled:opacity-50"
+                disabled={setSourceText.isPending}
+                onClick={() => setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate)}
+              >
+                {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -416,13 +469,30 @@ export function ProjectPage() {
   const activityList = (
     <ol className="flex flex-col gap-1.5 text-[13px]">
       {activity.length === 0 && <li className="text-ink3">Nothing yet.</li>}
-      {activity.map(({ e, d }) => (
-        <li key={e.id} className="grid grid-cols-[52px_14px_1fr] gap-1.5">
-          <span className="font-mono text-[11px] leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-          <span className={`font-mono text-xs leading-5 ${TONE_FG[d.tone]}`}>{TONE_GLYPH[d.tone]}</span>
-          <span className="min-w-0 break-words leading-5">{d.text}</span>
-        </li>
-      ))}
+      {activity.map(({ e, d }) => {
+        // entries about a clip jump to its card
+        const cid = (e.payload as { clipId?: string }).clipId;
+        const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
+        return (
+          <li key={e.id} className="grid grid-cols-[52px_14px_1fr] gap-1.5">
+            <span className="font-mono text-[11px] leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <span className={`font-mono text-xs leading-5 ${TONE_FG[d.tone]}`}>{TONE_GLYPH[d.tone]}</span>
+            {target ? (
+              <button
+                className="min-w-0 break-words text-left leading-5 hover:text-acc-text"
+                onClick={() => {
+                  focusCard(target, true);
+                  setActOpen(false);
+                }}
+              >
+                {d.text}
+              </button>
+            ) : (
+              <span className="min-w-0 break-words leading-5">{d.text}</span>
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 
@@ -489,6 +559,7 @@ export function ProjectPage() {
               if (compact) setMtab("transcript");
             }}
             onPlay={() => setPreview(c as ClipView)}
+            onCopyLink={() => copyLink({ clip: c.id })}
           />
         ))}
       </div>

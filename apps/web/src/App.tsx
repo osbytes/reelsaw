@@ -12,6 +12,9 @@ import { ProjectPage } from "./pages/Project";
 import { SettingsPage } from "./pages/Settings";
 import { ClipEditorPage } from "./pages/ClipEditor";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
+import { UploadsProvider } from "./lib/uploads";
+import { Search } from "lucide-react";
 
 export function Logo() {
   return (
@@ -86,6 +89,18 @@ function Avatar() {
   );
 }
 
+function SearchButton() {
+  const open = useCommandPalette();
+  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
+  return (
+    <button onClick={() => open()} className="flex h-[34px] items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]" aria-label="Search">
+      <Search className="h-4 w-4" />
+      <span className="hidden flex-1 text-left sm:inline">Search or paste a link…</span>
+      <span className="kbd hidden bg-panel text-[11px] sm:inline">{mod}K</span>
+    </button>
+  );
+}
+
 export function TopBar() {
   const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
   const loc = useLocation();
@@ -102,6 +117,7 @@ export function TopBar() {
         </NavLink>
       </nav>
       <div className="flex-1" />
+      <SearchButton />
       <MachineChip />
       <ThemeToggle />
       <Avatar />
@@ -137,6 +153,8 @@ function Protected({ children, bare }: { children: React.ReactNode; bare?: boole
 
 export function App() {
   return (
+    <UploadsProvider>
+    <CommandPaletteProvider>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
@@ -146,5 +164,7 @@ export function App() {
       <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </CommandPaletteProvider>
+    </UploadsProvider>
   );
 }
