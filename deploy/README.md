@@ -13,8 +13,10 @@ On macOS install [Ollama](https://ollama.com/download) first; on Linux the scrip
 container if it isn't already installed.
 
 ```bash
-bash install.sh        # or: curl -fsSL <url of install.sh> | bash
+curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
 ```
+
+(or `bash install.sh` from this folder; same script)
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls `qwen2.5:14b`, starts
 everything and waits until the app answers. `REELSAW_LLM=qwen2.5:7b` for less RAM; see the top of

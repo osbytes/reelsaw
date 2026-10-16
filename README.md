@@ -26,9 +26,26 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 ## Contributing
 
+Roadmap for learning from user decisions: [docs/SELF-IMPROVEMENT.md](docs/SELF-IMPROVEMENT.md).
+
 Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrency and UI rules every change follows. Agent instructions live in `AGENTS.md` / `CLAUDE.md`.
 
-## Quick start
+## Install (no source needed)
+
+Fully local, with Ollama for the language model and Speaches for speech-to-text. Needs Docker; on
+macOS install [Ollama](https://ollama.com/download) first:
+
+```bash
+curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
+```
+
+It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
+the model (`qwen2.5:14b`, ~9 GB; `REELSAW_LLM=qwen2.5:7b` for less RAM), starts everything and waits
+until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
+The script is [deploy/install.sh](deploy/install.sh); the gist mirrors it (update with
+`gh gist edit f49ef08b41d0bd1c160f789026c2f065 deploy/install.sh`).
+
+## Quick start (from source)
 
 ```bash
 git clone <this repo> reelsaw && cd reelsaw
