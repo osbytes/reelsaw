@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { TRPCError, tracked } from "@trpc/server";
@@ -8,6 +8,8 @@ import { schema, type Db } from "../db/index.js";
 import { createProjectInputSchema, projectSettingsSchema, defaultProjectSettings, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
+import type { UnitOfWork } from "../uow.js";
+import { requestRender, reopenProject } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { applyFlags } from "../pipeline/entities.js";
@@ -74,10 +76,7 @@ function publicProject(p: schema.Project) {
  * come back if it is deleted. Cuts refuse to swallow name fixes; corrections replace anything.
  */
 async function addManualFix(svc: Services, userId: string, input: { projectId: string; start: number; end: number; rerender: boolean }, what: { kind: "disfluency" | "entity"; text: string }) {
-  const db = svc.database.db;
-  const p = await ownedProject(db, userId, input.projectId);
-  const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
-  if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+  return withTranscript(svc, userId, input.projectId, async (u, p, t) => {
   const raw = t.rawWords ?? t.words;
   const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
   if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
@@ -112,8 +111,23 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
     absorbed: merged.flatMap((f) => (what.kind === "disfluency" && f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
   };
   const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
-  const rerendered = await saveFlags(svc, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
+  const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
   return { ok: true, flagId: flag.id, rerendered };
+  });
+}
+
+/**
+ * Read-modify-write on a project's transcript flags, as one unit of work: ownership check, the
+ * transcript row locked FOR UPDATE (so a concurrent edit or refine merge waits instead of being
+ * overwritten), then the change, its re-renders and its event commit together.
+ */
+async function withTranscript<T>(svc: Services, userId: string, projectId: string, fn: (u: UnitOfWork, p: schema.Project, t: schema.Transcript) => Promise<T>): Promise<T> {
+  return svc.tx(async (u) => {
+    const p = await ownedProject(u.db, userId, projectId);
+    const [t] = await u.db.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
+    if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+    return fn(u, p, t);
+  });
 }
 
 type DeletedFlag = TranscriptFlag & { deletedAt: string };
@@ -128,16 +142,16 @@ function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string)
 }
 
 /** Persist new flag lists, rebuild the cleaned words, re-render clips whose words changed around `f`. */
-async function saveFlags(svc: Services, p: schema.Project, t: schema.Transcript, flags: TranscriptFlag[], deletedFlags: DeletedFlag[], f: TranscriptFlag, rerender: boolean) {
-  const db = svc.database.db;
+async function saveFlags(svc: Services, u: UnitOfWork, p: schema.Project, t: schema.Transcript, flags: TranscriptFlag[], deletedFlags: DeletedFlag[], f: TranscriptFlag, rerender: boolean) {
+  const db = u.db;
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
   const segments = toSentences(words);
   await db.update(schema.transcripts).set({ words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") }).where(eq(schema.transcripts.projectId, p.id));
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
-  const rerendered = rerender && changed ? await rerenderOverlapping(svc, p, [{ start: f.start, end: f.end }]) : 0;
-  await svc.events.emit(p.id, "stage.started", { stage: "review", changed: changed ? 1 : 0, rerendered });
+  const rerendered = rerender && changed ? await rerenderOverlapping(svc, u, p, [{ start: f.start, end: f.end }]) : 0;
+  await u.emit(p.id, "stage.started", { stage: "review", changed: changed ? 1 : 0, rerendered });
   return rerendered;
 }
 
@@ -148,18 +162,20 @@ function restoreAbsorbed(f: TranscriptFlag): TranscriptFlag[] {
 }
 
 /** Re-render every clip overlapping one of the ranges (absolute seconds). Returns how many. */
-async function rerenderOverlapping(svc: Services, p: schema.Project, ranges: Array<{ start: number; end: number }>) {
+async function rerenderOverlapping(svc: Services, u: UnitOfWork, p: schema.Project, ranges: Array<{ start: number; end: number }>) {
   if (!ranges.length) return 0;
-  const db = svc.database.db;
   let n = 0;
-  for (const c of await listClips(db, p.id)) {
+  for (const c of await listClips(u.db, p.id)) {
     if (!ranges.some((r) => r.end > c.startSec && r.start < c.endSec)) continue;
-    await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-    await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-    await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-    n++;
+    if ((await requestRender(svc, u, p.id, c.id)) !== null) n++;
   }
-  if (n && (p.status === "done" || p.status === "failed")) await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+  return n;
+}
+
+/** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. */
+async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: schema.Clip) => boolean = (c) => c.status === "done" || c.status === "failed") {
+  let n = 0;
+  for (const c of await listClips(u.db, projectId)) if (which(c) && (await requestRender(svc, u, projectId, c.id)) !== null) n++;
   return n;
 }
 
@@ -290,54 +306,58 @@ export const appRouter = router({
       }
       title ||= "Untitled";
       const id = randomUUID();
-      const [p] = await db
-        .insert(schema.projects)
-        .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
-        .returning();
-      await svc.events.emit(id, "project.created", { title });
-      await svc.queue.enqueue(QUEUES.ingest, { projectId: id });
-      return publicProject(p!);
+      // row, event and first job together: never a "queued" project with no job behind it
+      const p = await svc.tx(async (u) => {
+        const [row] = await u.db
+          .insert(schema.projects)
+          .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
+          .returning();
+        await u.emit(id, "project.created", { title });
+        await u.enqueue(QUEUES.ingest, { projectId: id });
+        return row!;
+      });
+      return publicProject(p);
     }),
 
     /** Resume from the furthest completed stage; each stage skips work that already exists. */
     retry: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
-      const db = svc.database.db;
-      const p = await ownedProject(db, ctx.user.id, input.id);
-      const clips = await listClips(db, p.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true, refine: true } });
-      const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-      let queue: QueueName = QUEUES.ingest;
-      if (clips.length) queue = QUEUES.render;
-      else if (transcript && refineDone) queue = QUEUES.analyze;
-      else if (transcript) queue = QUEUES.refineEntities; // marker: resume the refine fan-out
-      else if (p.sourceKey) queue = QUEUES.transcribe;
+      return svc.tx(async (u) => {
+        const db = u.db;
+        const p = await ownedProject(db, ctx.user.id, input.id);
+        const clips = await listClips(db, p.id);
+        const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true, refine: true } });
+        const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
+        let queue: QueueName = QUEUES.ingest;
+        if (clips.length) queue = QUEUES.render;
+        else if (transcript && refineDone) queue = QUEUES.analyze;
+        else if (transcript) queue = QUEUES.refineEntities; // marker: resume the refine fan-out
+        else if (p.sourceKey) queue = QUEUES.transcribe;
 
-      if (queue === QUEUES.render) {
-        await db.update(schema.projects).set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-        for (const c of clips) {
-          if (c.status === "done") continue;
-          // a user-made clip whose AI preparation never finished goes back through clip.prepare
-          if (needsPrepare(c)) {
-            await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
-            await db.update(schema.clips).set({ status: "preparing", error: null }).where(eq(schema.clips.id, c.id));
-            await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
-            continue;
+        if (queue === QUEUES.render) {
+          await db.update(schema.projects).set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          for (const c of clips) {
+            if (c.status === "done") continue;
+            // a user-made clip whose AI preparation never finished goes back through clip.prepare
+            if (needsPrepare(c)) {
+              await u.cancelLiveJobs(QUEUES.prepare, c.id);
+              await db.update(schema.clips).set({ status: "preparing", error: null }).where(eq(schema.clips.id, c.id));
+              await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+              continue;
+            }
+            await requestRender(svc, u, p.id, c.id);
           }
-          await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-          await db.update(schema.clips).set({ status: "pending", error: null }).where(eq(schema.clips.id, c.id));
-          await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
+        } else if (queue === QUEUES.refineEntities) {
+          for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+          await enqueueRefine(svc, p.id, undefined, u);
+        } else {
+          for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+          await db.update(schema.projects).set({ status: "queued", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          await u.enqueue(queue, { projectId: p.id });
         }
-      } else if (queue === QUEUES.refineEntities) {
-        for (const q of STAGE_QUEUES) await svc.queue.cancelLiveJobs(q, p.id);
-        await enqueueRefine(svc, p.id);
-      } else {
-        for (const q of STAGE_QUEUES) await svc.queue.cancelLiveJobs(q, p.id);
-        await db.update(schema.projects).set({ status: "queued", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-        await svc.queue.enqueue(queue, { projectId: p.id });
-      }
-      await svc.events.emit(p.id, "stage.started", { stage: queue, retried: true });
-      return { ok: true, queue };
+        await u.emit(p.id, "stage.started", { stage: queue, retried: true });
+        return { ok: true, queue };
+      });
     }),
 
     /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
@@ -354,11 +374,14 @@ export const appRouter = router({
           const settings = projectSettingsSchema.parse({ ...p.settings, vocabulary: input.vocabulary || undefined });
           await db.update(schema.projects).set({ settings }).where(eq(schema.projects.id, p.id));
         }
-        for (const s of steps) await svc.queue.cancelLiveJobs(REFINE_QUEUE[s], p.id);
-        const refine = { ...t.refine };
-        for (const s of steps) delete refine[s];
-        await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
-        await enqueueRefine(svc, p.id, steps);
+        await svc.tx(async (u) => {
+          for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+          const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
+          const refine = { ...(cur?.refine ?? t.refine) };
+          for (const s of steps) delete refine[s];
+          await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
+          await enqueueRefine(svc, p.id, steps, u);
+        });
         return { ok: true, steps };
       }),
 
@@ -367,17 +390,13 @@ export const appRouter = router({
     setSourceText: protectedProcedure.input(z.object({ id: z.string(), sourceText: z.enum(["hide", "keep", "always"]) })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
       const db = svc.database.db;
-      const p = await ownedProject(db, ctx.user.id, input.id);
-      await db.update(schema.projects).set({ settings: { ...p.settings, sourceText: input.sourceText }, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-      let rerendered = 0;
-      for (const c of await listClips(db, p.id)) {
-        if (c.status !== "done" && c.status !== "failed") continue;
-        await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-        await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-        await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-        rerendered++;
-      }
-      if (rerendered && (p.status === "done" || p.status === "failed")) await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+      void db;
+      const rerendered = await svc.tx(async (u) => {
+        const p = await ownedProject(u.db, ctx.user.id, input.id);
+        // atomic JSON merge: no read-modify-write, so concurrent settings edits can't drop each other
+        await u.db.update(schema.projects).set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText: input.sourceText })}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+        return rerenderClips(svc, u, p.id);
+      });
       return { ok: true, rerendered };
     }),
 
@@ -393,25 +412,19 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         const db = svc.database.db;
-        const p = await ownedProject(db, ctx.user.id, input.id);
-        const { captionPosition: _legacy, ...rest } = p.settings as typeof p.settings & { captionPosition?: string };
-        const settings = projectSettingsSchema.parse({ ...rest, ...input.style });
-        await db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-        const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id) });
-        if (!input.keepOverrides) await db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
-        let rerendered = 0;
-        if (input.rerender) {
-          for (const c of clips) {
-            if (c.status !== "done" && c.status !== "failed") continue;
-            await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-            await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-            await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-            rerendered++;
-          }
-          if (rerendered && (p.status === "done" || p.status === "failed")) {
-            await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-          }
-        }
+        void db;
+        const rerendered = await svc.tx(async (u) => {
+          const p = await ownedProject(u.db, ctx.user.id, input.id);
+          // validate against the whole settings object, but write only the changed keys (atomic merge)
+          const merged = projectSettingsSchema.parse({ ...p.settings, ...input.style });
+          const patch = Object.fromEntries(Object.keys(input.style).map((k) => [k, merged[k as keyof typeof merged]]));
+          await u.db
+            .update(schema.projects)
+            .set({ settings: sql`(${schema.projects.settings} - 'captionPosition') || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() })
+            .where(eq(schema.projects.id, p.id));
+          if (!input.keepOverrides) await u.db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
+          return input.rerender ? rerenderClips(svc, u, p.id) : 0;
+        });
         return { ok: true, rerendered };
       }),
 
@@ -422,16 +435,22 @@ export const appRouter = router({
       const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
       if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
       const settings = projectSettingsSchema.parse({ ...p.settings, ...(input.settings ?? {}) });
-      for (const c of await listClips(db, p.id)) {
-        await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-        await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
-      }
-      await svc.queue.cancelLiveJobs(QUEUES.analyze, p.id);
-      await db.delete(schema.clips).where(eq(schema.clips.projectId, p.id));
-      await fs.rm(`${svc.paths.project(p.id)}/clips`, { recursive: true, force: true });
-      await svc.storage.deletePrefix(`${keys.projectPrefix(p.id)}/clips`);
-      await db.update(schema.projects).set({ settings, status: "analyzing", stage: "analyze", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-      await svc.queue.enqueue(QUEUES.analyze, { projectId: p.id });
+      await svc.tx(async (u) => {
+        for (const c of await listClips(u.db, p.id)) {
+          await u.cancelLiveJobs(QUEUES.render, c.id);
+          await u.cancelLiveJobs(QUEUES.prepare, c.id);
+        }
+        await u.cancelLiveJobs(QUEUES.analyze, p.id);
+        await u.db.delete(schema.clips).where(eq(schema.clips.projectId, p.id));
+        await u.db.update(schema.projects).set({ settings, status: "analyzing", stage: "analyze", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+        await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true });
+        await u.enqueue(QUEUES.analyze, { projectId: p.id });
+        // files go only once the rows that point at them are gone for good
+        u.afterCommit(async () => {
+          await fs.rm(`${svc.paths.project(p.id)}/clips`, { recursive: true, force: true });
+          await svc.storage.deletePrefix(`${keys.projectPrefix(p.id)}/clips`);
+        });
+      });
       return { ok: true };
     }),
 
@@ -439,14 +458,18 @@ export const appRouter = router({
       const { svc } = ctx;
       const db = svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
-      for (const c of await listClips(db, p.id)) {
-        await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-        await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
-      }
-      for (const q of STAGE_QUEUES) await svc.queue.cancelLiveJobs(q, p.id);
-      await db.delete(schema.projects).where(eq(schema.projects.id, p.id));
-      await fs.rm(svc.paths.project(p.id), { recursive: true, force: true });
-      await svc.storage.deletePrefix(keys.projectPrefix(p.id));
+      await svc.tx(async (u) => {
+        for (const c of await listClips(u.db, p.id)) {
+          await u.cancelLiveJobs(QUEUES.render, c.id);
+          await u.cancelLiveJobs(QUEUES.prepare, c.id);
+        }
+        for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+        await u.db.delete(schema.projects).where(eq(schema.projects.id, p.id));
+        u.afterCommit(async () => {
+          await fs.rm(svc.paths.project(p.id), { recursive: true, force: true });
+          await svc.storage.deletePrefix(keys.projectPrefix(p.id));
+        });
+      });
       return { ok: true };
     }),
 
@@ -488,12 +511,10 @@ export const appRouter = router({
           rerender: z.boolean().default(true),
         }),
       )
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const db = svc.database.db;
-        const p = await ownedProject(db, ctx.user.id, input.projectId);
-        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
-        if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+      .mutation(async ({ ctx, input }) =>
+        withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
+        const svc = ctx.svc;
+        const db = u.db;
         const raw = t.rawWords ?? t.words;
         const changed: Array<{ start: number; end: number }> = [];
         const flags = t.flags.map((f) => {
@@ -517,10 +538,11 @@ export const appRouter = router({
           .update(schema.transcripts)
           .set({ words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") })
           .where(eq(schema.transcripts.projectId, p.id));
-        const rerendered = input.rerender ? await rerenderOverlapping(svc, p, changed) : 0;
-        await svc.events.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+        const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
+        await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
         return { ok: true, changed: changed.length, rerendered };
-      }),
+        }),
+      ),
     /** Mark a span of the transcript to cut from the video (a manual disfluency flag, already accepted). */
     addCut: protectedProcedure
       .input(z.object({ projectId: z.string(), start: z.number().min(0), end: z.number().min(0), rerender: z.boolean().default(true) }))
@@ -532,27 +554,23 @@ export const appRouter = router({
     /** Soft-delete a fix: it moves to deletedFlags (restorable). A manual cut gives back the detector fixes it replaced. */
     deleteFlag: protectedProcedure
       .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const db = svc.database.db;
-        const p = await ownedProject(db, ctx.user.id, input.projectId);
-        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
-        const f = t?.flags.find((x) => x.id === input.flagId);
-        if (!t || !f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
-        const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
-        const rerendered = await saveFlags(svc, p, t, next.flags, next.deletedFlags, f, input.rerender);
-        return { ok: true, rerendered };
-      }),
+      .mutation(async ({ ctx, input }) =>
+        withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
+          const f = t.flags.find((x) => x.id === input.flagId);
+          if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
+          const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
+          const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
+          return { ok: true, rerendered };
+        }),
+      ),
     /** Bring back a soft-deleted fix. A manual cut re-absorbs overlapping cuts; overlapping a name fix is refused. */
     restoreFlag: protectedProcedure
       .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const db = svc.database.db;
-        const p = await ownedProject(db, ctx.user.id, input.projectId);
-        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
-        const d = t?.deletedFlags?.find((x) => x.id === input.flagId);
-        if (!t || !d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
+      .mutation(async ({ ctx, input }) =>
+        withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
+        const svc = ctx.svc;
+        const d = t.deletedFlags?.find((x) => x.id === input.flagId);
+        if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
         const { deletedAt: _deletedAt, ...flag } = d;
         void _deletedAt;
         const hits = (x: TranscriptFlag) => x.wordIndex <= flag.wordIndex + flag.span - 1 && x.wordIndex + x.span - 1 >= flag.wordIndex;
@@ -567,9 +585,10 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: `It overlaps ${overlapping[0]!.subkind === "manual" ? "one of your cuts" : "another fix"} (“${overlapping[0]!.heard}”). Delete that first.` });
         }
         live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
-        const rerendered = await saveFlags(svc, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
+        const rerendered = await saveFlags(svc, u, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
         return { ok: true, rerendered };
-      }),
+        }),
+      ),
   }),
 
   clips: router({
@@ -613,12 +632,16 @@ export const appRouter = router({
         const styleChanged = input.style !== undefined && JSON.stringify(input.style ?? null) !== JSON.stringify(c.style ?? null);
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
         const needsRender = boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged; // these are burned into the video
-        const [updated] = await db
+        const updated = await svc.tx(async (u) => {
+        // re-read under lock: unchanged fields come from the current row, not a snapshot taken before
+        const [cur] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id)).for("update");
+        if (!cur) throw new TRPCError({ code: "NOT_FOUND" });
+        const [row] = await u.db
           .update(schema.clips)
           .set({
-            title: input.title ?? c.title,
-            hook: input.hook ?? c.hook,
-            caption: input.caption ?? c.caption,
+            title: input.title ?? cur.title,
+            hook: input.hook ?? cur.hook,
+            caption: input.caption ?? cur.caption,
             ...(input.hashtags !== undefined ? { hashtags: input.hashtags.map((h) => h.replace(/^#+/, "")).filter(Boolean) } : {}),
             ...(input.layoutOverride !== undefined ? { layoutOverride: input.layoutOverride } : {}),
             ...(input.layoutSections !== undefined ? { layoutSections: input.layoutSections?.length ? input.layoutSections : null } : {}),
@@ -626,19 +649,16 @@ export const appRouter = router({
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
-            ...(needsRender && input.rerender ? { status: "pending" as const, error: null, outputKey: null, thumbnailKey: null } : {}),
             updatedAt: new Date(),
           })
           .where(eq(schema.clips.id, c.id))
           .returning();
-        if (needsRender && input.rerender) {
-          await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-          if (p.status === "done" || p.status === "failed") {
-            await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-          }
-          await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-        }
-        return publicClip(updated!);
+        // the edit and its re-render (generation bump, job, project reopened) commit together
+        if (needsRender && input.rerender) await requestRender(svc, u, p.id, c.id);
+        const [fresh] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id));
+        return fresh ?? row!;
+        });
+        return publicClip(updated);
       }),
 
     /**
@@ -659,7 +679,8 @@ export const appRouter = router({
         if (!transcript || !p.sourceKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The video must be downloaded and transcribed first" });
         const existing = await db.query.clips.findMany({ where: eq(schema.clips.projectId, p.id), columns: { index: true } });
         const index = existing.reduce((m, c) => Math.max(m, c.index + 1), 0);
-        const [row] = await db
+        const row = await svc.tx(async (u) => {
+        const [inserted] = await u.db
           .insert(schema.clips)
           .values({
             id: randomUUID(),
@@ -676,12 +697,12 @@ export const appRouter = router({
             origin: input.mode === "ai" ? "manual-ai" : "manual",
           })
           .returning();
-        if (p.status === "done" || p.status === "failed") {
-          await db.update(schema.projects).set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-        }
-        await svc.events.emit(p.id, "clip.created", { clipId: row!.id, index, title: row!.title });
-        await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: row!.id, mode: input.mode });
-        return publicClip(row!);
+        await reopenProject(u, p.id);
+        await u.emit(p.id, "clip.created", { clipId: inserted!.id, index, title: inserted!.title });
+        await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: inserted!.id, mode: input.mode });
+        return inserted!;
+        });
+        return publicClip(row);
       }),
 
     rerender: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
@@ -690,20 +711,19 @@ export const appRouter = router({
       const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, input.id) });
       if (!c) throw new TRPCError({ code: "NOT_FOUND" });
       const p = await ownedProject(db, ctx.user.id, c.projectId);
-      await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-      if (p.status === "done" || p.status === "failed") {
-        await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-      }
-      if (needsPrepare(c)) {
-        // never prepared (e.g. the model was down): redo preparation, which renders afterwards
-        await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
-        await db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-        await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
-        return { ok: true, step: "prepare" as const };
-      }
-      await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-      await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-      return { ok: true, step: "render" as const };
+      return svc.tx(async (u) => {
+        if (needsPrepare(c)) {
+          // never prepared (e.g. the model was down): redo preparation, which renders afterwards
+          await u.cancelLiveJobs(QUEUES.render, c.id);
+          await u.cancelLiveJobs(QUEUES.prepare, c.id);
+          await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+          await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+          await reopenProject(u, p.id);
+          return { ok: true, step: "prepare" as const };
+        }
+        await requestRender(svc, u, p.id, c.id);
+        return { ok: true, step: "render" as const };
+      });
     }),
   }),
 });

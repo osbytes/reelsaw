@@ -24,6 +24,10 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 - **Audio-aligned captions** – caption words are force-aligned to the clip audio (wav2vec2), so karaoke highlights land on the syllable rather than ASR estimates.
 - **Optional OpenTelemetry** – `OTEL_ENABLED=true` turns on OTLP traces + metrics for HTTP, Postgres, outbound fetch, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp executions and each pipeline stage.
 
+## Contributing
+
+Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrency and UI rules every change follows. Agent instructions live in `AGENTS.md` / `CLAUDE.md`.
+
 ## Quick start
 
 ```bash

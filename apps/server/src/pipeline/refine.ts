@@ -1,8 +1,9 @@
 import { detectOverlays } from "./overlays.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
+import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
 import { StageContext } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
@@ -34,9 +35,10 @@ export function stepEnabled(svc: Services, step: RefineStep): boolean {
 }
 
 /** Mark the project as refining and queue every enabled step that is not already done. */
-export async function enqueueRefine(svc: Services, projectId: string, steps: readonly RefineStep[] = REFINE_STEPS) {
-  const db = svc.database.db;
-  const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { refine: true } });
+export async function enqueueRefine(svc: Services, projectId: string, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork): Promise<void> {
+  if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, steps, tx));
+  const db = u.db;
+  const [t] = await db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
   if (!t) throw new Error("no transcript to refine");
   const refine: RefineStatus = { ...t.refine };
   const toRun = steps.filter((s) => stepEnabled(svc, s) && refine[s] !== "done");
@@ -44,9 +46,9 @@ export async function enqueueRefine(svc: Services, projectId: string, steps: rea
   for (const s of toRun) refine[s] = "queued";
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
   await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  await svc.events.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
-  for (const s of toRun) await svc.queue.enqueue(REFINE_QUEUE[s], { projectId });
-  if (!toRun.length) await finishIfComplete(svc, projectId);
+  await u.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
+  for (const s of toRun) await u.enqueue(REFINE_QUEUE[s], { projectId });
+  if (!toRun.length) await finishIfComplete(svc, projectId, u);
 }
 
 function overlaps(a: TranscriptFlag, b: TranscriptFlag) {
@@ -72,10 +74,11 @@ export async function mergeRefine(
   step: RefineStep,
   result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile },
 ) {
-  const db = svc.database.db;
-  const allDone = await db.transaction(async (tx) => {
+  // one unit: merged flags, step status, progress event and (if last) the hand-off to analyze
+  await svc.tx(async (u) => {
+    const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
-    if (!t) return false;
+    if (!t) return;
     const raw = t.rawWords ?? t.words;
     let flags = t.flags;
     if (result.flags) {
@@ -112,26 +115,28 @@ export async function mergeRefine(
         ...(result.textProfile !== undefined ? { textProfile: result.textProfile } : {}),
       })
       .where(eq(schema.transcripts.projectId, projectId));
-    return REFINE_STEPS.every((s) => refine[s] === "done" || refine[s] === "failed");
+    const finished = REFINE_STEPS.filter((s) => refine[s] === "done" || refine[s] === "failed").length;
+    await u.emit(projectId, "stage.progress", { stage: "refine", progress: finished / REFINE_STEPS.length, message: `${step} ${result.status}`, step, refine });
+    if (finished === REFINE_STEPS.length) await finishIfComplete(svc, projectId, u);
   });
-  const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { refine: true } });
-  const finished = REFINE_STEPS.filter((s) => t?.refine[s] === "done" || t?.refine[s] === "failed").length;
-  await svc.events.emit(projectId, "stage.progress", { stage: "refine", progress: finished / REFINE_STEPS.length, message: `${step} ${result.status}`, step, refine: t?.refine });
-  if (allDone) await finishIfComplete(svc, projectId);
 }
 
-export async function finishIfComplete(svc: Services, projectId: string) {
-  const db = svc.database.db;
-  const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { refine: true } });
+/**
+ * Hand a fully refined project to analyze. The status flip is conditional (refining → analyzing),
+ * so when the last step and the reconciler race, exactly one emits and enqueues.
+ */
+export async function finishIfComplete(svc: Services, projectId: string, u?: UnitOfWork): Promise<void> {
+  if (!u) return svc.tx((tx) => finishIfComplete(svc, projectId, tx));
+  const t = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { refine: true } });
   if (!t || !REFINE_STEPS.every((s) => t.refine[s] === "done" || t.refine[s] === "failed")) return;
-  const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { status: true } });
-  if (!p || p.status !== "refining") return;
-  await db
+  const moved = await u.db
     .update(schema.projects)
     .set({ status: "analyzing", stage: "analyze", stageProgress: 0, updatedAt: new Date() })
-    .where(eq(schema.projects.id, projectId));
-  await svc.events.emit(projectId, "stage.completed", { stage: "refine", refine: t.refine });
-  await svc.queue.enqueue(QUEUES.analyze, { projectId });
+    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.status, "refining")))
+    .returning({ id: schema.projects.id });
+  if (!moved.length) return;
+  await u.emit(projectId, "stage.completed", { stage: "refine", refine: t.refine });
+  await u.enqueue(QUEUES.analyze, { projectId });
 }
 
 async function markRunning(ctx: StageContext, step: RefineStep) {

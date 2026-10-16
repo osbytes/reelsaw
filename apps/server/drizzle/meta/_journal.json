@@ -85,6 +85,13 @@
       "when": 1792117655484,
       "tag": "0011_transcript_text_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792160260478,
+      "tag": "0012_clip_render_gen",
+      "breakpoints": true
     }
   ]
 }

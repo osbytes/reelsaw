@@ -5,7 +5,8 @@ import { schema, type Db } from "./db/index.js";
 import type { ProjectEvent, ProjectEventType } from "@reelsaw/shared";
 import type { Logger } from "./log.js";
 
-const CHANNEL = "reelsaw_events";
+export const EVENTS_CHANNEL = "reelsaw_events";
+const CHANNEL = EVENTS_CHANNEL;
 
 export interface EventNotice {
   id: number;
@@ -65,11 +66,17 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
   }
 
   const bus: EventBus = {
+    // Standalone event (progress, notices): insert + NOTIFY in ONE statement, so it is atomic.
+    // Events tied to a state change go through the unit of work (svc.tx) instead.
     async emit(projectId, type, payload = {}) {
-      const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning();
       // NOTIFY payloads are limited to 8000 bytes: send ids only, listeners fetch rows.
-      await pool.query("SELECT pg_notify($1, $2)", [CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
-      return { id: row!.id, projectId, type, payload, createdAt: row!.createdAt.toISOString() };
+      const res = await pool.query<{ id: number; created_at: Date }>(
+        `WITH e AS (INSERT INTO project_events (project_id, type, payload) VALUES ($1, $2, $3) RETURNING id, created_at)
+         SELECT e.id, e.created_at, pg_notify($4, json_build_object('id', e.id, 'projectId', $1::text)::text) FROM e`,
+        [projectId, type, JSON.stringify(payload), CHANNEL],
+      );
+      const row = res.rows[0]!;
+      return { id: Number(row.id), projectId, type, payload, createdAt: new Date(row.created_at).toISOString() };
     },
     async list(projectId, afterId = 0, limit = 500) {
       const rows = await db.query.projectEvents.findMany({

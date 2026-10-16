@@ -109,7 +109,8 @@ export async function transcribe(ctx: StageContext) {
   if (!words.length) throw new Error("Transcription returned no words. Is the audio silent?");
   const sentences = toSentences(words);
 
-  await ctx.db
+  await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length }, async (u) => {
+  await u.db
     .insert(schema.transcripts)
     .values({
       projectId,
@@ -124,9 +125,8 @@ export async function transcribe(ctx: StageContext) {
       sceneCuts: null,
     })
     .onConflictDoNothing();
-
-  await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length });
-  await enqueueRefine(svc, projectId);
+    await enqueueRefine(svc, projectId, undefined, u);
+  });
 }
 
 export { QUEUES };

@@ -1,3 +1,4 @@
+import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
  * workers off), so it sees exactly the config, models and storage the pipeline uses.
@@ -132,10 +133,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]!) });
     if (!c) throw new Error("clip not found");
     if (needsPrepare(c)) throw new Error("clip was never prepared; use `reelsaw recover` instead");
-    await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-    await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-    await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(and(eq(schema.projects.id, c.projectId), inArray(schema.projects.status, ["done", "failed"])));
-    await svc.queue.enqueue(QUEUES.render, { projectId: c.projectId, clipId: c.id });
+    await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));
     console.log(`queued render for ${c.id}`);
   },
 
@@ -234,16 +232,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const id = pos[0]!;
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id) });
     if (c) {
-      await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-      await svc.queue.cancelLiveJobs(QUEUES.prepare, c.id);
-      await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(and(eq(schema.projects.id, c.projectId), inArray(schema.projects.status, ["done", "failed"])));
       if (needsPrepare(c)) {
-        await db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-        await svc.queue.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
+        await svc.tx(async (u) => {
+          await u.cancelLiveJobs(QUEUES.render, c.id);
+          await u.cancelLiveJobs(QUEUES.prepare, c.id);
+          await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+          await u.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
+          await reopenProject(u, c.projectId);
+        });
         return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
       }
-      await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-      await svc.queue.enqueue(QUEUES.render, { projectId: c.projectId, clipId: c.id });
+      await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));
       return console.log(`queued render for clip ${c.id.slice(0, 8)}`);
     }
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });

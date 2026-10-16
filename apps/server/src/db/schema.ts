@@ -160,6 +160,8 @@ export const clips = pgTable(
   "clips",
   {
     id: text("id").primaryKey(),
+    /** bumped on every render request; a render only commits if its generation is still current */
+    renderGen: integer("render_gen").notNull().default(0),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),

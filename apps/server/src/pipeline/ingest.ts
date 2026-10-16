@@ -84,11 +84,12 @@ export async function ingest(ctx: StageContext) {
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
-  await ctx.db
-    .update(schema.projects)
-    .set({ sourceKey, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
-    .where(eq(schema.projects.id, projectId));
-
-  await ctx.complete({ durationSec: probe.durationSec, title });
-  await svc.queue.enqueue(QUEUES.transcribe, { projectId });
+  await ctx.complete({ durationSec: probe.durationSec, title }, async (u) => {
+    await u.db
+      .update(schema.projects)
+      .set({ sourceKey, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
+      .where(eq(schema.projects.id, projectId));
+    await u.enqueue(QUEUES.transcribe, { projectId });
+  });
+  void svc;
 }

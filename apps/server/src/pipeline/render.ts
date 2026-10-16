@@ -5,7 +5,8 @@ import { schema } from "../db/index.js";
 import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
 import type { Services } from "../services.js";
-import { StageContext, cleanupWorkdir } from "./common.js";
+import { StageContext } from "./common.js";
+import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
@@ -108,16 +109,24 @@ function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
-export async function renderClip(ctx: StageContext, clipId: string) {
+export async function renderClip(ctx: StageContext, clipId: string, jobGen?: number) {
   const { svc, projectId, db } = ctx;
   const project = await ctx.project();
   const clip = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId)) });
   const log = ctx.log.child({ clipId });
   if (!clip) return; // deleted; nothing to do
+  // the generation this job renders; jobs from before generations existed render the current one
+  const gen = jobGen ?? clip.renderGen;
+  if (gen !== clip.renderGen) {
+    log.info({ jobGen: gen, currentGen: clip.renderGen }, "stale render job (clip changed since); skipping");
+    return;
+  }
   if (needsPrepare(clip)) {
     // clip.prepare renders it once metadata/bounds exist; make sure that job exists and stop here
-    if (clip.status !== "preparing") await db.update(schema.clips).set({ status: "preparing", updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-    if (!(await svc.queue.hasLiveJob(QUEUES.prepare, clipId))) await svc.queue.enqueue(QUEUES.prepare, { projectId, clipId, mode: prepareModeOf(clip) });
+    await svc.tx(async (u) => {
+      if (clip.status !== "preparing") await u.db.update(schema.clips).set({ status: "preparing", updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+      if (!(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode: prepareModeOf(clip) });
+    });
     log.warn("render requested before the clip was prepared; sent back to clip.prepare");
     return;
   }
@@ -130,12 +139,24 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   const sourcePath = await ctx.ensureSource(project);
   const clipsDir = path.join(await ctx.dir(), "clips");
   await fs.mkdir(clipsDir, { recursive: true });
-  const outPath = path.join(clipsDir, `${clip.id}.mp4`);
-  const thumbPath = path.join(clipsDir, `${clip.id}.jpg`);
+  // per-generation scratch names: an overlapping stale render never touches these files
+  const outPath = path.join(clipsDir, `${clip.id}.${gen}.mp4`);
+  const thumbPath = path.join(clipsDir, `${clip.id}.${gen}.jpg`);
 
   const renderStarted = Date.now();
-  await db.update(schema.clips).set({ status: "rendering", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-  await svc.events.emit(projectId, "clip.rendering", { clipId });
+  const started = await svc.tx(async (u) => {
+    const r = await u.db
+      .update(schema.clips)
+      .set({ status: "rendering", error: null, updatedAt: new Date() })
+      .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, gen)))
+      .returning({ id: schema.clips.id });
+    if (r.length) await u.emit(projectId, "clip.rendering", { clipId });
+    return r.length > 0;
+  });
+  if (!started) {
+    log.info({ gen }, "clip changed before rendering started; skipping");
+    return;
+  }
 
   const settings = project.settings;
   const duration = clip.endSec - clip.startSec;
@@ -405,8 +426,8 @@ export async function renderClip(ctx: StageContext, clipId: string) {
   await fs.rename(tmpOut, outPath);
   await svc.media.ffmpeg(["-ss", (outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath], { signal: ctx.signal });
 
-  const outputKey = keys.clip(projectId, clip.id);
-  const thumbnailKey = keys.thumb(projectId, clip.id);
+  const outputKey = keys.clip(projectId, clip.id, gen);
+  const thumbnailKey = keys.thumb(projectId, clip.id, gen);
   await svc.storage.putFile(outputKey, outPath, "video/mp4");
   await svc.storage.putFile(thumbnailKey, thumbPath, "image/jpeg");
   if (svc.storage.driver !== "local") await fs.rm(outPath, { force: true }).catch(() => {});
@@ -423,34 +444,39 @@ export async function renderClip(ctx: StageContext, clipId: string) {
     outDurationSec: Number(outDuration.toFixed(2)),
     renderMs: Date.now() - renderStarted,
   };
-  await db.update(schema.clips).set({ status: "done", outputKey, thumbnailKey, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-  await svc.events.emit(projectId, "clip.done", { clipId, index: clip.index });
-  await finalizeProjectIfDone(svc, projectId);
+  // commit only if this is still the clip's current generation; a newer request wins and our files go
+  const committed = await svc.tx(async (u) => {
+    const [cur] = await u.db.select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!cur || cur.gen !== gen) return false;
+    await u.db.update(schema.clips).set({ status: "done", outputKey, thumbnailKey, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    await u.emit(projectId, "clip.done", { clipId, index: clip.index });
+    await finalizeInTx(svc, u, projectId);
+    // a previous output of this clip (other generation) is superseded
+    for (const k of [cur.outputKey, cur.thumbnailKey]) if (k && k !== outputKey && k !== thumbnailKey) u.afterCommit(() => svc.storage.delete(k));
+    return true;
+  });
+  if (!committed) {
+    log.info({ gen }, "render finished for a superseded version; discarding its output");
+    await svc.storage.delete(outputKey).catch(() => {});
+    await svc.storage.delete(thumbnailKey).catch(() => {});
+  }
 }
 
-export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown) {
+export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number) {
   const message = err instanceof Error ? err.message : String(err);
-  await svc.database.db.update(schema.clips).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-  await svc.events.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000) });
-  await finalizeProjectIfDone(svc, projectId);
+  await svc.tx(async (u) => {
+    // a failing stale render must not mark the newer, pending version as failed
+    const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!cur || (gen !== undefined && cur.gen !== gen)) return;
+    await u.db.update(schema.clips).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000) });
+    await finalizeInTx(svc, u, projectId);
+  });
 }
 
 /** Marks a project done once every clip reached a terminal state. Safe to call repeatedly. */
 export async function finalizeProjectIfDone(svc: Services, projectId: string) {
-  const db = svc.database.db;
-  const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) });
-  if (!clips.length || !clips.every((c) => c.status === "done" || c.status === "failed")) return;
-  const project = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
-  if (!project || project.status === "done" || project.status === "failed") return;
-  const doneCount = clips.filter((c) => c.status === "done").length;
-  if (doneCount === 0) {
-    await db.update(schema.projects).set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    await svc.events.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render" });
-    return;
-  }
-  await db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  await svc.events.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount });
-  await cleanupWorkdir(svc, projectId).catch((err) => svc.log.warn({ err, projectId }, "workdir cleanup failed"));
+  await svc.tx((u) => finalizeInTx(svc, u, projectId));
 }
 
 export interface ClipCutPlan extends RefineResult {

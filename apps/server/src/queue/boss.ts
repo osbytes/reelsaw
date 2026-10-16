@@ -21,9 +21,16 @@ export interface ProjectJob {
 export interface RenderJob {
   projectId: string;
   clipId: string;
+  /** clips.render_gen this job renders; a stale job (gen moved on) exits without writing */
+  gen?: number;
 }
 export interface PrepareJob extends RenderJob {
   mode: "exact" | "ai";
+}
+export type JobData = ProjectJob | RenderJob | PrepareJob;
+/** run the queue operation on a transaction's connection (see uow.ts) */
+export interface TxOpts {
+  db?: { executeSql(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
 }
 
 // Jobs lose their heartbeat within seconds of a worker crash, which lets pg-boss
@@ -45,11 +52,11 @@ export interface Queue {
   boss: PgBoss;
   retryLimitOf(queue: QueueName): number;
   /** Enqueue a stage job. Deduped per project/clip via singletonKey + exclusive policy. */
-  enqueue(queue: QueueName, data: ProjectJob | RenderJob | PrepareJob): Promise<string | null>;
+  enqueue(queue: QueueName, data: JobData, opts?: TxOpts): Promise<string | null>;
   /** True if a job for this key is created, retrying, or active. */
-  hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
+  hasLiveJob(queue: QueueName, key: string, opts?: TxOpts): Promise<boolean>;
   /** Cancel every live job for a key so it can be re-enqueued cleanly. */
-  cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
+  cancelLiveJobs(queue: QueueName, key: string, opts?: TxOpts): Promise<void>;
   /** Start pg-boss (runs its own migrations) and create the queues. */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -98,24 +105,26 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       await boss.stop({ graceful: true, timeout: config.SHUTDOWN_GRACE_SECONDS * 1000, close: false });
       started = false;
     },
-    enqueue(queue, data) {
+    enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
-      return boss.send(queue, data, { singletonKey });
+      return boss.send(queue, data, { singletonKey, ...(opts?.db ? { db: opts.db } : {}) });
     },
-    async hasLiveJob(queue, key) {
-      const res = await pool.query<{ n: string }>(
+    async hasLiveJob(queue, key, opts) {
+      const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
+      const res = await exec.executeSql(
         `select count(*)::text as n from pgboss.job where name = $1 and singleton_key = $2 and state in ('created','retry','active')`,
         [queue, key],
       );
-      return Number(res.rows[0]?.n ?? 0) > 0;
+      return Number((res.rows[0] as { n?: string } | undefined)?.n ?? 0) > 0;
     },
-    async cancelLiveJobs(queue, key) {
-      const res = await pool.query<{ id: string }>(
+    async cancelLiveJobs(queue, key, opts) {
+      const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
+      const res = await exec.executeSql(
         `select id from pgboss.job where name = $1 and singleton_key = $2 and state in ('created','retry','active')`,
         [queue, key],
       );
-      const ids = res.rows.map((r) => r.id);
-      if (ids.length) await boss.cancel(queue, ids);
+      const ids = (res.rows as Array<{ id: string }>).map((r) => r.id);
+      if (ids.length) await boss.cancel(queue, ids, opts?.db ? { db: opts.db } : undefined);
     },
   };
 }

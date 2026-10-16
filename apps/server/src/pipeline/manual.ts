@@ -1,3 +1,4 @@
+import { requestRender } from "./lifecycle.js";
 /**
  * Clips the user carved out of the transcript.
  *
@@ -128,9 +129,9 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const sc: SelectContext = { title: project.title, durationSec, minSec: 1, maxSec: 9999, focus: settings.focus };
   const scored = (await scoreCandidates(o, [{ id: 0, durationSec: pick.endSec - pick.startSec, text }], sc, 1, 1)).get(0);
 
-  await db
-    .update(schema.clips)
-    .set({
+  // packaging written, announced and the render queued in one commit
+  await svc.tx(async (u) => {
+    await requestRender(svc, u, projectId, clipId, {
       title: pick.title.slice(0, 120),
       hook: pick.hook.slice(0, 80),
       caption: (pick.caption ?? "").slice(0, 300),
@@ -141,10 +142,8 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       scores: scored?.scores ?? null,
       emphasis: scored?.emphasis.length ? scored.emphasis : null,
       reasoning: note.slice(0, 1000),
-      status: "pending",
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.clips.id, clipId));
-  await svc.events.emit(projectId, "clip.created", { clipId, index: clip.index, title: pick.title });
-  await svc.queue.enqueue(QUEUES.render, { projectId, clipId });
+    });
+    await u.emit(projectId, "clip.created", { clipId, index: clip.index, title: pick.title });
+  });
+  void db;
 }

@@ -5,6 +5,7 @@ import { schema, type Project } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
+import type { UnitOfWork } from "../uow.js";
 
 export class ProjectGoneError extends Error {
   constructor(id: string) {
@@ -51,11 +52,13 @@ export class StageContext {
   }
 
   async start(status: ProjectStatus) {
-    await this.db
-      .update(schema.projects)
-      .set({ status, stage: this.stage, stageProgress: 0, error: null, updatedAt: new Date() })
-      .where(eq(schema.projects.id, this.projectId));
-    await this.svc.events.emit(this.projectId, "stage.started", { stage: this.stage, status });
+    await this.svc.tx(async (u) => {
+      await u.db
+        .update(schema.projects)
+        .set({ status, stage: this.stage, stageProgress: 0, error: null, updatedAt: new Date() })
+        .where(eq(schema.projects.id, this.projectId));
+      await u.emit(this.projectId, "stage.started", { stage: this.stage, status });
+    });
   }
 
   private lastProgressAt = 0;
@@ -68,9 +71,17 @@ export class StageContext {
     await this.svc.events.emit(this.projectId, "stage.progress", { stage: this.stage, progress: pct, message, ...extra });
   }
 
-  async complete(extra: Record<string, unknown> = {}) {
-    await this.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
-    await this.svc.events.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra });
+  /**
+   * Finish the stage. `handoff` runs in the same transaction: the results it writes, the
+   * stage.completed event and the next stage's job commit together (or not at all, and the job
+   * retries), so a crash can't leave "completed" with nothing queued after it.
+   */
+  async complete(extra: Record<string, unknown> = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
+    await this.svc.tx(async (u) => {
+      await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
+      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra });
+      if (handoff) await handoff(u);
+    });
   }
 
   throwIfAborted() {
@@ -88,11 +99,10 @@ export async function exists(file: string): Promise<boolean> {
 
 export async function failProject(svc: Services, projectId: string, stage: PipelineStage, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  await svc.database.db
-    .update(schema.projects)
-    .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
-    .where(eq(schema.projects.id, projectId));
-  await svc.events.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000) });
+  await svc.tx(async (u) => {
+    await u.db.update(schema.projects).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000) });
+  });
 }
 
 export async function stageFailedAttempt(svc: Services, projectId: string, stage: PipelineStage, err: unknown, attempt: number, max: number) {

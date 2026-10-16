@@ -10,6 +10,7 @@ import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
+import { createUnitOfWork, type RunInTx } from "./uow.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createResourceGovernor, type ResourceGovernor } from "./resources.js";
 import { loadFaceDetector, type FaceDetector } from "./vision/faces.js";
@@ -35,6 +36,8 @@ export interface Services {
   media: MediaTools;
   events: EventBus;
   queue: Queue;
+  /** run a unit of work: state change + events + job enqueues in one transaction (uow.ts) */
+  tx: RunInTx;
   auth: Auth;
   resources: ResourceGovernor;
   /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
@@ -190,7 +193,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db));
 
-  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, auth, resources, faces, text, vad, aligner };
+  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
+  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, tx, auth, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {

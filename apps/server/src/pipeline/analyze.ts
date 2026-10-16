@@ -115,10 +115,10 @@ export async function analyze(ctx: StageContext) {
 
   const existingClips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) });
   if (existingClips.length) {
-    await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    for (const c of existingClips) {
-      if (c.status !== "done") await svc.queue.enqueue(QUEUES.render, { projectId, clipId: c.id });
-    }
+    await svc.tx(async (u) => {
+      await u.db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+      for (const c of existingClips) if (c.status !== "done") await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
+    });
     return;
   }
 
@@ -204,15 +204,14 @@ export async function analyze(ctx: StageContext) {
     hashtags: c.hashtags.map((h) => h.replace(/^#/, "")),
     status: "pending" as const,
   }));
-  await db.insert(schema.clips).values(rows);
-  for (const r of rows) await svc.events.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
-
-  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic } });
-  await db
-    .update(schema.projects)
-    .set({ status: "rendering", stage: "render", stageProgress: 0, updatedAt: new Date() })
-    .where(eq(schema.projects.id, projectId));
-  for (const r of rows) await svc.queue.enqueue(QUEUES.render, { projectId, clipId: r.id });
+  // clips, their events, "analyze done", the move to rendering and every render job: one commit
+  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic } }, async (u) => {
+    if (rows.length) await u.db.insert(schema.clips).values(rows);
+    for (const r of rows) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
+    await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    for (const r of rows) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
+  });
+  void db;
 }
 
 export async function listClips(db: Db, projectId: string) {

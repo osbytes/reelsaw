@@ -33,14 +33,17 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
         if (c.status === "done" || c.status === "failed") continue;
         if (needsPrepare(c)) {
           if (await svc.queue.hasLiveJob(QUEUES.prepare, c.id)) continue;
-          if (c.status !== "preparing") await db.update(schema.clips).set({ status: "preparing" }).where(eq(schema.clips.id, c.id));
-          await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-          await svc.queue.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+          await svc.tx(async (u) => {
+            if (c.status !== "preparing") await u.db.update(schema.clips).set({ status: "preparing" }).where(eq(schema.clips.id, c.id));
+            await u.cancelLiveJobs(QUEUES.render, c.id);
+            await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+          });
           requeued++;
           continue;
         }
         if (await svc.queue.hasLiveJob(QUEUES.render, c.id)) continue;
-        await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
+        // re-queue the clip's current generation (no bump: nothing about the clip changed)
+        await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id, gen: c.renderGen });
         requeued++;
       }
       await finalizeProjectIfDone(svc, p.id);

@@ -217,7 +217,8 @@ export function createStorage(config: Config, paths: Paths): Storage {
 export const keys = {
   upload: (id: string, ext: string) => `uploads/${id}${ext}`,
   source: (projectId: string, ext: string) => `projects/${projectId}/source${ext}`,
-  clip: (projectId: string, clipId: string) => `projects/${projectId}/clips/${clipId}.mp4`,
-  thumb: (projectId: string, clipId: string) => `projects/${projectId}/clips/${clipId}.jpg`,
+  // one file per render generation: a stale render can never overwrite a newer one's output
+  clip: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.mp4`,
+  thumb: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.jpg`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };
