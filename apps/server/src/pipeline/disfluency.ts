@@ -356,7 +356,21 @@ export async function verifyCandidates(model: LanguageModel, words: Word[], cand
   return result;
 }
 
-export async function detectDisfluencies(model: LanguageModel | null, words: Word[], opts: DisfluencyOptions = {}): Promise<TranscriptFlag[]> {
+/** One candidate cut and what happened to it (stage artifact for diagnosis / reports). */
+export interface DisfluencyTraceEntry {
+  wordIndex: number;
+  span: number;
+  text: string;
+  subkind: string;
+  source: "rule" | "model";
+  certain: boolean;
+  prior: number;
+  why: string;
+  verdict?: { cut: boolean; confidence: number } | null;
+  outcome: string;
+}
+
+export async function detectDisfluencies(model: LanguageModel | null, words: Word[], opts: DisfluencyOptions = {}, trace?: DisfluencyTraceEntry[]): Promise<TranscriptFlag[]> {
   const auto = opts.autoConfidence ?? 0.85;
   const reserved = new Set(opts.reserved ?? []);
   const rules = findRuleCandidates(words, reserved);
@@ -367,24 +381,32 @@ export async function detectDisfluencies(model: LanguageModel | null, words: Wor
   const uncertain = all.filter((c) => !c.certain);
   const verdicts = useModel && uncertain.length ? await verifyCandidates(model!, words, uncertain, opts) : null;
   const flags: TranscriptFlag[] = [];
+  const note = (c: Candidate, outcome: string, verdict?: { cut: boolean; confidence: number } | null) =>
+    trace?.push({ wordIndex: c.index, span: c.span, text: words.slice(c.index, c.index + c.span).map((w) => w.text).join(" "), subkind: c.subkind, source: rules.includes(c) ? "rule" : "model", certain: c.certain, prior: c.prior, why: c.why, verdict, outcome });
   for (const c of all) {
     const pause = pauseAfter(words, c.index + c.span - 1);
     if (c.certain) {
       flags.push(mkFlag(words, c, c.prior, auto));
+      note(c, flags.at(-1)!.status);
       continue;
     }
     if (verdicts) {
       const v = verdicts.get(uncertain.indexOf(c));
-      if (!v?.cut) continue; // the verifier says keep (or failed): never cut on a guess
+      if (!v?.cut) {
+        note(c, v ? "verifier: keep" : "verifier failed", v ?? null);
+        continue; // the verifier says keep (or failed): never cut on a guess
+      }
       // agreement of rules/rewrite and verifier; a pause at the interruption point adds confidence.
       // Repairs always go to review; only verified stutters with a pause may apply automatically.
       // anything that needed a second opinion goes to review: only certain cases apply automatically
       const conf = Math.min(auto - 0.01, (c.prior + v.confidence) / 2 + (pause >= 0.15 ? 0.05 : 0));
       flags.push(mkFlag(words, c, conf, auto));
+      note(c, flags.at(-1)!.status, v);
     } else if (c.prior >= 0.7) {
       // rules only: uncertain candidates go to review, never auto
       flags.push(mkFlag(words, c, Math.min(c.prior, auto - 0.01), auto));
-    }
+      note(c, flags.at(-1)!.status);
+    } else note(c, "low prior, no verifier");
   }
   return flags.sort((a, b) => a.wordIndex - b.wordIndex);
 }

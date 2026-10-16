@@ -92,6 +92,13 @@
       "when": 1792160260478,
       "tag": "0012_clip_render_gen",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792172860672,
+      "tag": "0013_stage_artifacts",
+      "breakpoints": true
     }
   ]
 }

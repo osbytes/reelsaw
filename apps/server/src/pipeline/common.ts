@@ -124,3 +124,38 @@ export async function cleanupWorkdir(svc: Services, projectId: string) {
     /* no clips dir */
   }
 }
+
+/** Host of a provider endpoint, without credentials, path or query (safe for artifacts/reports). */
+export function endpointHost(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Which models a stage ran with: provider:model ids and, for self-hosted endpoints, the host.
+ * Recorded with stage artifacts because the config at report time may differ from what ran.
+ */
+export function modelsUsed(svc: Services, ...which: Array<"language" | "transcription" | "align" | "aligner">): Record<string, string> {
+  const c = svc.config;
+  const out: Record<string, string> = {};
+  const host = (model: string) => {
+    const provider = model.split(":")[0];
+    return provider === "compat" ? endpointHost(c.OPENAI_COMPATIBLE_BASE_URL) : provider === "openai" ? endpointHost(c.OPENAI_BASE_URL) : undefined;
+  };
+  const add = (key: string, model: string) => {
+    out[key] = model;
+    const h = host(model);
+    if (h) out[`${key}Endpoint`] = h;
+  };
+  for (const w of which) {
+    if (w === "language") add("language", c.AI_MODEL);
+    if (w === "transcription") add("transcription", c.TRANSCRIPTION_MODEL);
+    if (w === "align") add("align", c.TRANSCRIPT_ALIGN_MODEL ?? c.TRANSCRIPTION_MODEL);
+    if (w === "aligner" && svc.aligner) out.aligner = path.basename(c.ALIGN_MODEL_DIR ?? "wav2vec2");
+  }
+  return out;
+}

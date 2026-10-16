@@ -5,9 +5,9 @@ import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext } from "./common.js";
+import { StageContext, modelsUsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
-import { detectDisfluencies } from "./disfluency.js";
+import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
 
@@ -72,13 +72,14 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile },
+  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; artifact?: { data: unknown; models: Record<string, string> } },
 ) {
   // one unit: merged flags, step status, progress event and (if last) the hand-off to analyze
   await svc.tx(async (u) => {
     const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
     if (!t) return;
+    if (result.artifact) await u.artifact(projectId, "refine", step, result.artifact.data, result.artifact.models);
     const raw = t.rawWords ?? t.words;
     let flags = t.flags;
     if (result.flags) {
@@ -168,7 +169,7 @@ export async function refineEntities(ctx: StageContext) {
     { signal: ctx.signal, telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
   );
   ctx.log.info({ step: "entities", auto: res.applied.length, pending: res.flags.length - res.applied.length, candidates: res.candidates }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags });
+  await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } });
 }
 
 /**
@@ -203,15 +204,16 @@ export async function refineDisfluency(ctx: StageContext) {
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
   for (const f of t.flags) if (f.kind === "entity" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
+  const trace: DisfluencyTraceEntry[] = [];
   const flags = await detectDisfluencies(svc.config.DISFLUENCY_LLM ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
     reserved,
     rejectedExamples: await rejectedCutExamples(svc, ctx.projectId).catch(() => []),
-  });
+  }, trace);
   ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags });
+  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: svc.config.DISFLUENCY_LLM ? modelsUsed(svc, "language") : { language: "none (rules only)" } } });
 }
 
 export async function refineScenes(ctx: StageContext) {

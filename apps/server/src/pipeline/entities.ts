@@ -268,6 +268,8 @@ export interface CorrectionResult {
   flags: TranscriptFlag[];
   applied: Array<{ heard: string; entity: string; at: number }>;
   candidates: number;
+  /** every candidate and what happened to it (stage artifact for diagnosis / reports) */
+  trace?: { entities: string[]; candidates: Array<{ wordIndex: number; heard: string; proposed: string; replace?: boolean; confidence?: number; outcome: string }> };
 }
 
 /** Rebuild the corrected word list from the as-heard words plus every auto/accepted flag. */
@@ -327,7 +329,8 @@ export async function correctTranscript(
   const minFlagConfidence = opts.minFlagConfidence ?? 0.4;
   entities = await filterProperNouns(model, entities, context, opts.signal);
   const candidates = findCandidates(words, entities);
-  const none = { words, rawWords: words, flags: [], applied: [], candidates: candidates.length };
+  const trace: NonNullable<CorrectionResult["trace"]> = { entities, candidates: candidates.map((c) => ({ wordIndex: c.wordIndex, heard: c.heard, proposed: c.entity, outcome: "model failed" })) };
+  const none = { words, rawWords: words, flags: [], applied: [], candidates: candidates.length, trace };
   if (!candidates.length) return none;
 
   const prompt = `You are reviewing speech-to-text errors in a transcript${context.title ? ` of the video "${context.title}"` : ""}${context.uploader ? ` by ${context.uploader}` : ""}.
@@ -361,10 +364,16 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
   const byId = new Map(decisions.map((d) => [d.id, d]));
   const flags: TranscriptFlag[] = [];
   let lastEnd = -1;
+  const traced = new Map(candidates.map((c, i) => [c, trace.candidates[i]!]));
   for (const c of candidates.sort((a, b) => a.wordIndex - b.wordIndex)) {
     const d = byId.get(c.id);
+    const tr = traced.get(c)!;
+    Object.assign(tr, { replace: d?.replace, confidence: d?.confidence, outcome: !d ? "no decision" : !d.replace ? "kept as heard" : d.confidence < minFlagConfidence ? "low confidence" : "flagged" });
     if (!d || !d.replace || d.confidence < minFlagConfidence) continue;
-    if (c.wordIndex < lastEnd) continue; // overlapping candidate
+    if (c.wordIndex < lastEnd) {
+      tr.outcome = "overlaps an earlier fix";
+      continue; // overlapping candidate
+    }
     lastEnd = c.wordIndex + c.span;
     flags.push({
       id: randomUUID(),
@@ -381,5 +390,6 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
     });
   }
   const applied = flags.filter((f) => f.status === "auto").map((f) => ({ heard: f.heard, entity: f.suggested, at: f.start }));
-  return { words: applyFlags(words, flags), rawWords: words, flags, applied, candidates: candidates.length };
+  for (const f of flags) for (const tr of trace.candidates) if (tr.wordIndex === f.wordIndex && tr.outcome === "flagged") tr.outcome = f.status;
+  return { words: applyFlags(words, flags), rawWords: words, flags, applied, candidates: candidates.length, trace };
 }

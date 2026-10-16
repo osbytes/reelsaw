@@ -218,3 +218,25 @@ export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
 export type ProjectEventRow = typeof projectEvents.$inferSelect;
+
+/**
+ * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate
+ * moment with its scores and the filter that dropped it. Written in the stage's unit of work.
+ * `models` records what actually ran (config at report time may differ).
+ */
+export const stageArtifacts = pgTable(
+  "stage_artifacts",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stage: text("stage").notNull(),
+    /** what the data is, within the stage (e.g. "candidates", "disfluency") */
+    kind: text("kind").notNull(),
+    models: jsonb("models").$type<Record<string, string>>().notNull().default({}),
+    data: jsonb("data").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("stage_artifacts_project_id_idx").on(t.projectId, t.id)],
+);

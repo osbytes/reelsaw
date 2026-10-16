@@ -26,6 +26,8 @@ export interface UnitOfWork {
   enqueue(queue: QueueName, data: JobData): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
+  /** record what a stage decided and which models ran (see schema.stageArtifacts) */
+  artifact(projectId: string, stage: string, kind: string, data: unknown, models?: Record<string, string>): Promise<void>;
   /** run after a successful commit (best-effort cleanup such as deleting superseded files) */
   afterCommit(fn: () => Promise<unknown> | unknown): void;
 }
@@ -51,6 +53,9 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
         enqueue: (q, data) => queue.enqueue(q, data, exec),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
+        async artifact(projectId, stage, kind, data, models = {}) {
+          await db.insert(schema.stageArtifacts).values({ projectId, stage, kind, data, models });
+        },
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
