@@ -70,51 +70,51 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
 
-      # build amd64 locally first and refuse to publish an image that carries source
-      - name: Build for checking
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          target: runtime
-          platforms: linux/amd64
-          load: true
-          tags: reelsaw:check
-          build-args: |
-            REELSAW_VERSION=${{ steps.v.outputs.version }}
-            REELSAW_COMMIT=${{ steps.v.outputs.commit }}
-            REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: No source in the image
-        run: sh scripts/check-image.sh reelsaw:check
-      # a full boot needs reachable AI providers (checked at startup); this proves the bundle and its
-      # externals resolve. The install itself is checked by hand before tagging (see deploy/README.md)
-      - name: Bundle loads
-        run: |
-          docker run --rm --entrypoint reelsaw reelsaw:check 2>&1 | grep -q "usage: reelsaw"
-
-      - name: Build and push
+      # one multi-arch build, pushed under a staging tag; checked; then retagged without rebuilding
+      - name: Build (amd64 + arm64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: runtime
           platforms: linux/amd64,linux/arm64
-          # only version tags publish; a manual run builds and checks without pushing
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          tags: ${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             REELSAW_VERSION=${{ steps.v.outputs.version }}
             REELSAW_COMMIT=${{ steps.v.outputs.commit }}
             REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
           cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: No source in the image; bundle loads on both architectures
+        env:
+          STAGING: ${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }}
+        run: |
+          docker pull --platform linux/amd64 "$STAGING"
+          sh scripts/check-image.sh "$STAGING"
+          for arch in amd64 arm64; do
+            docker run --rm --platform "linux/$arch" --entrypoint reelsaw "$STAGING" 2>&1 | grep -q "usage: reelsaw" || { echo "bundle failed to load on $arch"; exit 1; }
+          done
+
+      # only version tags publish; a manual run stops at the staging tag
+      - name: Publish tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          STAGING: ${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          args=()
+          while IFS= read -r t; do [ -n "$t" ] && args+=(-t "$t"); done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "$STAGING"
 
       - name: Install folder
         env:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           mkdir -p out/reelsaw
-          cp deploy/docker-compose.yml deploy/.env.example deploy/README.md out/reelsaw/
+          cp deploy/docker-compose.yml deploy/.env.example deploy/README.md deploy/install.sh out/reelsaw/
+          sed -i "s#ghcr.io/osbytes/reelsaw:latest#${GHCR_IMAGE}:${VERSION}#g" out/reelsaw/install.sh
           # pin the default image to this release
           sed -i "s#\${REELSAW_IMAGE:-[^}]*}#\${REELSAW_IMAGE:-${GHCR_IMAGE}:${VERSION}}#" out/reelsaw/docker-compose.yml
           (cd out && zip -r "reelsaw-${VERSION}.zip" reelsaw)

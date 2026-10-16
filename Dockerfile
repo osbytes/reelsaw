@@ -1,4 +1,15 @@
-# ---------- system: OS packages, media tools, models (shared by dev and runtime) ----------
+# Multi-arch builds: only the `system` and `runtime` stages run per target architecture (under
+# emulation in CI). Everything architecture-independent (model files, the JS build and production
+# node_modules; the one native dependency, onnxruntime-node, ships binaries for every platform)
+# runs once on the build machine's own architecture ($BUILDPLATFORM).
+
+# ---------- models: downloaded once, natively ----------
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS models
+RUN apk add --no-cache curl
+COPY scripts/download-models.sh /tmp/download-models.sh
+RUN sh /tmp/download-models.sh /models
+
+# ---------- system: OS packages and media tools (shared by dev and runtime) ----------
 FROM node:22-bookworm-slim AS system
 ENV DATA_DIR=/data \
     FACE_MODEL_PATH=/app/server/models/ultraface-rfb-320.onnx \
@@ -11,11 +22,10 @@ RUN apt-get update \
  && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
  && chmod +x /usr/local/bin/yt-dlp \
  && rm -rf /var/lib/apt/lists/*
-COPY scripts/download-models.sh /tmp/download-models.sh
-RUN sh /tmp/download-models.sh /app/server/models && rm /tmp/download-models.sh
+COPY --from=models /models /app/server/models
 
-# ---------- build ----------
-FROM node:22-bookworm-slim AS build
+# ---------- build: once, natively ----------
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./

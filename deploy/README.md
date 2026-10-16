@@ -7,6 +7,21 @@ speakers and burns in captions. Runs on your machine with Docker.
 
 Requires Docker with Compose (Docker Desktop on macOS/Windows), 8 GB RAM and ~10 GB disk.
 
+### Fully local in one command (Ollama + Speaches)
+
+On macOS install [Ollama](https://ollama.com/download) first; on Linux the script runs it in a
+container if it isn't already installed.
+
+```bash
+bash install.sh        # or: curl -fsSL <url of install.sh> | bash
+```
+
+It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls `qwen2.5:14b`, starts
+everything and waits until the app answers. `REELSAW_LLM=qwen2.5:7b` for less RAM; see the top of
+the script for the other options.
+
+### By hand
+
 ```bash
 cp .env.example .env          # set BETTER_AUTH_SECRET, POSTGRES_PASSWORD and an AI provider
 docker compose up -d
