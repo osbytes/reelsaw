@@ -508,7 +508,10 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       key={v}
       role="radio"
       aria-checked={filter === v}
-      onClick={() => setFilter(v)}
+      onClick={() => {
+        setFilter(v);
+        if (!listOpen) setListOpen(true); // the chips filter the list: show it
+      }}
       className={`rounded-full border px-2.5 py-[3px] text-xs font-semibold whitespace-nowrap ${filter === v ? "border-ink bg-ink text-bg" : "border-line text-ink2 hover:text-ink"}`}
     >
       {label}
@@ -526,20 +529,23 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
             <span className={`chip ${pendingFlags.length ? "bg-warn-soft" : "bg-ok-soft"} text-ink`}>
               <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
             </span>
-            <div role="radiogroup" aria-label="Which fixes to show" className="flex shrink-0 gap-1">
-              {filterBtn("all", `All ${orderedFlags.length}`)}
-              {filterBtn("review", `To review ${pendingFlags.length}`)}
-              {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
-              {filterBtn("entity", "Names")}
-              {filterBtn("disfluency", "Cuts")}
-              {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
-            </div>
             <button data-flag-nav className="btn-ghost px-2.5 py-1 text-xs" disabled={!pendingFlags.length} onClick={nextPending} title="Next fix to review (N). Then A accept, R reject, ↑ ↓ move">
               Next fix <span className="rounded-[4px] border border-current px-1 font-mono text-[10px] opacity-75">N</span>
             </button>
           </div>
         )}
         <div className="flex-1" />
+        {orderedFlags.length > 0 && (
+          // filters sit beside the list they filter (they also narrow the highlights in the text)
+          <div role="radiogroup" aria-label="Which fixes to show" className="flex shrink-0 gap-1">
+            {filterBtn("all", `All ${orderedFlags.length}`)}
+            {filterBtn("review", `To review ${pendingFlags.length}`)}
+            {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
+            {filterBtn("entity", "Names")}
+            {filterBtn("disfluency", "Cuts")}
+            {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
+          </div>
+        )}
         {orderedFlags.length > 0 && (
           <button
             className={`btn shrink-0 px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}

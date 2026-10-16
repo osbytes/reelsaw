@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSubscription } from "@trpc/tanstack-react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronUp, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { ChevronDown, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
+import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
 import { describeEvent, type Tone } from "../lib/activity";
@@ -221,6 +222,76 @@ export function ProjectPage() {
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
 
+  const activityList = (
+    <ol className="flex flex-col gap-1.5 text-[13px]">
+      {activity.length === 0 && <li className="text-ink3">Nothing yet.</li>}
+      {activity.map(({ e, d }) => {
+        // entries about a clip jump to its card
+        const cid = (e.payload as { clipId?: string }).clipId;
+        const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
+        return (
+          <li key={e.id} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2" title={d.text}>
+            <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+            <ToneGlyph tone={d.tone} />
+            {target ? (
+              <button
+                className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
+                onClick={() => {
+                  focusCard(target, true);
+                  setActOpen(false);
+                }}
+              >
+                {d.text}
+              </button>
+            ) : (
+              <span className="min-w-0 truncate leading-5">{d.text}</span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+  // latest status line in the header; the full feed opens in a popover below it
+  const activityTrigger = (
+    <Popover.Root open={actOpen} onOpenChange={setActOpen}>
+      <Popover.Trigger asChild>
+        <button
+          className={`inline-flex min-w-0 max-w-[420px] items-center gap-2 rounded-[6px] text-left hover:text-ink ${live.tone === "err" ? "text-err" : live.tone === "warn" ? "text-warn" : live.tone === "ok" && !active ? "font-semibold text-ok" : "text-ink2"}`}
+          title="Activity"
+        >
+          <ToneGlyph tone={live.tone} />
+          <span className="min-w-0 truncate leading-5">{live.text}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink3" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="start"
+          // line the feed's glyph column up under the status line's glyph: padding 16 + time 64 + gap 8
+          alignOffset={-88}
+          sideOffset={8}
+          onOpenAutoFocus={(e) => e.preventDefault()} // don't ring the first entry on open
+          collisionPadding={12}
+          className="z-50 flex max-h-[min(60vh,var(--radix-popover-content-available-height))] w-[min(460px,calc(100vw-24px))] flex-col rounded-[14px] border border-line bg-panel shadow-pop"
+        >
+          <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
+            <b>Activity</b>
+            <span className="text-xs text-ink3">{active ? "updates live" : "history"}</span>
+            {sortedClips.length > 0 && (
+              <span className={`ml-auto text-xs ${readyCount === sortedClips.length ? "font-semibold text-ok" : "text-ink2"}`}>
+                {readyCount} of {sortedClips.length} clips ready
+              </span>
+            )}
+          </div>
+          <ScrollArea className="max-h-[min(calc(60vh-46px),calc(var(--radix-popover-content-available-height)-46px))]">
+            <div className="px-4 py-3">{activityList}</div>
+          </ScrollArea>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+
   const header = (
     <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}>
       <div className="min-w-0 flex-[1_1_320px]">
@@ -242,11 +313,7 @@ export function ProjectPage() {
           ) : (
             <span>Uploaded file</span>
           )}
-          {sortedClips.length > 0 && (
-            <span className={readyCount === sortedClips.length ? "font-semibold text-ok" : ""}>
-              {readyCount} of {sortedClips.length} clips ready
-            </span>
-          )}
+          {activityTrigger}
         </div>
         {(active || p.status === "failed") && (
           <ol aria-label="Pipeline" className="mt-2.5 flex flex-wrap gap-1.5">
@@ -458,64 +525,6 @@ export function ProjectPage() {
     </div>
   );
 
-  const activityList = (
-    <ol className="flex flex-col gap-1.5 text-[13px]">
-      {activity.length === 0 && <li className="text-ink3">Nothing yet.</li>}
-      {activity.map(({ e, d }) => {
-        // entries about a clip jump to its card
-        const cid = (e.payload as { clipId?: string }).clipId;
-        const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
-        return (
-          <li key={e.id} className="grid grid-cols-[64px_14px_minmax(0,1fr)] items-baseline gap-2" title={d.text}>
-            <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-            <span className={`font-mono text-xs leading-5 ${TONE_FG[d.tone]}`}>{TONE_GLYPH[d.tone]}</span>
-            {target ? (
-              <button
-                className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
-                onClick={() => {
-                  focusCard(target, true);
-                  setActOpen(false);
-                }}
-              >
-                {d.text}
-              </button>
-            ) : (
-              <span className="min-w-0 truncate leading-5">{d.text}</span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
-
-  const activityDock = (
-    <div className="relative shrink-0 border-t border-line bg-panel px-4 py-2.5 sm:px-5">
-      {actOpen && (
-        <div className="absolute inset-x-4 bottom-[calc(100%+8px)] z-30 flex max-h-[50vh] flex-col rounded-[14px] border border-line bg-panel shadow-pop sm:inset-x-5">
-          <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-            <b>Activity</b>
-            <span className="text-xs text-ink3">{active ? "updates live" : "history"}</span>
-            <button className="ml-auto text-ink2 hover:text-ink" onClick={() => setActOpen(false)} aria-label="Close activity">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <ScrollArea className="max-h-[calc(50vh-48px)]">
-            <div className="px-4 py-3">{activityList}</div>
-          </ScrollArea>
-        </div>
-      )}
-      <button
-        onClick={() => setActOpen(!actOpen)}
-        aria-expanded={actOpen}
-        className={`flex w-full items-center gap-2.5 rounded-full border px-3.5 py-1.5 text-left text-[13px] text-ink ${live.tone === "err" ? "border-err bg-err-soft" : live.tone === "warn" ? "border-warn bg-warn-soft" : "border-line bg-panel hover:bg-sunk"}`}
-      >
-        <span className={`font-mono font-bold ${TONE_FG[live.tone]}`}>{TONE_GLYPH[live.tone]}</span>
-        <span className="min-w-0 flex-1 truncate">{live.text}</span>
-        {actOpen ? <ChevronDown className="h-4 w-4 text-ink3" /> : <ChevronUp className="h-4 w-4 text-ink3" />}
-      </button>
-    </div>
-  );
-
   const clipsList = (
     <>
       {sortedClips.length === 0 && (
@@ -616,7 +625,6 @@ export function ProjectPage() {
             ) : (
               waiting
             )}
-            {activityDock}
           </section>
           <aside className="flex min-h-0 flex-col border-l border-line bg-sunk">
             {drawer ? (
@@ -686,4 +694,9 @@ export function ProjectPage() {
       />
     </div>
   );
+}
+
+/** status glyph centred in a fixed box, so it lines up with the text beside it whatever the glyph */
+function ToneGlyph({ tone }: { tone: Tone }) {
+  return <span className={`inline-grid h-5 w-3.5 shrink-0 place-items-center font-mono text-[11px] leading-none ${TONE_FG[tone]}`}>{TONE_GLYPH[tone]}</span>;
 }
