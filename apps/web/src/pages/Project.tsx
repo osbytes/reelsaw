@@ -208,6 +208,27 @@ export function ProjectPage() {
     stalled: ["◷", "bg-warn-soft text-warn"],
     failed: ["▲", "bg-err-soft text-err"],
   };
+  // pipeline progress, rolled into the header status line (strip) and its popover (rows)
+  const showPipe = active || p.status === "failed";
+  const pipeRows = PIPELINE_STAGES.map((stage, i) => {
+    const st = pipeState(stage, i);
+    const pr = progress?.stage === stage ? progress.value : (p.stageProgress ?? 0);
+    const note =
+      st === "running"
+        ? stage === "refine"
+          ? (["entities", "disfluency", "scenes"] as const)
+              .map((s) => `${REFINE_LABEL[s]} ${refineState[s] === "done" ? "✓" : refineState[s] === "running" ? "…" : refineState[s] === "failed" ? "▲" : "○"}`)
+              .join(" · ")
+          : `${Math.round(pr * 100)}%`
+        : st === "stalled"
+          ? "no progress"
+          : st === "failed"
+            ? "failed"
+            : null;
+    return { stage, st, note, pct: st === "running" && stage !== "refine" ? `${Math.round(pr * 100)}%` : null };
+  });
+  const curPipe = pipeRows.find((r) => r.st === "running" || r.st === "stalled" || r.st === "failed");
+  const SEG: Record<string, string> = { done: "bg-ok", running: "bg-acc", waiting: "bg-line", stalled: "bg-warn", failed: "bg-err" };
   const overlays = p.transcript?.overlays ?? [];
   const presentation = !!p.transcript?.textProfile?.presentation;
   const masking = overlays.length > 0 && masksSourceText(p.settings.sourceText, p.transcript?.textProfile);
@@ -261,6 +282,25 @@ export function ProjectPage() {
           title="Activity"
         >
           <ToneGlyph tone={live.tone} />
+          {showPipe && (
+            <>
+              <span className="flex shrink-0 gap-0.5" aria-hidden>
+                {pipeRows.map((r) => (
+                  <span key={r.stage} className={`h-1.5 w-2.5 rounded-full ${SEG[r.st]}`} />
+                ))}
+              </span>
+              {curPipe && (
+                <span className="shrink-0 whitespace-nowrap leading-5">
+                  <span className="sr-only">Step {pipeRows.indexOf(curPipe) + 1} of {pipeRows.length}: </span>
+                  <span className="font-semibold text-ink">{STAGE_LABEL[curPipe.stage]}</span>
+                  {curPipe.pct && <span className="ml-1 font-mono text-[11px] text-ink3">{curPipe.pct}</span>}
+                </span>
+              )}
+              <span className="text-ink3" aria-hidden>
+                ·
+              </span>
+            </>
+          )}
           <span className="min-w-0 truncate leading-5">{live.text}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink3" />
         </button>
@@ -285,6 +325,20 @@ export function ProjectPage() {
             )}
           </div>
           <ScrollArea className="max-h-[min(calc(60vh-46px),calc(var(--radix-popover-content-available-height)-46px))]">
+            {showPipe && (
+              <ol aria-label="Pipeline" className="flex flex-col gap-1.5 border-b border-line px-4 py-3 text-[13px]">
+                {pipeRows.map((r) => (
+                  <li key={r.stage} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2">
+                    <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums text-ink3">{r.pct ?? ""}</span>
+                    <span className={`inline-grid h-5 w-3.5 place-items-center font-mono text-[11px] leading-none ${PIPE_STYLE[r.st]![1].split(" ").find((c) => c.startsWith("text-"))}`}>{PIPE_STYLE[r.st]![0]}</span>
+                    <span className={`min-w-0 truncate leading-5 ${r.st === "waiting" ? "text-ink3" : ""}`}>
+                      <span className={r.st === "running" || r.st === "stalled" || r.st === "failed" ? "font-semibold" : ""}>{STAGE_LABEL[r.stage]}</span>
+                      {r.note && !r.pct && <span className="ml-2 text-xs text-ink2">{r.note}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
             <div className="px-4 py-3">{activityList}</div>
           </ScrollArea>
         </Popover.Content>
@@ -315,32 +369,6 @@ export function ProjectPage() {
           )}
           {activityTrigger}
         </div>
-        {(active || p.status === "failed") && (
-          <ol aria-label="Pipeline" className="mt-2.5 flex flex-wrap gap-1.5">
-            {PIPELINE_STAGES.map((stage, i) => {
-              const st = pipeState(stage, i);
-              const [g, cls] = PIPE_STYLE[st]!;
-              const pr = progress?.stage === stage ? progress.value : (p.stageProgress ?? 0);
-              const note =
-                st === "running"
-                  ? stage === "refine"
-                    ? (["entities", "disfluency", "scenes"] as const)
-                        .map((s) => `${REFINE_LABEL[s]} ${refineState[s] === "done" ? "✓" : refineState[s] === "running" ? "…" : refineState[s] === "failed" ? "▲" : "○"}`)
-                        .join(" · ")
-                    : `${Math.round(pr * 100)}%`
-                  : st === "stalled"
-                    ? "no progress"
-                    : null;
-              return (
-                <li key={stage} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>
-                  <span className="font-mono">{g}</span>
-                  <span className="text-ink">{STAGE_LABEL[stage]}</span>
-                  {note && <span className="font-mono text-[11px] opacity-80">{note}</span>}
-                </li>
-              );
-            })}
-          </ol>
-        )}
       </div>
       <div className="flex items-center gap-2">
         {readyCount > 0 ? (
