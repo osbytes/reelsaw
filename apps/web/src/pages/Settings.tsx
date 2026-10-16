@@ -72,7 +72,10 @@ export function SettingsPage() {
     <ScrollArea className="min-h-0 flex-1">
       <main className="mx-auto flex max-w-[960px] flex-col gap-6 px-4 py-7 sm:px-6">
         <div>
-          <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
+            <span className="min-h-5 font-mono text-xs text-ink3">{s ? `Reelsaw ${s.version.version} · ${s.version.commit}` : ""}</span>
+          </div>
           <p className="mt-1 text-sm text-ink2">
             Read from the server environment. Change them in <span className="font-mono text-[13px]">.env</span> and restart.
           </p>

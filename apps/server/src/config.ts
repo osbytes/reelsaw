@@ -17,6 +17,10 @@ export const envSchema = z.object({
   LOG_FORMAT: z.enum(["auto", "json", "pretty"]).default("auto"),
   PORT: z.coerce.number().default(3000),
   APP_URL: z.string().default("http://localhost:3000"),
+  // baked into the image at build time (Dockerfile build args); "dev" when running from source
+  REELSAW_VERSION: z.string().default("dev"),
+  REELSAW_COMMIT: z.string().default("unknown"),
+  REELSAW_BUILT_AT: z.string().default("unknown"),
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(16),
   DATA_DIR: z.string().default(path.resolve(process.cwd(), "data")),

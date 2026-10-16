@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import pg from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -36,8 +37,11 @@ export function createDatabase(connectionString: string, log: Logger): Database 
       }
     },
     async migrate() {
+      // next to the package: src/db/index.ts (dev), dist/db/index.js (tsc) or dist/main.js (bundle)
       const here = path.dirname(fileURLToPath(import.meta.url));
-      await migrate(db, { migrationsFolder: path.resolve(here, "../../drizzle") }); // works from src/ and dist/
+      const folder = ["../drizzle", "../../drizzle"].map((p) => path.resolve(here, p)).find((p) => existsSync(path.join(p, "meta/_journal.json")));
+      if (!folder) throw new Error(`migrations folder not found near ${here}`);
+      await migrate(db, { migrationsFolder: folder });
     },
     close: () => pool.end(),
   };

@@ -3,7 +3,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import Fuse, { type FuseResult, type FuseResultMatch } from "fuse.js";
 import { useNavigate } from "react-router";
-import { Film, FolderOpen, Link2, Moon, Plus, Search, Settings, Upload } from "lucide-react";
+import { Film, FolderOpen, LifeBuoy, Link2, Moon, Plus, Search, Settings, Upload } from "lucide-react";
+import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
 import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
@@ -106,6 +107,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       { key: "a-projects", group: "Actions", icon: <FolderOpen className="h-4 w-4" />, label: "Go to projects", run: go(() => nav("/")) },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
+      { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
     ];
     if (url) return out;
     const d = indexQ.data;

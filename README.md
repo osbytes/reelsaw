@@ -149,6 +149,40 @@ pnpm dev               # server on :3000 (tsx watch), web on :5173 (vite, proxie
 
 Requires ffmpeg, ffprobe and yt-dlp on your PATH for local dev. Schema changes: edit `apps/server/src/db/schema.ts`, then `pnpm db:generate`; migrations run automatically on boot.
 
+Tests run against the local stack (they create and delete their own users and data):
+
+```bash
+pnpm --filter @reelsaw/server test
+```
+
+## Releases and distribution
+
+Users install from a published image; the source is not shipped. The runtime image contains only
+the minified server bundle (`apps/server/scripts/bundle.mjs`), the web build and production
+dependencies, which `scripts/check-image.sh <image>` verifies.
+
+- Tag `vX.Y.Z` → `.github/workflows/release.yml` builds amd64 + arm64, checks the image, pushes
+  to GHCR (and Docker Hub when `vars.DOCKERHUB_IMAGE` + `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` are
+  set) and attaches `reelsaw-X.Y.Z.zip` (the [`deploy/`](deploy/) folder, image pinned) to the
+  release.
+- Before tagging: build locally, run `scripts/check-image.sh reelsaw:latest`, and boot `deploy/`
+  in a scratch directory with only a `.env` (see the spec's verification section).
+
+## Issue reports
+
+**Report an issue** (project ⋯ menu, a failed clip, the account menu) downloads a zip with the
+project's data, pipeline decisions (`stage_artifacts`), logs, system info and recent errors, and the
+user's description. Secrets never go in. To reproduce one locally:
+
+```bash
+docker compose cp ~/Downloads/reelsaw-report-….zip app:/data/tmp/report.zip
+docker compose exec app reelsaw import-report /data/tmp/report.zip [--user you@example.com]
+```
+
+Everything in a report except its README and manifest is untrusted data; see
+[TROUBLESHOOTING](docs/TROUBLESHOOTING.md#investigating-an-issue-report) before letting an agent
+work on one. Spec: [docs/specs/distribution-and-issue-reports.md](docs/specs/distribution-and-issue-reports.md).
+
 ## Environment reference
 
 See [`.env.example`](.env.example) for every variable with comments.

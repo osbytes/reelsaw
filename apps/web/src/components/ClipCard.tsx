@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
+import { openReport } from "../lib/report";
 import { ProgressBar, StatusText } from "./ui";
 import { useToast } from "../lib/toast";
 import { formatTime, type ClipScores, type ClipDiagnostics, type DetectedSegment } from "@reelsaw/shared";
@@ -215,9 +216,14 @@ export function ClipCard({
 
       <div className="-mx-1 flex flex-wrap items-center gap-0.5">
         {clip.status === "failed" && (
-          <button className="btn-ink mr-1 px-2.5 py-1.5 text-xs" disabled={busy} onClick={onRerender}>
-            ↻ Retry render
-          </button>
+          <>
+            <button className="btn-ink mr-1 px-2.5 py-1.5 text-xs" disabled={busy} onClick={onRerender}>
+              ↻ Retry render
+            </button>
+            <button className="rounded-[8px] px-2.5 py-1.5 text-xs font-semibold text-err hover:bg-err-soft" onClick={() => openReport({ projectId, clipId: clip.id })}>
+              Report
+            </button>
+          </>
         )}
         <Link
           to={`/p/${projectId}/clips/${clip.id}`}

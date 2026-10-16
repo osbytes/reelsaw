@@ -25,7 +25,12 @@ COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm -r build \
- && pnpm --filter @reelsaw/server --prod deploy --legacy /out/server
+ && pnpm --filter @reelsaw/server bundle \
+ && pnpm --filter @reelsaw/server --prod deploy --legacy /out/server \
+ # ship the minified bundle only: no tsc output, sources, maps, or the inlined workspace package
+ && rm -rf /out/server/dist /out/server/dist-bundle /out/server/src /out/server/test /out/server/scripts /out/server/tsconfig*.json /out/server/node_modules/@reelsaw \
+ && cp -r apps/server/dist-bundle /out/server/dist \
+ && find /out/server -path /out/server/node_modules -prune -o \( -name "*.ts" -o -name "*.map" \) -print | xargs -r rm -f
 
 # ---------- dev: source mounted, live reload (docker-compose.dev.yml) ----------
 FROM system AS dev
@@ -49,8 +54,17 @@ CMD ["sh", "-c", "pnpm --filter @reelsaw/shared dev & pnpm --filter @reelsaw/web
 
 # ---------- runtime ----------
 FROM system AS runtime
+ARG REELSAW_VERSION=dev
+ARG REELSAW_COMMIT=unknown
+ARG REELSAW_BUILT_AT=unknown
 ENV NODE_ENV=production \
-    WEB_DIST=/app/web
+    WEB_DIST=/app/web \
+    REELSAW_VERSION=${REELSAW_VERSION} \
+    REELSAW_COMMIT=${REELSAW_COMMIT} \
+    REELSAW_BUILT_AT=${REELSAW_BUILT_AT}
+LABEL org.opencontainers.image.title="Reelsaw" \
+      org.opencontainers.image.version="${REELSAW_VERSION}" \
+      org.opencontainers.image.revision="${REELSAW_COMMIT}"
 WORKDIR /app
 COPY --from=build /out/server /app/server
 COPY --from=build /app/apps/server/drizzle /app/server/drizzle

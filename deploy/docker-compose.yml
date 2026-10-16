@@ -1,0 +1,84 @@
+# Reelsaw: pulls the published image; no source needed.
+#   cp .env.example .env   # then fill in BETTER_AUTH_SECRET and an AI provider
+#   docker compose up -d   # http://localhost:3000
+# Fully local AI (Speaches for speech-to-text):   docker compose --profile local-ai up -d
+name: reelsaw
+
+x-app: &app
+  image: ${REELSAW_IMAGE:-ghcr.io/osbytes/reelsaw:latest}
+  # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
+  stop_grace_period: 330s
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - data:/data
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reelsaw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reelsaw}
+      POSTGRES_DB: reelsaw
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reelsaw -d reelsaw"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
+      PORT: "3000"
+      DATA_DIR: /data
+      # JSON logs (rotated daily, 7 kept); issue reports include this project's lines
+      LOG_FILE: /data/logs/reelsaw.log
+      RUN_HTTP: "true"
+      RUN_WORKERS: ${RUN_WORKERS_IN_APP:-true}
+    ports:
+      - "${PORT:-3000}:3000"
+
+  # Optional extra workers: docker compose --profile workers up -d --scale worker=2
+  worker:
+    <<: *app
+    profiles: ["workers"]
+    environment:
+      DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
+      DATA_DIR: /data
+      LOG_FILE: /data/logs/reelsaw.log
+      RUN_HTTP: "false"
+      RUN_WORKERS: "true"
+
+  # Speech-to-text on your machine (faster-whisper behind an OpenAI-compatible API)
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu   # :latest-cuda with an NVIDIA GPU
+    profiles: ["local-ai"]
+    restart: unless-stopped
+    environment:
+      WHISPER__MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      LOG_LEVEL: info
+    volumes:
+      - speaches:/home/ubuntu/.cache/huggingface
+
+  # Ollama in a container (Linux; on macOS run Ollama natively for the GPU): --profile ollama
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  pgdata:
+  data:
+  speaches:
+  ollama:

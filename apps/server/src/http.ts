@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { trpcServer } from "@hono/trpc-server";
@@ -15,6 +15,8 @@ import { contextFactory } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { createExportZip } from "./export.js";
+import { createReportZip, reportPreview } from "./report/bundle.js";
+import { reportRequestSchema } from "@reelsaw/shared";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 
 /** Range-capable file response for video playback. */
@@ -72,7 +74,8 @@ export function createApp(svc: Services) {
     }),
   );
 
-  app.get("/api/health", async (c) => c.json({ ok: true, resources: await svc.resources.snapshot() }));
+  const version = { version: svc.config.REELSAW_VERSION, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT };
+  app.get("/api/health", async (c) => c.json({ ok: true, ...version, resources: await svc.resources.snapshot() }));
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   app.use("/api/trpc/*", trpcServer({ router: appRouter, endpoint: "/api/trpc", createContext: contextFactory(svc) }));
 
@@ -137,6 +140,28 @@ export function createApp(svc: Services) {
     c.header("Cache-Control", "no-store");
     return c.body(Readable.toWeb(stream) as ReadableStream);
   });
+
+  // "Report an issue": zip of the project's (or account's) data for local reproduction; owner only
+  app.get("/api/projects/:projectId/report/preview", async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    const info = await reportPreview(svc, session.user.id, c.req.param("projectId"));
+    return info ? c.json(info) : c.json({ error: "not found" }, 404);
+  });
+  const sendReport = async (c: Context, projectId: string | null) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    const parsed = reportRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid report" }, 400);
+    const zip = await createReportZip(svc, session.user.id, projectId, parsed.data);
+    if (!zip) return c.json({ error: "not found" }, 404);
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${zip.filename}"`);
+    c.header("Cache-Control", "no-store");
+    return c.body(Readable.toWeb(zip.stream) as ReadableStream);
+  };
+  app.post("/api/projects/:projectId/report", (c) => sendReport(c, c.req.param("projectId")));
+  app.post("/api/report", (c) => sendReport(c, null));
 
   // A/B preview of a disfluency cut (transcript popover): plan = which boundaries, audio = mp3 of the window
   app.get("/api/projects/:projectId/flags/:flagId/cut-plan", async (c) => {

@@ -1229,6 +1229,7 @@ export function ClipEditor(props: Props) {
     ["Remove selected transition", "Delete"],
     ["Undo / redo", `${MOD}Z  ⇧${MOD}Z`],
     ["Save", `${MOD}S`],
+    ["Report an issue", "!"],
     ["Disable snapping while dragging", "hold Alt"],
     ["Zoom timeline", `${MOD} + scroll`],
     ["This sheet", "?"],

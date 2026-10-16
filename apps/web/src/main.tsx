@@ -6,6 +6,9 @@ import { TRPCProvider, makeTrpcClient } from "./lib/trpc";
 import { App } from "./App";
 import { ToastProvider } from "./lib/toast";
 import "./index.css";
+import { installDiagnostics } from "./lib/diagnostics";
+
+installDiagnostics();
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000 } } });
 const trpcClient = makeTrpcClient();

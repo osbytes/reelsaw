@@ -216,6 +216,7 @@ export const appRouter = router({
 
   settings: router({
     get: protectedProcedure.query(async ({ ctx }) => ({
+      version: { version: ctx.svc.config.REELSAW_VERSION, commit: ctx.svc.config.REELSAW_COMMIT, builtAt: ctx.svc.config.REELSAW_BUILT_AT },
       aiModel: ctx.svc.config.AI_MODEL,
       transcriptionModel: ctx.svc.config.TRANSCRIPTION_MODEL,
       openaiBaseUrl: ctx.svc.config.OPENAI_BASE_URL ?? null,

@@ -1,7 +1,9 @@
 import { Routes, Route, Navigate, Link, NavLink, useLocation } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy } from "lucide-react";
+import { ReportDialog } from "./components/ReportDialog";
+import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
 import { useTheme } from "./lib/theme";
@@ -80,6 +82,9 @@ function Avatar() {
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={8} className="menu">
           <DropdownMenu.Label className="px-2.5 py-1.5 text-xs text-ink3">{u.email}</DropdownMenu.Label>
+          <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
+            <LifeBuoy className="h-4 w-4" /> Report an issue…
+          </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={() => signOut().then(() => window.location.assign("/login"))}>
             <LogOut className="h-4 w-4" /> Sign out
           </DropdownMenu.Item>
@@ -119,6 +124,9 @@ export function TopBar() {
       <div className="flex-1" />
       <SearchButton />
       <MachineChip />
+      <button className="btn-ghost h-[34px] w-[34px] px-0" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
+        <LifeBuoy className="h-4 w-4" />
+      </button>
       <ThemeToggle />
       <Avatar />
     </header>
@@ -164,6 +172,7 @@ export function App() {
       <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <ReportDialog />
     </CommandPaletteProvider>
     </UploadsProvider>
   );

@@ -448,3 +448,41 @@ export function speakerCrop(srcW: number, srcH: number, aspect: number, face: { 
 export function cropX(srcW: number, w: number, cx: number) {
   return Math.max(0, Math.min(srcW - w, cx * srcW - w / 2));
 }
+
+// ---------- issue reports ----------
+
+/** Report zip format; the importer refuses newer major versions. */
+export const REPORT_FORMAT = 1;
+
+export const reportIncludeSchema = z.object({
+  /** this project's log lines */
+  logs: z.boolean().default(true),
+  /** versions, machine resources, queue state, usage and the instance's recent errors */
+  system: z.boolean().default(true),
+  /** thumbnails and the selected clip's rendered video */
+  previews: z.boolean().default(true),
+  /** every rendered clip */
+  allClips: z.boolean().default(false),
+  /** the source video file (can be large) */
+  source: z.boolean().default(false),
+});
+export type ReportInclude = z.infer<typeof reportIncludeSchema>;
+
+export const reportClientSchema = z
+  .object({
+    route: z.string().max(2000),
+    userAgent: z.string().max(500),
+    viewport: z.string().max(40),
+    theme: z.string().max(20),
+    errors: z.array(z.object({ at: z.string().max(40), kind: z.string().max(40), message: z.string().max(4000), stack: z.string().max(8000).optional() })).max(100),
+  })
+  .partial();
+
+export const reportRequestSchema = z.object({
+  description: z.string().trim().min(3, "Describe what went wrong").max(10000),
+  /** clips the report is about (their renders are included with previews) */
+  clipIds: z.array(z.string().max(100)).max(50).default([]),
+  include: reportIncludeSchema.default({ logs: true, system: true, previews: true, allClips: false, source: false }),
+  client: reportClientSchema.default({}),
+});
+export type ReportRequest = z.infer<typeof reportRequestSchema>;

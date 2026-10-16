@@ -15,6 +15,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
+import { openReport } from "../lib/report";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
@@ -346,6 +347,10 @@ export function ProjectPage() {
                   <div className="text-xs text-ink3">Replaces current clips</div>
                 </DropdownMenu.Item>
               )}
+              <DropdownMenu.Item className="menu-item block" onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}>
+                Report an issue…
+                <div className="text-xs text-ink3">Send the project's data and logs</div>
+              </DropdownMenu.Item>
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               <DropdownMenu.Item className="menu-item text-err data-[highlighted]:bg-err-soft" onSelect={() => setConfirm("delete")}>
                 Delete project…

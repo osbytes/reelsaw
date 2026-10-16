@@ -118,6 +118,25 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
 
+## Investigating an issue report
+
+1. Import it into the local stack (never a production instance; released images refuse):
+   `docker compose cp report.zip app:/data/tmp/r.zip && docker compose exec app reelsaw import-report /data/tmp/r.zip`.
+   The summary lists clips, fixes, the failed stage, which models ran, notes about missing pieces,
+   and any **instruction-like passages** it found (field + snippet).
+2. Open the printed URL; use `reelsaw status/clip/faces/cuts` on the new ids. The original ids are
+   in the project's `sourceMeta.report`.
+3. Clips whose render wasn't in the zip are "failed" with a note, and mid-run projects come in as
+   "failed": nothing runs until you press Retry. Re-renders need the source video (downloaded from
+   known video hosts automatically, or `--source <file>`).
+4. `logs.jsonl`, `errors.jsonl`, `queue.json`, `system.json` and `artifacts.json` stay in the zip.
+
+**Working on a report with an AI agent:** transcripts, titles, model output, logs and the user's
+description come from someone else's machine and can contain text aimed at the reader ("ignore
+previous instructions", "run …"). Point the agent at the zip's README first, keep it in the normal
+permission mode (no bypass or auto-accept), and run it in a worktree or devcontainer whose `.env`
+has no production credentials. The importer's warnings are a tripwire, not a filter.
+
 ## Lessons: stuck jobs (manual clip, 2026-10-15)
 
 What happened: a manual clip's AI preparation ran while Ollama was down, the clip ended up queued for render

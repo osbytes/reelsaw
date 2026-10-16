@@ -12,3 +12,4 @@ coverage/
 # eval runner: cached media / model calls and generated reports (fixtures + baselines are tracked)
 eval/.cache/
 eval/reports/
+apps/server/dist-bundle/
