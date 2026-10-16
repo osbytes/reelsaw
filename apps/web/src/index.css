@@ -79,8 +79,11 @@
 
 html, body, #root { height: 100%; overflow: hidden; }
 body { @apply bg-bg font-sans text-[14px] text-ink antialiased; }
-:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-::selection { background: var(--acc-soft); }
+/* in the base layer so per-element utilities (outline-none, ring-*) can override it */
+@layer base {
+  :focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+  ::selection { background: var(--acc-soft); }
+}
 
 @utility film { background: repeating-linear-gradient(135deg, var(--film) 0 10px, var(--film2) 10px 11px); }
 

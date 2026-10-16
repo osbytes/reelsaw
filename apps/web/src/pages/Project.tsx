@@ -182,6 +182,18 @@ export function ProjectPage() {
     if (clipsLoaded) writeHash({ clip: preview?.id ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview?.id]);
+  // clicking a clip's marker in the transcript: highlight its card, show it, and park the source at its start
+  const focusClipFromTranscript = (cid: string) => {
+    const c = q.data?.clips.find((x) => x.id === cid);
+    if (!c) return;
+    focusCard(cid, compact);
+    const v = sourceRef.current;
+    if (v) {
+      v.pause();
+      v.currentTime = c.startSec;
+      setSrcTime(c.startSec);
+    }
+  };
   const copyLink = (params: Record<string, string>) =>
     navigator.clipboard
       .writeText(linkWith(params))
@@ -603,7 +615,7 @@ export function ProjectPage() {
             <div className="flex min-h-0 flex-1 flex-col">
               {source}
               {transcriptStage ? (
-                <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} />
+                <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
               ) : (
                 waiting
               )}
@@ -622,7 +634,7 @@ export function ProjectPage() {
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
             {transcriptStage ? (
-              <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} />
+              <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
             ) : (
               waiting
             )}

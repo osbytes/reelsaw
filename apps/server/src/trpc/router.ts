@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { TRPCError, tracked } from "@trpc/server";
@@ -216,24 +216,18 @@ export const appRouter = router({
     })),
   }),
 
-  /** ⌘K palette: projects and clips whose title (or a clip's hook / caption) contains the query. */
-  search: protectedProcedure.input(z.object({ q: z.string().trim().min(1).max(100) })).query(async ({ ctx, input }) => {
+  /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
+  searchIndex: protectedProcedure.query(async ({ ctx }) => {
     const db = ctx.svc.database.db;
-    const like = `%${input.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-    const mine = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, createdAt: true } });
-    const ids = mine.map((p) => p.id);
-    const projects = mine.filter((p) => p.title.toLowerCase().includes(input.q.toLowerCase())).slice(0, 8);
+    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
+    const ids = projects.map((p) => p.id);
     const clips = ids.length
-      ? await db.query.clips.findMany({
-          where: and(inArray(schema.clips.projectId, ids), or(ilike(schema.clips.title, like), ilike(schema.clips.hook, like), ilike(schema.clips.caption, like))),
-          columns: { id: true, projectId: true, title: true, hook: true, index: true, status: true, startSec: true, endSec: true, thumbnailKey: true },
-          limit: 12,
-        })
+      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, thumbnailKey: true }, limit: 5000 })
       : [];
-    const titleOf = new Map(mine.map((p) => [p.id, p.title]));
+    const titleOf = new Map(projects.map((p) => [p.id, p.title]));
     return {
-      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec })),
-      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, index: c.index, status: c.status, startSec: c.startSec, endSec: c.endSec, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
+      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
+      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
     };
   }),
 

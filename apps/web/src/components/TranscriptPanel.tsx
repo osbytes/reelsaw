@@ -18,7 +18,12 @@ interface Props {
   words: Word[];
   flags: TranscriptFlag[];
   currentTime: number;
-  clips: Array<{ index: number; startSec: number; endSec: number }>;
+  clips: Array<TranscriptClip>;
+  /** click on a clip marker: focus that clip (card + source position) */
+  onFocusClip?: (id: string) => void;
+  /** open the clip's preview */
+  onPlayClip?: (id: string) => void;
+  activeClipId?: string | null;
   onSeek: (t: number) => void;
   /** soft-deleted fixes (restorable from the Deleted filter) */
   deletedFlags?: Array<TranscriptFlag & { deletedAt: string }>;
@@ -28,6 +33,18 @@ interface Props {
 }
 
 type Variant = "orig" | "cut";
+export interface TranscriptClip {
+  id?: string;
+  index: number;
+  startSec: number;
+  endSec: number;
+  title?: string;
+  hook?: string;
+  status?: string;
+  score?: number;
+  thumbnailUrl?: string | null;
+  videoUrl?: string | null;
+}
 const cutKind = (f: TranscriptFlag) => (f.subkind === "manual" ? "your cut" : f.subkind === "repair" ? "false start" : (f.subkind ?? "filler"));
 interface CutPlan {
   flagId: string;
@@ -49,7 +66,7 @@ const EPS = 0.02;
  * scrolls away, then shows a "resume" pill. Lines are rendered word by word so each name fix is an
  * inline highlight with a hover/click popover (accept, reject, or type a replacement).
  */
-export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, onLoop, deletedFlags = [], className = "" }: Props) {
+export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, onLoop, deletedFlags = [], onFocusClip, onPlayClip, activeClipId, className = "" }: Props) {
   // flag whose surrounding audio is playing on repeat, how much context, and which version (A/B for cuts)
   const [looping, setLooping] = useState<string | null>(null);
   const [ctxSec, setCtxSec] = useState(2);
@@ -193,7 +210,17 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     if (!els.length) return setPick(null);
     const start = Math.min(...els.map((e) => Number(e.dataset.s)));
     const end = Math.max(...els.map((e) => Number(e.dataset.e)));
-    const rect = r.getBoundingClientRect();
+    // snap the visible highlight to whole words: what's highlighted is exactly what Make clip / Cut / Correct use
+    const first = els.reduce((a, e) => (Number(e.dataset.s) < Number(a.dataset.s) ? e : a));
+    const last = els.reduce((a, e) => (Number(e.dataset.e) > Number(a.dataset.e) ? e : a));
+    const snapped = document.createRange();
+    snapped.setStartBefore(first);
+    snapped.setEndAfter(last);
+    if (snapped.compareBoundaryPoints(Range.START_TO_START, r) !== 0 || snapped.compareBoundaryPoints(Range.END_TO_END, r) !== 0) {
+      sel.removeAllRanges();
+      sel.addRange(snapped);
+    }
+    const rect = snapped.getBoundingClientRect();
     const box = root.getBoundingClientRect();
     const top = Math.min(box.height - 44, Math.max(40, rect.bottom - box.top + 6));
     const left = Math.max(150, Math.min(box.width - 150, rect.left - box.left + rect.width / 2));
@@ -254,6 +281,18 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       return { s, ws };
     });
   }, [segments, words, flags]);
+
+  // which clip each line belongs to, and runs of consecutive lines in the same clip
+  const clipOfLine = useMemo(() => lines.map(({ s }) => clips.find((c) => s.start < c.endSec - 0.3 && s.end > c.startSec + 0.3)), [lines, clips]);
+  const clipGroups = useMemo(() => {
+    const out: Array<{ clip: TranscriptClip | undefined; items: number[] }> = [];
+    clipOfLine.forEach((c, i) => {
+      const last = out.at(-1);
+      if (last && last.clip === c) last.items.push(i);
+      else out.push({ clip: c, items: [i] });
+    });
+    return out;
+  }, [clipOfLine]);
 
   // auto-scroll the transcript viewport (never the page) while following
   useEffect(() => {
@@ -536,9 +575,24 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={viewportRef}>
         <div ref={contentRef} className="mx-auto max-w-[760px] px-5 pb-28 pt-4" onMouseUp={() => setTimeout(readSelection, 0)} onTouchEnd={() => setTimeout(readSelection, 50)} onKeyUp={readSelection}>
           {segments.length === 0 && <p className="py-10 text-center text-ink3">The transcript appears here after transcription.</p>}
-          {lines.map(({ s, ws }, i) => {
+          {clipGroups.map((g) => (
+            // a clip's lines share one bracket down the margin, labelled once; the label sticks while scrolling through it
+            <div key={g.items[0]} className="grid grid-cols-[24px_minmax(0,1fr)] gap-1">
+              <div className="relative">
+                {g.clip && (
+                  <>
+                    <div className={`absolute bottom-2 left-[11px] top-3 w-0.5 rounded-full ${activeClipId && g.clip.id === activeClipId ? "bg-acc" : "bg-acc/40"}`} />
+                    <div className="sticky top-2 z-[5] pt-2">
+                      <ClipMarker clip={g.clip} projectId={projectId} active={!!activeClipId && g.clip.id === activeClipId} onFocus={onFocusClip} onPlay={onPlayClip} />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="min-w-0">
+                {g.items.map((i) => {
+            const { s, ws } = lines[i]!;
             const isActive = currentTime >= s.start && currentTime < s.end;
-            const inClip = clips.find((c) => s.start < c.endSec - 0.3 && s.end > c.startSec + 0.3);
+            const inClip = clipOfLine[i];
             const marks = ws.filter((x) => x.flag && visibleFlag(x.flag));
             return (
               <div
@@ -547,11 +601,6 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                 className={`-mx-3 grid grid-cols-[30px_minmax(0,1fr)] gap-2.5 rounded-[12px] px-3 py-2 ${isActive ? "bg-panel shadow-[0_0_0_1px_var(--line)]" : ""}`}
               >
                 <div className="flex flex-col items-center gap-1 pt-0.5">
-                  {inClip && (
-                    <span className="grid h-5 min-w-5 place-items-center rounded-[6px] bg-acc px-1 font-mono text-[10px] font-semibold text-acc-ink" title={`In clip #${inClip.index + 1}`}>
-                      {inClip.index + 1}
-                    </span>
-                  )}
                   {marks.slice(0, 3).map(({ flag }) => (
                     <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flag!.kind === "entity" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink"}`}>
                       {flag!.kind === "entity" ? "Aa" : "✂"}
@@ -648,7 +697,10 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                 </div>
               </div>
             );
-          })}
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </ScrollArea>
       {listOpen && orderedFlags.length > 0 && (
@@ -1156,5 +1208,87 @@ function Refusal({ reason }: { reason: string }) {
         </ScrollArea>
       )}
     </div>
+  );
+}
+
+/** The one label of a clip's bracket: hover for a summary card, click to focus the clip. */
+function ClipMarker({ clip, projectId, active, onFocus, onPlay }: { clip: TranscriptClip; projectId: string; active: boolean; onFocus?: (id: string) => void; onPlay?: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const show = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(true), 120);
+  };
+  const hide = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(false), 160);
+  };
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onFocus={show}
+          onBlur={hide}
+          onClick={(e) => {
+            e.preventDefault();
+            setOpen(false);
+            if (clip.id) onFocus?.(clip.id);
+          }}
+          aria-label={`Clip ${clip.index + 1}${clip.title ? `: ${clip.title}` : ""}`}
+          className={`grid h-6 min-w-6 place-items-center rounded-[7px] px-1 font-mono text-[11px] font-semibold shadow-[0_0_0_3px_var(--bg)] transition ${active ? "bg-ink text-bg" : "bg-acc text-acc-ink hover:brightness-110"}`}
+        >
+          {clip.index + 1}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="right"
+          align="start"
+          sideOffset={8}
+          collisionPadding={12}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          className="z-50 flex w-[280px] gap-3 rounded-[14px] border border-line bg-panel p-3 text-ink shadow-pop outline-none"
+        >
+          <button
+            className="film relative w-[54px] shrink-0 overflow-hidden rounded-[8px]"
+            style={{ aspectRatio: "9 / 16" }}
+            disabled={!clip.videoUrl || !clip.id}
+            onClick={() => clip.id && onPlay?.(clip.id)}
+            aria-label="Play preview"
+          >
+            {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+            {clip.videoUrl && <span className="absolute inset-0 grid place-items-center text-[10px] text-white [text-shadow:0_1px_2px_#000]">▶</span>}
+          </button>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex items-start gap-1.5">
+              <span className="pt-px font-mono text-[11px] text-ink3">#{clip.index + 1}</span>
+              <b className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug">{clip.title || "Untitled clip"}</b>
+              {clip.score ? <span className="shrink-0 rounded-[6px] bg-acc-soft px-1.5 font-mono text-[11px] font-semibold text-acc-text">{Math.round(clip.score)}</span> : null}
+            </div>
+            <span className="font-mono text-[11px] text-ink2">
+              {formatTime(clip.startSec)}–{formatTime(clip.endSec)} · {Math.round(clip.endSec - clip.startSec)}s
+            </span>
+            {clip.hook && <span className="line-clamp-2 text-xs text-ink2">“{clip.hook}”</span>}
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {clip.id && (
+                <button className="btn-ghost px-2 py-1 text-xs" onClick={() => onFocus?.(clip.id!)}>
+                  Show clip
+                </button>
+              )}
+              {clip.id && (
+                <a className="btn-quiet px-2 py-1 text-xs font-semibold text-acc-text no-underline" href={`/p/${projectId}/clips/${clip.id}`}>
+                  Edit
+                </a>
+              )}
+            </div>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

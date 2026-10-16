@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
+import Fuse, { type FuseResult, type FuseResultMatch } from "fuse.js";
 import { useNavigate } from "react-router";
 import { Film, FolderOpen, Link2, Moon, Plus, Search, Settings, Upload } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
@@ -78,14 +79,17 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const [, toggleTheme] = useTheme();
   const { startProjects, openWithFile } = useUploads();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [debounced, setDebounced] = useState(q);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(q.trim()), 140);
-    return () => clearTimeout(id);
-  }, [q]);
   const url = isUrl(q);
-  const projectsQ = useQuery({ ...trpc.projects.list.queryOptions(), enabled: open });
-  const searchQ = useQuery({ ...trpc.search.queryOptions({ q: debounced || "_" }), enabled: open && debounced.length >= 2 && !url, placeholderData: (prev) => prev });
+  // one small index of every project and clip, fuzzy-matched locally as you type
+  const indexQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 30_000 });
+  const fuse = useMemo(() => {
+    const d = indexQ.data;
+    if (!d) return null;
+    return {
+      projects: fuzzy(d.projects, [{ name: "title", weight: 1 }]),
+      clips: fuzzy(d.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }]),
+    };
+  }, [indexQ.data]);
   const [cursor, setCursor] = useState(0);
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -94,8 +98,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
 
   const items: Item[] = useMemo(() => {
     const out: Item[] = [];
-    const ql = q.trim().toLowerCase();
-    if (url) out.push({ key: "new-url", group: "Start", icon: <Link2 className="h-4 w-4" />, label: "New project from this link", hint: <span className="truncate font-mono">{q.trim()}</span>, run: go(() => nav(`/new?url=${encodeURIComponent(q.trim())}`)) });
+    const ql = q.trim();
+    if (url) out.push({ key: "new-url", group: "Start", icon: <Link2 className="h-4 w-4" />, label: "New project from this link", hint: <span className="truncate font-mono">{ql}</span>, run: go(() => nav(`/new?url=${encodeURIComponent(ql)}`)) });
     const actions: Item[] = [
       { key: "a-new", group: "Actions", icon: <Plus className="h-4 w-4" />, label: "New project", hint: "paste a link or upload", run: go(() => nav("/new")) },
       { key: "a-upload", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload videos…", hint: "several start a project each", run: () => fileRef.current?.click() },
@@ -104,34 +108,44 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
     ];
     if (url) return out;
+    const d = indexQ.data;
     if (!ql) {
-      for (const p of (projectsQ.data ?? []).slice(0, 6))
-        out.push({ key: `p-${p.id}`, group: "Recent projects", thumb: p.sourceThumbnailUrl ?? p.thumbnailUrl, label: p.title, hint: <StatusText status={p.status} />, run: go(() => nav(`/p/${p.id}`)) });
+      for (const p of (d?.projects ?? []).slice(0, 6))
+        out.push({ key: `p-${p.id}`, group: "Recent projects", thumb: p.thumbnailUrl, label: p.title, hint: <StatusText status={p.status} />, run: go(() => nav(`/p/${p.id}`)) });
       return [...out, ...actions];
     }
-    out.push(...actions.filter((a) => String(a.label).toLowerCase().includes(ql)));
-    const projects = searchQ.data?.projects ?? (projectsQ.data ?? []).filter((p) => p.title.toLowerCase().includes(ql)).slice(0, 8);
-    for (const p of projects) {
-      const full = projectsQ.data?.find((x) => x.id === p.id);
-      out.push({ key: `p-${p.id}`, group: "Projects", thumb: full?.sourceThumbnailUrl ?? full?.thumbnailUrl, label: p.title, hint: <StatusText status={p.status} />, run: go(() => nav(`/p/${p.id}`)) });
+    const actionFuse = new Fuse(actions, { keys: ["label", "hint"], threshold: 0.4, ignoreLocation: true, includeMatches: true });
+    for (const r of actionFuse.search(ql).slice(0, 3)) out.push({ ...r.item, label: <Highlight text={String(r.item.label)} matches={r.matches} k="label" /> });
+    if (fuse) {
+      for (const r of fuse.projects.search(ql).slice(0, 6))
+        out.push({ key: `p-${r.item.id}`, group: "Projects", thumb: r.item.thumbnailUrl, label: <Highlight text={r.item.title} matches={r.matches} k="title" />, hint: <StatusText status={r.item.status} />, run: go(() => nav(`/p/${r.item.id}`)) });
+      for (const r of fuse.clips.search(ql).slice(0, 10)) {
+        const c = r.item;
+        const via = r.matches?.find((m) => m.key !== "title");
+        out.push({
+          key: `c-${c.id}`,
+          group: "Clips",
+          thumb: c.thumbnailUrl,
+          icon: <Film className="h-4 w-4" />,
+          label: <Highlight text={c.title || "Untitled clip"} matches={r.matches} k="title" />,
+          hint:
+            // show where the match was when it wasn't the title: the hook or caption snippet
+            via && (via.key === "hook" || via.key === "caption") && typeof via.value === "string" ? (
+              <span className="truncate">
+                #{c.index + 1} · <Highlight text={via.value} matches={[via]} k={via.key} />
+              </span>
+            ) : (
+              <span className="truncate">
+                #{c.index + 1} · {c.projectTitle} · <span className="font-mono">{formatTime(c.startSec)}</span>
+              </span>
+            ),
+          run: go(() => nav(`/p/${c.projectId}#clip=${c.id}`)),
+        });
+      }
     }
-    for (const c of searchQ.data?.clips ?? [])
-      out.push({
-        key: `c-${c.id}`,
-        group: "Clips",
-        thumb: c.thumbnailUrl,
-        icon: <Film className="h-4 w-4" />,
-        label: c.title || "Untitled clip",
-        hint: (
-          <span className="truncate">
-            #{c.index + 1} · {c.projectTitle} · <span className="font-mono">{formatTime(c.startSec)}</span>
-          </span>
-        ),
-        run: go(() => nav(`/p/${c.projectId}#clip=${c.id}`)),
-      });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, url, projectsQ.data, searchQ.data]);
+  }, [q, url, indexQ.data, fuse]);
 
   useEffect(() => setCursor(0), [q]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -168,14 +182,14 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                 }
               }}
               placeholder="Search projects and clips, or paste a video link…"
-              className="h-[52px] min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink3"
+              className="h-[52px] min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink3 focus-visible:outline-none"
               aria-label="Search"
             />
             <span className="kbd">esc</span>
           </div>
           <ScrollArea className="max-h-[min(460px,60vh)]">
             <div ref={listRef} className="flex flex-col p-1.5">
-              {items.length === 0 && <div className="px-3 py-8 text-center text-sm text-ink3">{searchQ.isFetching ? "Searching…" : "Nothing found"}</div>}
+              {items.length === 0 && <div className="px-3 py-8 text-center text-sm text-ink3">{indexQ.isLoading ? "Loading…" : "Nothing found"}</div>}
               {items.map((it, i) => {
                 const head = it.group !== lastGroup ? it.group : null;
                 lastGroup = it.group;
@@ -231,4 +245,48 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+/**
+ * Fuzzy matcher that handles both shapes of query: the whole string as one pattern ("chia jm"),
+ * and words that each match somewhere, typos and all ("revnge sucess"). Best score wins.
+ */
+function fuzzy<T>(items: T[], keys: Array<{ name: string; weight: number }>): { search: (q: string) => FuseResult<T>[] } {
+  const base = { keys, includeMatches: true, includeScore: true, ignoreLocation: true, threshold: 0.38, minMatchCharLength: 2 };
+  const whole = new Fuse(items, base);
+  const words = new Fuse(items, { ...base, useExtendedSearch: true });
+  return {
+    search(q: string) {
+      const best = new Map<T, FuseResult<T>>();
+      const add = (rs: FuseResult<T>[]) => {
+        for (const r of rs) {
+          const prev = best.get(r.item);
+          if (!prev || (r.score ?? 1) < (prev.score ?? 1)) best.set(r.item, r);
+        }
+      };
+      add(whole.search(q));
+      if (/\s/.test(q.trim())) add(words.search(q.trim().replace(/[!'=^$|]/g, " ")));
+      return [...best.values()].sort((a, b) => (a.score ?? 1) - (b.score ?? 1));
+    },
+  };
+}
+
+/** Bold the characters Fuse matched in one key of a result. */
+function Highlight({ text, matches, k }: { text: string; matches?: readonly FuseResultMatch[]; k: string }) {
+  const m = matches?.find((x) => x.key === k && x.value === text);
+  if (!m?.indices.length) return <>{text}</>;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  // ignore single-letter scatter; keep runs of 2+ so highlights read as words
+  for (const [a, b] of m.indices.filter(([a, b]) => b - a >= 1)) {
+    if (a > at) parts.push(text.slice(at, a));
+    parts.push(
+      <mark key={a} className="rounded-[3px] bg-acc-soft text-acc-text">
+        {text.slice(a, b + 1)}
+      </mark>,
+    );
+    at = b + 1;
+  }
+  parts.push(text.slice(at));
+  return <>{parts}</>;
 }

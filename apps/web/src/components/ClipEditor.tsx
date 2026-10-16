@@ -568,6 +568,12 @@ export function ClipEditor(props: Props) {
     if (!el.contains(r.commonAncestorContainer)) return setTxSel(null);
     const spans = [...el.querySelectorAll<HTMLElement>("[data-s]")].filter((n) => r.intersectsNode(n));
     if (!spans.length) return setTxSel(null);
+    // snap the highlight to whole words
+    const snapped = document.createRange();
+    snapped.setStartBefore(spans[0]!);
+    snapped.setEndAfter(spans.at(-1)!);
+    sel.removeAllRanges();
+    sel.addRange(snapped);
     setTxSel({ start: Math.min(...spans.map((n) => Number(n.dataset.s))), end: Math.max(...spans.map((n) => Number(n.dataset.e))) });
   };
   const transcript = (
