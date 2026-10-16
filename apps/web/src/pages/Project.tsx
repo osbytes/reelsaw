@@ -13,6 +13,7 @@ import { ConfirmDialog, ProgressBar } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { TranscriptPanel } from "../components/TranscriptPanel";
+import { usePlayback } from "../lib/playback";
 import { formatTime, masksSourceText, PIPELINE_STAGES, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
@@ -51,7 +52,6 @@ export function ProjectPage() {
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
-  const [playing, setPlaying] = useState(false);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
   const [actOpen, setActOpen] = useState(false);
   const [drawer, setDrawer] = useState(true);
@@ -61,6 +61,9 @@ export function ProjectPage() {
   const compact = width < 900;
   const [mtab, setMtab] = useState<"transcript" | "clips" | "activity">("transcript");
   const sourceRef = useRef<HTMLVideoElement>(null);
+  // one owner for what's audible: Space, the Play button and the transcript's play-in-context share it
+  const playback = usePlayback(sourceRef);
+  const playing = playback.playing;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id }) });
 
@@ -117,34 +120,11 @@ export function ProjectPage() {
     const v = sourceRef.current;
     if (clipId) setActiveClip(clipId);
     if (!v) return;
+    playback.stopLoop(); // seeking elsewhere ends play-in-context
     v.currentTime = t;
     v.play().catch(() => {});
   }
-  // loop a span of the source (transcript fix context); rAF keeps the wrap tight, timeupdate is ~4 Hz
-  const [loop, setLoop] = useState<{ start: number; end: number } | null>(null);
-  useEffect(() => {
-    const v = sourceRef.current;
-    if (!v) return;
-    if (!loop) return;
-    v.currentTime = loop.start;
-    v.play().catch(() => {});
-    let raf = 0;
-    const tick = () => {
-      if (v.currentTime >= loop.end || v.currentTime < loop.start - 0.5) v.currentTime = loop.start;
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      v.pause();
-    };
-  }, [loop]);
-  const togglePlay = () => {
-    const v = sourceRef.current;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
-  };
+  const togglePlay = playback.toggle;
 
   // ----- deep links: #clip=<id> opens the preview, #card=<id> highlights a card, #t=<sec> seeks the source -----
   const hash = useHashParams();
@@ -188,6 +168,7 @@ export function ProjectPage() {
     if (!c) return;
     focusCard(cid, compact);
     const v = sourceRef.current;
+    playback.stopLoop();
     if (v) {
       v.pause();
       v.currentTime = c.startSec;
@@ -206,15 +187,13 @@ export function ProjectPage() {
       if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement;
       if (el.closest("input, textarea, select, [contenteditable]")) return;
-      const v = sourceRef.current;
-      if (!v) return;
+      if (!sourceRef.current) return;
       e.preventDefault(); // also stops Space from re-clicking the focused button
-      if (v.paused) v.play().catch(() => {});
-      else v.pause();
+      togglePlay(); // pauses / resumes play-in-context too, keeping it armed
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePlay]);
 
   if (q.isLoading) return <p className="p-6 text-ink3">Loading…</p>;
   if (q.error || !p) return <p className="p-6 text-err">{q.error?.message ?? "Not found"}</p>;
@@ -411,8 +390,7 @@ export function ProjectPage() {
             playsInline
             className="absolute inset-0 h-full w-full bg-black object-contain"
             onTimeUpdate={(e) => setSrcTime(e.currentTarget.currentTime)}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
+            {...playback.videoProps}
             onClick={togglePlay}
           />
         )}
@@ -615,7 +593,7 @@ export function ProjectPage() {
             <div className="flex min-h-0 flex-1 flex-col">
               {source}
               {transcriptStage ? (
-                <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+                <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
               ) : (
                 waiting
               )}
@@ -634,7 +612,7 @@ export function ProjectPage() {
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
             {transcriptStage ? (
-              <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} onLoop={setLoop} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+              <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
             ) : (
               waiting
             )}

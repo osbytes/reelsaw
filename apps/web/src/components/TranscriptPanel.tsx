@@ -8,6 +8,7 @@ import { useLocation } from "react-router";
 import { readHash, writeHash, linkWith } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
+import type { Playback } from "../lib/playback";
 import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word } from "@reelsaw/shared";
 
 interface Props {
@@ -27,8 +28,8 @@ interface Props {
   onSeek: (t: number) => void;
   /** soft-deleted fixes (restorable from the Deleted filter) */
   deletedFlags?: Array<TranscriptFlag & { deletedAt: string }>;
-  /** loop a span of the source (audio context for a fix); null stops */
-  onLoop?: (span: { start: number; end: number } | null) => void;
+  /** shared playback: play-in-context loops a span through it, so Space and Play stay in sync */
+  playback?: Playback;
   className?: string;
 }
 
@@ -66,20 +67,14 @@ const EPS = 0.02;
  * scrolls away, then shows a "resume" pill. Lines are rendered word by word so each name fix is an
  * inline highlight with a hover/click popover (accept, reject, or type a replacement).
  */
-export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, onLoop, deletedFlags = [], onFocusClip, onPlayClip, activeClipId, className = "" }: Props) {
-  // flag whose surrounding audio is playing on repeat, how much context, and which version (A/B for cuts)
-  const [looping, setLooping] = useState<string | null>(null);
+export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, playback, deletedFlags = [], onFocusClip, onPlayClip, activeClipId, className = "" }: Props) {
+  // fix whose surrounding audio is on repeat (owned by the shared playback), how much context, and
+  // which version (A/B for cuts)
+  const looping = playback?.loop?.key ?? null;
+  const loopPaused = !!playback?.loopPaused;
   const [ctxSec, setCtxSec] = useState(2);
   const [variant, setVariant] = useState<Variant>("orig");
   const [plans, setPlans] = useState<Record<string, PlanState>>({});
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audio = () => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-      audioRef.current.loop = true;
-    }
-    return audioRef.current;
-  };
   const fetchPlan = async (f: TranscriptFlag, exact = false): Promise<CutPlan | undefined> => {
     setPlans((x) => ({ ...x, [f.id]: { ...x[f.id], loading: exact ? "exact" : "plan", error: undefined } }));
     try {
@@ -94,27 +89,17 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     }
   };
   const startLoop = async (f: TranscriptFlag, pad = ctxSec, v: Variant = f.kind === "disfluency" ? variant : "orig", plan?: CutPlan) => {
-    setLooping(f.id);
+    if (!playback) return;
     setPinnedFlag(f.id);
     setOpenFlag(f.id);
-    if (v === "orig") {
-      audioRef.current?.pause();
-      onLoop?.({ start: Math.max(0, f.start - pad), end: f.end + pad });
-      return;
-    }
-    // with the cut: server renders the window with the seam, played on repeat in an <audio>
-    onLoop?.(null);
+    const span = { key: f.id, start: Math.max(0, f.start - pad), end: f.end + pad };
+    if (v === "orig") return playback.startLoop(span);
+    // with the cut: the server renders the window with the seam, played on repeat instead of the video
     const pl = plan ?? plans[f.id]?.plan ?? (await fetchPlan(f));
     if (!pl) return;
-    const a = audio();
-    a.src = `/api/projects/${projectId}/flags/${f.id}/preview.mp3?pad=${pad}&cutStart=${pl.cut.start}&cutEnd=${pl.cut.end}`;
-    a.play().catch(() => {});
+    playback.startLoop({ ...span, src: `/api/projects/${projectId}/flags/${f.id}/preview.mp3?pad=${pad}&cutStart=${pl.cut.start}&cutEnd=${pl.cut.end}` });
   };
-  const stopLoop = () => {
-    setLooping(null);
-    audioRef.current?.pause();
-    onLoop?.(null);
-  };
+  const stopLoop = () => playback?.stopLoop();
   const toggleLoop = (f: TranscriptFlag) => (looping === f.id ? stopLoop() : void startLoop(f));
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -423,7 +408,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       const cur = pinnedFlag ? orderedFlags.find((f) => f.id === pinnedFlag) : undefined;
       if (!cur) return;
       if (k === "a") decide(cur.id, { status: "accepted" });
-      else if (k === "p" && onLoop) toggleLoop(cur);
+      else if (k === "p" && playback) toggleLoop(cur);
       else if (k === "r") decide(cur.id, { status: "rejected" });
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -438,7 +423,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     if (looping && openFlag !== looping) stopLoop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFlag]);
-  useEffect(() => () => (audioRef.current?.pause(), onLoop?.(null)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => playback?.stopLoop(), []); // eslint-disable-line react-hooks/exhaustive-deps
   // ----- deep links: #fix=<id> pins a fix, #sel=<start>-<end> selects a range (both kept in sync) -----
   const hydrated = useRef(false);
   const copyLink = (params: Record<string, string>) =>
@@ -662,9 +647,10 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                           deleting={delFlag.isPending}
                           onCopyLink={() => copyLink({ fix: flag.id })}
                           loop={
-                            onLoop
+                            playback
                               ? {
                                   on: looping === flag.id,
+                                  paused: looping === flag.id && loopPaused,
                                   sec: ctxSec,
                                   toggle: () => toggleLoop(flag),
                                   setSec: (n) => {
@@ -893,7 +879,7 @@ function FlagWord({
   onDelete?: () => void;
   deleting?: boolean;
   onCopyLink?: () => void;
-  loop?: { on: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
+  loop?: { on: boolean; paused: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
   word: Word;
   flag: TranscriptFlag;
   decision?: Decision;
@@ -1042,12 +1028,12 @@ function FlagWord({
           {loop && (
             <div className="flex items-center gap-2">
               <button
-                className={`btn px-2.5 py-1.5 text-xs ${loop.on ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+                className={`btn min-w-[9.5rem] justify-center px-2.5 py-1.5 text-xs ${loop.on ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
                 onClick={loop.toggle}
                 aria-pressed={loop.on}
-                title="Play the audio around this fix on repeat (P)"
+                title={loop.on ? "Stop playing in context (P) · Space pauses" : "Play the audio around this fix on repeat (P)"}
               >
-                {loop.on ? "❚❚ Stop" : "↻ Play in context"} <span className="font-mono opacity-70">P</span>
+                {loop.on ? "■ Stop" : "↻ Play in context"} <span className="font-mono opacity-70">P</span>
               </button>
               <div role="radiogroup" aria-label="Seconds of context" className="seg">
                 {[2, 4, 8].map((n) => (
@@ -1062,10 +1048,10 @@ function FlagWord({
                   </button>
                 ))}
               </div>
-              {loop.on && !loop.ab && <span className="text-[11px] text-ink3">original audio</span>}
+              {loop.on && !loop.ab && <span className="whitespace-nowrap text-[11px] text-ink3">{loop.paused ? "paused" : "original audio"}</span>}
             </div>
           )}
-          {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} />}
+          {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} paused={loop.paused} />}
           <div className="flex flex-wrap items-center gap-1.5">
             {flag.subkind === "manual" && !isDeletion && (
               <button className="btn-primary px-2.5 py-1.5 text-xs" disabled={!text.trim() || text.trim() === shown} onClick={accept} title="Stage the new text; apply from the bar">
@@ -1125,7 +1111,7 @@ const SOURCE_LABEL: Record<CutPlan["source"], string> = {
 };
 
 /** Original vs with-the-cut toggle for a disfluency, plus where the cut boundaries came from. */
-function CutAB({ ab, playing }: { ab: NonNullable<NonNullable<React.ComponentProps<typeof FlagWord>["loop"]>["ab"]>; playing: boolean }) {
+function CutAB({ ab, playing, paused }: { ab: NonNullable<NonNullable<React.ComponentProps<typeof FlagWord>["loop"]>["ab"]>; playing: boolean; paused: boolean }) {
   const { plan, loading, error } = ab.plan ?? {};
   useEffect(() => {
     ab.loadPlan();
@@ -1152,7 +1138,7 @@ function CutAB({ ab, playing }: { ab: NonNullable<NonNullable<React.ComponentPro
             </button>
           ))}
         </div>
-        {playing && <span className="text-[11px] text-ink3">{ab.variant === "cut" ? "playing with the cut" : "playing as recorded"}</span>}
+        {playing && <span className="whitespace-nowrap text-[11px] text-ink3">{paused ? "paused" : ab.variant === "cut" ? "playing with the cut" : "playing as recorded"}</span>}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink2">
         {loading === "plan" && <span>Checking for an exact cut…</span>}
