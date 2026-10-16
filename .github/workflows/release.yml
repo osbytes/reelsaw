@@ -77,8 +77,9 @@ jobs:
           context: .
           target: runtime
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }}
+          # zstd: multi-threaded and several times faster to compress than gzip, slightly smaller.
+          # Pulling needs Docker Engine 23+ / containerd 1.5+.
+          outputs: type=image,name=${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }},push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             REELSAW_VERSION=${{ steps.v.outputs.version }}
@@ -87,7 +88,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: No source in the image; bundle loads on both architectures
+      - name: No source in the image; bundle and ONNX models load on both architectures
         env:
           STAGING: ${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }}
         run: |
@@ -95,6 +96,10 @@ jobs:
           sh scripts/check-image.sh "$STAGING"
           for arch in amd64 arm64; do
             docker run --rm --platform "linux/$arch" --entrypoint reelsaw "$STAGING" 2>&1 | grep -q "usage: reelsaw" || { echo "bundle failed to load on $arch"; exit 1; }
+            # a real inference session: proves the native binary for this arch survived the trim
+            docker run --rm --platform "linux/$arch" --entrypoint node -w /app/server "$STAGING" -e \
+              'require("onnxruntime-node").InferenceSession.create(process.env.FACE_MODEL_PATH).then(s=>console.log("onnx ok",process.arch,s.inputNames.join(",")))' \
+              | grep "onnx ok" || { echo "onnxruntime failed on $arch"; exit 1; }
           done
 
       # only version tags publish; a manual run stops at the staging tag

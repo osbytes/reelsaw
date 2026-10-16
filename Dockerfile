@@ -42,6 +42,21 @@ RUN pnpm -r build \
  && cp -r apps/server/dist-bundle /out/server/dist \
  && find /out/server -path /out/server/node_modules -prune -o \( -name "*.ts" -o -name "*.map" \) -print | xargs -r rm -f
 
+# ---------- server for one target architecture: drop the other platforms' native binaries ----------
+# A separate stage (not a RUN in `runtime`): deleting files in a later layer wouldn't shrink the image.
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS server
+ARG TARGETARCH
+COPY --from=build /out/server /out/server
+RUN set -eu; \
+    case "$TARGETARCH" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "unsupported arch $TARGETARCH"; exit 1 ;; esac; \
+    bins=$(find /out/server/node_modules/.pnpm -path "*/onnxruntime-node/bin/napi-v*" -maxdepth 6 -type d -name "napi-v*"); \
+    [ -n "$bins" ] || { echo "onnxruntime-node binaries not found: layout changed?"; exit 1; }; \
+    for b in $bins; do \
+      find "$b" -mindepth 1 -maxdepth 1 -type d ! -name linux -exec rm -rf {} +; \
+      find "$b/linux" -mindepth 1 -maxdepth 1 -type d ! -name "$arch" -exec rm -rf {} +; \
+      ls "$b/linux/$arch"/*.node >/dev/null || { echo "no onnxruntime binary for linux/$arch in $b"; exit 1; }; \
+    done
+
 # ---------- dev: source mounted, live reload (docker-compose.dev.yml) ----------
 FROM system AS dev
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
@@ -76,7 +91,7 @@ LABEL org.opencontainers.image.title="Reelsaw" \
       org.opencontainers.image.version="${REELSAW_VERSION}" \
       org.opencontainers.image.revision="${REELSAW_COMMIT}"
 WORKDIR /app
-COPY --from=build /out/server /app/server
+COPY --from=server /out/server /app/server
 COPY --from=build /app/apps/server/drizzle /app/server/drizzle
 COPY --from=build /app/apps/web/dist /app/web
 # operator CLI: docker compose exec app reelsaw status <projectId>
