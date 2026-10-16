@@ -4,7 +4,8 @@
 #   curl -fsSL <this script's raw URL> | bash
 #
 # Creates ~/reelsaw (docker-compose.yml + .env with generated secrets), pulls the model, starts the
-# stack and waits until it answers. Re-running is safe: an existing .env is kept.
+# stack and waits until it answers. Re-running is safe and is how you update: the existing .env is
+# kept, the newest image is pulled and the app restarts (data stays in Docker volumes).
 #
 # Options (environment variables):
 #   REELSAW_DIR=~/reelsaw                         where to install
@@ -130,6 +131,9 @@ YAML
 
 if [ -f .env ]; then
   say "Keeping the existing .env (delete it to regenerate)"
+  # an existing install may pin a version: use the image it runs
+  pinned=$(sed -n 's/^REELSAW_IMAGE=//p' .env | tail -1)
+  [ -n "$pinned" ] && IMAGE="$pinned"
 else
   rand() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
   cat > .env <<ENV
