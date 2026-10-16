@@ -13,7 +13,11 @@ export function describeEvent(e: ProjectEvent): { text: string; tone: Tone } | n
     case "project.created":
       return { text: `Project created${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
     case "stage.started":
-      if (p.stage === "review") return { text: `Applying ${p.changed} transcript fix${p.changed === 1 ? "" : "es"}${p.rerendered ? `, re-rendering ${p.rerendered} clip${p.rerendered === 1 ? "" : "s"}` : ""}`, tone: "run" };
+      // one-shot event: the fix is saved when it's emitted; only the re-renders are still running
+      if (p.stage === "review")
+        return p.rerendered
+          ? { text: `Transcript updated, re-rendering ${p.rerendered} clip${p.rerendered === 1 ? "" : "s"}`, tone: "run" }
+          : { text: p.changed ? `Transcript updated (${p.changed} fix${p.changed === 1 ? "" : "es"})` : "Transcript updated", tone: "ok" };
       if (p.stage === "refine" && Array.isArray(p.steps)) return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
     case "stage.completed":

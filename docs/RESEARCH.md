@@ -129,6 +129,35 @@ Impact and effort are scored 1–5. Rank is ordered by roughly impact ÷ effort.
 
 ---
 
+## Disfluency detection (Oct 2026)
+
+What we do now (`pipeline/disfluency.ts`): rules find certain cases (filled pauses, plain stutters,
+comma repeats whose first copy can't end a clause) and candidates; a deletions-only LLM rewrite adds
+candidates that pass a rough-copy test (the repair starts right after the deletion, never across a
+sentence end); an LLM verifier compares each sentence with and without the candidate. Only certain
+cases apply automatically. Measured on the `disfluency` eval: precision 0.46 → 0.94, auto-applied
+false positives 6 → 0, recall 0.91 → 0.70.
+
+From the literature:
+- Scheme: Shriberg's reparandum → interruption point → (interregnum) → repair; detection tags the
+  reparandum only. Fillers are scored separately.
+- Prompted LLMs mostly over-delete (DRES, Teleki et al. 2025, arXiv 2509.20321: gpt-4o 78 E-F1 zero-shot
+  vs 91–95 for fine-tuned small models on Switchboard). Reasoning models over-delete worst.
+- Cheap false-positive guards that work: rough-copy structure, cues at the interruption point
+  (pause, cut-off, filler), sentence boundaries as hard limits, emphatic repeats and discourse
+  markers kept by default.
+- Datasets: Switchboard reannotated (free, github.com/vickyzayats/switchboard_corrected_reannotated,
+  telephone speech), DisfluencySpeech (HF amaai-lab/DisfluencySpeech, before/after pairs),
+  PodcastFillers (fillers only, non-commercial metadata), LARD (rule-generated repairs; useful for
+  hard negatives). No public podcast dataset labels repairs.
+- Local models: the self-attentive BERT checkpoint from Jamshid Lou & Johnson (ACL 2020, ~91 F1,
+  github.com/pariajm/joint-disfluency-detector-and-parser) runs on CPU; worth trying as a second
+  verifier. Long term: fine-tune a small tagger (ModernBERT/DistilBERT) on Switchboard plus our own
+  reviewed podcast windows.
+
+Next: grow the eval from every review (it is built from accepted/rejected flags), add timing cues
+(pause/fragment at the interruption point) once the eval has enough cases to tune a threshold.
+
 ## Top 10 next moves (prioritised)
 
 > **Status (2026-10-15):** #1 (map → pool → rank), #2 (rubric sub-scores + focus + length buckets + maxClips) and #3 (emphasis captions + readability rules + safe-zone overlay) are implemented. Per-scene reframe overrides (#10, manual part) and drag-to-recentre are implemented too. #4 (Silero VAD pause trimming) and #5 (CTC forced alignment for cut seams, wav2vec2-base-960h, Apache-2.0) followed.

@@ -231,16 +231,16 @@ export function ProjectPage() {
   const dur = p.durationSec ?? 0;
 
   const header = (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3 border-b border-line px-4 py-3.5 sm:px-5">
+    <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}>
       <div className="min-w-0 flex-[1_1_320px]">
-        <div className="flex gap-1.5 text-xs text-ink3">
+        <div className={`gap-1.5 text-xs text-ink3 ${compact ? "hidden" : "flex"}`}>
           <Link to="/" className="text-ink3 no-underline hover:text-ink">
             Projects
           </Link>
           <span>/</span>
           <span className="truncate">{p.title}</span>
         </div>
-        <h1 className="mt-0.5 text-xl font-bold leading-tight tracking-tight [text-wrap:pretty]">{p.title}</h1>
+        <h1 className={`mt-0.5 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "text-xl"}`}>{p.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 text-[13px] text-ink2">
           {dur ? <span className="font-mono text-xs leading-5">{formatTime(dur)}</span> : null}
           {p.width && p.height ? <span>{p.height}p</span> : null}
@@ -287,7 +287,7 @@ export function ProjectPage() {
       <div className="flex items-center gap-2">
         {readyCount > 0 ? (
           <a className="btn-primary py-2 no-underline" href={`/api/projects/${p.id}/export.zip`} download title="Zip of every rendered clip with YouTube / TikTok metadata, paste-ready text and a manifest">
-            Export {readyCount} clip{readyCount === 1 ? "" : "s"}
+            Export{compact ? "" : ` ${readyCount} clip${readyCount === 1 ? "" : "s"}`}
           </a>
         ) : (
           <button className="btn-primary py-2" disabled>
@@ -364,10 +364,32 @@ export function ProjectPage() {
       </div>
     ) : null;
 
+  // burned-in / slide text notice: beside the source on desktop, in the Activity tab on phones
+  const textNotice = (overlays.length > 0 || presentation) && (
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-acc-soft px-2.5 py-1.5 text-xs text-ink2">
+            <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{presentation ? "SLIDES" : hasCaptions ? "CC" : "TXT"}</span>
+            <span className={`min-w-0 flex-[1_1_160px] text-ink ${compact ? "truncate" : ""}`}>
+              {presentation && p.settings.sourceText !== "always"
+                ? "Looks like a slide presentation, so on-screen text is kept and slides are shown whole."
+                : presentation && p.settings.sourceText === "always"
+                  ? "Burned-in text is hidden, even though this looks like a slide presentation."
+                  : `Burned-in ${hasCaptions ? "captions" : "text"}${overlays.length > 1 ? " and logos" : ""} ${masking ? "are hidden in clips." : "are shown in clips."}`}
+            </span>
+            {(presentation ? overlays.length > 0 || p.settings.sourceText === "always" : true) && (
+              <button
+                className="text-xs font-semibold text-acc-text disabled:opacity-50"
+                disabled={setSourceText.isPending}
+                onClick={() => setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate)}
+              >
+                {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
+              </button>
+            )}
+          </div>
+  );
   const pct = (t: number) => `${dur ? (t / dur) * 100 : 0}%`;
   const source = (
-    <div className={`flex shrink-0 gap-4 px-4 py-3.5 sm:px-5 ${compact ? "flex-col" : "flex-wrap items-center"}`}>
-      <div className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video max-h-[30vh] w-full" : "aspect-video h-[clamp(110px,24vh,214px)]"}`}>
+    <div className={`flex shrink-0 px-4 sm:px-5 ${compact ? "items-center gap-3 py-2.5" : "flex-wrap items-center gap-4 py-3.5"}`}>
+      <div className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video w-[44%]" : "aspect-video h-[clamp(110px,24vh,214px)]"}`}>
         {p.sourceVideoUrl && (
           <video
             ref={sourceRef}
@@ -392,7 +414,7 @@ export function ProjectPage() {
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-[#b9b9c0]">{active ? "downloading…" : "no source video"}</span>
         )}
       </div>
-      <div className="flex min-w-0 flex-[1_1_240px] flex-col justify-center gap-2.5">
+      <div className={`flex min-w-0 flex-col justify-center ${compact ? "flex-1 gap-1.5" : "flex-[1_1_240px] gap-2.5"}`}>
         <div className="flex flex-wrap items-center gap-1.5">
           <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => seekSource(Math.max(0, srcTime - 5))}>
             −5s
@@ -424,27 +446,7 @@ export function ProjectPage() {
           ))}
           <div className="absolute top-0.5 h-[22px] w-0.5 rounded-[1px] bg-ink" style={{ left: pct(srcTime) }} />
         </div>
-        {(overlays.length > 0 || presentation) && (
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-acc-soft px-2.5 py-1.5 text-xs text-ink2">
-            <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{presentation ? "SLIDES" : hasCaptions ? "CC" : "TXT"}</span>
-            <span className="min-w-0 flex-[1_1_160px] text-ink">
-              {presentation && p.settings.sourceText !== "always"
-                ? "Looks like a slide presentation, so on-screen text is kept and slides are shown whole."
-                : presentation && p.settings.sourceText === "always"
-                  ? "Burned-in text is hidden, even though this looks like a slide presentation."
-                  : `Burned-in ${hasCaptions ? "captions" : "text"}${overlays.length > 1 ? " and logos" : ""} ${masking ? "are hidden in clips." : "are shown in clips."}`}
-            </span>
-            {(presentation ? overlays.length > 0 || p.settings.sourceText === "always" : true) && (
-              <button
-                className="text-xs font-semibold text-acc-text disabled:opacity-50"
-                disabled={setSourceText.isPending}
-                onClick={() => setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate)}
-              >
-                {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
-              </button>
-            )}
-          </div>
-        )}
+        {!compact && textNotice}
       </div>
     </div>
   );
@@ -474,12 +476,12 @@ export function ProjectPage() {
         const cid = (e.payload as { clipId?: string }).clipId;
         const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
         return (
-          <li key={e.id} className="grid grid-cols-[52px_14px_1fr] gap-1.5">
-            <span className="font-mono text-[11px] leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          <li key={e.id} className="grid grid-cols-[64px_14px_minmax(0,1fr)] items-baseline gap-2" title={d.text}>
+            <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
             <span className={`font-mono text-xs leading-5 ${TONE_FG[d.tone]}`}>{TONE_GLYPH[d.tone]}</span>
             {target ? (
               <button
-                className="min-w-0 break-words text-left leading-5 hover:text-acc-text"
+                className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
                 onClick={() => {
                   focusCard(target, true);
                   setActOpen(false);
@@ -488,7 +490,7 @@ export function ProjectPage() {
                 {d.text}
               </button>
             ) : (
-              <span className="min-w-0 break-words leading-5">{d.text}</span>
+              <span className="min-w-0 truncate leading-5">{d.text}</span>
             )}
           </li>
         );
@@ -608,6 +610,7 @@ export function ProjectPage() {
             </div>
           )}
           {mtab === "clips" && <ScrollArea className="min-h-0 flex-1 bg-sunk">{clipsList}</ScrollArea>}
+          {mtab === "activity" && textNotice && <div className="shrink-0 px-4 pt-3">{textNotice}</div>}
           {mtab === "activity" && (
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-4">{activityList}</div>

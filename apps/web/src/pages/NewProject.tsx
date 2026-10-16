@@ -353,9 +353,9 @@ export function NewProjectPage() {
             </section>
           </div>
 
-          <aside className="order-first lg:order-last">
+          <aside className="lg:order-last">
             <div className="flex flex-col items-center gap-3 lg:sticky lg:top-7">
-              <div className="h-[460px] w-full sm:h-[540px]">
+              <div className="h-[400px] w-full sm:h-[540px]">
                 <LoopingPreview
                   source={source}
                   srcW={srcDims.w}

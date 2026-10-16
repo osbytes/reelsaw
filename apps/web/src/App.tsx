@@ -25,7 +25,7 @@ export function Logo() {
           <path d="M1 7.2h14v1.6H1z" />
         </svg>
       </span>
-      <span className="text-[15px] font-bold tracking-tight">Reelsaw</span>
+      <span className="hidden text-[15px] font-bold tracking-tight sm:inline">Reelsaw</span>
     </Link>
   );
 }
@@ -102,13 +102,13 @@ function SearchButton() {
 }
 
 export function TopBar() {
-  const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
+  const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-2.5 py-[7px] no-underline sm:px-3 ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
   const loc = useLocation();
   const inProjects = loc.pathname === "/" || loc.pathname.startsWith("/p/") || loc.pathname === "/new";
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel px-4 sm:gap-5 sm:px-5">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:gap-5 sm:px-5">
       <Logo />
-      <nav className="flex gap-1">
+      <nav className="flex min-w-0 gap-0.5 sm:gap-1">
         <NavLink to="/" className={() => nav({ isActive: inProjects })}>
           Projects
         </NavLink>

@@ -646,7 +646,24 @@ export function ClipEditor(props: Props) {
 
   const captionsTab = (
     <div className="flex flex-col gap-5">
-      <Field label="Apply style to">
+      {/* the follow-up action lives in the label row's reserved slot, so toggling never pushes the panel down */}
+      <Field
+        label="Apply style to"
+        hint={
+          styleScope === "all" ? (
+            <span>re-renders every clip</span>
+          ) : (
+            <button
+              className={`text-xs font-semibold text-acc-text ${Object.keys(styleOverride).length > 0 ? "" : "invisible"}`}
+              aria-hidden={Object.keys(styleOverride).length === 0}
+              tabIndex={Object.keys(styleOverride).length > 0 ? 0 : -1}
+              onClick={() => edit({ style: projectStyle })}
+            >
+              Use the project style
+            </button>
+          )
+        }
+      >
         <Segmented
           value={styleScope}
           onChange={setStyleScope}
@@ -655,12 +672,6 @@ export function ClipEditor(props: Props) {
             { value: "all", label: `All ${clipCount} clips`, title: "Updates the project style and re-renders every clip" },
           ]}
         />
-        {styleScope === "clip" && Object.keys(styleOverride).length > 0 && (
-          <button className="w-max text-xs font-semibold text-acc-text" onClick={() => edit({ style: projectStyle })}>
-            Use the project style
-          </button>
-        )}
-        {styleScope === "all" && <span className="text-[11px] text-ink3">Saving updates the project default and re-renders every clip.</span>}
       </Field>
       <Field label="Look">
         <div className="grid grid-cols-4 gap-2">
@@ -1012,9 +1023,12 @@ export function ClipEditor(props: Props) {
           tag={frameTag}
         />
         {buffering && <div className="pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">Loading…</div>}
+        {/* overlaid on the frame: a warning that pushed the transport down would move the buttons under the cursor */}
+        {capWarn && (
+          <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 w-[min(320px,90%)] -translate-x-1/2 rounded-[10px] bg-warn-soft/95 px-3 py-1.5 text-center text-xs text-ink shadow-pop">{capWarn}</div>
+        )}
         <video ref={videoRef} src={sourceVideoUrl} preload="auto" playsInline className="pointer-events-none absolute h-px w-px opacity-0" />
       </div>
-      {capWarn && <div className="rounded-[10px] bg-warn-soft px-3 py-1.5 text-xs text-ink">{capWarn}</div>}
       <div className="flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-ink2">
         <span className="flex items-center gap-1.5" title={cropLayout ? "Drag the picture to re-centre this section" : `Not adjustable in ${MODE_LABEL[framing.layout]}`}>
           Offset <span className="font-mono text-ink">{curSec?.offsetX ? `${curSec.offsetX > 0 ? "+" : ""}${Math.round(curSec.offsetX * 100)}%` : "0%"}</span>
@@ -1189,7 +1203,7 @@ export function ClipEditor(props: Props) {
       </button>
       <ThemeToggle className="hidden sm:inline-flex" />
       <button
-        className="btn-primary"
+        className="btn-primary sm:min-w-[148px]"
         disabled={busy || (!changed && clip.status !== "failed")}
         onClick={() => void save(needsRender || (!changed && clip.status === "failed"))}
         title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don't need a re-render (${MOD}S)`}

@@ -33,11 +33,14 @@ export function ProjectsPage() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-bold tracking-tight">Projects</h1>
-            {projects.length > 0 && (
-              <p className="mt-1 text-sm text-ink2">
+            {/* height reserved so the grid doesn't jump when the list arrives */}
+            {projects.length > 0 ? (
+              <p className="mt-1 min-h-5 text-sm text-ink2">
                 {projects.length} project{projects.length === 1 ? "" : "s"}
                 {running ? ` · ${running} processing` : ""} · {clips} clip{clips === 1 ? "" : "s"} ready
               </p>
+            ) : (
+              <p className="mt-1 min-h-5" />
             )}
           </div>
           <Link to="/new" className="btn-primary py-2.5 text-sm no-underline">

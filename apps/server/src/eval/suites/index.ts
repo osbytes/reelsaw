@@ -9,4 +9,5 @@ import { pausesSuite } from "./pauses.js";
 import { alignmentSuite } from "./alignment.js";
 import { speakersSuite } from "./speakers.js";
 import { selectionSuite, selectionModelSuite } from "./selection.js";
-export const suites: Suite[] = [selectionSuite, framingSuite, scenesSuite, pausesSuite, alignmentSuite, speakersSuite, overlaysSuite, cutsSuite, transcriptionSuite, selectionModelSuite];
+import { disfluencySuite } from "./disfluency.js";
+export const suites: Suite[] = [selectionSuite, framingSuite, scenesSuite, pausesSuite, alignmentSuite, speakersSuite, overlaysSuite, cutsSuite, transcriptionSuite, disfluencySuite, selectionModelSuite];

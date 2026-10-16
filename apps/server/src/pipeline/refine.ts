@@ -1,6 +1,6 @@
 import { detectOverlays } from "./overlays.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { QUEUES } from "../queue/boss.js";
@@ -166,6 +166,30 @@ export async function refineEntities(ctx: StageContext) {
   await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags });
 }
 
+/**
+ * Cuts the user rejected in their other projects, as "… [words] …" snippets: the verifier sees them
+ * as examples of what not to cut, so the detector learns this user's taste over time.
+ */
+async function rejectedCutExamples(svc: Services, projectId: string, max = 8): Promise<string[]> {
+  const db = svc.database.db;
+  const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
+  if (!p) return [];
+  const others = await db.query.projects.findMany({ where: eq(schema.projects.userId, p.userId), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
+  const out: string[] = [];
+  for (const o of others) {
+    if (o.id === projectId || out.length >= max) continue;
+    const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, o.id), columns: { flags: true, rawWords: true, words: true } });
+    const ws = t?.rawWords ?? t?.words ?? [];
+    for (const f of t?.flags ?? []) {
+      if (f.kind !== "disfluency" || f.status !== "rejected" || f.subkind === "manual" || out.length >= max) continue;
+      const a = f.wordIndex;
+      const b = f.wordIndex + f.span;
+      out.push(`…${ws.slice(Math.max(0, a - 6), a).map((w) => w.text).join(" ")} [${ws.slice(a, b).map((w) => w.text).join(" ")}] ${ws.slice(b, b + 5).map((w) => w.text).join(" ")}…`);
+    }
+  }
+  return out;
+}
+
 export async function refineDisfluency(ctx: StageContext) {
   const { svc } = ctx;
   const t = await loadTranscript(ctx);
@@ -179,6 +203,7 @@ export async function refineDisfluency(ctx: StageContext) {
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
     reserved,
+    rejectedExamples: await rejectedCutExamples(svc, ctx.projectId).catch(() => []),
   });
   ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
   await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags });

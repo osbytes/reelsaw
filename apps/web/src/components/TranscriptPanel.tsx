@@ -349,7 +349,8 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     filter === "deleted" ? false : filter === "all" || (filter === "review" ? f.status === "pending" && !decisions[f.id] : filter === "reviewed" ? isReviewed(f) : f.kind === filter);
   const [listOpen, setListOpenRaw] = useState(() => {
     try {
-      return localStorage.getItem("rs-fixes-pane") === "1";
+      // phones start with the transcript itself; the pane would cover it
+      return window.innerWidth >= 900 && localStorage.getItem("rs-fixes-pane") === "1";
     } catch {
       return false;
     }
@@ -492,15 +493,16 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
 
   return (
     <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-y border-line bg-panel px-5 py-2.5">
-        <h2 className="text-[15px] font-bold">Transcript</h2>
+      {/* one scrollable row on phones, wraps on wider screens */}
+      <div className="flex shrink-0 items-center gap-x-3 gap-y-2 overflow-x-auto border-y border-line bg-panel px-4 py-2.5 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible sm:px-5">
+        <h2 className="shrink-0 text-[15px] font-bold">Transcript</h2>
         {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
         {orderedFlags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5 sm:flex-wrap">
             <span className={`chip ${pendingFlags.length ? "bg-warn-soft" : "bg-ok-soft"} text-ink`}>
               <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
             </span>
-            <div role="radiogroup" aria-label="Which fixes to show" className="flex gap-1">
+            <div role="radiogroup" aria-label="Which fixes to show" className="flex shrink-0 gap-1">
               {filterBtn("all", `All ${orderedFlags.length}`)}
               {filterBtn("review", `To review ${pendingFlags.length}`)}
               {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
@@ -516,7 +518,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         <div className="flex-1" />
         {orderedFlags.length > 0 && (
           <button
-            className={`btn px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+            className={`btn shrink-0 px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
             onClick={() => setListOpen(!listOpen)}
             aria-pressed={listOpen}
             title="List every fix, reviewed or not"
@@ -650,7 +652,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         </div>
       </ScrollArea>
       {listOpen && orderedFlags.length > 0 && (
-        <aside className="absolute inset-y-0 right-0 z-20 flex w-[340px] max-w-full flex-col border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
+        <aside className="absolute inset-y-0 right-0 z-20 flex w-full flex-col sm:w-[340px] border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
           <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
             <b className="text-[13px]">Fixes</b>
             <span className="text-xs text-ink3">{filter === "deleted" ? deletedFlags.length : orderedFlags.filter(visibleFlag).length} shown</span>
@@ -1012,7 +1014,6 @@ function FlagWord({
             </div>
           )}
           {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} />}
-          {decision && <p className="text-xs text-ink2">Staged. Apply from the bar at the bottom of the transcript.</p>}
           <div className="flex flex-wrap items-center gap-1.5">
             {flag.subkind === "manual" && !isDeletion && (
               <button className="btn-primary px-2.5 py-1.5 text-xs" disabled={!text.trim() || text.trim() === shown} onClick={accept} title="Stage the new text; apply from the bar">
@@ -1055,6 +1056,8 @@ function FlagWord({
             )}
             <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
           </div>
+          {/* always present, one line: swapping its text never resizes the popover */}
+          <p className="truncate text-[11px] text-ink3">{decision ? <span className="text-ink2">Staged · apply from the bar under the transcript</span> : "A accept · R reject · ↑ ↓ next · P play"}</p>
           </div>
           </ScrollArea>
         </Popover.Content>
@@ -1127,25 +1130,31 @@ function Refusal({ reason }: { reason: string }) {
   const lostPrev = /prev lost/.test(reason);
   const leftover = /deleted (?:heard|left)/.test(reason);
   const why = /within 30 s/.test(reason)
-    ? "The search ran out of time."
+    ? "search ran out of time"
     : lostNext && lostPrev
-      ? "Each try also clipped the words around it."
+      ? "it clipped the words around it"
       : lostNext
-        ? "Each try also clipped the word after it."
+        ? "it clipped the next word"
         : lostPrev
-          ? "Each try also clipped the word before it."
+          ? "it clipped the previous word"
           : leftover
-            ? "Part of the cut words was still audible."
-            : "The seam didn't sound clean.";
+            ? "part of it stayed audible"
+            : "the seam wasn't clean";
   return (
     <div className="flex flex-col gap-1 text-[11px] leading-snug text-ink">
-      <p>
-        <span className="font-semibold text-warn">No clean cut{tries ? ` after ${tries} tries` : ""}.</span> {why} Renders keep these words in the audio; “With cut” plays the approximate cut.
-      </p>
-      <button className="w-max font-semibold text-acc-text" onClick={() => setOpen(!open)} aria-expanded={open}>
-        {open ? "Hide details" : "Details"}
-      </button>
-      {open && <p className="whitespace-pre-wrap break-words rounded-[8px] bg-panel p-2 font-mono text-[10px] text-ink2">{reason.replace(/; (?=\d)/g, ";\n")}</p>}
+      <div className="flex items-center gap-2" title="Renders keep these words in the audio; “With cut” plays the approximate cut">
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-semibold text-warn">No clean cut{tries ? ` (${tries} tries)` : ""}</span> · {why}
+        </span>
+        <button className="shrink-0 font-semibold text-acc-text" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? "Hide" : "Details"}
+        </button>
+      </div>
+      {open && (
+        <ScrollArea className="max-h-32 rounded-[8px] bg-panel">
+          <p className="whitespace-pre-wrap break-words p-2 font-mono text-[10px] text-ink2">{reason.replace(/; (?=\d)/g, ";\n")}</p>
+        </ScrollArea>
+      )}
     </div>
   );
 }

@@ -30,8 +30,12 @@ too are *known issues*: they show as FAIL but don't break the run; fixing one sh
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |
 | `transcription` | STT + LLM, macOS `say` for audio | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction |
 | `selection-model` | LLM | one real map call per sampled chunk: candidates parse, land inside the chunk and snap |
+| `disfluency` | nothing (`--offline`: rules only); LLM for the full pipeline | precision / recall / auto-applied false positives of disfluency detection on 50 reviewed real-transcript windows (user-accepted = cut, user-rejected = keep, plus hand-labelled emphasis and stutters). LLM calls are cached by prompt |
 
 Known issues recorded in the baselines today:
+- `disfluency`: discourse "like" fillers ("and like throwing a ball") and optional "that" are missed
+  (recall 0.70); the verifier keeps them, which is the safe direction. One comma-separated quotative
+  repeat ("he's like, he's like, son") is still proposed, for review only.
 - `selection/apollo/snapping`: candidates whose end has no sentence boundary within 2.5 s keep a
   mid-sentence end (long 6–7 s sentences in podcasts).
 - `overlays/frame-640s`: the "YT/APOLLO" handle is occluded by a mic.
