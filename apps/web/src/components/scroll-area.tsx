@@ -11,10 +11,10 @@ export function ScrollArea({ className = "", children, viewportRef, ...props }: 
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollAreaPrimitive.Scrollbar orientation="vertical" className="flex touch-none select-none p-0.5 transition-colors data-[orientation=vertical]:w-2.5">
-        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border hover:bg-muted/60" />
+        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-line2 hover:bg-ink3" />
       </ScrollAreaPrimitive.Scrollbar>
       <ScrollAreaPrimitive.Scrollbar orientation="horizontal" className="flex touch-none select-none p-0.5 data-[orientation=horizontal]:h-2.5 data-[orientation=horizontal]:flex-col">
-        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border hover:bg-muted/60" />
+        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-line2 hover:bg-ink3" />
       </ScrollAreaPrimitive.Scrollbar>
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>

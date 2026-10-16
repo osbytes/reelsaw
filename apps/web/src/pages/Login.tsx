@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Navigate } from "react-router";
-import { Scissors } from "lucide-react";
 import { signIn, signUp, useSession } from "../lib/auth";
+import { Logo, ThemeToggle } from "../App";
 
 export function LoginPage() {
   const { data } = useSession();
@@ -29,12 +29,14 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center overflow-auto p-6">
-      <form onSubmit={submit} className="card w-full max-w-sm space-y-4 p-6">
-        <div className="flex items-center gap-2 text-lg font-semibold">
-          <Scissors className="h-5 w-5 text-accent" /> Reelsaw
+    <div className="relative flex h-screen items-center justify-center overflow-auto p-6">
+      <ThemeToggle className="absolute right-4 top-4" />
+      <form onSubmit={submit} className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
+        <Logo />
+        <div>
+          <h1 className="text-[26px] font-bold tracking-tight">{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <p className="mt-1 text-sm text-ink2">Running on <span className="font-mono text-[13px]">{window.location.host}</span></p>
         </div>
-        <p className="text-sm text-muted">Turn long videos into short clips with AI.</p>
         {mode === "signup" && (
           <div>
             <label className="label">Name</label>
@@ -49,11 +51,11 @@ export function LoginPage() {
           <label className="label">Password</label>
           <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
-        {error && <p className="text-sm text-danger">{error}</p>}
-        <button className="btn-primary w-full justify-center" disabled={busy}>
+        {error && <p className="rounded-[10px] bg-err-soft px-3 py-2 text-sm text-ink">{error}</p>}
+        <button className="btn-primary w-full py-2.5 text-sm" disabled={busy}>
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
-        <button type="button" className="w-full text-center text-xs text-muted hover:text-text" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+        <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
           {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
         </button>
       </form>

@@ -142,6 +142,8 @@ export const transcripts = pgTable("transcripts", {
   /** words exactly as the transcriber returned them; `words` is this with accepted flags applied */
   rawWords: jsonb("raw_words").$type<Word[]>(),
   flags: jsonb("flags").$type<TranscriptFlag[]>().notNull().default([]),
+  /** soft-deleted fixes, newest last; kept out of `flags` so nothing downstream applies them. Restorable. */
+  deletedFlags: jsonb("deleted_flags").$type<Array<TranscriptFlag & { deletedAt: string }>>().notNull().default([]),
   entities: jsonb("entities").$type<string[]>().notNull().default([]),
   /** per-step status of the refine stage (entities / disfluency / scenes) */
   refine: jsonb("refine").$type<RefineStatus>().notNull().default({}),

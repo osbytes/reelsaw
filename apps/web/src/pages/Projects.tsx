@@ -1,11 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { Film, Clock } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
-import { StatusBadge, ProgressBar } from "../components/ui";
+import { StatusText } from "../components/ui";
+import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
 
-const ACTIVE = new Set(["queued", "ingesting", "transcribing", "analyzing", "rendering"]);
+const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
+
+function ago(d: string | Date) {
+  const s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 86400 * 7) return `${Math.floor(s / 86400)} d ago`;
+  return new Date(d).toLocaleDateString();
+}
 
 export function ProjectsPage() {
   const trpc = useTRPC();
@@ -13,61 +23,72 @@ export function ProjectsPage() {
     ...trpc.projects.list.queryOptions(),
     refetchInterval: (query) => (query.state.data?.some((p) => ACTIVE.has(p.status)) ? 3000 : false),
   });
-
-  if (q.isLoading) return <p className="text-muted">Loading projects…</p>;
-  if (q.error) return <p className="text-danger">{q.error.message}</p>;
   const projects = q.data ?? [];
-
-  if (!projects.length)
-    return (
-      <div className="card p-10 text-center">
-        <Film className="mx-auto mb-3 h-8 w-8 text-muted" />
-        <h2 className="text-lg font-semibold">No projects yet</h2>
-        <p className="mb-4 text-sm text-muted">Paste a YouTube link or upload a video to get your first clips.</p>
-        <Link to="/new" className="btn-primary">
-          New project
-        </Link>
-      </div>
-    );
+  const running = projects.filter((p) => ACTIVE.has(p.status)).length;
+  const clips = projects.reduce((a, p) => a + p.clipsDone, 0);
 
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">Projects</h1>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {projects.map((p) => (
-          <Link key={p.id} to={`/p/${p.id}`} className="card overflow-hidden transition hover:border-accent-2/60">
-            <div className="aspect-video bg-panel-2">
-              {p.thumbnailUrl ? (
-                <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-muted">
-                  <Film className="h-8 w-8" />
-                </div>
-              )}
-            </div>
-            <div className="space-y-2 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="line-clamp-2 text-sm font-medium">{p.title}</h3>
-                <StatusBadge status={p.status} />
-              </div>
-              {ACTIVE.has(p.status) && <ProgressBar value={p.stageProgress ?? 0} />}
-              <div className="flex items-center gap-3 text-xs text-muted">
-                {p.durationSec ? (
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" /> {formatTime(p.durationSec)}
-                  </span>
-                ) : null}
-                {p.clipCount > 0 && (
-                  <span>
-                    {p.clipsDone}/{p.clipCount} clips
-                  </span>
-                )}
-                <span className="ml-auto">{new Date(p.createdAt).toLocaleDateString()}</span>
-              </div>
-            </div>
+    <ScrollArea className="min-h-0 flex-1">
+      <main className="mx-auto flex max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[28px] font-bold tracking-tight">Projects</h1>
+            {projects.length > 0 && (
+              <p className="mt-1 text-sm text-ink2">
+                {projects.length} project{projects.length === 1 ? "" : "s"}
+                {running ? ` · ${running} processing` : ""} · {clips} clip{clips === 1 ? "" : "s"} ready
+              </p>
+            )}
+          </div>
+          <Link to="/new" className="btn-primary py-2.5 text-sm no-underline">
+            <Plus className="h-4 w-4" /> New project
           </Link>
-        ))}
-      </div>
-    </div>
+        </div>
+
+        {q.isLoading && <p className="text-ink3">Loading projects…</p>}
+        {q.error && <p className="text-err">{q.error.message}</p>}
+
+        {!q.isLoading && !projects.length && (
+          <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
+            <span className="film h-[72px] w-[42px] rounded-[8px]" />
+            <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
+            <p className="text-sm leading-relaxed text-ink2">Paste a YouTube link or upload a file. We’ll transcribe it, find the strongest moments and frame them for 9:16.</p>
+            <Link to="/new" className="btn-primary mt-2 py-2.5 text-sm no-underline">
+              <Plus className="h-4 w-4" /> New project
+            </Link>
+          </div>
+        )}
+
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
+          {projects.map((p) => {
+            const active = ACTIVE.has(p.status);
+            const detail =
+              p.status === "failed"
+                ? (p.error ?? "Something went wrong").split("\n")[0]
+                : p.clipCount
+                  ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
+                  : `Added ${ago(p.createdAt)}`;
+            return (
+              <Link key={p.id} to={`/p/${p.id}`} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
+                <div className="film relative aspect-video">
+                  {p.thumbnailUrl && <img src={p.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+                  {p.durationSec ? <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">{formatTime(p.durationSec)}</span> : null}
+                  {active && (
+                    <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
+                      <div className="h-full bg-acc transition-all" style={{ width: `${Math.round((p.stageProgress ?? 0) * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5 p-3.5">
+                  <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug">{p.title}</h3>
+                  <StatusText status={p.status} />
+                  <div className="truncate text-xs text-ink3">{detail}</div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </main>
+    </ScrollArea>
   );
 }

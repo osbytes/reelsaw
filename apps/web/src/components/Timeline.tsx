@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { ZoomIn, ZoomOut, Maximize2, Scissors, Undo2, Redo2, ChevronRight, Check } from "lucide-react";
+import { Scissors, Undo2, Redo2, Check } from "lucide-react";
 import { formatTime, type DetectedSegment, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -23,12 +23,14 @@ export const MODE_COLOR: Record<string, string> = {
   center: "#64748b",
   none: "#334155",
 };
-export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Face", split: "Split", stack: "Stack", fit: "Fit", center: "Center", none: "Original" };
+export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;
 const SNAP_PX = 8;
-const LABEL_W = 56;
+const LABEL_W = 96;
+const MIN_SPAN = 6;
+const MAX_SPAN = 180;
 
 /** Clamp sections to the range and close gaps: the layout track always covers the clip exactly. */
 export function normalizeSections(sections: EditorSection[], range: [number, number]): EditorSection[] {
@@ -68,7 +70,13 @@ interface Props {
   selected: number | null;
   onSelect: (i: number | null) => void;
   detected: DetectedSegment[];
-  snap: boolean;
+  /** spans removed as disfluencies, drawn hatched on the words lane */
+  cuts?: Array<{ start: number; end: number }>;
+  onResetOffset?: (index: number) => void;
+  /** controls shown at the left of the toolbar (trim fields) */
+  toolbar?: React.ReactNode;
+  /** hide the hint line on short screens */
+  compactHints?: boolean;
 }
 
 type DragState =
@@ -83,12 +91,12 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, snap }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, compactHints }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(600);
   const fitView = useCallback((): [number, number] => {
     const len = range[1] - range[0];
-    const pad = Math.max(3, len * 0.15);
+    const pad = Math.max(2, len * 0.25);
     return [Math.max(0, range[0] - pad), Math.min(sourceDuration || range[1] + pad, range[1] + pad)];
   }, [range, sourceDuration]);
   const [view, setView] = useState<[number, number]>(fitView);
@@ -127,30 +135,40 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
 
   const visibleWords = useMemo(() => words.filter((wd) => wd.end >= view[0] && wd.start <= view[1]), [words, view]);
 
-  /** Snap targets near t: word edges, scene cuts, playhead. Alt (or snap off) disables. */
+  const [snapHit, setSnapHit] = useState<{ t: number; kind: string } | null>(null);
+  /** Snap within 8px to word edges, scene changes and the playhead. Alt disables. */
   const snapT = (t: number, prefer: "start" | "end" | "any", alt: boolean) => {
-    if (!snap || alt) return t;
+    if (alt) {
+      setSnapHit(null);
+      return t;
+    }
     const tol = (SNAP_PX / w) * span;
     let best = t;
     let bestD = tol;
-    const consider = (c: number) => {
+    let kind = "";
+    const consider = (c: number, k: string) => {
       const d = Math.abs(c - t);
       if (d < bestD) {
         best = c;
         bestD = d;
+        kind = k;
       }
     };
     for (const wd of visibleWords) {
-      if (prefer !== "end") consider(Math.max(0, wd.start - 0.05));
-      if (prefer !== "start") consider(wd.end + 0.08);
+      if (prefer !== "end") consider(Math.max(0, wd.start - 0.05), "word");
+      if (prefer !== "start") consider(wd.end + 0.08, "word");
     }
-    for (const c of sceneCuts) if (c >= view[0] && c <= view[1]) consider(c);
-    consider(current);
+    for (const c of sceneCuts) if (c >= view[0] && c <= view[1]) consider(c, "scene change");
+    consider(current, "playhead");
+    setSnapHit(kind ? { t: best, kind } : null);
     return Number(best.toFixed(2));
   };
 
   function zoom(factor: number, around = (view[0] + view[1]) / 2) {
-    const newSpan = Math.max(2, Math.min(sourceDuration || 3600, span * factor));
+    setSpan(span * factor, around);
+  }
+  function setSpan(next: number, around = (view[0] + view[1]) / 2) {
+    const newSpan = Math.max(MIN_SPAN, Math.min(Math.max(MIN_SPAN, Math.min(MAX_SPAN, sourceDuration || MAX_SPAN)), next));
     const frac = (around - view[0]) / span;
     const s = Math.max(0, around - frac * newSpan);
     setView([s, s + newSpan]);
@@ -160,8 +178,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, tAt(e.clientX));
-    } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {
-      const d = ((e.shiftKey ? e.deltaY : e.deltaX) / w) * span;
+    } else {
+      // plain scroll pans the timeline
+      const d = ((Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / w) * span;
       const s = Math.max(0, view[0] + d);
       setView([s, s + span]);
     }
@@ -222,6 +241,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   function end(e: React.PointerEvent) {
     lanesRef.current?.releasePointerCapture?.(e.pointerId);
     setDrag(null);
+    setSnapHit(null);
     gesture.current = undefined;
   }
 
@@ -235,171 +255,172 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
     if (lane === "layout" && section >= 0) onSelect(section);
   }
 
-  // ruler ticks: pick a step that gives ~80px between labels
+  // ruler ticks
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
-  const step = steps.find((st) => (st / span) * w >= 70) ?? 600;
+  const step = steps.find((st) => (st / span) * w >= 64) ?? 600;
   const ticks: number[] = [];
   for (let t = Math.ceil(view[0] / step) * step; t <= view[1]; t += step) ticks.push(t);
 
   const playX = x(current);
-  const lane = "relative border-b border-border/60";
+  const lane = "relative";
+  const len = range[1] - range[0];
+  const zoomMax = Math.max(MIN_SPAN + 1, Math.min(MAX_SPAN, sourceDuration || MAX_SPAN));
+  const zoomVal = Math.round((1 - (Math.log(span) - Math.log(MIN_SPAN)) / (Math.log(zoomMax) - Math.log(MIN_SPAN))) * 100);
+  const isCut = (wd: Word) => cuts.some((c) => wd.start >= c.start - 0.02 && wd.end <= c.end + 0.02);
+  const label = "flex items-center px-4 text-xs font-semibold text-ink2";
 
   return (
-    <div className="select-none rounded-md border border-border bg-panel-2/40 text-[11px]">
-      <div className="flex items-center gap-1 border-b border-border px-2 py-1 text-muted">
-        <span className="font-mono">{formatTime(view[0])}</span>
-        <span className="mx-1">–</span>
-        <span className="font-mono">{formatTime(view[1])}</span>
-        <span className="mx-1 h-4 w-px bg-border" />
-        <button type="button" className="flex items-center gap-1 rounded px-1.5 py-1 text-text hover:bg-panel-2 disabled:opacity-40" disabled={!canSplitAt(current)} onClick={() => onSplit(current)} title={`Split layout at playhead (${SPLIT_SHORTCUT} or S)`}>
-          <Scissors className="h-3.5 w-3.5" /> Split
-        </button>
-        <button type="button" className="rounded p-1 hover:bg-panel-2 disabled:opacity-40" disabled={!canUndo} onClick={onUndo} title={`Undo (${MOD}Z)`}>
-          <Undo2 className="h-3.5 w-3.5" />
-        </button>
-        <button type="button" className="rounded p-1 hover:bg-panel-2 disabled:opacity-40" disabled={!canRedo} onClick={onRedo} title={`Redo (${MOD}Shift+Z)`}>
-          <Redo2 className="h-3.5 w-3.5" />
-        </button>
-        <span className="ml-auto hidden lg:inline">Right-click for options · {MOD}scroll zooms · Alt disables snapping</span>
-        <button type="button" className="rounded p-1 hover:bg-panel-2" onClick={() => zoom(1 / 1.5, current)} title="Zoom in">
-          <ZoomIn className="h-3.5 w-3.5" />
-        </button>
-        <button type="button" className="rounded p-1 hover:bg-panel-2" onClick={() => zoom(1.5, current)} title="Zoom out">
-          <ZoomOut className="h-3.5 w-3.5" />
-        </button>
-        <button type="button" className="rounded p-1 hover:bg-panel-2" onClick={() => setView(fitView())} title="Fit clip">
-          <Maximize2 className="h-3.5 w-3.5" />
-        </button>
+    <div className="select-none">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
+        {toolbar}
+        <span className="font-mono text-xs text-ink2">{len.toFixed(1)}s</span>
+        <span className={`rounded-full px-2.5 py-[3px] font-mono text-[11px] whitespace-nowrap ${snapHit && drag ? "bg-acc text-acc-ink" : "bg-sunk text-ink2"}`}>{snapHit && drag ? `snap: ${snapHit.kind}` : "snapping on"}</span>
+        <div className="ml-auto flex items-center gap-2 text-xs text-ink2">
+          <span>Zoom</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.max(0, Math.min(100, zoomVal))}
+            onChange={(e) => {
+              const z = Number(e.target.value) / 100;
+              const next = Math.exp(Math.log(zoomMax) - z * (Math.log(zoomMax) - Math.log(MIN_SPAN)));
+              setSpan(next, next < len ? current : (view[0] + view[1]) / 2);
+            }}
+            className="w-28 accent-[var(--acc)]"
+            aria-label="Zoom timeline"
+          />
+          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setView(fitView())} title="Fit the clip">
+            Fit
+          </button>
+        </div>
       </div>
       <div className="flex" onWheel={onWheel}>
         {/* lane labels */}
-        <div className="shrink-0 border-r border-border text-muted" style={{ width: LABEL_W }}>
-          <div className="flex h-5 items-center px-1.5 border-b border-border/60" />
-          <div className="flex h-6 items-center px-1.5 border-b border-border/60">Words</div>
-          <div className="flex h-8 items-center px-1.5 border-b border-border/60">Clip</div>
-          <div className="flex h-9 items-center px-1.5">Layout</div>
+        <div className="shrink-0" style={{ width: LABEL_W }}>
+          <div className="h-6" />
+          <div className={`${label} h-[26px]`}>Words</div>
+          <div className={`${label} mt-1.5 h-[34px]`}>Clip</div>
+          <div className={`${label} mt-1.5 h-[38px]`}>Framing</div>
         </div>
 
         <ContextMenu.Root modal={false}>
         <ContextMenu.Trigger asChild>
-        <div ref={lanesRef} className="relative min-w-0 flex-1 overflow-hidden" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onPointerLeave={() => setHoverT(null)} onContextMenu={onContext}>
+        <div ref={lanesRef} className="relative mr-4 min-w-0 flex-1 overflow-hidden pb-2" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onPointerLeave={() => setHoverT(null)} onContextMenu={onContext}>
           {/* ruler */}
-          <div data-lane="ruler" className={`${lane} h-5 cursor-ew-resize bg-panel/60`} onPointerDown={(e) => begin(e, { kind: "scrub" })}>
+          <div data-lane="ruler" className={`${lane} h-6 cursor-ew-resize`} onPointerDown={(e) => begin(e, { kind: "scrub" })}>
             {ticks.map((t) => (
-              <div key={t} className="absolute top-0 h-full border-l border-border/80 pl-1 font-mono text-muted" style={{ left: x(t) }}>
+              <div key={t} className="absolute top-0 h-6 border-l border-line2 pl-1 font-mono text-[10px] leading-4 text-ink3" style={{ left: x(t) }}>
                 {formatTime(t)}
               </div>
-            ))}
-            {sceneCuts.filter((c) => c >= view[0] && c <= view[1]).map((c) => (
-              <div key={c} className="absolute bottom-0 h-1.5 w-px bg-accent-2/70" style={{ left: x(c) }} title={`Scene cut ${formatTime(c)}`} />
             ))}
           </div>
 
           {/* words */}
-          <div data-lane="words" className={`${lane} h-6 cursor-grab`} onPointerDown={(e) => e.button === 0 && begin(e, { kind: "pan", grabX: e.clientX, orig: view })}>
+          <div data-lane="words" className={`${lane} h-[26px] cursor-grab`} onPointerDown={(e) => e.button === 0 && begin(e, { kind: "pan", grabX: e.clientX, orig: view })}>
             {visibleWords.map((wd, i) => {
+              const inClip = wd.start >= range[0] - 0.01 && wd.end <= range[1] + 0.05;
+              const cut = isCut(wd);
               const left = x(wd.start);
-              const width = Math.max(2, x(wd.end) - left);
-              const inClip = wd.end > range[0] && wd.start < range[1];
+              const width = Math.max(1, x(wd.end) - left - 1);
               return (
                 <div
-                  key={`${wd.start}-${i}`}
-                  className={`absolute top-1 bottom-1 overflow-hidden whitespace-nowrap rounded-sm px-0.5 leading-4 ${inClip ? "bg-accent/25 text-text" : "bg-panel text-muted"}`}
-                  style={{ left, width }}
-                  title={`${wd.text} ${formatTime(wd.start)}`}
-                  onDoubleClick={() => onSeek(wd.start)}
+                  key={i}
+                  className={`absolute top-0 h-[26px] overflow-hidden rounded-[4px] px-[3px] text-[10px] leading-[26px] whitespace-nowrap ${cut ? "text-ink3 line-through" : inClip ? "bg-acc-soft text-ink" : "bg-sunk text-ink"}`}
+                  style={{ left, width, ...(cut ? { background: "repeating-linear-gradient(45deg, var(--line) 0 3px, transparent 3px 6px)" } : {}) }}
+                  title={wd.text}
                 >
-                  {width > 18 ? wd.text : ""}
+                  {width > 22 ? wd.text.replace(/[,.?!]$/, "") : ""}
                 </div>
               );
             })}
           </div>
 
           {/* clip range */}
-          <div data-lane="clip" className={`${lane} h-8`}>
-            <div className="absolute inset-y-0 left-0 bg-black/30" style={{ width: Math.max(0, x(range[0])) }} />
-            <div className="absolute inset-y-0 right-0 bg-black/30" style={{ left: Math.min(w, x(range[1])) }} />
+          <div data-lane="clip" className={`${lane} mt-1.5 h-[34px] rounded-[8px] bg-sunk`}>
             <div
-              className="absolute inset-y-1 cursor-grab rounded border border-accent bg-accent/25 active:cursor-grabbing"
+              className="absolute inset-y-0 flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
               style={{ left: x(range[0]), width: Math.max(4, x(range[1]) - x(range[0])) }}
               onPointerDown={(e) => begin(e, { kind: "move", grabT: tAt(e.clientX), orig: range })}
               title="Drag to slide the whole clip"
             >
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[10px] text-text/80">{(range[1] - range[0]).toFixed(1)}s</span>
+              <span className="pointer-events-none font-mono text-[11px] font-semibold text-acc-text">{len.toFixed(1)}s</span>
             </div>
             {(["start", "end"] as const).map((k) => (
               <div
                 key={k}
-                className="absolute inset-y-0 z-10 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
-                style={{ left: x(k === "start" ? range[0] : range[1]) }}
+                className={`absolute inset-y-0 z-[3] grid w-3.5 -translate-x-1/2 cursor-ew-resize place-items-center rounded-[6px] bg-acc ${drag?.kind === k ? "brightness-110" : ""}`}
+                style={{ left: x(range[k === "start" ? 0 : 1]) }}
                 onPointerDown={(e) => begin(e, { kind: k })}
-                title={k === "start" ? "Drag clip start" : "Drag clip end"}
+                title={k === "start" ? "Drag to set the in point (I)" : "Drag to set the out point (O)"}
               >
-                <div className={`h-full w-1.5 rounded-sm ${drag?.kind === k ? "bg-accent-2" : "bg-accent"}`} />
+                <span className="h-3.5 w-[3px] rounded-full bg-acc-ink/70" />
               </div>
             ))}
           </div>
 
-          {/* layout track */}
-          <div data-lane="layout" className="relative h-9 cursor-crosshair" onPointerEnter={() => setHoverLane("layout")} onPointerLeave={() => setHoverLane(null)} onDoubleClick={(e) => onSplit(Number(tAt(e.clientX).toFixed(2)))}>
+          {/* framing sections */}
+          <div data-lane="layout" className="relative mt-1.5 h-[38px] cursor-pointer" onPointerEnter={() => setHoverLane("layout")} onPointerLeave={() => setHoverLane(null)}>
             {sections.map((s, i) => {
               const left = x(s.start);
               const width = Math.max(2, x(s.end) - left);
-              const det = s.mode === "auto" ? detected.filter((d) => d.end > s.start && d.start < s.end) : [];
-              const color = MODE_COLOR[s.mode]!;
+              const det = detected.filter((d) => !d.manual && d.end > s.start && d.start < s.end);
+              const auto = s.mode === "auto";
+              const chose = [...new Set(det.map((d) => MODE_LABEL[d.layout]))].join(" / ");
               return (
                 <div
                   key={i}
-                  className={`absolute inset-y-1 cursor-pointer overflow-hidden rounded ${selected === i ? "ring-2 ring-accent-2" : ""}`}
-                  style={{ left, width, background: `${color}33`, border: `1px ${s.mode === "auto" ? "dashed" : "solid"} ${color}` }}
+                  className={`absolute top-0 flex h-[38px] flex-col justify-center overflow-hidden rounded-[8px] px-2.5 ${auto ? "border-[1.5px] border-dashed border-line2 bg-panel text-ink" : "border-[1.5px] border-ink bg-ink text-bg"} ${selected === i ? "shadow-[0_0_0_2px_var(--acc)]" : ""}`}
+                  style={{ left, width }}
                   onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     e.stopPropagation();
                     onSelect(i);
+                    onSeek(Math.max(s.start, Math.min(s.end - 0.01, tAt(e.clientX))));
                   }}
                   title={`${MODE_LABEL[s.mode]} ${formatTime(s.start)}–${formatTime(s.end)}`}
                 >
-                  <span className="pointer-events-none absolute left-1 top-0.5 whitespace-nowrap font-medium" style={{ color }}>
-                    {width > 40 ? MODE_LABEL[s.mode] : ""}
-                    {width > 60 && s.offsetX ? ` ↔${s.offsetX > 0 ? "+" : ""}${Math.round(s.offsetX * 100)}%` : ""}
-                    {width > 90 && s.mode === "auto" && det.length ? ` · ${[...new Set(det.map((d) => MODE_LABEL[d.layout]))].join("/")}` : ""}
-                  </span>
-                  {/* what the detector picked inside auto sections */}
-                  {det.map((d, j) => (
-                    <div
-                      key={j}
-                      className="pointer-events-none absolute bottom-0 h-1"
-                      style={{ left: x(Math.max(s.start, d.start)) - left, width: Math.max(1, x(Math.min(s.end, d.end)) - x(Math.max(s.start, d.start))), background: MODE_COLOR[d.layout] }}
-                      title={d.reason}
-                    />
-                  ))}
+                  {width > 44 && <span className="truncate text-[11px] font-bold leading-tight">{MODE_LABEL[s.mode]}</span>}
+                  {width > 70 && (
+                    <span className="truncate text-[10px] leading-tight opacity-75">
+                      {auto ? (chose ? `→ ${chose}` : "→ decided at render") : s.offsetX ? `offset ${s.offsetX > 0 ? "+" : ""}${Math.round(s.offsetX * 100)}%` : "forced"}
+                    </span>
+                  )}
                 </div>
               );
             })}
-            {/* razor guide: where a double-click / right-click split would land */}
             {hoverLane === "layout" && hoverT !== null && !drag && canSplitAt(hoverT) && (
-              <div className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-accent-2" style={{ left: x(hoverT) }}>
-                <Scissors className="absolute -left-1.5 -top-0.5 h-3 w-3 -rotate-90 text-accent-2" />
-              </div>
+              <div className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-acc" style={{ left: x(hoverT) }} />
             )}
-            {/* transition handles */}
             {sections.slice(1).map((s, k) => (
               <div
                 key={`b${k}`}
-                className="absolute inset-y-0 z-10 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
+                className="absolute top-0 z-[4] grid h-[38px] w-4 -translate-x-1/2 cursor-ew-resize place-items-center"
                 style={{ left: x(s.start) }}
                 onPointerDown={(e) => begin(e, { kind: "boundary", index: k + 1 })}
-                title={`Transition at ${formatTime(s.start)} (drag to move)`}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onMerge(k + 1, "left");
+                }}
+                title="Drag to move this transition · double-click to remove it"
               >
-                <div className={`h-6 w-1 rounded-full ${drag?.kind === "boundary" && drag.index === k + 1 ? "bg-accent-2" : "bg-text/80"}`} />
+                <div className={`h-6 w-1 rounded-full ${drag?.kind === "boundary" && drag.index === k + 1 ? "bg-acc" : "bg-ink"} shadow-[0_0_0_2px_var(--panel)]`} />
               </div>
             ))}
           </div>
 
-          {/* playhead + hover line */}
-          {hoverT !== null && !drag && <div className="pointer-events-none absolute inset-y-0 w-px bg-text/20" style={{ left: x(hoverT) }} />}
-          {playX >= 0 && playX <= w && (
-            <div className="pointer-events-none absolute inset-y-0 z-20 w-px bg-danger" style={{ left: playX }}>
-              <div className="absolute -left-1 top-0 h-2 w-2 rotate-45 bg-danger" />
+          {/* scene changes */}
+          {sceneCuts
+            .filter((c) => c > view[0] && c < view[1])
+            .map((c) => (
+              <div key={c} className="pointer-events-none absolute bottom-0 top-6 border-l-2 border-dashed border-warn opacity-60" style={{ left: x(c) }} title={`Scene change ${formatTime(c)}`} />
+            ))}
+          {/* snap target while dragging */}
+          {drag && snapHit && <div className="pointer-events-none absolute bottom-0 top-6 z-[6] border-l-2 border-snap" style={{ left: x(snapHit.t) }} />}
+          {/* playhead */}
+          {playX >= -2 && playX <= w + 2 && (
+            <div className="pointer-events-none absolute inset-y-0 z-[7] -ml-px w-0.5 bg-ink" style={{ left: playX }}>
+              <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-ink" />
             </div>
           )}
         </div>
@@ -408,6 +429,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
           <TimelineMenu
             at={menuAt}
             sections={sections}
+            detected={detected}
             range={range}
             current={current}
             canSplitAt={canSplitAt}
@@ -415,6 +437,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             onSetMode={onSetMode}
             onMerge={onMerge}
             onResetLayout={onResetLayout}
+            onResetOffset={onResetOffset}
             onSetIn={(t) => onRange([Math.min(t, range[1] - MIN_CLIP), range[1]])}
             onSetOut={(t) => onRange([range[0], Math.max(t, range[0] + MIN_CLIP)])}
             onSeek={onSeek}
@@ -426,16 +449,24 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         </ContextMenu.Portal>
         </ContextMenu.Root>
       </div>
+      {!compactHints && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pr-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
+          <span>Drag the handles to trim; drag the clip to slide it</span>
+          <span>Snaps to words, scene changes and the playhead · hold Alt to drag freely</span>
+          <span>{MOD} + scroll zooms · right-click for framing</span>
+        </div>
+      )}
     </div>
   );
 }
 
 const MENU_MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
-const item = "menu-item text-xs";
+const item = "menu-item";
 
 function TimelineMenu(p: {
   at: { t: number; lane: string; section: number } | null;
   sections: EditorSection[];
+  detected: DetectedSegment[];
   range: [number, number];
   current: number;
   canSplitAt: (t: number) => boolean;
@@ -443,6 +474,7 @@ function TimelineMenu(p: {
   onSetMode: (i: number, m: SectionMode) => void;
   onMerge: (i: number, side: "left" | "right") => void;
   onResetLayout: () => void;
+  onResetOffset?: (i: number) => void;
   onSetIn: (t: number) => void;
   onSetOut: (t: number) => void;
   onSeek: (t: number) => void;
@@ -454,56 +486,54 @@ function TimelineMenu(p: {
   const at = p.at;
   if (!at) return null;
   const sec = at.section >= 0 ? p.sections[at.section] : undefined;
-  const inClip = at.t > p.range[0] && at.t < p.range[1];
+  const autoChose = sec ? [...new Set(p.detected.filter((d) => !d.manual && d.end > sec.start && d.start < sec.end).map((d) => MODE_LABEL[d.layout]))].join(" / ") : "";
   return (
-    <ContextMenu.Content className="z-[60] min-w-56 rounded-md border border-border bg-panel p-1 shadow-xl outline-none" collisionPadding={8}>
-      <ContextMenu.Label className="px-2 py-1 font-mono text-[10px] text-muted">{formatTime(at.t)}</ContextMenu.Label>
+    <ContextMenu.Content className="menu z-[60] w-[240px]" collisionPadding={8}>
+      <ContextMenu.Label className="px-2.5 py-1 font-mono text-[10px] text-ink3">{formatTime(at.t)}</ContextMenu.Label>
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
-        <Scissors className="h-3.5 w-3.5" /> Split layout here
+        <Scissors className="h-3.5 w-3.5" /> Split here <span className="menu-hint">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
-      <ContextMenu.Item className={item} disabled={!p.canSplitAt(p.current)} onSelect={() => p.onSplit(p.current)}>
-        <Scissors className="h-3.5 w-3.5 opacity-60" /> Split at playhead <span className="menu-hint">{SPLIT_SHORTCUT}</span>
-      </ContextMenu.Item>
-      {sec && inClip && (
+      {sec && (
         <>
-          <ContextMenu.Sub>
-            <ContextMenu.SubTrigger className={item}>
-              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: MODE_COLOR[sec.mode] }} /> Framing: {MODE_LABEL[sec.mode]}
-              <ChevronRight className="ml-auto h-3.5 w-3.5" />
-            </ContextMenu.SubTrigger>
-            <ContextMenu.Portal>
-              <ContextMenu.SubContent className="z-[61] min-w-36 rounded-md border border-border bg-panel p-1 shadow-xl outline-none" sideOffset={4}>
-                {MENU_MODES.map((m) => (
-                  <ContextMenu.Item key={m} className={item} onSelect={() => p.onSetMode(at.section, m)}>
-                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: MODE_COLOR[m] }} /> {MODE_LABEL[m]}
-                    {sec.mode === m && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </ContextMenu.Item>
-                ))}
-              </ContextMenu.SubContent>
-            </ContextMenu.Portal>
-          </ContextMenu.Sub>
+          <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+          <ContextMenu.Label className="px-2.5 pb-0.5 pt-1 text-[11px] font-semibold text-ink3">Framing</ContextMenu.Label>
+          <ContextMenu.RadioGroup value={sec.mode} onValueChange={(m) => p.onSetMode(at.section, m as SectionMode)}>
+            {MENU_MODES.map((m) => (
+              <ContextMenu.RadioItem key={m} value={m} className={item}>
+                <span className="w-3.5">
+                  <ContextMenu.ItemIndicator>
+                    <Check className="h-3.5 w-3.5" />
+                  </ContextMenu.ItemIndicator>
+                </span>
+                {m === "auto" ? `Auto${autoChose ? ` (${autoChose})` : ""}` : MODE_LABEL[m]}
+              </ContextMenu.RadioItem>
+            ))}
+          </ContextMenu.RadioGroup>
+          <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
           <ContextMenu.Item className={item} disabled={at.section === 0} onSelect={() => p.onMerge(at.section, "left")}>
-            Remove transition on the left
+            Merge with previous
           </ContextMenu.Item>
           <ContextMenu.Item className={item} disabled={at.section >= p.sections.length - 1} onSelect={() => p.onMerge(at.section, "right")}>
-            Remove transition on the right
+            Merge with next
           </ContextMenu.Item>
+          {p.onResetOffset && (
+            <ContextMenu.Item className={item} disabled={!sec.offsetX} onSelect={() => p.onResetOffset!(at.section)}>
+              Reset re-centring
+            </ContextMenu.Item>
+          )}
         </>
       )}
-      <ContextMenu.Item className={item} disabled={p.sections.length < 2 && p.sections[0]?.mode === "auto"} onSelect={p.onResetLayout}>
-        Reset layout to auto
-      </ContextMenu.Item>
-      <ContextMenu.Separator className="my-1 h-px bg-border" />
+      <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} onSelect={() => p.onSetIn(at.t)} disabled={at.t >= p.range[1] - MIN_CLIP}>
-        Set clip start here <span className="menu-hint">I at playhead</span>
+        Set in point here
       </ContextMenu.Item>
       <ContextMenu.Item className={item} onSelect={() => p.onSetOut(at.t)} disabled={at.t <= p.range[0] + MIN_CLIP}>
-        Set clip end here <span className="menu-hint">O at playhead</span>
+        Set out point here
       </ContextMenu.Item>
       <ContextMenu.Item className={item} onSelect={() => p.onSeek(at.t)}>
         Move playhead here
       </ContextMenu.Item>
-      <ContextMenu.Separator className="my-1 h-px bg-border" />
+      <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} disabled={!p.canUndo} onSelect={p.onUndo}>
         <Undo2 className="h-3.5 w-3.5" /> Undo <span className="menu-hint">{MOD}Z</span>
       </ContextMenu.Item>

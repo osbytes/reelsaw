@@ -5,8 +5,9 @@ import fs from "node:fs/promises";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure } from "./context.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, defaultProjectSettings, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, defaultProjectSettings, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
 import { QUEUES, type QueueName } from "../queue/boss.js";
+import type { Services } from "../services.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { applyFlags } from "../pipeline/entities.js";
@@ -67,6 +68,53 @@ function publicProject(p: schema.Project) {
   };
 }
 
+type DeletedFlag = TranscriptFlag & { deletedAt: string };
+/** Move a live flag to the deleted list; a manual cut hands back the flags it absorbed. */
+function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string): { flags: TranscriptFlag[]; deletedFlags: DeletedFlag[] } {
+  const f = flags.find((x) => x.id === id);
+  if (!f) return { flags, deletedFlags: deleted };
+  return {
+    flags: flags.flatMap((x) => (x.id === id ? restoreAbsorbed(x) : [x])).sort((a, b) => a.wordIndex - b.wordIndex),
+    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }].slice(-500),
+  };
+}
+
+/** Persist new flag lists, rebuild the cleaned words, re-render clips whose words changed around `f`. */
+async function saveFlags(svc: Services, p: schema.Project, t: schema.Transcript, flags: TranscriptFlag[], deletedFlags: DeletedFlag[], f: TranscriptFlag, rerender: boolean) {
+  const db = svc.database.db;
+  const raw = t.rawWords ?? t.words;
+  const words = applyFlags(raw, flags);
+  const segments = toSentences(words);
+  await db.update(schema.transcripts).set({ words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") }).where(eq(schema.transcripts.projectId, p.id));
+  const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
+  const changed = near(applyFlags(raw, t.flags)) !== near(words);
+  const rerendered = rerender && changed ? await rerenderOverlapping(svc, p, [{ start: f.start, end: f.end }]) : 0;
+  await svc.events.emit(p.id, "stage.started", { stage: "review", changed: changed ? 1 : 0, rerendered });
+  return rerendered;
+}
+
+/** Deleting a flag: a manual cut is replaced by the detector flags it absorbed (with their decisions). */
+function restoreAbsorbed(f: TranscriptFlag): TranscriptFlag[] {
+  if (f.subkind !== "manual") return [];
+  return (f.absorbed ?? []).map((a) => a as unknown as TranscriptFlag);
+}
+
+/** Re-render every clip overlapping one of the ranges (absolute seconds). Returns how many. */
+async function rerenderOverlapping(svc: Services, p: schema.Project, ranges: Array<{ start: number; end: number }>) {
+  if (!ranges.length) return 0;
+  const db = svc.database.db;
+  let n = 0;
+  for (const c of await listClips(db, p.id)) {
+    if (!ranges.some((r) => r.end > c.startSec && r.start < c.endSec)) continue;
+    await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
+    await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
+    await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
+    n++;
+  }
+  if (n && (p.status === "done" || p.status === "failed")) await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+  return n;
+}
+
 async function ownedProject(db: Db, userId: string, projectId: string) {
   const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)) });
   if (!p) throw new TRPCError({ code: "NOT_FOUND" });
@@ -116,6 +164,7 @@ export const appRouter = router({
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,
       resources: await ctx.svc.resources.snapshot(),
+      limits: { maxCpuPercent: ctx.svc.config.MAX_CPU_PERCENT, minFreeMemMB: ctx.svc.config.MIN_FREE_MEM_MB, minFreeDiskMB: ctx.svc.config.MIN_FREE_DISK_MB },
     })),
   }),
 
@@ -145,7 +194,7 @@ export const appRouter = router({
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true } });
+      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, deletedFlags: true } });
       return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null };
     }),
 
@@ -336,10 +385,16 @@ export const appRouter = router({
       await ownedProject(svc.database.db, ctx.user.id, input.id);
       let lastId = Number(input.lastEventId ?? 0) || 0;
       const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
+      // page through everything after lastId: list() returns at most 500 rows, and a project's
+      // history (progress ticks included) is often much longer than that
       const flush = async function* () {
-        for (const e of await svc.events.list(input.id, lastId)) {
-          lastId = e.id;
-          yield tracked(String(e.id), e satisfies ProjectEvent);
+        for (;;) {
+          const page = await svc.events.list(input.id, lastId, 500);
+          for (const e of page) {
+            lastId = e.id;
+            yield tracked(String(e.id), e satisfies ProjectEvent);
+          }
+          if (page.length < 500) return;
         }
       };
       yield* flush();
@@ -381,28 +436,109 @@ export const appRouter = router({
           if (wasApplied !== willApply || textChanged) changed.push({ start: f.start, end: f.end });
           return { ...f, status: d.status, replacement };
         });
+        // rejecting your own cut deletes it (soft): it moves to deletedFlags and gives back what it replaced
+        let live = flags;
+        let deletedFlags = t.deletedFlags ?? [];
+        for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected")) ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
+        const words = applyFlags(raw, live);
+        const segments = toSentences(words);
+        await db
+          .update(schema.transcripts)
+          .set({ words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") })
+          .where(eq(schema.transcripts.projectId, p.id));
+        const rerendered = input.rerender ? await rerenderOverlapping(svc, p, changed) : 0;
+        await svc.events.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+        return { ok: true, changed: changed.length, rerendered };
+      }),
+    /** Mark a span of the transcript to cut from the video (a manual disfluency flag, already accepted). */
+    addCut: protectedProcedure
+      .input(z.object({ projectId: z.string(), start: z.number().min(0), end: z.number().min(0), rerender: z.boolean().default(true) }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        const db = svc.database.db;
+        const p = await ownedProject(db, ctx.user.id, input.projectId);
+        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
+        if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "No transcript" });
+        const raw = t.rawWords ?? t.words;
+        const idx = raw.map((w, i) => ({ w, i })).filter(({ w }) => w.start >= input.start - 0.02 && w.end <= input.end + 0.02);
+        if (!idx.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one whole word" });
+        let from = idx[0]!.i;
+        let to = idx.at(-1)!.i;
+        const hits = (f: (typeof t.flags)[number]) => f.wordIndex <= to && f.wordIndex + f.span - 1 >= from;
+        if (t.flags.some((f) => f.kind === "entity" && hits(f))) throw new TRPCError({ code: "BAD_REQUEST", message: "The selection overlaps a name fix. Reject that fix first, or select around it." });
+        // existing cuts inside or touching the selection merge into the new one
+        const merged = t.flags.filter((f) => f.kind === "disfluency" && hits(f));
+        for (const f of merged) {
+          from = Math.min(from, f.wordIndex);
+          to = Math.max(to, f.wordIndex + f.span - 1);
+        }
+        const span = raw.slice(from, to + 1);
+        const flag = {
+          id: randomUUID(),
+          kind: "disfluency" as const,
+          subkind: "manual" as const,
+          wordIndex: from,
+          span: span.length,
+          start: span[0]!.start,
+          end: span.at(-1)!.end,
+          heard: span.map((w) => w.text).join(" "),
+          suggested: "",
+          confidence: 1,
+          status: "accepted" as const,
+          // remember the detector flags this replaces so deleting the cut brings them back
+          absorbed: merged.flatMap((f) => (f.subkind === "manual" ? (f.absorbed ?? []) : [f as Record<string, unknown>])),
+        };
+        const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
         const words = applyFlags(raw, flags);
         const segments = toSentences(words);
         await db
           .update(schema.transcripts)
           .set({ words, rawWords: raw, flags, segments, text: segments.map((s) => s.text).join(" ") })
           .where(eq(schema.transcripts.projectId, p.id));
-        let rerendered = 0;
-        if (input.rerender && changed.length) {
-          const clips = await listClips(db, p.id);
-          for (const c of clips) {
-            if (!changed.some((r) => r.end > c.startSec && r.start < c.endSec)) continue;
-            await svc.queue.cancelLiveJobs(QUEUES.render, c.id);
-            await db.update(schema.clips).set({ status: "pending", error: null, outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-            await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id });
-            rerendered++;
-          }
-          if (rerendered && (p.status === "done" || p.status === "failed")) {
-            await db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
-          }
+        const rerendered = input.rerender ? await rerenderOverlapping(svc, p, [{ start: flag.start, end: flag.end }]) : 0;
+        await svc.events.emit(p.id, "stage.started", { stage: "review", changed: 1, rerendered });
+        return { ok: true, flagId: flag.id, rerendered };
+      }),
+    /** Soft-delete a fix: it moves to deletedFlags (restorable). A manual cut gives back the detector fixes it replaced. */
+    deleteFlag: protectedProcedure
+      .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        const db = svc.database.db;
+        const p = await ownedProject(db, ctx.user.id, input.projectId);
+        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
+        const f = t?.flags.find((x) => x.id === input.flagId);
+        if (!t || !f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
+        const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
+        const rerendered = await saveFlags(svc, p, t, next.flags, next.deletedFlags, f, input.rerender);
+        return { ok: true, rerendered };
+      }),
+    /** Bring back a soft-deleted fix. A manual cut re-absorbs overlapping cuts; overlapping a name fix is refused. */
+    restoreFlag: protectedProcedure
+      .input(z.object({ projectId: z.string(), flagId: z.string(), rerender: z.boolean().default(true) }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        const db = svc.database.db;
+        const p = await ownedProject(db, ctx.user.id, input.projectId);
+        const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id) });
+        const d = t?.deletedFlags?.find((x) => x.id === input.flagId);
+        if (!t || !d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
+        const { deletedAt: _deletedAt, ...flag } = d;
+        void _deletedAt;
+        const hits = (x: TranscriptFlag) => x.wordIndex <= flag.wordIndex + flag.span - 1 && x.wordIndex + x.span - 1 >= flag.wordIndex;
+        const overlapping = t.flags.filter(hits);
+        let live = t.flags;
+        if (flag.subkind === "manual") {
+          if (overlapping.some((x) => x.kind === "entity")) throw new TRPCError({ code: "BAD_REQUEST", message: "A name fix now overlaps this cut. Delete it first." });
+          if (overlapping.some((x) => x.subkind === "manual")) throw new TRPCError({ code: "BAD_REQUEST", message: "Another of your cuts now overlaps this one." });
+          flag.absorbed = overlapping as unknown as Array<Record<string, unknown>>;
+          live = t.flags.filter((x) => !overlapping.includes(x));
+        } else if (overlapping.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `It overlaps ${overlapping[0]!.subkind === "manual" ? "one of your cuts" : "another fix"} (“${overlapping[0]!.heard}”). Delete that first.` });
         }
-        await svc.events.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
-        return { ok: true, changed: changed.length, rerendered };
+        live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
+        const rerendered = await saveFlags(svc, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
+        return { ok: true, rerendered };
       }),
   }),
 
@@ -415,6 +551,7 @@ export const appRouter = router({
           title: z.string().min(1).max(120).optional(),
           hook: z.string().max(80).optional(),
           caption: z.string().max(300).optional(),
+          hashtags: z.array(z.string().min(1).max(40)).max(20).optional(),
           layoutOverride: reframeModeSchema.nullable().optional(),
           /** Forced framing per section, absolute source seconds; [] or null = all auto. */
           layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional(),
@@ -452,6 +589,7 @@ export const appRouter = router({
             title: input.title ?? c.title,
             hook: input.hook ?? c.hook,
             caption: input.caption ?? c.caption,
+            ...(input.hashtags !== undefined ? { hashtags: input.hashtags.map((h) => h.replace(/^#+/, "")).filter(Boolean) } : {}),
             ...(input.layoutOverride !== undefined ? { layoutOverride: input.layoutOverride } : {}),
             ...(input.layoutSections !== undefined ? { layoutSections: input.layoutSections?.length ? input.layoutSections : null } : {}),
             ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),

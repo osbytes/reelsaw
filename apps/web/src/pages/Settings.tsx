@@ -1,66 +1,125 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
+import { ScrollArea } from "../components/scroll-area";
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-2 text-sm last:border-0">
-      <span className="text-muted">{k}</span>
-      <span className="truncate font-mono text-xs">{v}</span>
-    </div>
-  );
+function gb(mb: number) {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
 }
 
 export function SettingsPage() {
   const trpc = useTRPC();
   const q = useQuery({ ...trpc.settings.get.queryOptions(), refetchInterval: 5000 });
   const s = q.data;
-  if (!s) return <p className="text-muted">Loading…</p>;
-  const r = s.resources;
+  const r = s?.resources;
+  const L = s?.limits;
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
-  return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <h1 className="text-xl font-semibold">Settings</h1>
-      <p className="text-xs text-muted">Configuration comes from the environment (12-factor). Edit <code>.env</code> and restart to change it.</p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold">Models</h2>
-          <Row k="Language model" v={s.aiModel} />
-          <Row k="Transcription" v={s.transcriptionModel} />
-          {s.openaiBaseUrl && <Row k="OpenAI base URL" v={s.openaiBaseUrl} />}
-          {s.compatBaseUrl && <Row k="Compat base URL" v={s.compatBaseUrl} />}
-          <Row k="Face detection" v={s.faceDetection ? "on" : "off"} />
-        </div>
-        <div className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold">Runtime</h2>
-          <Row k="Storage" v={s.storage} />
-          <Row k="Render concurrency" v={s.renderConcurrency} />
-          <Row k="Signups" v={s.allowSignup ? "open" : "closed"} />
-          <Row k="OpenTelemetry" v={s.otel ? "on" : "off"} />
-          <Row k="Max upload" v={`${s.maxUploadMb} MB`} />
-        </div>
-        <div className="card p-4 sm:col-span-2">
-          <h2 className="mb-2 text-sm font-semibold">Resources <span className="font-normal text-muted">(live)</span></h2>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Meter label={`CPU ${r.cpuPercent}% busy · ${r.cpus} cpus${r.load1 !== null ? ` · load ${r.load1}` : ""}`} value={r.cpuPercent} ok={r.ok.cpu} />
-            <Meter label={`Memory ${r.memTotalMB - r.memAvailableMB} / ${r.memTotalMB} MB`} value={pct(r.memTotalMB - r.memAvailableMB, r.memTotalMB)} ok={r.ok.memory} />
-            <Meter label={r.diskFreeMB >= 0 ? `Disk ${r.diskTotalMB - r.diskFreeMB} / ${r.diskTotalMB} MB` : "Disk n/a"} value={r.diskFreeMB >= 0 ? pct(r.diskTotalMB - r.diskFreeMB, r.diskTotalMB) : 0} ok={r.ok.disk} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function Meter({ label, value, ok }: { label: string; value: number; ok: boolean }) {
+  const gauges = r
+    ? [
+        {
+          name: "CPU",
+          val: `${r.cpuPercent}%`,
+          used: r.cpuPercent,
+          limit: L?.maxCpuPercent,
+          ok: r.ok.cpu,
+          note: `${r.cpus} cores${r.load1 !== null ? ` · load ${r.load1}` : ""}${L ? ` · heavy jobs wait above ${L.maxCpuPercent}%` : ""}`,
+        },
+        {
+          name: "Memory",
+          val: `${pct(r.memTotalMB - r.memAvailableMB, r.memTotalMB)}%`,
+          used: pct(r.memTotalMB - r.memAvailableMB, r.memTotalMB),
+          limit: L ? 100 - pct(L.minFreeMemMB, r.memTotalMB) : undefined,
+          ok: r.ok.memory,
+          note: `${gb(r.memTotalMB - r.memAvailableMB)} of ${gb(r.memTotalMB)}${L ? ` · keeps ${gb(L.minFreeMemMB)} free` : ""}`,
+        },
+        {
+          name: "Disk",
+          val: r.diskFreeMB >= 0 ? `${pct(r.diskTotalMB - r.diskFreeMB, r.diskTotalMB)}%` : "n/a",
+          used: r.diskFreeMB >= 0 ? pct(r.diskTotalMB - r.diskFreeMB, r.diskTotalMB) : 0,
+          limit: L && r.diskTotalMB > 0 ? 100 - pct(L.minFreeDiskMB, r.diskTotalMB) : undefined,
+          ok: r.ok.disk,
+          note: r.diskFreeMB >= 0 ? `${gb(r.diskFreeMB)} free of ${gb(r.diskTotalMB)}` : "Not measurable on this filesystem",
+        },
+      ]
+    : [];
+
+  const cfg = s
+    ? [
+        {
+          title: "Models",
+          rows: [
+            ["Language model", s.aiModel],
+            ["Transcription", s.transcriptionModel],
+            ...(s.openaiBaseUrl ? [["OpenAI base URL", s.openaiBaseUrl]] : []),
+            ...(s.compatBaseUrl ? [["Compatible base URL", s.compatBaseUrl]] : []),
+            ["Face detection", s.faceDetection ? "on" : "off"],
+          ],
+        },
+        {
+          title: "Runtime",
+          rows: [
+            ["Storage", s.storage],
+            ["Render concurrency", String(s.renderConcurrency)],
+            ["Max upload", `${s.maxUploadMb} MB`],
+            ["Sign-ups", s.allowSignup ? "open" : "closed"],
+            ["OpenTelemetry", s.otel ? "on" : "off"],
+          ],
+        },
+      ]
+    : [];
+
   return (
-    <div>
-      <div className="mb-1 flex justify-between text-xs text-muted">
-        <span>{label}</span>
-        <span className={ok ? "text-ok" : "text-danger"}>{ok ? "ok" : "throttling"}</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded bg-panel-2">
-        <div className={`h-full ${ok ? "bg-accent-2" : "bg-danger"}`} style={{ width: `${value}%` }} />
-      </div>
-    </div>
+    <ScrollArea className="min-h-0 flex-1">
+      <main className="mx-auto flex max-w-[960px] flex-col gap-6 px-4 py-7 sm:px-6">
+        <div>
+          <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
+          <p className="mt-1 text-sm text-ink2">
+            Read from the server environment. Change them in <span className="font-mono text-[13px]">.env</span> and restart.
+          </p>
+        </div>
+        {!s && <p className="text-ink3">Loading…</p>}
+        {r && (
+          <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-[15px] font-bold">Machine</h2>
+              <span className="text-xs text-ink3">updates live</span>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {gauges.map((g) => (
+                <div key={g.name} className="flex flex-col gap-2">
+                  <div className="flex items-baseline justify-between">
+                    <b>{g.name}</b>
+                    <span className={`font-mono text-sm ${g.ok ? "" : "text-warn"}`}>{g.val}</span>
+                  </div>
+                  <div className="relative h-2 rounded-full bg-sunk">
+                    <div className={`h-full rounded-full ${g.ok ? "bg-acc" : "bg-warn"}`} style={{ width: `${Math.min(100, g.used)}%` }} />
+                    {g.limit !== undefined && g.limit > 0 && g.limit < 100 && <div title="Pause threshold" className="absolute -top-1 h-4 w-0.5 rounded-full bg-ink" style={{ left: `${g.limit}%` }} />}
+                  </div>
+                  <div className="text-xs text-ink2">
+                    {g.ok ? "" : "◷ Jobs paused · "}
+                    {g.note}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {cfg.map((sec) => (
+            <section key={sec.title} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">
+              <h2 className="text-[15px] font-bold">{sec.title}</h2>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+                {sec.rows.map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className="text-ink2">{k}</dt>
+                    <dd className="truncate text-right font-mono text-xs leading-5">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+        </div>
+      </main>
+    </ScrollArea>
   );
 }

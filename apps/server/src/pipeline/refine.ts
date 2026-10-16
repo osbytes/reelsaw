@@ -80,9 +80,13 @@ export async function mergeRefine(
     let flags = t.flags;
     if (result.flags) {
       const kind = step === "entities" ? "entity" : "disfluency";
-      const kept = flags.filter((f) => f.kind !== kind);
-      let incoming = carryDecisions(flags.filter((f) => f.kind === kind), result.flags);
-      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => k.kind === "entity" && overlaps(k, f)));
+      // manual cuts are the user's, not the detector's: they survive a re-run
+      const isManual = (f: (typeof flags)[number]) => f.subkind === "manual";
+      const kept = flags.filter((f) => f.kind !== kind || isManual(f));
+      let incoming = carryDecisions(flags.filter((f) => f.kind === kind && !isManual(f)), result.flags);
+      // fixes the user deleted stay deleted when the detector finds them again
+      incoming = incoming.filter((f) => !(t.deletedFlags ?? []).some((d) => d.kind === f.kind && d.wordIndex === f.wordIndex && d.span === f.span));
+      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => (k.kind === "entity" || isManual(k)) && overlaps(k, f)));
       else {
         // entity flags win: drop disfluency flags that overlap a new entity span
         flags = kept.filter((k) => !(k.kind === "disfluency" && incoming.some((f) => overlaps(k, f))));
@@ -166,7 +170,7 @@ export async function refineDisfluency(ctx: StageContext) {
   await markRunning(ctx, "disfluency");
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
-  for (const f of t.flags) if (f.kind === "entity") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
+  for (const f of t.flags) if (f.kind === "entity" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const flags = await detectDisfluencies(svc.config.DISFLUENCY_LLM ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
     telemetry: svc.otel.enabled,

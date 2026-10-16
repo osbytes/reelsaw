@@ -15,6 +15,7 @@ import { contextFactory } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { createExportZip } from "./export.js";
+import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 
 /** Range-capable file response for video playback. */
 async function sendFile(req: Request, file: string, downloadName?: string): Promise<Response> {
@@ -135,6 +136,31 @@ export function createApp(svc: Services) {
     c.header("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     c.header("Cache-Control", "no-store");
     return c.body(Readable.toWeb(stream) as ReadableStream);
+  });
+
+  // A/B preview of a disfluency cut (transcript popover): plan = which boundaries, audio = mp3 of the window
+  app.get("/api/projects/:projectId/flags/:flagId/cut-plan", async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.text("unauthorized", 401);
+    const { projectId, flagId } = c.req.param();
+    const plan = await planCutPreview(svc, session.user.id, projectId, flagId, { exact: c.req.query("exact") === "1", signal: c.req.raw.signal });
+    return plan ? c.json(plan) : c.text("not found", 404);
+  });
+  app.get("/api/projects/:projectId/flags/:flagId/preview.mp3", async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return c.text("unauthorized", 401);
+    const { projectId, flagId } = c.req.param();
+    const num = (k: string) => {
+      const v = c.req.query(k);
+      return v === undefined || v === "" || !Number.isFinite(Number(v)) ? undefined : Number(v);
+    };
+    const cs = num("cutStart");
+    const ce = num("cutEnd");
+    const audio = await cutPreviewAudio(svc, session.user.id, projectId, flagId, { pad: num("pad") ?? 2, cut: cs !== undefined && ce !== undefined && ce > cs ? { start: cs, end: ce } : undefined, signal: c.req.raw.signal });
+    if (!audio) return c.text("not found", 404);
+    c.header("Content-Type", "audio/mpeg");
+    c.header("Cache-Control", "private, max-age=3600");
+    return c.body(new Uint8Array(audio));
   });
 
   app.get("/media/source/:projectId", async (c) => {

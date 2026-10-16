@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router";
-import { Upload, Link2, ShieldAlert, ChevronDown } from "lucide-react";
+import { Link, useNavigate } from "react-router";
+import { ChevronRight } from "lucide-react";
+import { ScrollArea } from "../components/scroll-area";
+import { ProgressBar, Segmented } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
 import { defaultProjectSettings, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
-import { StyleControls, Segmented } from "../components/StyleControls";
 
 const LENGTHS = [
   { id: "short", label: "< 30s", min: 10, max: 30 },
@@ -148,191 +149,246 @@ export function NewProjectPage() {
   const lengthId = LENGTHS.find((l) => l.min === s.minClipSeconds && l.max === s.maxClipSeconds)?.id ?? "custom";
   const source = mode === "upload" ? videoEl : imgEl;
 
+  const sec = "flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5";
+  const h2 = "text-[15px] font-bold";
+  const lenLabel = lengthId === "custom" ? `${s.minClipSeconds}–${s.maxClipSeconds}s` : LENGTHS.find((l) => l.id === lengthId)!.label;
+  const look = { karaoke: "Highlight", box: "Boxed", plain: "Outlined", none: "No" }[style.captions];
+  const summary = `${s.maxClips ? `At most ${s.maxClips} clips` : "Every strong moment"} · ${lenLabel} · ${look} captions${s.focus ? ` · about “${s.focus}”` : ""}`;
+  const canStart = mode === "url" ? /^https?:\/\/\S+\.\S+/.test(url) : !!file;
+  const chip = (on: boolean) => `rounded-full border px-3.5 py-1.5 text-[13px] font-semibold ${on ? "border-ink bg-ink text-bg" : "border-line bg-panel text-ink2 hover:text-ink"}`;
+
   return (
-    <form onSubmit={submit} className="mx-auto max-w-5xl">
-      <h1 className="mb-4 text-xl font-semibold">New project</h1>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        {/* preview: first on mobile, sticky on the right on desktop */}
-        <div className="order-first lg:order-last">
-          <div className="space-y-2 lg:sticky lg:top-0">
-            <div className="h-[460px] sm:h-[540px]">
-              <LoopingPreview
-                source={source}
-                srcW={srcDims.w}
-                srcH={srcDims.h}
-                framing={{ layout: previewAs, cx: 0.5, cy: 0.4, cx2: 0.5 }}
-                style={style}
-                words={SAMPLE_WORDS}
-                hook="Your hook goes here"
-                emphasis={["captions", "every"]}
-                alwaysShowHook
-                onStyleChange={(p) => patch(p)}
-                showSafeZones={safe}
-              />
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+      <ScrollArea className="min-h-0 flex-1">
+        <main className="mx-auto grid max-w-[1120px] gap-6 px-4 py-7 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div>
+              <div className="text-xs text-ink3">
+                <Link to="/" className="text-ink3 no-underline hover:text-ink">
+                  Projects
+                </Link>{" "}
+                / New
+              </div>
+              <h1 className="mt-0.5 text-[28px] font-bold tracking-tight">New project</h1>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
+
+            <section className={sec}>
+              <h2 className={h2}>Source</h2>
               <Segmented
+                className="w-max"
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: "url", label: "Paste link" },
+                  { value: "upload", label: "Upload file" },
+                ]}
+              />
+              {mode === "url" ? (
+                <>
+                  <input className="input py-2.5" placeholder="https://youtube.com/watch?v=…" aria-label="Video link" value={url} onChange={(e) => setUrl(e.target.value)} required />
+                  {(imgEl || peek.data?.title) && (
+                    <div className="flex items-center gap-3 rounded-[12px] bg-sunk p-2">
+                      <div className="film aspect-video w-24 shrink-0 overflow-hidden rounded-[8px]">{imgEl && <img src={imgEl.src} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />}</div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{peek.data?.title ?? "YouTube video"}</div>
+                        <div className="text-xs text-ink3">{ytId ? "youtube.com" : (() => { try { return new URL(debouncedUrl).host; } catch { return ""; } })()}</div>
+                      </div>
+                    </div>
+                  )}
+                  {validUrl && !ytId && peek.isLoading && <div className="text-xs text-ink3">Fetching title and thumbnail…</div>}
+                </>
+              ) : (
+                <>
+                  <label className="flex cursor-pointer flex-col items-center gap-1 rounded-[12px] border-2 border-dashed border-line2 px-4 py-6 text-center text-sm text-ink2 hover:border-acc">
+                    <span className="font-semibold text-ink">{file ? file.name : "Choose a video file"}</span>
+                    <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${settingsQ.data?.maxUploadMb ?? "—"} MB`}</span>
+                    <input className="hidden" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                  </label>
+                  {uploadPct !== null && <ProgressBar value={uploadPct} />}
+                  <video ref={hiddenVideo} src={objectUrl ?? undefined} muted playsInline preload="auto" className="hidden" />
+                </>
+              )}
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional, defaults to the video title)" aria-label="Title" />
+            </section>
+
+            <section className={sec}>
+              <h2 className={h2}>Clip length</h2>
+              <div className="flex flex-wrap gap-2">
+                {LENGTHS.map((l) => (
+                  <button key={l.id} type="button" className={chip(lengthId === l.id)} onClick={() => patch({ minClipSeconds: l.min, maxClipSeconds: l.max })}>
+                    {l.label}
+                  </button>
+                ))}
+                <button type="button" className={chip(lengthId === "custom")} onClick={() => patch({ minClipSeconds: s.minClipSeconds + 1 })}>
+                  Custom
+                </button>
+              </div>
+              {lengthId === "custom" && (
+                <div className="flex items-center gap-2 text-[13px] text-ink2">
+                  Between
+                  <input className="input w-16 px-2 py-1" type="number" min={5} max={180} value={s.minClipSeconds} onChange={(e) => patch({ minClipSeconds: Number(e.target.value) })} aria-label="Minimum seconds" />
+                  and
+                  <input className="input w-16 px-2 py-1" type="number" min={10} max={300} value={s.maxClipSeconds} onChange={(e) => patch({ maxClipSeconds: Number(e.target.value) })} aria-label="Maximum seconds" />
+                  seconds
+                </div>
+              )}
+            </section>
+
+            <section className={sec}>
+              <h2 className={h2}>How many</h2>
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                <input type="radio" name="cnt" className="mt-1 accent-[var(--acc)]" checked={!s.maxClips} onChange={() => patch({ maxClips: undefined })} />
+                <span>
+                  <b>Every strong moment</b>
+                  <br />
+                  <span className="text-[13px] text-ink2">Weak moments are dropped, so you might get 3 clips or 30.</span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                <input type="radio" name="cnt" className="accent-[var(--acc)]" checked={!!s.maxClips} onChange={() => patch({ maxClips: s.maxClips ?? 10 })} />
+                <b>At most</b>
+                <input className="input w-16 px-2 py-1" type="number" min={1} max={50} value={s.maxClips ?? 10} onFocus={() => !s.maxClips && patch({ maxClips: 10 })} onChange={(e) => patch({ maxClips: Math.max(1, Number(e.target.value)) })} aria-label="Maximum clips" />
+                <span className="text-ink2">clips</span>
+              </label>
+            </section>
+
+            <section className={sec}>
+              <label htmlFor="focus" className={h2}>
+                Focus <span className="text-xs font-normal text-ink3">optional</span>
+              </label>
+              <input id="focus" className="input" placeholder="Find clips about… e.g. pricing, hiring" value={s.focus ?? ""} onChange={(e) => patch({ focus: e.target.value || undefined })} maxLength={300} />
+              <span className="text-xs text-ink3">Only on-topic moments are kept. Each clip also gets a relevance score.</span>
+            </section>
+
+            <section className={sec}>
+              <h2 className={h2}>Captions</h2>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["karaoke", "Highlight"],
+                    ["box", "Boxed"],
+                    ["plain", "Outlined"],
+                    ["none", "Off"],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button key={v} type="button" className={chip(style.captions === v)} onClick={() => patch({ captions: v })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-[13px]">
+                {style.captions !== "none" && style.captions !== "plain" && (
+                  <span className="flex items-center gap-2">
+                    Highlight
+                    {["#C6A8FF", "#FFD84D", "#5EE0A0", "#FFFFFF"].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Highlight ${c}`}
+                        onClick={() => patch({ highlightColor: c })}
+                        className="h-6 w-6 rounded-full"
+                        style={{ background: c, border: style.highlightColor.toUpperCase() === c ? "2px solid var(--ink)" : "2px solid var(--line)" }}
+                      />
+                    ))}
+                  </span>
+                )}
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" className="accent-[var(--acc)]" checked={style.showHook} onChange={(e) => patch({ showHook: e.target.checked })} /> Hook text
+                </label>
+              </div>
+              <span className="text-xs text-ink3">This is the project default. Fine-tune size, words on screen and key words per clip in the editor.</span>
+            </section>
+
+            <section className={sec}>
+              <button type="button" className="flex items-center gap-1.5 text-left text-[15px] font-bold" aria-expanded={more} onClick={() => setMore(!more)}>
+                <ChevronRight className={`h-4 w-4 transition ${more ? "rotate-90" : ""}`} /> Advanced
+              </button>
+              {more && (
+                <div className="flex flex-col gap-4">
+                  <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
+                    Names and terms to spell correctly
+                    <input className="input font-normal" placeholder="e.g. Copia, La Marzocco, Priyanka" value={s.vocabulary ?? ""} onChange={(e) => patch({ vocabulary: e.target.value || undefined })} />
+                    <span className="text-xs font-normal text-ink3">Also pulled from the video title, description and tags.</span>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
+                    Extra instructions for the AI
+                    <textarea className="input font-normal" rows={3} placeholder="e.g. Prefer stories over tips. Avoid sponsor reads." value={s.instructions ?? ""} onChange={(e) => patch({ instructions: e.target.value || undefined })} />
+                  </label>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[13px] font-semibold text-ink2">Pauses</span>
+                    <Segmented
+                      className="w-max"
+                      size="sm"
+                      value={s.pauses}
+                      onChange={(v) => patch({ pauses: v })}
+                      options={[
+                        { value: "natural", label: "Natural", title: "Pauses longer than 0.6 s are shortened" },
+                        { value: "tight", label: "Tight", title: "Pauses longer than 0.35 s are shortened" },
+                        { value: "off", label: "Keep", title: "Leave pauses as recorded" },
+                      ]}
+                    />
+                    <span className="text-xs text-ink3">Long silences are shortened with jump cuts, like disfluencies.</span>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                    <input type="checkbox" className="mt-1 accent-[var(--acc)]" checked={s.sourceText !== "keep"} onChange={(e) => patch({ sourceText: e.target.checked ? "hide" : "keep" })} />
+                    <span>
+                      <b>Hide captions and logos already burned into the video</b>
+                      <br />
+                      <span className="text-[13px] text-ink2">Detected automatically. You can turn this off per project later.</span>
+                    </span>
+                  </label>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <aside className="order-first lg:order-last">
+            <div className="flex flex-col items-center gap-3 lg:sticky lg:top-7">
+              <div className="h-[460px] w-full sm:h-[540px]">
+                <LoopingPreview
+                  source={source}
+                  srcW={srcDims.w}
+                  srcH={srcDims.h}
+                  framing={{ layout: previewAs, cx: 0.5, cy: 0.4, cx2: 0.5 }}
+                  style={style}
+                  words={SAMPLE_WORDS}
+                  hook="Your hook goes here"
+                  emphasis={["captions", "every"]}
+                  alwaysShowHook
+                  onStyleChange={(p) => patch(p)}
+                  showSafeZones={safe}
+                  tag={source ? undefined : "preview"}
+                />
+              </div>
+              <div className="text-xs text-ink3">Drag the caption or hook to position them. They snap to centre.</div>
+              <Segmented
+                size="sm"
                 value={previewAs}
                 onChange={setPreviewAs}
                 options={[
-                  { value: "face", label: "Face", title: "Speaker crop" },
-                  { value: "split", label: "Split", title: "Two speakers" },
-                  { value: "stack", label: "Stack", title: "Screen + webcam" },
-                  { value: "fit", label: "Fit", title: "Whole frame, blurred background" },
+                  { value: "face", label: "Speaker" },
+                  { value: "split", label: "Two" },
+                  { value: "stack", label: "Screen" },
+                  { value: "fit", label: "Whole" },
                 ]}
               />
-              <button type="button" className={`btn-ghost px-2 py-1 text-xs ${safe ? "text-danger" : ""}`} onClick={() => setSafe(!safe)} title="Show where TikTok / Shorts / Reels draw their buttons and description">
-                <ShieldAlert className="h-3.5 w-3.5" /> Safe zones
-              </button>
+              <span className="text-center text-xs leading-snug text-ink3">Preview only. Framing is chosen automatically per section; you can override it per clip later.</span>
+              <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+                <input type="checkbox" className="accent-[var(--acc)]" checked={safe} onChange={(e) => setSafe(e.target.checked)} /> Show platform safe zones
+              </label>
             </div>
-            <p className="text-xs text-muted">Framing is chosen automatically per scene. Override any section in the clip editor afterwards.</p>
-          </div>
-        </div>
+          </aside>
+        </main>
+      </ScrollArea>
 
-        <div className="space-y-4">
-          <section className="card space-y-3 p-4">
-            <div className="flex gap-2">
-              <button type="button" className={mode === "url" ? "btn-primary" : "btn-ghost"} onClick={() => setMode("url")}>
-                <Link2 className="h-4 w-4" /> URL
-              </button>
-              <button type="button" className={mode === "upload" ? "btn-primary" : "btn-ghost"} onClick={() => setMode("upload")}>
-                <Upload className="h-4 w-4" /> Upload
-              </button>
-            </div>
-            {mode === "url" ? (
-              <div>
-                <label className="label">Video URL</label>
-                <input className="input" placeholder="https://www.youtube.com/watch?v=…" value={url} onChange={(e) => setUrl(e.target.value)} required />
-                {peek.data?.title && !ytId && <p className="mt-1 truncate text-xs text-muted">{peek.data.title}</p>}
-              </div>
-            ) : (
-              <div>
-                <label className="label">Video file (max {settingsQ.data?.maxUploadMb ?? "—"} MB)</label>
-                <input className="input" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
-                {uploadPct !== null && <p className="mt-2 text-xs text-muted">Uploading… {Math.round(uploadPct * 100)}%</p>}
-                <video ref={hiddenVideo} src={objectUrl ?? undefined} muted playsInline preload="auto" className="hidden" />
-              </div>
-            )}
-            <div>
-              <label className="label">Title (optional)</label>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Defaults to the video title" />
-            </div>
-          </section>
-
-          <section className="card space-y-4 p-4">
-            <h2 className="text-sm font-semibold">Clips</h2>
-            <div>
-              <label className="label">Length</label>
-              <Segmented
-                value={lengthId}
-                onChange={(id) => {
-                  const l = LENGTHS.find((x) => x.id === id);
-                  if (l) patch({ minClipSeconds: l.min, maxClipSeconds: l.max });
-                }}
-                options={[...LENGTHS.map((l) => ({ value: l.id as string, label: l.label })), ...(lengthId === "custom" ? [{ value: "custom", label: "Custom" }] : [])]}
-              />
-              <div className="mt-2 flex items-center gap-2 text-xs text-muted">
-                <input className="input w-16 px-2 py-1" type="number" min={5} max={180} value={s.minClipSeconds} onChange={(e) => patch({ minClipSeconds: Number(e.target.value) })} />
-                to
-                <input className="input w-16 px-2 py-1" type="number" min={10} max={300} value={s.maxClipSeconds} onChange={(e) => patch({ maxClipSeconds: Number(e.target.value) })} />
-                seconds
-              </div>
-            </div>
-            <div>
-              <label className="label">How many</label>
-              <div className="flex flex-wrap items-center gap-3">
-                <Segmented
-                  value={s.maxClips ? "cap" : "auto"}
-                  onChange={(v) => patch({ maxClips: v === "auto" ? undefined : (s.maxClips ?? 10) })}
-                  options={[
-                    { value: "auto", label: "Every strong moment", title: "The AI returns as many clips as the video supports" },
-                    { value: "cap", label: "At most…" },
-                  ]}
-                />
-                {s.maxClips !== undefined && <input className="input w-20 px-2 py-1" type="number" min={1} max={50} value={s.maxClips} onChange={(e) => patch({ maxClips: Math.max(1, Number(e.target.value)) })} />}
-              </div>
-              <p className="mt-1 text-xs text-muted">No target count is given to the AI; weak moments are dropped instead of padding the list.</p>
-            </div>
-            <div>
-              <label className="label">Pauses</label>
-              <Segmented
-                value={s.pauses}
-                onChange={(v) => patch({ pauses: v })}
-                options={[
-                  { value: "natural", label: "Natural", title: "Pauses longer than 0.6 s are shortened" },
-                  { value: "tight", label: "Tight", title: "Pauses longer than 0.35 s are shortened (fast, punchy pacing)" },
-                  { value: "off", label: "Keep", title: "Leave pauses as recorded" },
-                ]}
-              />
-              <p className="mt-1 text-xs text-muted">Silence is detected on-device and removed with jump cuts, like the filler-word cuts.</p>
-            </div>
-            <div>
-              <label className="label">Find clips about (optional)</label>
-              <input
-                className="input"
-                placeholder="e.g. pricing, the founding story, anything about sleep"
-                value={s.focus ?? ""}
-                onChange={(e) => patch({ focus: e.target.value || undefined })}
-                maxLength={300}
-              />
-              <p className="mt-1 text-xs text-muted">Only on-topic moments are kept, and each clip gets a relevance score.</p>
-            </div>
-          </section>
-
-          <section className="card p-4">
-            <h2 className="mb-3 text-sm font-semibold">Captions & hook</h2>
-            <StyleControls style={style} onChange={(p) => patch(p)} />
-          </section>
-
-          <section className="card p-4">
-            <button type="button" className="flex w-full items-center justify-between text-sm font-semibold" onClick={() => setMore(!more)}>
-              Transcript & AI
-              <ChevronDown className={`h-4 w-4 transition ${more ? "rotate-180" : ""}`} />
-            </button>
-            {more && (
-              <div className="mt-3 space-y-3">
-                <div>
-                  <label className="label">Names & terms to spell correctly</label>
-                  <input
-                    className="input"
-                    placeholder="e.g. Copia, La Marzocco, Priyanka (also pulled from the title, description and tags)"
-                    value={s.vocabulary ?? ""}
-                    onChange={(e) => patch({ vocabulary: e.target.value || undefined })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Extra instructions for the AI</label>
-                  <textarea
-                    className="input"
-                    rows={2}
-                    placeholder="e.g. Avoid clips with profanity. Prefer stories over tips."
-                    value={s.instructions ?? ""}
-                    onChange={(e) => patch({ instructions: e.target.value || undefined })}
-                  />
-                </div>
-                <label className="flex items-start gap-2 text-sm" title="Detected automatically with an on-device text detector">
-                  <input type="checkbox" className="mt-1" checked={s.sourceText !== "keep"} onChange={(e) => patch({ sourceText: e.target.checked ? "hide" : "keep" })} />
-                  <span>
-                    Hide captions and logos already burned into the video
-                    <span className="block text-xs text-muted">Kept out of speaker crops where possible, blurred elsewhere, so they don't appear next to (or twice under) your captions.</span>
-                  </span>
-                </label>
-                <p className="text-xs text-muted">Fillers, repeats and false starts are removed from captions and cut from the video automatically. Review them on the transcript after processing.</p>
-              </div>
-            )}
-          </section>
-
-        </div>
-      </div>
-
-      {/* always reachable: sticks to the bottom of the scrolling page */}
-      <div className="sticky bottom-0 z-10 -mx-4 mt-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0 text-xs text-muted">
-            {error ? <span className="text-danger">{error}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : <span className="truncate">Model: {settingsQ.data?.aiModel} · Transcription: {settingsQ.data?.transcriptionModel}</span>}
-          </div>
-          <button className="btn-primary" disabled={busy}>
-            {busy ? "Working…" : "Generate clips"}
+      <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
+          <span className="min-w-0 flex-1 truncate text-[13px] text-ink2">{error ? <span className="text-err">{error}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : summary}</span>
+          <Link to="/" className="btn-quiet no-underline">
+            Cancel
+          </Link>
+          <button className="btn-primary px-5 py-2.5 text-sm" disabled={busy || !canStart}>
+            {busy ? "Starting…" : "Find clips"}
           </button>
         </div>
       </div>

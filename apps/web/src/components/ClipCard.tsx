@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Download, RefreshCw, Scissors, Loader2, Copy, Check, Crosshair } from "lucide-react";
-import { StatusBadge, ProgressBar } from "./ui";
-import * as Popover from "@radix-ui/react-popover";
-import { formatTime, RUBRIC_WEIGHTS, type ClipScores, type ClipDiagnostics } from "@reelsaw/shared";
+import { Link } from "react-router";
+import { Loader2 } from "lucide-react";
+import { ProgressBar, StatusText } from "./ui";
+import { useToast } from "../lib/toast";
+import { formatTime, type ClipScores, type ClipDiagnostics, type DetectedSegment } from "@reelsaw/shared";
+import { MODE_LABEL } from "./Timeline";
 
 export interface ClipView {
   id: string;
@@ -21,204 +23,223 @@ export interface ClipView {
   layout: string | null;
   layoutInfo: { reason: string } | null;
   layoutOverride: string | null;
-  layoutSections?: unknown[];
+  layoutSections?: Array<{ mode: string }>;
+  layoutSegments?: DetectedSegment[];
   scores?: ClipScores | null;
   diagnostics?: ClipDiagnostics | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
 }
 
-const LAYOUT_LABEL: Record<string, string> = { face: "Face crop", split: "Split", stack: "Stacked", fit: "Fit", center: "Center", none: "Original" };
+const RUBRIC: Array<{ key: keyof ClipScores; label: string }> = [
+  { key: "hook", label: "Hook" },
+  { key: "value", label: "Value" },
+  { key: "flow", label: "Flow" },
+  { key: "shareability", label: "Shareability" },
+  { key: "relevance", label: "Relevance" },
+];
 
-function scoreColor(s: number) {
-  return s >= 80 ? "text-ok" : s >= 60 ? "text-accent" : "text-muted";
+function framingText(c: ClipView) {
+  const segs = c.layoutSegments ?? [];
+  const forced = (c.layoutSections?.length ?? 0) > 0 || (c.layoutOverride && c.layoutOverride !== "auto");
+  if (!segs.length) return c.layout ? `${forced ? "" : "Auto · "}${MODE_LABEL[c.layout] ?? c.layout}` : "Decided at render";
+  const names: string[] = [];
+  for (const s of segs) {
+    const n = MODE_LABEL[s.layout] ?? s.layout;
+    if (names.at(-1) !== n) names.push(n);
+  }
+  return `${forced ? "" : "Auto · "}${names.join(" → ")}${forced ? " (set)" : ""}`;
+}
+
+function cutsNote(d: ClipDiagnostics | null | undefined) {
+  if (!d) return "Shown after the first render";
+  const a = d.cuts.applied.length;
+  const k = d.cuts.skipped.length;
+  const parts: string[] = [];
+  if (a || k) parts.push(`${a} cut${a === 1 ? "" : "s"}${k ? `; ${k} kept because removal couldn’t be verified` : ""}`);
+  if (d.pauses?.cuts) parts.push(`${d.pauses.removedSec.toFixed(1)}s of pauses trimmed`);
+  return parts.length ? parts.join(" · ") : "No disfluencies found";
 }
 
 export function ClipCard({
   clip,
+  projectId,
   progress,
   active,
   busy,
-  onEdit,
   onRerender,
   onSeek,
+  onPlay,
 }: {
   clip: ClipView;
+  projectId: string;
   progress?: number;
   active?: boolean;
   busy?: boolean;
-  onEdit: () => void;
   onRerender: () => void;
   onSeek: () => void;
+  onPlay: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const postText = [clip.caption || clip.title, clip.hashtags.map((h) => `#${h}`).join(" ")].filter(Boolean).join("\n\n");
-  const copy = () => {
-    void navigator.clipboard.writeText(postText).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  const len = Math.round(clip.endSec - clip.startSec);
+  const toast = useToast();
+  const [bdOpen, setBd] = useState(false);
+  const [postOpen, setPost] = useState(false);
+  const [whyOpen, setWhy] = useState(false);
+  const done = clip.status === "done";
+  const working = clip.status === "rendering" || clip.status === "preparing";
+  const pct = Math.round((progress ?? 0) * 100);
+  const tags = clip.hashtags.map((h) => `#${h}`).join(" ");
+  const copy = () =>
+    navigator.clipboard
+      .writeText([clip.title, clip.caption, tags].filter(Boolean).join("\n\n"))
+      .then(() => toast("Caption + hashtags copied"))
+      .catch(() => toast("Couldn’t copy"));
+  const skipped = clip.diagnostics?.cuts.skipped ?? [];
+  const detail =
+    clip.status === "failed"
+      ? { text: clip.error ?? "Render failed", cls: "bg-err-soft" }
+      : clip.status === "pending"
+        ? { text: "Waiting for a render slot.", cls: "bg-warn-soft" }
+        : clip.status === "preparing"
+          ? { text: clip.origin === "manual-ai" ? "AI is finding the best moment in your selection." : "AI is writing the title, hook and caption.", cls: "bg-acc-soft" }
+          : null;
+  const statusLabel = clip.status === "rendering" ? `Rendering ${pct}%` : clip.status === "failed" ? "Render failed" : clip.status === "pending" ? "Queued" : undefined;
+  const statusKey = clip.status === "pending" ? "queued" : clip.status;
+  const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <div className={`card flex gap-4 p-3 transition ${active ? "border-accent/60" : ""}`}>
-      {/* player */}
-      <div className="relative w-[200px] shrink-0 overflow-hidden rounded-md bg-black" style={{ aspectRatio: "9 / 16" }}>
-        {clip.videoUrl ? (
-          <video src={clip.videoUrl} poster={clip.thumbnailUrl ?? undefined} controls preload="metadata" className="h-full w-full object-contain" />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-xs text-muted">
-            {clip.status === "rendering" || clip.status === "preparing" ? <Loader2 className={`h-5 w-5 animate-spin ${clip.status === "preparing" ? "text-accent-2" : "text-accent"}`} /> : <StatusBadge status={clip.status} />}
-            {clip.status === "preparing" && <p className="text-center">{clip.origin === "manual-ai" ? "AI is finding the best moment in your selection" : "AI is writing the title, hook and caption"}</p>}
-            {(clip.status === "rendering" || clip.status === "preparing") && (
-              <div className="w-full">
-                <ProgressBar value={progress ?? 0} />
-              </div>
+    <article className={`flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active ? "border-acc" : "border-line"}`}>
+      <div className="flex gap-3">
+        <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
+          {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+          <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
+            {clip.status === "failed" ? "!" : clip.status === "preparing" ? <Loader2 className="h-4 w-4 animate-spin" /> : working ? `${pct}%` : clip.status === "pending" ? "◷" : <span className="grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
+          </span>
+          {clip.status === "rendering" && (
+            <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
+              <span className="block h-full bg-acc" style={{ width: `${pct}%` }} />
+            </span>
+          )}
+        </button>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-start gap-2">
+            <span className="pt-px font-mono text-xs text-ink3">#{clip.index + 1}</span>
+            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || "Untitled moment"}</h3>
+            {clip.score > 0 && (
+              <button
+                onClick={() => setBd(!bdOpen)}
+                aria-expanded={bdOpen}
+                title="Why this score"
+                className={`shrink-0 rounded-[8px] px-2 py-0.5 font-mono text-[13px] font-semibold ${bdOpen ? "bg-acc text-acc-ink" : "bg-acc-soft text-acc-text"}`}
+              >
+                {Math.round(clip.score)}
+              </button>
             )}
-            {clip.error && <p className="line-clamp-4 text-center text-danger">{clip.error}</p>}
           </div>
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink2">
+            <button onClick={onSeek} className="font-mono text-ink2 hover:text-acc-text" title="Seek source to this clip">
+              {formatTime(clip.startSec)}–{formatTime(clip.endSec)}
+            </button>
+            <span>{Math.round(clip.endSec - clip.startSec)}s</span>
+            <StatusText status={statusKey as never} label={statusLabel} />
+          </div>
+          {clip.origin && clip.origin !== "ai" && <span className="w-max rounded-full bg-sunk px-2 py-px text-[11px] font-semibold text-ink2">{clip.origin === "manual" ? "Your range" : "AI pick in your range"}</span>}
+          {clip.hook && <p className="text-[13px] text-ink2">“{clip.hook}”</p>}
+        </div>
+      </div>
+
+      {clip.status === "rendering" && <ProgressBar value={progress ?? 0} />}
+      {detail && <div className={`rounded-[8px] px-2.5 py-1.5 text-xs leading-snug text-ink ${detail.cls}`}>{detail.text}</div>}
+
+      {bdOpen && (
+        <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-2.5">
+          {clip.scores ? (
+            RUBRIC.filter((r) => clip.scores![r.key] !== undefined).map((r) => {
+              const v = Math.round((clip.scores![r.key] as number) * 10);
+              return (
+                <div key={r.key} className="grid grid-cols-[92px_1fr_28px] items-center gap-2 text-xs">
+                  <span className="text-ink2">{r.label}</span>
+                  <div className="h-1.5 rounded-full bg-line">
+                    <div className="h-full rounded-full bg-acc" style={{ width: `${v}%` }} />
+                  </div>
+                  <span className="text-right font-mono">{v}</span>
+                </div>
+              );
+            })
+          ) : (
+            <span className="text-xs text-ink2">No breakdown stored for this clip.</span>
+          )}
+          {clip.reasoning && <p className="mt-0.5 text-xs leading-snug text-ink2">{clip.reasoning}</p>}
+          {clip.scores?.rank ? <p className="text-[11px] text-ink3">Ranked #{clip.scores.rank} in head-to-head comparisons. A rubric score, not a view prediction.</p> : null}
+        </div>
+      )}
+
+      {clip.status !== "preparing" && (
+        <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-xs">
+          <dt className="text-ink3">Framing</dt>
+          <dd className="text-ink">{framingText(clip)}</dd>
+          <dt className="text-ink3">Cuts</dt>
+          <dd className="text-ink">
+            {cutsNote(clip.diagnostics)}{" "}
+            {skipped.length > 0 && (
+              <button className="font-semibold text-acc-text" onClick={() => setWhy(!whyOpen)}>
+                {whyOpen ? "Hide" : "Why?"}
+              </button>
+            )}
+          </dd>
+          <dt className="text-ink3">Post</dt>
+          <dd>
+            <button className="font-semibold text-acc-text" aria-expanded={postOpen} onClick={() => setPost(!postOpen)}>
+              {postOpen ? "Hide caption & hashtags" : "Show caption & hashtags"}
+            </button>
+          </dd>
+        </dl>
+      )}
+      {whyOpen && (
+        <div className="rounded-[8px] bg-warn-soft px-2.5 py-1.5 text-xs leading-snug">
+          The removal couldn’t be verified, so the audio was kept. Captions still drop the word.
+          {skipped.map((s, i) => (
+            <p key={i} className="mt-1 line-clamp-3 font-mono text-[10px] text-ink2" title={s.reason}>
+              {formatTime(s.start)} · {s.reason}
+            </p>
+          ))}
+        </div>
+      )}
+      {postOpen && (
+        <div className="flex flex-col gap-1 rounded-[10px] bg-sunk p-2.5 text-[13px] leading-snug">
+          <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
+          {tags && <div className="text-xs text-acc-text">{tags}</div>}
+        </div>
+      )}
+
+      <div className="-mx-1 flex flex-wrap items-center gap-0.5">
+        {clip.status === "failed" && (
+          <button className="btn-ink mr-1 px-2.5 py-1.5 text-xs" disabled={busy} onClick={onRerender}>
+            ↻ Retry render
+          </button>
         )}
-        <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted">#{clip.index + 1}</span>
-      </div>
-
-      {/* meta */}
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-sm font-semibold leading-snug">{clip.title}</h3>
-          <ScoreBadge score={clip.score} scores={clip.scores ?? null} />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-          <button className="flex items-center gap-1 hover:text-text" onClick={onSeek} title="Jump the source player to this clip">
-            <Crosshair className="h-3 w-3" /> {formatTime(clip.startSec)} → {formatTime(clip.endSec)} · {len}s
-          </button>
-          {clip.layout && (
-            <span className="rounded bg-panel-2 px-1.5 py-0.5" title={clip.layoutInfo?.reason ?? ""}>
-              {LAYOUT_LABEL[clip.layout] ?? clip.layout}
-              {clip.layoutOverride || clip.layoutSections?.length ? " · manual" : ""}
-            </span>
-          )}
-          {clip.diagnostics && (clip.diagnostics.cuts.applied.length + clip.diagnostics.cuts.skipped.length > 0 || (clip.diagnostics.pauses?.cuts ?? 0) > 0) && <CutsBadge d={clip.diagnostics} />}
-          {clip.origin && clip.origin !== "ai" && (
-            <span className="rounded bg-accent-2/15 px-1.5 py-0.5 text-accent-2" title={clip.origin === "manual" ? "Exact range you selected in the transcript" : "AI picked this inside your transcript selection"}>
-              {clip.origin === "manual" ? "Your selection" : "AI pick from selection"}
-            </span>
-          )}
-        </div>
-        {clip.hook && <p className="text-sm text-accent-2">“{clip.hook}”</p>}
-        {clip.caption && <p className="text-sm text-text/90">{clip.caption}</p>}
-        {clip.hashtags.length > 0 && <p className="text-xs text-muted">{clip.hashtags.map((h) => `#${h}`).join(" ")}</p>}
-        <p className="line-clamp-2 text-xs text-muted/80" title={clip.reasoning}>
-          {clip.reasoning}
-        </p>
-        <div className="mt-auto flex flex-wrap gap-2 pt-1">
-          {clip.videoUrl && (
-            <a className="btn-primary" href={`${clip.videoUrl}?download`}>
-              <Download className="h-4 w-4" /> Download
-            </a>
-          )}
-          <button className="btn-ghost" disabled={clip.status === "preparing"} onClick={onEdit} title="Trim, retitle, change layout">
-            <Scissors className="h-4 w-4" /> Edit
-          </button>
-          <button className="btn-ghost" onClick={copy} title="Copy caption + hashtags">
-            {copied ? <Check className="h-4 w-4 text-ok" /> : <Copy className="h-4 w-4" />} Caption
-          </button>
-          <button className="btn-ghost" disabled={clip.status === "rendering" || clip.status === "preparing" || busy} onClick={onRerender} title="Re-render">
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const RUBRIC: Array<{ key: keyof typeof RUBRIC_WEIGHTS | "relevance"; label: string; hint: string }> = [
-  { key: "hook", label: "Hook", hint: "Does the opening stop a scroller within 3 seconds?" },
-  { key: "value", label: "Value", hint: "Insight, emotion, humour, story or usefulness" },
-  { key: "flow", label: "Flow", hint: "Stands alone: clean start, payoff at the end" },
-  { key: "shareability", label: "Share", hint: "Would people comment, share or save it?" },
-  { key: "relevance", label: "Focus", hint: "How on-topic it is for your focus" },
-];
-
-/** Total score; click for the rubric breakdown it was computed from. */
-function ScoreBadge({ score, scores }: { score: number; scores: ClipScores | null }) {
-  const badge = (
-    <div className={`shrink-0 text-right ${scoreColor(score)}`}>
-      <div className="text-lg font-bold leading-none">{Math.round(score)}</div>
-      <div className="text-[10px] uppercase tracking-wide opacity-70">{scores?.rank ? `score · #${scores.rank} h2h` : "score"}</div>
-    </div>
-  );
-  if (!scores) return badge;
-  return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button className="rounded hover:bg-panel-2" title="Score breakdown">
-          {badge}
+        <Link
+          to={`/p/${projectId}/clips/${clip.id}`}
+          aria-disabled={clip.status === "preparing"}
+          className={`rounded-[8px] px-2.5 py-1.5 text-xs font-semibold text-acc-text no-underline hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}
+        >
+          Edit
+        </Link>
+        <button className={ghost} onClick={copy}>
+          Copy text
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content side="left" align="start" sideOffset={6} className="z-50 w-64 space-y-2 rounded-md border border-border bg-panel p-3 text-xs shadow-xl outline-none">
-          {RUBRIC.filter((r) => scores[r.key] !== undefined).map((r) => {
-            const v = scores[r.key] as number;
-            return (
-              <div key={r.key} title={r.hint}>
-                <div className="flex justify-between">
-                  <span>{r.label}</span>
-                  <span className="font-mono text-muted">{v.toFixed(1)}/10</span>
-                </div>
-                <div className="mt-0.5 h-1.5 overflow-hidden rounded bg-panel-2">
-                  <div className={`h-full ${v >= 7 ? "bg-ok" : v >= 5 ? "bg-accent" : "bg-muted"}`} style={{ width: `${v * 10}%` }} />
-                </div>
-              </div>
-            );
-          })}
-          <p className="pt-1 text-muted">
-            Weighted: hook {RUBRIC_WEIGHTS.hook * 100}%, value {RUBRIC_WEIGHTS.value * 100}%, flow {RUBRIC_WEIGHTS.flow * 100}%, share {RUBRIC_WEIGHTS.shareability * 100}%. Median of {scores.samples} judgement(s).
-            {scores.rank ? ` Ranked #${scores.rank} in head-to-head comparisons.` : ""} A rubric score, not a view prediction.
-          </p>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-/** Disfluency cuts the last render applied / refused, with the verifier's reasons. */
-function CutsBadge({ d }: { d: ClipDiagnostics }) {
-  const skipped = d.cuts.skipped.length;
-  return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button className={`rounded px-1.5 py-0.5 ${skipped ? "bg-accent/15 text-accent" : "bg-panel-2"}`} title="Disfluency jump cuts in the last render">
-          ✂ {d.cuts.applied.length} cut{d.cuts.applied.length === 1 ? "" : "s"}
-          {skipped ? ` · ${skipped} kept` : ""}
-          {d.pauses?.cuts ? ` · ${d.pauses.removedSec.toFixed(1)}s pauses` : ""}
+        {done && clip.videoUrl ? (
+          <a className={`${ghost} no-underline`} href={`${clip.videoUrl}?download`}>
+            Download
+          </a>
+        ) : (
+          <button className={ghost} disabled>
+            Download
+          </button>
+        )}
+        <button className={ghost} disabled={working || busy} onClick={onRerender}>
+          Re-render
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content side="bottom" align="start" sideOffset={6} className="z-50 max-w-md space-y-2 rounded-md border border-border bg-panel p-3 text-xs shadow-xl outline-none">
-          {d.pauses?.cuts ? (
-            <p>
-              Shortened {d.pauses.cuts} pause{d.pauses.cuts === 1 ? "" : "s"} to {d.pauses.maxPause}s, {d.pauses.removedSec.toFixed(1)}s of silence removed.
-            </p>
-          ) : null}
-          {d.cuts.applied.map((c, i) => (
-            <p key={`a${i}`} className="text-ok">
-              Cut {formatTime(c.start)} ({(c.end - c.start).toFixed(2)}s), verified by re-transcribing the seam
-            </p>
-          ))}
-          {d.cuts.skipped.map((c, i) => (
-            <div key={`s${i}`}>
-              <p className="text-accent">Kept {formatTime(c.start)}: the removal could not be verified, so the audio was left intact (captions still drop it).</p>
-              <p className="mt-1 line-clamp-6 break-words font-mono text-[10px] text-muted" title={c.reason}>
-                {c.reason}
-              </p>
-            </div>
-          ))}
-          <p className="text-muted">
-            Rendered {new Date(d.renderedAt).toLocaleString()} in {(d.renderMs / 1000).toFixed(0)}s · {d.outDurationSec}s output
-          </p>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      </div>
+    </article>
   );
 }

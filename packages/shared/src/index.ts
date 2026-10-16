@@ -217,7 +217,8 @@ export const transcriptFlagSchema = z.object({
   /** entity = misheard name; disfluency = filler / repetition / false start to delete */
   kind: z.enum(["entity", "disfluency"]).default("entity"),
   /** for disfluencies: which class the detector assigned */
-  subkind: z.enum(["filler", "repetition", "repair"]).optional(),
+  /** manual = the user marked these words to cut from the transcript */
+  subkind: z.enum(["filler", "repetition", "repair", "manual"]).optional(),
   /** index + span into the raw (as-heard) word list */
   wordIndex: z.number().int(),
   span: z.number().int().min(1),
@@ -232,6 +233,8 @@ export const transcriptFlagSchema = z.object({
   confidence: z.number().min(0).max(1),
   /** auto = applied automatically (high confidence); pending = waiting for the user; accepted/rejected = user decision */
   status: z.enum(["auto", "pending", "accepted", "rejected"]),
+  /** manual cuts: detector flags this cut replaced, restored (with their decisions) if it is deleted */
+  absorbed: z.array(z.record(z.string(), z.unknown())).optional(),
 });
 export type TranscriptFlag = z.infer<typeof transcriptFlagSchema>;
 

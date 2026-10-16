@@ -1,0 +1,1 @@
+ALTER TABLE "transcripts" ADD COLUMN "deleted_flags" jsonb DEFAULT '[]'::jsonb NOT NULL;

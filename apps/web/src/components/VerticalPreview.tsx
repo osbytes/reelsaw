@@ -39,26 +39,48 @@ interface Props {
   /** drag the picture to re-centre the crop; delta is in source-width fractions */
   onPan?: (deltaX: number) => void;
   showSafeZones?: boolean;
+  platform?: Platform;
+  /** small label in the top-left corner (e.g. which framing is showing) */
+  tag?: string;
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
   className?: string;
 }
 
 const FONT = `"DejaVu Sans", Verdana, system-ui, sans-serif`;
-const SNAP = 0.025;
+const SNAP = 0.03;
+
+export type Platform = "tiktok" | "shorts" | "reels";
+export const PLATFORM_NAME: Record<Platform, string> = { tiktok: "TikTok", shorts: "Shorts", reels: "Reels" };
+/** Approximate platform chrome on a 9:16 frame, as fractions of the frame. */
+export const SAFE_ZONES: Record<Platform, { top: number; bottom: number; rail: { top: number; bottom: number; width: number } }> = {
+  tiktok: { top: 0.07, bottom: 0.2, rail: { top: 0.38, bottom: 0.2, width: 0.13 } },
+  shorts: { top: 0.06, bottom: 0.18, rail: { top: 0.45, bottom: 0.18, width: 0.12 } },
+  reels: { top: 0.07, bottom: 0.22, rail: { top: 0.5, bottom: 0.22, width: 0.12 } },
+};
+/** A sentence when the caption sits under platform UI, else "". */
+export function safeZoneWarning(platform: Platform, x: number, y: number) {
+  const z = SAFE_ZONES[platform];
+  const n = PLATFORM_NAME[platform];
+  if (y > 1 - z.bottom) return `Caption sits under the ${n} description area. Move it up to keep it readable.`;
+  if (x > 1 - z.rail.width - 0.2 && y > z.rail.top && y < 1 - z.rail.bottom) return `Caption overlaps the ${n} buttons.`;
+  if (y < z.top) return `Caption sits under the ${n} top bar.`;
+  return "";
+}
 
 /**
  * 9:16 preview that mirrors the renderer: the frame is drawn on a canvas with the same crop math as
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, showSafeZones, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
   const [drag, setDrag] = useState<null | "caption" | "hook" | "pan">(null);
   const panX = useRef(0);
   const [snappedX, setSnappedX] = useState(false);
+  const [snappedY, setSnappedY] = useState(false);
   const framingRef = useRef(framing);
   framingRef.current = framing;
   const overlaysRef = useRef(overlays ?? []);
@@ -132,18 +154,24 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     }
     if (!drag || !boxRef.current || !onStyleChange) return;
     const r = boxRef.current.getBoundingClientRect();
+    // kept 15–85% horizontally and 4–94% vertically so text never leaves the frame; centre snap within 3%, Alt skips
     let x = (e.clientX - r.left) / r.width;
-    const y = Math.max(0.04, Math.min(0.96, (e.clientY - r.top) / r.height));
-    const snap = Math.abs(x - 0.5) < SNAP && !e.altKey;
-    if (snap) x = 0.5;
-    x = Math.max(0.08, Math.min(0.92, x));
-    setSnappedX(snap);
+    let y = (e.clientY - r.top) / r.height;
+    const sx = Math.abs(x - 0.5) < SNAP && !e.altKey;
+    const sy = Math.abs(y - 0.5) < SNAP && !e.altKey;
+    if (sx) x = 0.5;
+    if (sy) y = 0.5;
+    x = Math.max(0.15, Math.min(0.85, x));
+    y = Math.max(0.04, Math.min(0.94, y));
+    setSnappedX(sx);
+    setSnappedY(sy);
     const r3 = (n: number) => Math.round(n * 1000) / 1000;
     onStyleChange(drag === "caption" ? { captionX: r3(x), captionY: r3(y) } : { hookX: r3(x), hookY: r3(y) });
   }
   function onPointerUp() {
     setDrag(null);
     setSnappedX(false);
+    setSnappedY(false);
   }
 
   const capPx = h * CAPTION_FONT_FRAC * style.captionSize;
@@ -153,17 +181,19 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   return (
     <div
       ref={boxRef}
-      className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-lg bg-black ${pannable ? (drag === "pan" ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
+      className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (drag === "pan" ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
       title={pannable ? "Drag the picture to re-centre the crop" : undefined}
       onPointerDown={onPanStart}
       onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      {showSafeZones && <SafeZones />}
-      {drag && snappedX && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-accent-2/80" />}
+      {showSafeZones && <SafeZones platform={platform} />}
+      {tag && <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>}
+      {drag && drag !== "pan" && snappedX && <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-0 border-l-2 border-snap" />}
+      {drag && drag !== "pan" && snappedY && <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0 border-t-2 border-snap" />}
 
       {showHook && (
         <div
-          className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" ? "ring-2 ring-accent-2" : draggable ? "hover:ring-1 hover:ring-white/50" : ""}`}
+          className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{ left: `${style.hookX * 100}%`, top: `${style.hookY * 100}%`, fontFamily: FONT, fontSize: hookPx, maxWidth: width * 0.88, width: "max-content", background: "#fff", color: "#000", padding: `${hookPx * 0.2}px ${hookPx * 0.3}px` }}
           onPointerDown={(e) => onPointerDown("hook", e)}
           title={draggable ? "Drag to move the hook" : undefined}
@@ -174,7 +204,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
 
       {style.captions !== "none" && line && (
         <div
-          className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "caption" ? "ring-2 ring-accent-2" : draggable ? "hover:ring-1 hover:ring-white/50" : ""}`}
+          className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "caption" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{
             left: `${style.captionX * 100}%`,
             top: `${style.captionY * 100}%`,
@@ -207,15 +237,23 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   );
 }
 
-/** Approximate TikTok / Shorts / Reels UI chrome on a 1080×1920 frame. */
-function SafeZones() {
-  const zone = "pointer-events-none absolute bg-danger/15 outline outline-1 outline-dashed outline-danger/40";
+/** Platform UI chrome: top bar, right-hand buttons and the username + description area. */
+function SafeZones({ platform }: { platform: Platform }) {
+  const z = SAFE_ZONES[platform];
+  const n = PLATFORM_NAME[platform];
+  const zone = "pointer-events-none absolute bg-[rgba(255,92,92,.22)] outline outline-1 outline-dashed outline-[rgba(255,92,92,.55)]";
+  const lab = "pointer-events-none absolute text-[9px] font-semibold text-white/90 [text-shadow:0_1px_2px_#000]";
   return (
     <>
-      <div className={zone} style={{ left: 0, right: 0, top: 0, height: "7%" }} />
-      <div className={zone} style={{ left: 0, right: 0, bottom: 0, height: "20%" }} />
-      <div className={zone} style={{ right: 0, top: "38%", bottom: "20%", width: "13%" }} />
-      <span className="pointer-events-none absolute bottom-1 left-1 text-[9px] text-danger/80">platform UI</span>
+      <div className={zone} style={{ left: 0, right: 0, top: 0, height: `${z.top * 100}%` }} />
+      <div className={zone} style={{ left: 0, right: 0, bottom: 0, height: `${z.bottom * 100}%` }} />
+      <div className={zone} style={{ right: 0, top: `${z.rail.top * 100}%`, bottom: `${z.rail.bottom * 100}%`, width: `${z.rail.width * 100}%` }} />
+      <span className={lab} style={{ left: 6, bottom: `calc(${z.bottom * 100}% - 14px)` }}>
+        {n} username + description
+      </span>
+      <span className={`${lab} [writing-mode:vertical-rl]`} style={{ right: 4, top: `${z.rail.top * 100 + 1}%` }}>
+        {n} buttons
+      </span>
     </>
   );
 }

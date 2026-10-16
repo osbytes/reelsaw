@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowDown, Check, X, Sparkles, RefreshCw, ChevronUp, ChevronDown, Scissors, Flag, Play, Loader2 } from "lucide-react";
+import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
+import { useToast } from "../lib/toast";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word } from "@reelsaw/shared";
@@ -17,6 +18,25 @@ interface Props {
   currentTime: number;
   clips: Array<{ index: number; startSec: number; endSec: number }>;
   onSeek: (t: number) => void;
+  /** soft-deleted fixes (restorable from the Deleted filter) */
+  deletedFlags?: Array<TranscriptFlag & { deletedAt: string }>;
+  /** loop a span of the source (audio context for a fix); null stops */
+  onLoop?: (span: { start: number; end: number } | null) => void;
+  className?: string;
+}
+
+type Variant = "orig" | "cut";
+const cutKind = (f: TranscriptFlag) => (f.subkind === "manual" ? "your cut" : f.subkind === "repair" ? "false start" : (f.subkind ?? "filler"));
+interface CutPlan {
+  flagId: string;
+  cut: { start: number; end: number };
+  source: "render" | "search" | "timestamps";
+  refused?: string;
+}
+interface PlanState {
+  plan?: CutPlan;
+  loading?: "plan" | "exact";
+  error?: string;
 }
 
 type Decision = { status: "accepted" | "rejected"; replacement?: string };
@@ -27,7 +47,56 @@ const EPS = 0.02;
  * scrolls away, then shows a "resume" pill. Lines are rendered word by word so each name fix is an
  * inline highlight with a hover/click popover (accept, reject, or type a replacement).
  */
-export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek }: Props) {
+export function TranscriptPanel({ projectId, language, segments, words, flags, currentTime, clips, onSeek, onLoop, deletedFlags = [], className = "" }: Props) {
+  // flag whose surrounding audio is playing on repeat, how much context, and which version (A/B for cuts)
+  const [looping, setLooping] = useState<string | null>(null);
+  const [ctxSec, setCtxSec] = useState(2);
+  const [variant, setVariant] = useState<Variant>("orig");
+  const [plans, setPlans] = useState<Record<string, PlanState>>({});
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audio = () => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      audioRef.current.loop = true;
+    }
+    return audioRef.current;
+  };
+  const fetchPlan = async (f: TranscriptFlag, exact = false): Promise<CutPlan | undefined> => {
+    setPlans((x) => ({ ...x, [f.id]: { ...x[f.id], loading: exact ? "exact" : "plan", error: undefined } }));
+    try {
+      const r = await fetch(`/api/projects/${projectId}/flags/${f.id}/cut-plan${exact ? "?exact=1" : ""}`, { credentials: "include" });
+      if (!r.ok) throw new Error(await r.text());
+      const plan = (await r.json()) as CutPlan;
+      setPlans((x) => ({ ...x, [f.id]: { plan } }));
+      return plan;
+    } catch (err) {
+      setPlans((x) => ({ ...x, [f.id]: { ...x[f.id], loading: undefined, error: (err as Error).message } }));
+      return undefined;
+    }
+  };
+  const startLoop = async (f: TranscriptFlag, pad = ctxSec, v: Variant = f.kind === "disfluency" ? variant : "orig", plan?: CutPlan) => {
+    setLooping(f.id);
+    setPinnedFlag(f.id);
+    setOpenFlag(f.id);
+    if (v === "orig") {
+      audioRef.current?.pause();
+      onLoop?.({ start: Math.max(0, f.start - pad), end: f.end + pad });
+      return;
+    }
+    // with the cut: server renders the window with the seam, played on repeat in an <audio>
+    onLoop?.(null);
+    const pl = plan ?? plans[f.id]?.plan ?? (await fetchPlan(f));
+    if (!pl) return;
+    const a = audio();
+    a.src = `/api/projects/${projectId}/flags/${f.id}/preview.mp3?pad=${pad}&cutStart=${pl.cut.start}&cutEnd=${pl.cut.end}`;
+    a.play().catch(() => {});
+  };
+  const stopLoop = () => {
+    setLooping(null);
+    audioRef.current?.pause();
+    onLoop?.(null);
+  };
+  const toggleLoop = (f: TranscriptFlag) => (looping === f.id ? stopLoop() : void startLoop(f));
   const trpc = useTRPC();
   const qc = useQueryClient();
   const review = useMutation(trpc.transcripts.review.mutationOptions());
@@ -48,6 +117,45 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   const contentRef = useRef<HTMLDivElement>(null);
   const [pick, setPick] = useState<{ start: number; end: number; top: number; left: number } | null>(null);
   const createClip = useMutation(trpc.clips.create.mutationOptions());
+  const addCut = useMutation(trpc.transcripts.addCut.mutationOptions());
+  const toast = useToast();
+  const delFlag = useMutation(trpc.transcripts.deleteFlag.mutationOptions());
+  async function deleteOne(f: TranscriptFlag) {
+    try {
+      const r = await delFlag.mutateAsync({ projectId, flagId: f.id });
+      if (looping === f.id) stopLoop();
+      setDecisions((x) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== f.id)));
+      setPinnedFlag(null);
+      setOpenFlag(null);
+      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""} · restore it from Deleted`);
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  }
+  const restore = useMutation(trpc.transcripts.restoreFlag.mutationOptions());
+  async function restoreOne(id: string) {
+    try {
+      const r = await restore.mutateAsync({ projectId, flagId: id });
+      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      if (deletedFlags.length <= 1) setFilter("all");
+      toast(`Restored${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`);
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  }
+  async function cutSelection() {
+    if (!pick) return;
+    try {
+      const r = await addCut.mutateAsync({ projectId, start: pick.start, end: pick.end });
+      window.getSelection()?.removeAllRanges();
+      setPick(null);
+      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      toast(r.rerendered ? `Cut added · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Cut added");
+    } catch {
+      /* error shown in the bar */
+    }
+  }
   const readSelection = () => {
     const sel = window.getSelection();
     const content = contentRef.current;
@@ -174,11 +282,21 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     }
   }
 
-  function jumpToFlag(i: number) {
+  function jumpToFlag(i: number, tries = 0) {
     const f = orderedFlags[i];
     const v = viewportRef.current;
-    const el = f && flagRefs.current[f.id];
-    if (!f || !v || !el) return;
+    if (!f || !v) return;
+    // a flag hidden by the current filter has no anchor yet: show everything, retry after render
+    if (!visibleFlag(f)) {
+      setFilter("all");
+      if (tries < 5) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
+      return;
+    }
+    const el = flagRefs.current[f.id];
+    if (!el) {
+      if (tries < 5) requestAnimationFrame(() => jumpToFlag(i, tries + 1));
+      return;
+    }
     setFollowing(false);
     setFlagCursor(i);
     programmaticUntil.current = Date.now() + 900;
@@ -198,198 +316,377 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
   }
 
+  type Filter = "all" | "review" | "reviewed" | "entity" | "disfluency" | "deleted";
+  const [filter, setFilter] = useState<Filter>("all");
+  const isReviewed = (f: TranscriptFlag) => !!decisions[f.id] || f.status === "accepted" || f.status === "rejected";
+  const visibleFlag = (f: TranscriptFlag) =>
+    filter === "deleted" ? false : filter === "all" || (filter === "review" ? f.status === "pending" && !decisions[f.id] : filter === "reviewed" ? isReviewed(f) : f.kind === filter);
+  const [listOpen, setListOpenRaw] = useState(() => {
+    try {
+      return localStorage.getItem("rs-fixes-pane") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setListOpen = (o: boolean) => {
+    setListOpenRaw(o);
+    try {
+      localStorage.setItem("rs-fixes-pane", o ? "1" : "0");
+    } catch {
+      /* private mode */
+    }
+  };
+  const reviewedCount = flags.filter(isReviewed).length;
+  const nextPending = () => {
+    const isP = (f: TranscriptFlag) => f.status === "pending" && !decisions[f.id];
+    const next = orderedFlags.findIndex((f, i) => i > flagCursor && isP(f));
+    jumpToFlag(next >= 0 ? next : orderedFlags.findIndex(isP));
+  };
+  const decide = (id: string, d: Decision | null) => setDecisions((x) => (d ? { ...x, [id]: d } : Object.fromEntries(Object.entries(x).filter(([key]) => key !== id))));
+  // N next fix · A accept · R reject · ↑/↓ previous/next while a fix is pinned
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || el.closest("input, textarea, select, [contenteditable]")) return;
+      const k = e.key.toLowerCase();
+      if (k === "n" && orderedFlags.length) {
+        e.preventDefault();
+        nextPending();
+        return;
+      }
+      const cur = pinnedFlag ? orderedFlags.find((f) => f.id === pinnedFlag) : undefined;
+      if (!cur) return;
+      if (k === "a") decide(cur.id, { status: "accepted" });
+      else if (k === "p" && onLoop) toggleLoop(cur);
+      else if (k === "r") decide(cur.id, { status: "rejected" });
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const i = orderedFlags.indexOf(cur);
+        jumpToFlag((i + (e.key === "ArrowDown" ? 1 : -1) + orderedFlags.length) % orderedFlags.length);
+      } else if (e.key === "Escape") onPinClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  useEffect(() => {
+    if (looping && openFlag !== looping) stopLoop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFlag]);
+  useEffect(() => () => (audioRef.current?.pause(), onLoop?.(null)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const onPinClose = () => {
+    setPinnedFlag(null);
+    setOpenFlag(null);
+  };
+  const nDecided = Object.keys(decisions).length;
+  const affected = useMemo(() => {
+    const ids = new Set(Object.keys(decisions));
+    const hit = new Set<number>();
+    for (const f of flags) if (ids.has(f.id)) for (const c of clips) if (f.start < c.endSec && f.end > c.startSec) hit.add(c.index + 1);
+    return [...hit].sort((a, b) => a - b);
+  }, [decisions, flags, clips]);
+  const filterBtn = (v: Filter, label: string) => (
+    <button
+      key={v}
+      role="radio"
+      aria-checked={filter === v}
+      onClick={() => setFilter(v)}
+      className={`rounded-full border px-2.5 py-[3px] text-xs font-semibold whitespace-nowrap ${filter === v ? "border-ink bg-ink text-bg" : "border-line text-ink2 hover:text-ink"}`}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <div ref={rootRef} className="card relative flex flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-muted">
-        <span>
-          Transcript{language ? ` · ${language}` : ""}
-          {segments.length > 0 && <span className="ml-1 hidden text-muted/70 sm:inline">· select text to make a clip</span>}
-        </span>
+    <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-y border-line bg-panel px-5 py-2.5">
+        <h2 className="text-[15px] font-bold">Transcript</h2>
+        {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
         {orderedFlags.length > 0 && (
-          <span className="flex items-center gap-1">
-            <button className="rounded border border-border px-1 py-0.5 hover:bg-panel-2" title="Previous flag" onClick={() => jumpToFlag((flagCursor - 1 + orderedFlags.length) % orderedFlags.length)}>
-              <ChevronUp className="h-3 w-3" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`chip ${pendingFlags.length ? "bg-warn-soft" : "bg-ok-soft"} text-ink`}>
+              <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
+            </span>
+            <div role="radiogroup" aria-label="Which fixes to show" className="flex gap-1">
+              {filterBtn("all", `All ${orderedFlags.length}`)}
+              {filterBtn("review", `To review ${pendingFlags.length}`)}
+              {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
+              {filterBtn("entity", "Names")}
+              {filterBtn("disfluency", "Cuts")}
+              {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
+            </div>
+            <button data-flag-nav className="btn-ghost px-2.5 py-1 text-xs" disabled={!pendingFlags.length} onClick={nextPending} title="Next fix to review (N). Then A accept, R reject, ↑ ↓ move">
+              Next fix <span className="rounded-[4px] border border-current px-1 font-mono text-[10px] opacity-75">N</span>
             </button>
-            <Popover.Root>
-              <Popover.Trigger asChild>
-                <button className="flex items-center gap-1 rounded border border-border px-2 py-0.5 tabular-nums hover:bg-panel-2" title="All flags">
-                  <Flag className="h-3 w-3" />
-                  {flagCursor >= 0 ? `${flagCursor + 1} / ${orderedFlags.length}` : orderedFlags.length}
-                </button>
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Content side="bottom" align="end" sideOffset={6} className="z-50 w-96 rounded-md border border-border bg-panel p-2 text-xs shadow-xl outline-none">
-                  <ScrollArea className="max-h-80">
-                    <ul className="space-y-0.5 pr-2">
-                      {orderedFlags.map((f, i) => {
-                        const d = decisions[f.id];
-                        const st = (d?.status ?? f.status) as TranscriptFlag["status"];
-                        const text = d?.replacement ?? f.replacement ?? f.suggested;
-                        return (
-                          <li key={f.id}>
-                            <Popover.Close asChild>
-                              <button className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-panel-2 ${i === flagCursor ? "bg-panel-2" : ""}`} onClick={() => jumpToFlag(i)}>
-                                <span className="w-10 shrink-0 font-mono text-muted">{formatTime(f.start)}</span>
-                                {f.kind === "disfluency" ? <Scissors className="h-3 w-3 shrink-0 text-accent-2" /> : <Sparkles className="h-3 w-3 shrink-0 text-accent" />}
-                                <span className="min-w-0 flex-1 truncate">
-                                  {f.kind === "disfluency" ? (
-                                    <>
-                                      remove <span className="text-text line-through">{f.heard}</span> <span className="text-muted">({f.subkind === "repair" ? "false start" : f.subkind})</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="text-text line-through">{f.heard}</span> → <span className="text-text">{text}</span>
-                                    </>
-                                  )}
-                                </span>
-                                <span className={`shrink-0 ${st === "auto" || st === "accepted" ? "text-ok" : st === "rejected" ? "text-muted" : "text-accent"}`}>
-                                  {st === "auto" ? "auto" : st === "pending" ? "review" : st}
-                                </span>
-                                <span className="w-8 shrink-0 text-right text-muted">{Math.round(f.confidence * 100)}%</span>
-                              </button>
-                            </Popover.Close>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </ScrollArea>
-                </Popover.Content>
-              </Popover.Portal>
-            </Popover.Root>
-            <button className="rounded border border-border px-1 py-0.5 hover:bg-panel-2" title="Next flag" onClick={() => jumpToFlag((flagCursor + 1) % orderedFlags.length)}>
-              <ChevronDown className="h-3 w-3" />
-            </button>
-          </span>
+          </div>
         )}
-      </div>
-      {(pendingFlags.length > 0 || dirty) && (
-        <div className="flex items-center justify-between gap-3 border-b border-border bg-accent/5 px-3 py-1.5 text-xs">
-          <span className="text-muted">
-            {pendingFlags.length > 0 ? (
-              <>
-                <span className="font-medium text-accent">{pendingFlags.length}</span> to review
-              </>
-            ) : (
-              "All flags reviewed"
-            )}
-            {dirty && <span className="ml-2">· {Object.keys(decisions).length} decided, not applied</span>}
-          </span>
-          <span className="flex items-center gap-2">
-            {pendingFlags.length > 0 && (
-              <button
-                className="btn-ghost !py-1 text-xs"
-                onClick={() => {
-                  const next = orderedFlags.findIndex((f, i) => i > flagCursor && f.status === "pending" && !decisions[f.id]);
-                  jumpToFlag(next >= 0 ? next : orderedFlags.findIndex((f) => f.status === "pending" && !decisions[f.id]));
-                }}
-              >
-                Next to review
-              </button>
-            )}
-            {dirty && (
-              <button className="btn-primary !py-1 text-xs" disabled={review.isPending} onClick={submit}>
-                <RefreshCw className="h-3 w-3" /> Apply {Object.keys(decisions).length} & re-render
-              </button>
-            )}
-          </span>
+        <div className="flex-1" />
+        {orderedFlags.length > 0 && (
+          <button
+            className={`btn px-2.5 py-1 text-xs ${listOpen ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+            onClick={() => setListOpen(!listOpen)}
+            aria-pressed={listOpen}
+            title="List every fix, reviewed or not"
+          >
+            <ListChecks className="h-3.5 w-3.5" /> Fixes list
+          </button>
+        )}
+        <div className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 xl:flex">
+          <span><b className="font-mono text-[10px] text-acc-text">Aa</b> name fix</span>
+          <span><b className="font-mono text-[10px]">✂</b> cut</span>
+          <span><b className="font-mono text-[10px] text-warn">?</b> review</span>
         </div>
-      )}
-      <ScrollArea className="h-[46vh]" viewportRef={viewportRef}>
-        <div ref={contentRef} className="space-y-0.5 p-3 text-sm selection:bg-accent-2/40" onMouseUp={() => setTimeout(readSelection, 0)} onTouchEnd={() => setTimeout(readSelection, 50)} onKeyUp={readSelection}>
-          {segments.length === 0 && <p className="text-muted">Appears after transcription.</p>}
+      </div>
+      <div className="relative flex min-h-0 flex-1">
+      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={viewportRef}>
+        <div ref={contentRef} className="mx-auto max-w-[760px] px-5 pb-28 pt-4" onMouseUp={() => setTimeout(readSelection, 0)} onTouchEnd={() => setTimeout(readSelection, 50)} onKeyUp={readSelection}>
+          {segments.length === 0 && <p className="py-10 text-center text-ink3">The transcript appears here after transcription.</p>}
           {lines.map(({ s, ws }, i) => {
             const isActive = currentTime >= s.start && currentTime < s.end;
-            const inClip = clips.find((c) => s.start >= c.startSec - 0.3 && s.end <= c.endSec + 0.3);
+            const inClip = clips.find((c) => s.start < c.endSec - 0.3 && s.end > c.startSec + 0.3);
+            const marks = ws.filter((x) => x.flag && visibleFlag(x.flag));
             return (
               <div
                 key={i}
                 ref={isActive ? activeRef : undefined}
-                className={`rounded px-1.5 py-0.5 leading-7 ${isActive ? "bg-accent/20" : inClip ? "bg-accent-2/10" : "hover:bg-panel-2"}`}
-                title={inClip ? `In clip #${inClip.index + 1}` : undefined}
+                className={`-mx-3 grid grid-cols-[30px_minmax(0,1fr)] gap-2.5 rounded-[12px] px-3 py-2 ${isActive ? "bg-panel shadow-[0_0_0_1px_var(--line)]" : ""}`}
               >
-                <button className="mr-2 select-none font-mono text-[11px] text-muted hover:text-text" onClick={() => onSeek(s.start)} title="Seek here">
-                  {formatTime(s.start)}
-                </button>
-                {ws.length === 0 && (
-                  <span data-s={s.start} data-e={s.end} onClick={() => onSeek(s.start)}>
-                    {s.text}
-                  </span>
-                )}
-                {ws.map(({ w, flag }, k) => {
-                  const spoken = currentTime >= w.start && currentTime < w.end;
-                  if (!flag) {
-                    return (
-                      <span key={k} data-s={w.start} data-e={w.end} onClick={() => !window.getSelection()?.toString() && onSeek(w.start)} className={`cursor-pointer rounded-sm px-px ${spoken ? "text-accent" : ""}`}>
-                        {w.text}{" "}
+                <div className="flex flex-col items-center gap-1 pt-0.5">
+                  {inClip && (
+                    <span className="grid h-5 min-w-5 place-items-center rounded-[6px] bg-acc px-1 font-mono text-[10px] font-semibold text-acc-ink" title={`In clip #${inClip.index + 1}`}>
+                      {inClip.index + 1}
+                    </span>
+                  )}
+                  {marks.slice(0, 3).map(({ flag }) => (
+                    <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flag!.kind === "entity" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink"}`}>
+                      {flag!.kind === "entity" ? "Aa" : "✂"}
+                    </span>
+                  ))}
+                </div>
+                <div className="min-w-0">
+                  <button className="select-none font-mono text-[11px] text-ink3 hover:text-ink" onClick={() => onSeek(s.start)} title="Seek here">
+                    {formatTime(s.start)}
+                  </button>
+                  <p className="text-base leading-[1.7] [text-wrap:pretty]">
+                    {ws.length === 0 && (
+                      <span data-s={s.start} data-e={s.end} onClick={() => onSeek(s.start)}>
+                        {s.text}
                       </span>
-                    );
-                  }
-                  return (
-                    <FlagWord
-                      key={k}
-                      word={w}
-                      flag={flag}
-                      decision={decisions[flag.id]}
-                      open={openFlag === flag.id}
-                      pinned={pinnedFlag === flag.id}
-                      highlighted={orderedFlags[flagCursor]?.id === flag.id}
-                      anchorRef={(el) => {
-                        flagRefs.current[flag.id] = el;
-                      }}
-                      onOpenChange={(o) => {
-                        if (o) setOpenFlag(flag.id);
-                        else if (pinnedFlag !== flag.id) setOpenFlag((cur) => (cur === flag.id ? null : cur));
-                      }}
-                      onPin={(p) => {
-                        setPinnedFlag(p ? flag.id : null);
-                        setOpenFlag(p ? flag.id : null);
-                      }}
-                      onDecide={(d) => setDecisions((x) => (d ? { ...x, [flag.id]: d } : Object.fromEntries(Object.entries(x).filter(([key]) => key !== flag.id))))}
-                    />
-                  );
-                })}
+                    )}
+                    {ws.map(({ w, flag }, k) => {
+                      const spoken = currentTime >= w.start && currentTime < w.end;
+                      const inside = inClip && w.start >= inClip.startSec - 0.02 && w.end <= inClip.endSec + 0.05;
+                      if (!flag || !visibleFlag(flag)) {
+                        return (
+                          <span key={k}>
+                            <span
+                              data-s={w.start}
+                              data-e={w.end}
+                              onClick={() => !window.getSelection()?.toString() && onSeek(w.start)}
+                              className={`cursor-pointer rounded-[3px] ${spoken ? "bg-acc text-acc-ink" : inside ? "bg-acc-soft/70" : "hover:bg-sunk"}`}
+                            >
+                              {flag && (flag.status === "auto" || flag.status === "accepted") && flag.kind === "entity" ? (flag.replacement ?? flag.suggested) : w.text}
+                            </span>{" "}
+                          </span>
+                        );
+                      }
+                      return (
+                        <FlagWord
+                          key={k}
+                          word={w}
+                          flag={flag}
+                          decision={decisions[flag.id]}
+                          open={openFlag === flag.id}
+                          pinned={pinnedFlag === flag.id}
+                          highlighted={orderedFlags[flagCursor]?.id === flag.id}
+                          where={`${formatTime(flag.start)}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
+                          position={`${orderedFlags.indexOf(flag) + 1} of ${orderedFlags.length}`}
+                          anchorRef={(el) => {
+                            flagRefs.current[flag.id] = el;
+                          }}
+                          onOpenChange={(o) => {
+                            if (o) setOpenFlag(flag.id);
+                            else if (pinnedFlag !== flag.id) setOpenFlag((cur) => (cur === flag.id ? null : cur));
+                          }}
+                          onPin={(p) => {
+                            setPinnedFlag(p ? flag.id : null);
+                            setOpenFlag(p ? flag.id : null);
+                            if (p) setFlagCursor(orderedFlags.indexOf(flag));
+                          }}
+                          onDecide={(d) => decide(flag.id, d)}
+                          onDelete={() => void deleteOne(flag)}
+                          deleting={delFlag.isPending}
+                          loop={
+                            onLoop
+                              ? {
+                                  on: looping === flag.id,
+                                  sec: ctxSec,
+                                  toggle: () => toggleLoop(flag),
+                                  setSec: (n) => {
+                                    setCtxSec(n);
+                                    if (looping === flag.id) void startLoop(flag, n);
+                                  },
+                                  ab:
+                                    flag.kind === "disfluency"
+                                      ? {
+                                          variant,
+                                          setVariant: (v) => {
+                                            setVariant(v);
+                                            void startLoop(flag, ctxSec, v);
+                                          },
+                                          plan: plans[flag.id],
+                                          loadPlan: () => void (plans[flag.id]?.plan || plans[flag.id]?.loading ? undefined : fetchPlan(flag)),
+                                          findExact: async () => {
+                                            const pl = await fetchPlan(flag, true);
+                                            if (pl && looping === flag.id && variant === "cut") void startLoop(flag, ctxSec, "cut", pl);
+                                          },
+                                        }
+                                      : undefined,
+                                }
+                              : undefined
+                          }
+                        />
+                      );
+                    })}
+                  </p>
+                </div>
               </div>
             );
           })}
         </div>
       </ScrollArea>
+      {listOpen && orderedFlags.length > 0 && (
+        <aside className="absolute inset-y-0 right-0 z-20 flex w-[340px] max-w-full flex-col border-l border-line bg-panel shadow-pop xl:static xl:shadow-none">
+          <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+            <b className="text-[13px]">Fixes</b>
+            <span className="text-xs text-ink3">{filter === "deleted" ? deletedFlags.length : orderedFlags.filter(visibleFlag).length} shown</span>
+            <button className="ml-auto text-ink2 hover:text-ink" onClick={() => setListOpen(false)} aria-label="Close fixes list">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            <ol className="flex flex-col gap-0.5 p-1.5">
+              {filter === "deleted" &&
+                [...deletedFlags].reverse().map((f) => (
+                  <li key={f.id} className="grid grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5">
+                    <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold opacity-60 ${f.kind === "disfluency" ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{f.kind === "disfluency" ? "✂" : "Aa"}</span>
+                    <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
+                      <span className="block truncate text-[13px] text-ink2">{f.kind === "disfluency" ? `“${f.heard}”` : `${f.heard} → ${f.replacement ?? f.suggested}`}</span>
+                      <span className="block text-[11px] text-ink3">
+                        <span className="font-mono">{formatTime(f.start)}</span> · {f.kind === "disfluency" ? cutKind(f) : "name fix"} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    </button>
+                    <button className="btn-ghost px-2.5 py-1 text-xs" disabled={restore.isPending} onClick={() => void restoreOne(f.id)}>
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              {orderedFlags.map((f, i) => {
+                if (!visibleFlag(f)) return null;
+                const d = decisions[f.id] as Decision | undefined;
+                const st = f.status;
+                const isCut = f.kind === "disfluency";
+                const rep = d?.replacement ?? f.replacement ?? f.suggested;
+                const [label, tone] = d
+                  ? [`Staged: ${d.status === "accepted" ? "accept" : "reject"}`, "bg-acc-soft"]
+                  : st === "pending"
+                    ? ["Needs review", "bg-warn-soft"]
+                    : st === "auto"
+                      ? ["Auto-applied", "bg-ok-soft"]
+                      : st === "accepted"
+                        ? ["Accepted", "bg-ok-soft"]
+                        : ["Rejected", "bg-sunk"];
+                return (
+                  <li key={f.id}>
+                    <button
+                      data-flag-nav
+                      onClick={() => jumpToFlag(i)}
+                      className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
+                    >
+                      <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${isCut ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{isCut ? "✂" : "Aa"}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px]">
+                          {isCut ? (
+                            <>“<s>{f.heard}</s>”</>
+                          ) : (
+                            <>
+                              <s className="text-ink3">{f.heard}</s> → {rep}
+                            </>
+                          )}
+                        </span>
+                        <span className="block text-[11px] text-ink3">
+                          <span className="font-mono">{formatTime(f.start)}</span> · {isCut ? cutKind(f) : "name fix"} · {Math.round(f.confidence * 100)}%
+                        </span>
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-ink ${tone}`}>{label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </ScrollArea>
+        </aside>
+      )}
+      </div>
       {pick && (
         <div
-          className="absolute z-30 w-max max-w-[calc(100%-12px)] -translate-x-1/2 rounded-md border border-border bg-panel p-1 text-xs shadow-xl"
+          className="absolute z-30 w-max max-w-[calc(100%-12px)] -translate-x-1/2 rounded-[12px] bg-ink p-1 text-xs text-bg shadow-pop"
           style={{ top: pick.top, left: pick.left }}
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="flex items-center gap-1 whitespace-nowrap">
-          <span className="px-1.5 font-mono text-muted">
-            {Math.round(pick.end - pick.start)}s
-          </span>
-          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => onSeek(pick.start)} title="Play from the start of the selection">
-            <Play className="h-3.5 w-3.5" />
-          </button>
-          <button className="btn-primary !px-2 !py-1 text-xs" disabled={createClip.isPending || pick.end - pick.start < 3} onClick={() => makeClip("exact")} title="Clip exactly this range; the AI writes the title, hook and caption">
-            {createClip.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Scissors className="h-3.5 w-3.5" />} Make clip
-          </button>
-          <button className="btn-ghost !px-2 !py-1 text-xs" disabled={createClip.isPending || pick.end - pick.start < 8} onClick={() => makeClip("ai")} title="Let the AI find the best standalone clip inside this selection">
-            <Sparkles className="h-3.5 w-3.5" /> AI pick
-          </button>
-          <button
-            className="rounded p-1 text-muted hover:text-text"
-            onClick={() => {
-              window.getSelection()?.removeAllRanges();
-              setPick(null);
-            }}
-            aria-label="Cancel"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            <span className="px-2 font-mono">{(pick.end - pick.start).toFixed(1)}s</span>
+            <button className="rounded-[8px] px-2 py-1.5 hover:bg-white/10" onClick={() => onSeek(pick.start)} aria-label="Play selection" title="Play from the start of the selection">
+              <Play className="h-3.5 w-3.5" />
+            </button>
+            <button className="rounded-[8px] bg-acc px-2.5 py-1.5 font-semibold text-acc-ink disabled:opacity-40" disabled={createClip.isPending || pick.end - pick.start < 3} onClick={() => makeClip("exact")} title={pick.end - pick.start < 3 ? "Select at least 3s" : "Clip exactly this range; the AI writes the title, hook and caption"}>
+              {createClip.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : null} Make clip
+            </button>
+            <button className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40" disabled={createClip.isPending || pick.end - pick.start < 8} onClick={() => makeClip("ai")} title={pick.end - pick.start < 8 ? "Select at least 8s for an AI pick" : "Let the AI find the best standalone clip inside this selection"}>
+              <Sparkles className="inline h-3.5 w-3.5" /> AI pick
+            </button>
+            <span className="mx-0.5 h-4 w-px bg-white/20" />
+            <button
+              className="rounded-[8px] px-2.5 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-40"
+              disabled={addCut.isPending}
+              onClick={cutSelection}
+              title="Remove these words from the video and captions of every clip that contains them"
+            >
+              {addCut.isPending ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "✂"} Cut
+            </button>
+            <button
+              className="rounded-[8px] px-2 py-1.5 hover:bg-white/10"
+              onClick={() => {
+                window.getSelection()?.removeAllRanges();
+                setPick(null);
+              }}
+              aria-label="Cancel"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
-          {createClip.error && <p className="whitespace-normal px-1.5 pt-1 text-danger">{createClip.error.message}</p>}
+          {pick.end - pick.start < 8 && <p className="px-2 pb-1 pt-0.5 text-[11px] opacity-70">{pick.end - pick.start < 3 ? "Clips need at least 3s; any length can be cut." : "AI pick needs at least 8s."}</p>}
+          {createClip.error && <p className="whitespace-normal px-2 pb-1 text-err">{createClip.error.message}</p>}
+          {addCut.error && <p className="max-w-[420px] whitespace-normal px-2 pb-1 text-err">{addCut.error.message}</p>}
         </div>
       )}
       {!following && segments.length > 0 && (
-        <button className="btn-primary absolute bottom-3 left-1/2 -translate-x-1/2 !py-1 text-xs shadow-lg" onClick={resume}>
-          <ArrowDown className="h-3 w-3" /> Resume auto-scroll · {formatTime(currentTime)}
+        <button className="absolute left-1/2 top-[58px] z-20 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-bg shadow-pop" onClick={resume}>
+          <ArrowDown className="mr-1 inline h-3 w-3" /> Resume following · {formatTime(currentTime)}
         </button>
+      )}
+      {nDecided > 0 && (
+        <div className="absolute inset-x-4 bottom-4 z-20 mx-auto flex max-w-[640px] flex-wrap items-center gap-3 rounded-[14px] border border-line bg-panel px-4 py-3 shadow-pop">
+          <div className="min-w-0 flex-1 text-[13px]">
+            <b>{nDecided} staged</b>{" "}
+            <span className="text-ink2">· {affected.length ? `re-renders clip${affected.length === 1 ? "" : "s"} ${affected.join(", ")}` : "no clips affected"}</span>
+          </div>
+          <button className="btn-ghost" onClick={() => setDecisions({})}>
+            Discard
+          </button>
+          <button className="btn-primary" disabled={review.isPending} onClick={submit}>
+            {review.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Apply {nDecided} {affected.length ? "& re-render" : ""}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -402,17 +699,27 @@ function FlagWord({
   open,
   pinned,
   highlighted,
+  where,
+  position,
   anchorRef,
   onOpenChange,
   onPin,
   onDecide,
+  loop,
+  onDelete,
+  deleting,
 }: {
+  onDelete?: () => void;
+  deleting?: boolean;
+  loop?: { on: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
   word: Word;
   flag: TranscriptFlag;
   decision?: Decision;
   open: boolean;
   pinned: boolean;
   highlighted: boolean;
+  where: string;
+  position: string;
   anchorRef: (el: HTMLElement | null) => void;
   onOpenChange: (open: boolean) => void;
   onPin: (pinned: boolean) => void;
@@ -424,6 +731,11 @@ function FlagWord({
   const [text, setText] = useState(shown);
   const closeTimer = useRef<number | undefined>(undefined);
   const pct = Math.round(flag.confidence * 100);
+  const isDeletion = flag.kind === "disfluency";
+  const [confirmDel, setConfirmDel] = useState(false);
+  useEffect(() => {
+    if (!open) setConfirmDel(false);
+  }, [open]);
 
   const hoverOpen = () => {
     window.clearTimeout(closeTimer.current);
@@ -433,16 +745,21 @@ function FlagWord({
     window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(() => onOpenChange(false), 180);
   };
-  const commit = () => {
+  const accept = () => {
     const t = text.trim();
     if (!t && !isDeletion) return;
     onDecide({ status: "accepted", replacement: t === flag.suggested ? undefined : t });
   };
 
-  const isDeletion = flag.kind === "disfluency";
-  const underline = applied ? "decoration-ok" : status === "rejected" ? "decoration-muted decoration-dashed" : "decoration-accent";
-  const bg = applied ? (isDeletion ? "bg-danger/10" : "bg-ok/10") : status === "rejected" ? "" : "bg-accent/10";
-  // what the caption will say: replacement text for entities, nothing (struck through) for deletions
+  const pending = status === "pending";
+  const glyph = (isDeletion ? "✂" : "Aa") + (pending ? "?" : status === "rejected" ? "✕" : status === "accepted" ? "✓" : "");
+  const stateLabel = status === "auto" ? "Auto-applied" : pending ? "Needs review" : status === "accepted" ? "Accepted" : "Rejected";
+  const stateTone = pending ? "bg-warn-soft" : applied ? "bg-ok-soft" : "bg-sunk";
+  // the chip shapes from the component spec: dotted = auto, solid = accepted, dashed box = review, grey dotted = rejected
+  let cls = "";
+  if (pending) cls = "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn";
+  else if (isDeletion) cls = applied ? "line-through text-ink3" : "border-b-2 border-dotted border-line2";
+  else cls = applied ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-acc` : "border-b-2 border-dotted border-line2";
   const display = isDeletion || !applied ? word.text : shown;
 
   return (
@@ -450,6 +767,9 @@ function FlagWord({
       <Popover.Trigger asChild>
         <span
           ref={anchorRef}
+          role="button"
+          tabIndex={0}
+          aria-label={`${isDeletion ? "Filler cut" : "Name fix"}, ${stateLabel}`}
           data-s={word.start}
           data-e={word.end}
           onMouseEnter={hoverOpen}
@@ -458,62 +778,236 @@ function FlagWord({
             e.preventDefault();
             onPin(!pinned);
           }}
-          className={`cursor-pointer rounded-sm px-0.5 decoration-2 underline-offset-4 ${isDeletion && applied ? "line-through decoration-danger/70 text-muted" : `underline ${underline}`} ${bg} ${highlighted ? "ring-1 ring-accent" : ""}`}
-          title={isDeletion ? `remove "${flag.heard}" (${flag.subkind}, ${pct}%)` : `${flag.heard} → ${shown} (${pct}%)`}
+          className={`cursor-pointer ${cls} ${highlighted || pinned ? "ring-2 ring-acc ring-offset-1 ring-offset-bg" : ""}`}
         >
-          {display}{" "}
+          {pending && !isDeletion && (
+            <>
+              <s className="text-ink3">{word.text}</s> →{" "}
+            </>
+          )}
+          {pending && !isDeletion ? shown : display}
+          <sup className={`ml-0.5 font-mono text-[9px] font-semibold ${pending ? "text-warn" : isDeletion ? "text-ink3" : "text-acc-text"}`}>{glyph}</sup>
         </span>
-      </Popover.Trigger>
+      </Popover.Trigger>{" "}
       <Popover.Portal>
         <Popover.Content
           side="top"
           align="start"
-          sideOffset={6}
+          sideOffset={8}
+          collisionPadding={12}
           onMouseEnter={hoverOpen}
           onMouseLeave={hoverClose}
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="z-50 w-80 rounded-md border border-border bg-panel p-3 text-xs shadow-xl outline-none"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          onFocusOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => {
+            if ((e.target as HTMLElement | null)?.closest?.("[data-flag-nav]")) e.preventDefault();
+          }}
+          className="z-50 w-[340px] overflow-hidden rounded-[14px] border border-line bg-panel text-[13px] text-ink shadow-pop outline-none"
         >
-          <div className="mb-2 flex items-center gap-2 text-muted">
-            {isDeletion ? <Scissors className="h-3 w-3 text-accent-2" /> : <Sparkles className="h-3 w-3 text-accent" />}
-            <span>
-              {isDeletion ? `${flag.subkind}: remove ` : "heard "}
-              <span className="text-text line-through decoration-danger/60">{flag.heard}</span>
-            </span>
-            <span className="ml-auto rounded bg-panel-2 px-1.5 py-0.5" title="Model confidence">
-              {pct}%
-            </span>
-            <span className={applied ? "text-ok" : status === "rejected" ? "text-muted" : "text-accent"}>
-              {status === "auto" ? "auto-fixed" : status}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <input
-              className="input !py-1 text-xs"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commit();
-              }}
-              placeholder={isDeletion ? "leave empty to delete, or type what to keep" : "replacement"}
-            />
-            <button className="btn-primary !px-2 !py-1" onClick={commit} title={isDeletion ? "Remove these words" : "Accept with this text"}>
-              <Check className="h-3 w-3" />
-            </button>
-            {status !== "rejected" && (
-              <button className="btn-ghost !px-2 !py-1" onClick={() => onDecide({ status: "rejected" })} title="Keep what was heard">
-                <X className="h-3 w-3" />
+          {/* never taller than the room Radix measured on screen; the body scrolls instead */}
+          <ScrollArea style={{ maxHeight: "var(--radix-popover-content-available-height)" }}>
+          <div className="flex flex-col gap-3 p-3.5">
+          <div className="flex items-center gap-2">
+            <span className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${isDeletion ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{isDeletion ? "✂" : "Aa"}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : "Name / term fix"}</div>
+              <div className="text-xs text-ink3">{where}</div>
+            </div>
+            <span className={`chip ${stateTone}`}>{stateLabel}</span>
+            {pinned && (
+              <button className="text-ink2 hover:text-ink" onClick={() => onPin(false)} aria-label="Close">
+                <X className="h-4 w-4" />
               </button>
             )}
+          </div>
+          {isDeletion ? (
+            <div>
+              <span className="text-ink3">Cuts </span>
+              <s>“{flag.heard}”</s>
+            </div>
+          ) : (
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+              <span className="text-xs text-ink3">Heard</span>
+              <s>{flag.heard}</s>
+              <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
+                Use
+              </label>
+              <input
+                id={`rep-${flag.id}`}
+                className="input py-1.5"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") accept();
+                }}
+              />
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-ink3">Confidence</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-sunk">
+              <div className={`h-full rounded-full ${pct >= 80 ? "bg-ok" : pct >= 60 ? "bg-acc" : "bg-warn"}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="font-mono">{pct}%</span>
+          </div>
+          {loop && (
+            <div className="flex items-center gap-2">
+              <button
+                className={`btn px-2.5 py-1.5 text-xs ${loop.on ? "bg-ink font-semibold text-bg" : "border border-line bg-panel text-ink hover:bg-sunk"}`}
+                onClick={loop.toggle}
+                aria-pressed={loop.on}
+                title="Play the audio around this fix on repeat (P)"
+              >
+                {loop.on ? "❚❚ Stop" : "↻ Play in context"} <span className="font-mono opacity-70">P</span>
+              </button>
+              <div role="radiogroup" aria-label="Seconds of context" className="seg">
+                {[2, 4, 8].map((n) => (
+                  <button
+                    key={n}
+                    role="radio"
+                    aria-checked={loop.sec === n}
+                    onClick={() => loop.setSec(n)}
+                    className={`rounded-[7px] px-2 py-0.5 font-mono text-[11px] ${loop.sec === n ? "bg-panel text-ink shadow-[0_1px_2px_rgba(0,0,0,.12)]" : "text-ink2"}`}
+                  >
+                    ±{n}s
+                  </button>
+                ))}
+              </div>
+              {loop.on && !loop.ab && <span className="text-[11px] text-ink3">original audio</span>}
+            </div>
+          )}
+          {loop?.ab && <CutAB ab={loop.ab} playing={loop.on} />}
+          {decision && <p className="text-xs text-ink2">Staged. Apply from the bar at the bottom of the transcript.</p>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {flag.subkind !== "manual" && (
+              <>
+                <button className="btn-primary px-2.5 py-1.5 text-xs" onClick={accept}>
+                  <Check className="h-3.5 w-3.5" /> Accept <span className="font-mono opacity-70">A</span>
+                </button>
+                <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={() => onDecide({ status: "rejected" })}>
+                  <X className="h-3.5 w-3.5" /> Reject <span className="font-mono opacity-70">R</span>
+                </button>
+              </>
+            )}
+            {onDelete &&
+              (confirmDel ? (
+                <span className="flex items-center gap-1">
+                  <button className="btn bg-err px-2.5 py-1.5 text-xs font-semibold text-white hover:brightness-110" disabled={deleting} onClick={onDelete}>
+                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} {flag.subkind === "manual" ? "Delete cut" : "Delete fix"}
+                  </button>
+                  <button className="btn-quiet px-2 py-1.5 text-xs" onClick={() => setConfirmDel(false)}>
+                    Keep
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="btn-quiet px-2.5 py-1.5 text-xs text-ink2"
+                  onClick={() => setConfirmDel(true)}
+                  title={flag.subkind === "manual" ? "Delete your cut; any automatic fixes it replaced come back as they were" : "Delete this fix; the words stay as heard"}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </button>
+              ))}
             {decision && (
-              <button className="btn-ghost !px-2 !py-1 text-muted" onClick={() => onDecide(null)} title="Undo">
-                undo
+              <button className="btn-quiet px-2.5 py-1.5 text-xs" onClick={() => onDecide(null)}>
+                ↶ Undo
               </button>
             )}
+            <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
           </div>
-          {decision && <p className="mt-2 text-muted">Pending. Use "Apply & re-render" in the header to save.</p>}
+          </div>
+          </ScrollArea>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+const SOURCE_LABEL: Record<CutPlan["source"], string> = {
+  render: "Exact: the cut from the last render",
+  search: "Exact: found by the cut search",
+  timestamps: "Approximate: word timestamps",
+};
+
+/** Original vs with-the-cut toggle for a disfluency, plus where the cut boundaries came from. */
+function CutAB({ ab, playing }: { ab: NonNullable<NonNullable<React.ComponentProps<typeof FlagWord>["loop"]>["ab"]>; playing: boolean }) {
+  const { plan, loading, error } = ab.plan ?? {};
+  useEffect(() => {
+    ab.loadPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-2">
+      <div className="flex items-center gap-2">
+        <div role="radiogroup" aria-label="Which version" className="seg bg-panel">
+          {(
+            [
+              ["orig", "Original"],
+              ["cut", "With cut"],
+            ] as const
+          ).map(([v, l]) => (
+            <button
+              key={v}
+              role="radio"
+              aria-checked={ab.variant === v}
+              onClick={() => ab.setVariant(v)}
+              className={`rounded-[7px] px-2.5 py-1 text-xs font-semibold ${ab.variant === v ? "bg-ink text-bg" : "text-ink2 hover:text-ink"}`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+        {playing && <span className="text-[11px] text-ink3">{ab.variant === "cut" ? "playing with the cut" : "playing as recorded"}</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink2">
+        {loading === "plan" && <span>Checking for an exact cut…</span>}
+        {loading === "exact" && (
+          <span className="flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" /> Searching for a clean cut, usually 5–20 s…
+          </span>
+        )}
+        {!loading && plan && <span>{SOURCE_LABEL[plan.source]}</span>}
+        {!loading && plan?.source === "timestamps" && !plan.refused && (
+          <button className="font-semibold text-acc-text" onClick={ab.findExact} title="Run the same cut search the renderer uses on this spot">
+            Find exact cut
+          </button>
+        )}
+        {error && <span className="text-err">{error.slice(0, 120)}</span>}
+      </div>
+      {!loading && plan?.refused && <Refusal reason={plan.refused} />}
+    </div>
+  );
+}
+
+/** One readable line for a refused cut, with the verifier's raw log behind a toggle. */
+function Refusal({ reason }: { reason: string }) {
+  const [open, setOpen] = useState(false);
+  const tries = /after (\d+) attempt/.exec(reason)?.[1];
+  const lostNext = /next lost/.test(reason);
+  const lostPrev = /prev lost/.test(reason);
+  const leftover = /deleted (?:heard|left)/.test(reason);
+  const why = /within 30 s/.test(reason)
+    ? "The search ran out of time."
+    : lostNext && lostPrev
+      ? "Each try also clipped the words around it."
+      : lostNext
+        ? "Each try also clipped the word after it."
+        : lostPrev
+          ? "Each try also clipped the word before it."
+          : leftover
+            ? "Part of the cut words was still audible."
+            : "The seam didn't sound clean.";
+  return (
+    <div className="flex flex-col gap-1 text-[11px] leading-snug text-ink">
+      <p>
+        <span className="font-semibold text-warn">No clean cut{tries ? ` after ${tries} tries` : ""}.</span> {why} Renders keep these words in the audio; “With cut” plays the approximate cut.
+      </p>
+      <button className="w-max font-semibold text-acc-text" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {open ? "Hide details" : "Details"}
+      </button>
+      {open && <p className="whitespace-pre-wrap break-words rounded-[8px] bg-panel p-2 font-mono text-[10px] text-ink2">{reason.replace(/; (?=\d)/g, ";\n")}</p>}
+    </div>
   );
 }
