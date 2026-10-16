@@ -100,5 +100,6 @@ body { @apply bg-bg font-sans text-[14px] text-ink antialiased; }
 @utility menu { @apply z-50 min-w-52 rounded-[14px] border border-line bg-panel p-1.5 text-ink shadow-pop outline-none; }
 @utility card { @apply rounded-[14px] border border-line bg-panel; }
 @utility chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap; }
-@utility kbd { @apply rounded-[6px] bg-sunk px-2 py-px font-mono text-xs text-ink; }
+/* keyboard key: outlined in the surrounding text colour so it reads on any button or surface */
+@utility kbd { @apply inline-grid min-w-[1.5em] place-items-center rounded-[4px] border border-current px-1 font-mono text-[10px] leading-[1.45] whitespace-nowrap opacity-75; }
 @utility seg { @apply inline-flex gap-0.5 rounded-[10px] bg-sunk p-[3px]; }

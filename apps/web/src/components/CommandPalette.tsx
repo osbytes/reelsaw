@@ -211,7 +211,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                         <span className="block truncate text-[13px] font-semibold">{it.label}</span>
                         {it.hint && <span className="block truncate text-xs text-ink3">{it.hint}</span>}
                       </span>
-                      {i === cursor && <span className="kbd text-[10px]">↵</span>}
+                      {i === cursor && <span className="kbd">↵</span>}
                     </button>
                   </div>
                 );
@@ -220,10 +220,10 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           </ScrollArea>
           <div className="flex items-center gap-3 border-t border-line px-4 py-2 text-[11px] text-ink3">
             <span>
-              <span className="kbd text-[10px]">↑↓</span> move
+              <span className="kbd">↑↓</span> move
             </span>
             <span>
-              <span className="kbd text-[10px]">↵</span> open
+              <span className="kbd">↵</span> open
             </span>
             <span className="ml-auto">Drop videos anywhere to start projects · {MOD}K</span>
           </div>

@@ -3,7 +3,8 @@
  *  - split cases: face samples from a wide two-person shot (speakers at the far left and right).
  *    The layout must be "split" and each speaker crop (`speakerCrop` + `cropX`, shared with the
  *    preview) must centre its speaker within `maxOffset` of the crop width and keep burned-in
- *    caption bands out of the crop.
+ *    caption bands out of the crop. With `maxDrift`, neither speaker's crop may wander more than
+ *    that (normalized x) from where that speaker sits: no pan over to the other person and back.
  *  - track cases: the "heavy tripod" camera (`tripodTrack`) must settle within `maxErrPx` of the
  *    face after `settleSec`, and never pan faster than `maxPanPxPerSec`.
  * Face samples are committed (samples.json, derived from the video); when missing they are
@@ -27,7 +28,7 @@ interface FramingCase {
   srcW: number;
   srcH: number;
   avoid?: Array<{ y1: number; y2: number }>;
-  expect: { layout?: string; maxOffset?: number; settleSec?: number; maxErrPx?: number; maxPanPxPerSec?: number };
+  expect: { layout?: string; maxOffset?: number; maxDrift?: number; settleSec?: number; maxErrPx?: number; maxPanPxPerSec?: number };
 }
 
 async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promise<FaceSample[]> {
@@ -83,6 +84,9 @@ export const framingSuite: Suite = {
           checks[`${s.label}.face`] = `${ctr.x.toFixed(2)},${ctr.y.toFixed(2)}`;
           checks[`${s.label}.offset`] = Number(offset.toFixed(3));
           checks[`${s.label}.cropW`] = Number((crop.w / c.srcW).toFixed(2));
+          const drift = Math.max(...s.track.map((p) => Math.abs(p.x - ctr.x)));
+          checks[`${s.label}.drift`] = Number(drift.toFixed(3));
+          if (c.expect.maxDrift !== undefined && drift > c.expect.maxDrift) fails.push(`speaker ${s.label} crop drifts ${drift.toFixed(2)} from its speaker`);
           if (offset > (c.expect.maxOffset ?? 0.2)) fails.push(`speaker ${s.label} off-centre by ${(offset * 100).toFixed(0)}% of the crop`);
           const faceY = ctr.y * c.srcH;
           for (const b of c.avoid ?? []) {

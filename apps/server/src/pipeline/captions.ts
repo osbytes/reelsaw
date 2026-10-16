@@ -1,4 +1,4 @@
-import { lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, type Word, type Style } from "@reelsaw/shared";
+import { lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
 
 export interface CaptionOptions {
   width: number;
@@ -46,7 +46,8 @@ export function hookFontPx(height: number) {
  * Build an ASS subtitle file. `words` must already be relative to the clip start.
  * Text blocks are centred on (captionX, captionY) / (hookX, hookY) of the frame via \an5\pos.
  */
-export function buildAss(words: Word[], opts: CaptionOptions): string {
+export function buildAss(input: Word[], opts: CaptionOptions): string {
+  const words = monotonicWords(input);
   const { width, height, font, style } = opts;
   const scale = height / 1920;
   const captionSize = captionFontPx(height, style.captionSize);

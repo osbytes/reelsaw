@@ -1,0 +1,10 @@
+{
+  "kind": "split",
+  "note": "Two-person shot (source 0:25-0:31) where a spurious box keeps appearing beside the left speaker and outranks the right one; picking the two largest boxes swapped the right speaker's crop onto the left person and back (a \"lazy eye\" pan).",
+  "source": { "id": "power-of-one-day", "url": "https://www.youtube.com/watch?v=siNNCI6JAjk", "start": 24.84, "end": 31.05, "localPath": "/data/projects/486900e4-41d6-4428-8a72-d04130141a69/source.mp4" },
+  "start": 0,
+  "end": 6.21,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": { "layout": "split", "maxOffset": 0.2, "maxDrift": 0.08 }
+}

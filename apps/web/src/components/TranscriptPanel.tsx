@@ -530,7 +530,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               <span className="font-mono">{pendingFlags.length ? "?" : "✓"}</span> {pendingFlags.length ? `${pendingFlags.length} to review` : "All reviewed"}
             </span>
             <button data-flag-nav className="btn-ghost px-2.5 py-1 text-xs" disabled={!pendingFlags.length} onClick={nextPending} title="Next fix to review (N). Then A accept, R reject, ↑ ↓ move">
-              Next fix <span className="rounded-[4px] border border-current px-1 font-mono text-[10px] opacity-75">N</span>
+              Next fix <span className="kbd">N</span>
             </button>
           </div>
         )}
@@ -1039,7 +1039,7 @@ function FlagWord({
                 aria-pressed={loop.on}
                 title={loop.on ? "Stop playing in context (P) · Space pauses" : "Play the audio around this fix on repeat (P)"}
               >
-                {loop.on ? "■ Stop" : "↻ Play in context"} <span className="font-mono opacity-70">P</span>
+                {loop.on ? "■ Stop" : "↻ Play in context"} <span className="kbd">P</span>
               </button>
               <div role="radiogroup" aria-label="Seconds of context" className="seg">
                 {[2, 4, 8].map((n) => (
@@ -1067,10 +1067,10 @@ function FlagWord({
             {flag.subkind !== "manual" && (
               <>
                 <button className="btn-primary px-2.5 py-1.5 text-xs" onClick={accept}>
-                  <Check className="h-3.5 w-3.5" /> Accept <span className="font-mono opacity-70">A</span>
+                  <Check className="h-3.5 w-3.5" /> Accept <span className="kbd">A</span>
                 </button>
                 <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={() => onDecide({ status: "rejected" })}>
-                  <X className="h-3.5 w-3.5" /> Reject <span className="font-mono opacity-70">R</span>
+                  <X className="h-3.5 w-3.5" /> Reject <span className="kbd">R</span>
                 </button>
               </>
             )}
@@ -1101,7 +1101,16 @@ function FlagWord({
             <span className="ml-auto font-mono text-[11px] text-ink3">{position}</span>
           </div>
           {/* always present, one line: swapping its text never resizes the popover */}
-          <p className="truncate text-[11px] text-ink3">{decision ? <span className="text-ink2">Staged · apply from the bar under the transcript</span> : "A accept · R reject · ↑ ↓ next · P play"}</p>
+          <p className="flex items-center gap-1 truncate text-[11px] text-ink3">
+            {decision ? (
+              <span className="text-ink2">Staged · apply from the bar under the transcript</span>
+            ) : (
+              <>
+                <span className="kbd">A</span> accept · <span className="kbd">R</span> reject · <span className="kbd">↑</span>
+                <span className="kbd">↓</span> next · <span className="kbd">P</span> play
+              </>
+            )}
+          </p>
           </div>
           </ScrollArea>
         </Popover.Content>

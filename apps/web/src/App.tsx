@@ -96,7 +96,7 @@ function SearchButton() {
     <button onClick={() => open()} className="flex h-[34px] items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]" aria-label="Search">
       <Search className="h-4 w-4" />
       <span className="hidden flex-1 text-left sm:inline">Search or paste a link…</span>
-      <span className="kbd hidden bg-panel text-[11px] sm:inline">{mod}K</span>
+      <span className="kbd hidden sm:inline-grid">{mod}K</span>
     </button>
   );
 }

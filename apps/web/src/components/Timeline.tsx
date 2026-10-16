@@ -491,7 +491,7 @@ function TimelineMenu(p: {
     <ContextMenu.Content className="menu z-[60] w-[240px]" collisionPadding={8}>
       <ContextMenu.Label className="px-2.5 py-1 font-mono text-[10px] text-ink3">{formatTime(at.t)}</ContextMenu.Label>
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
-        <Scissors className="h-3.5 w-3.5" /> Split here <span className="menu-hint">{SPLIT_SHORTCUT}</span>
+        <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ml-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
       {sec && (
         <>
@@ -535,10 +535,10 @@ function TimelineMenu(p: {
       </ContextMenu.Item>
       <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
       <ContextMenu.Item className={item} disabled={!p.canUndo} onSelect={p.onUndo}>
-        <Undo2 className="h-3.5 w-3.5" /> Undo <span className="menu-hint">{MOD}Z</span>
+        <Undo2 className="h-3.5 w-3.5" /> Undo <span className="kbd ml-auto">{MOD}Z</span>
       </ContextMenu.Item>
       <ContextMenu.Item className={item} disabled={!p.canRedo} onSelect={p.onRedo}>
-        <Redo2 className="h-3.5 w-3.5" /> Redo <span className="menu-hint">{MOD}⇧Z</span>
+        <Redo2 className="h-3.5 w-3.5" /> Redo <span className="kbd ml-auto">{MOD}⇧Z</span>
       </ContextMenu.Item>
     </ContextMenu.Content>
   );

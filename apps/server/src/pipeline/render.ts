@@ -338,13 +338,34 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }));
       const res = await alignWordTimes(svc.aligner, clipAudio, heard);
       const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
-      let used = 0;
-      const byOrig = heard.map((h, i) => ({ h, a: res.words[i]! }));
-      clipWordsRel = clipWordsRel.map((w) => {
-        const m = byOrig.find((x) => norm(x.h.text) === norm(w.text) && Math.abs(x.h.start - w.start) < 0.6);
-        if (!m) return w;
-        used++;
-        return { ...w, start: m.a.start, end: m.a.end };
+      // match caption words to heard words one-to-one and in order: a repeated word ("or … or")
+      // must not reuse an earlier occurrence's timing, or lines go back in time and overlap
+      let cursor = 0;
+      const match = clipWordsRel.map((w) => {
+        for (let k = cursor; k < heard.length && heard[k]!.start - w.start < 0.6; k++) {
+          if (Math.abs(heard[k]!.start - w.start) < 0.6 && norm(heard[k]!.text) === norm(w.text)) {
+            cursor = k + 1;
+            return k;
+          }
+        }
+        return -1;
+      });
+      const used = match.filter((k) => k >= 0).length;
+      // unmatched words (corrected names, …) move with their nearest matched neighbour instead of
+      // keeping transcript timing between aligned neighbours
+      const shiftAt = (i: number) => (match[i]! >= 0 ? res.words[match[i]!]!.start - heard[match[i]!]!.start : undefined);
+      const nearestShift = (i: number) => {
+        for (let d = 1; d < match.length; d++) {
+          const s = shiftAt(i - d) ?? shiftAt(i + d);
+          if (s !== undefined) return s;
+        }
+        return 0;
+      };
+      clipWordsRel = clipWordsRel.map((w, i) => {
+        const k = match[i]!;
+        if (k >= 0) return { ...w, start: res.words[k]!.start, end: res.words[k]!.end };
+        const s = nearestShift(i);
+        return { ...w, start: Math.max(0, w.start + s), end: Math.max(0, w.end + s) };
       });
       captionTiming = { aligned: used, total: clipWordsRel.length, medianShiftMs: res.medianShiftMs, ms: Date.now() - t0 };
       log.info(captionTiming, "caption words aligned to audio");

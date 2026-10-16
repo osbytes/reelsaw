@@ -12,6 +12,7 @@ docker compose exec app reelsaw logs <id> [n]          # log lines for a project
 docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, live jobs, errors
 docker compose exec app reelsaw events <projectId> 50  # what the pipeline emitted, in order
 docker compose exec app reelsaw clip <clipId>          # one clip: bounds, layout segments, last render's cuts + reasons
+docker compose exec app reelsaw faces <clipId> [a-b]   # face boxes per frame (clip-relative range) + split speaker tracks; --json for eval fixtures
 docker compose logs -f app | pnpm dlx pino-pretty      # structured logs, readable
 docker compose logs app | grep '"clipId":"<id>"'       # every line for one clip (logs carry projectId/clipId/jobId)
 ```
@@ -26,6 +27,8 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under 45. |
 | Face off-centre | Editor layout track; `reelsaw clip` → layout segments `cx` | Old render (pre-settle tracker) or detector found no face (`fit`). Drag the picture to re-centre. |
+| Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
+| Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
 
 ## 2. Tools
@@ -98,6 +101,10 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   ~3.2 face-heights and keeps it out of burned-in text bands.
 - **Face detectors see posters.** UltraFace returned a wall object as a face (score ~0.88, identical box every
   frame) and split paired it with the real speaker. `dropStaticFaces` removes face clusters that never move.
+- **Pair speakers by continuity, not by box size.** Taking the two largest boxes per frame and sorting them
+  left/right let a spurious box beside one speaker (a second detection, a hand) outrank the other speaker, so
+  that crop panned onto the wrong person and back ("lazy eye"). `assignPair` gives each box to the speaker it's
+  nearer to and holds the last position when a speaker has none (eval `framing/split-spurious-box-beside-speaker`).
 - **Speakers disappear for seconds** (drinking, turning away). Split holds through short one-face stretches when the
   visible face matches one of the split speakers; otherwise the layout flips for a sip.
 - **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across

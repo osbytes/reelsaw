@@ -123,13 +123,33 @@ function pairSizes(pair: { a: FaceSample[]; b: FaceSample[] }): [number, number]
   return [sz(pair.a), sz(pair.b)];
 }
 
-function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSample[] } {
+export function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSample[] } {
+  // Keep each speaker by continuity, not by "two largest boxes sorted left to right": a spurious box
+  // (a second detection beside one face, a hand) would otherwise outrank the other speaker and swap
+  // that crop onto the wrong person for a few frames, then back (a "lazy eye" pan).
+  const cx = (bx: FaceBox) => (bx.x1 + bx.x2) / 2;
+  const seeds = samples.flatMap((s) => {
+    const xs = s.boxes.slice(0, 2).map(cx).sort((p, q) => p - q);
+    return xs.length === 2 && xs[1]! - xs[0]! > 0.2 ? [xs as [number, number]] : [];
+  });
+  let la = seeds.length ? median(seeds.map((x) => x[0])) : 0.33;
+  let lb = seeds.length ? median(seeds.map((x) => x[1])) : 0.67;
   const a: FaceSample[] = [];
   const b: FaceSample[] = [];
   for (const s of samples) {
-    const two = s.boxes.slice(0, 2).sort((p, q) => p.x1 + p.x2 - (q.x1 + q.x2));
-    a.push({ t: s.t, box: two[0] ?? null, boxes: [] });
-    b.push({ t: s.t, box: two[1] ?? null, boxes: [] });
+    // every box belongs to the speaker it's nearer to; each speaker keeps its nearest box
+    let pa: FaceBox | null = null;
+    let pb: FaceBox | null = null;
+    for (const bx of s.boxes) {
+      const x = cx(bx);
+      if (Math.abs(x - la) <= Math.abs(x - lb)) {
+        if (!pa || Math.abs(x - la) < Math.abs(cx(pa) - la)) pa = bx;
+      } else if (!pb || Math.abs(x - lb) < Math.abs(cx(pb) - lb)) pb = bx;
+    }
+    if (pa) la = cx(pa);
+    if (pb) lb = cx(pb);
+    a.push({ t: s.t, box: pa, boxes: [] });
+    b.push({ t: s.t, box: pb, boxes: [] });
   }
   return { a, b };
 }

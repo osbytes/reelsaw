@@ -28,6 +28,7 @@ import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
  */
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
+import { sampleFaces, dropStaticFaces, decideLayout } from "./pipeline/layout.js";
 import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
@@ -126,6 +127,30 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(`  at ${diagnostics.renderedAt} in ${diagnostics.renderMs} ms, ${diagnostics.outDurationSec}s out, layout ${diagnostics.layout}`);
     for (const a of diagnostics.cuts.applied) console.log(`  cut     ${a.start.toFixed(3)}-${a.end.toFixed(3)}`);
     for (const s of diagnostics.cuts.skipped) console.log(`  SKIPPED ${s.start.toFixed(3)}-${s.end.toFixed(3)}: ${s.reason}`);
+  },
+
+  // per-sample face boxes over a clip (or a range of it, seconds relative to the clip) and the
+  // speaker tracks a split would use: for diagnosing framing that drifts or swaps speakers
+  async faces(svc) {
+    if (!svc.faces) throw new Error("FACE_DETECTION is off");
+    const c = await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]!) });
+    if (!c) throw new Error("clip not found");
+    const [from, to] = (pos[1] ?? `0-${c.endSec - c.startSec}`).split("-").map(Number) as [number, number];
+    const samples = dropStaticFaces(
+      await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: await sourcePath(svc, c.projectId), startSec: c.startSec + from, durationSec: to - from, sampleFps: 4 }),
+    ).samples;
+    if (args.includes("--json")) return console.log(JSON.stringify(samples)); // eval fixture (samples.json)
+    const d = decideLayout(samples, svc.config);
+    console.log(`${samples.length} samples, layout ${d.layout}: ${d.reason}`);
+    const f = (n: number | undefined) => (n === undefined ? "  -  " : n.toFixed(3));
+    table(
+      samples.map((sm, i) => ({
+        t: (from + sm.t).toFixed(2),
+        faces: sm.boxes.map((b) => `${f((b.x1 + b.x2) / 2)}@${f(b.y2 - b.y1)}`).join(" "),
+        a: f(d.track?.[i]?.x),
+        b: d.layout === "split" ? f(d.track2?.[i]?.x) : "",
+      })),
+    );
   },
 
   async rerender(svc) {
@@ -325,7 +350,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <status|events|clip|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <status|events|clip|faces|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

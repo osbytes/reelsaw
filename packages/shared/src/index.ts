@@ -338,13 +338,27 @@ export const captionMaxChars = (size: number) => Math.max(10, Math.min(40, Math.
 
 /** Minimum time a caption line stays up (unless the next line starts sooner). */
 export const MIN_LINE_SECONDS = 0.7;
-/** Display end for line i: hold short lines up to MIN_LINE_SECONDS without overlapping the next. */
+/**
+ * Display end for line i: hold short lines up to MIN_LINE_SECONDS, and never past the next line's
+ * start. Word timestamps often overlap (the last word ends after the next line's first begins), so
+ * without the cap two lines are drawn on top of each other at the same position.
+ */
 export function lineDisplayEnd<W extends { start: number; end: number }>(lines: W[][], i: number): number {
   const line = lines[i]!;
   const start = line[0]!.start;
   const end = line[line.length - 1]!.end;
   const next = lines[i + 1]?.[0]?.start ?? Infinity;
-  return Math.max(end, Math.min(start + MIN_LINE_SECONDS, next));
+  return Math.min(next, Math.max(end, start + MIN_LINE_SECONDS));
+}
+
+/** Words in spoken order with non-decreasing starts and positive durations (captions assume it). */
+export function monotonicWords<W extends { start: number; end: number }>(words: W[]): W[] {
+  let prev = -Infinity;
+  return words.map((w) => {
+    const start = Math.max(w.start, prev);
+    prev = start;
+    return { ...w, start, end: Math.max(w.end, start + 0.05) };
+  });
 }
 
 /** Caption/hook font sizes as a fraction of frame height (renderer multiplies by output height). */
