@@ -85,8 +85,14 @@ Ownership is checked in the same transaction as the write (`user_id = ctx.user.i
 
 ### Soft delete
 Delete hides the asset from pickers and defaults, but render still resolves soft-deleted ids, so
-projects using it keep working. The UI shows "Used by N projects" first and offers restore. A later
-cleanup job purges files deleted over 30 days ago and used by no project.
+projects using it keep working. The UI shows "Used by N projects" first and offers restore. The web offers Undo in a toast
+for about 8 s after removal. The storage sweep (hourly, or `reelsaw storage sweep`) hard-deletes assets deleted over
+30 days ago that no project setting or clip references, with their `bumpers/<id>/…` objects and local cache.
+
+### Duplicates
+`bumper_assets.content_hash` is the sha256 of the uploaded file, computed in `bumpers.create`. A live asset with the
+same hash is returned with `duplicate: true` instead of inserting; a soft-deleted one is restored (`restored: true`).
+Assets added before this column have a null hash and are not backfilled, so re-uploading one of those is not caught.
 
 ## Render pipeline
 

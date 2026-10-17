@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planSweep, parseClipFile, SWEEP_GRACE_MS, HEAR_TMP_MAX_AGE_MS, type DbView, type ScratchProject } from "../src/storage/sweep.js";
+import { planSweep, parseClipFile, bumperPurgeable, BUMPER_PURGE_MS, SWEEP_GRACE_MS, HEAR_TMP_MAX_AGE_MS, type DbView, type ScratchProject } from "../src/storage/sweep.js";
 import { duplicateSourceBytes, videoIdentity, youtubeId } from "../src/storage/usage.js";
 
 const NOW = 1_800_000_000_000;
@@ -94,5 +94,18 @@ describe("duplicate sources", () => {
       { identity: null, bytes: 70 },
     ]);
     assert.deepEqual(r, { bytes: 288 + 95, groups: 2 });
+  });
+});
+
+describe("bumperPurgeable", () => {
+  const gone = (days: number) => ({ deletedAt: new Date(NOW - days * 24 * 3600_000) });
+  it("purges an unreferenced asset removed over 30 days ago", () => {
+    assert.ok(bumperPurgeable(gone(31), false, NOW));
+  });
+  it("keeps recent removals, live assets and anything still referenced", () => {
+    assert.ok(!bumperPurgeable(gone(29), false, NOW));
+    assert.ok(!bumperPurgeable({ deletedAt: new Date(NOW - BUMPER_PURGE_MS) }, false, NOW), "exactly 30 days is not yet over");
+    assert.ok(!bumperPurgeable({ deletedAt: null }, false, NOW));
+    assert.ok(!bumperPurgeable(gone(400), true, NOW));
   });
 });

@@ -1,7 +1,7 @@
 import { inArray, eq, desc } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { sweepRetention } from "../retention.js";
-import { sweepScratch } from "../storage/sweep.js";
+import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { QUEUES, type QueueName } from "./boss.js";
@@ -84,6 +84,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         if (Date.now() - lastSweep < 60 * 60_000) return;
         lastSweep = Date.now();
         await sweepScratch(svc);
+        await purgeBumperAssets(svc);
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();

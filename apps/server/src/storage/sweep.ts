@@ -8,7 +8,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { keys } from "./index.js";
@@ -179,4 +179,58 @@ export async function removeScratchSource(svc: Services, projectId: string) {
   for (const f of await fs.readdir(dir).catch(() => [] as string[])) {
     if (f.startsWith("source.")) await fs.rm(path.join(dir, f), { force: true }).catch(() => {});
   }
+}
+
+/** Soft-deleted library assets are kept this long so Undo and restore keep working. */
+export const BUMPER_PURGE_MS = 30 * 24 * 60 * 60_000;
+
+/** A removed asset is purgeable once it has been gone for 30 days and no project setting or clip names it. */
+export function bumperPurgeable(a: { deletedAt: Date | null }, referenced: boolean, now: number): boolean {
+  return !!a.deletedAt && !referenced && now - a.deletedAt.getTime() > BUMPER_PURGE_MS;
+}
+
+/**
+ * Hard-deletes library assets removed over 30 days ago that nothing references, then drops their
+ * storage objects (`bumpers/<id>/…`) and local cache. The row delete commits first; the files go after.
+ */
+export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean; now?: number } = {}): Promise<string[]> {
+  const log = svc.log.child({ module: "sweep" });
+  const now = opts.now ?? Date.now();
+  const cutoff = new Date(now - BUMPER_PURGE_MS);
+  const candidates = await svc.database.db
+    .select({ id: schema.bumperAssets.id })
+    .from(schema.bumperAssets)
+    .where(and(isNotNull(schema.bumperAssets.deletedAt), lt(schema.bumperAssets.deletedAt, cutoff)))
+    .limit(200);
+  const purged: string[] = [];
+  for (const { id } of candidates) {
+    if (opts.dryRun) {
+      purged.push(id);
+      continue;
+    }
+    const gone = await svc.tx(async (u) => {
+      const [a] = await u.db.select({ id: schema.bumperAssets.id, deletedAt: schema.bumperAssets.deletedAt }).from(schema.bumperAssets).where(eq(schema.bumperAssets.id, id)).for("update");
+      if (!a) return false;
+      const ref = await u.db.execute(sql`
+        select exists (select 1 from projects where settings ->> 'introAssetId' = ${id} or settings ->> 'outroAssetId' = ${id})
+            or exists (select 1 from clips where bumpers ->> 'intro' = ${id} or bumpers ->> 'outro' = ${id}) as used`);
+      const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
+      if (!bumperPurgeable(a, used, now)) return false;
+      await u.db.delete(schema.bumperAssets).where(eq(schema.bumperAssets.id, id));
+      u.afterCommit(async () => {
+        try {
+          await svc.storage.deletePrefix(`bumpers/${id}`);
+          await fs.rm(path.join(svc.paths.root, "bumpers", id), { recursive: true, force: true });
+        } catch (err) {
+          log.warn({ err, assetId: id }, "purged a library asset but could not remove its files");
+        }
+      });
+      return true;
+    });
+    if (gone) {
+      purged.push(id);
+      log.info({ assetId: id }, "purged a library asset removed over 30 days ago");
+    }
+  }
+  return purged;
 }

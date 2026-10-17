@@ -15,7 +15,7 @@ import type { UnitOfWork } from "../uow.js";
 import { requestRender, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
-import { bumperKind, bumperProblem, ensureBumperThumb, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -321,6 +321,7 @@ export const appRouter = router({
         group by a.id`);
       const usedBy = new Map((used.rows as Array<{ id: string; n: number }>).map((r) => [r.id, r.n]));
       const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usedBy.get(r.id) ?? 0 });
+      // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
         assets: rows.filter((r) => !r.deletedAt).map(pub),
@@ -409,7 +410,17 @@ export const appRouter = router({
           const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
           if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
           const sourceKey = keys.bumper(id, ext);
+          const contentHash = await sha256File(local);
           const row = await svc.tx(async (u) => {
+            // one upload of a given file at a time per user, so two racing copies cannot both insert
+            await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bumper:${ctx.user.id}:${contentHash}`}))`);
+            const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
+            if (same) {
+              const wasRemoved = !!same.deletedAt;
+              if (wasRemoved) await u.db.update(schema.bumperAssets).set({ deletedAt: null }).where(eq(schema.bumperAssets.id, same.id));
+              if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, same.id);
+              return { asset: same, duplicate: true as const, restored: wasRemoved };
+            }
             // ownership is re-checked in the unit of work that writes
             const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, ctx.user.id)));
             if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
@@ -426,6 +437,7 @@ export const appRouter = router({
                 hasAudio: kind === "video" && probe.hasAudio,
                 sourceKey,
                 sizeBytes: up.sizeBytes,
+                contentHash,
               })
               .returning();
             if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, id);
@@ -440,9 +452,10 @@ export const appRouter = router({
                 await fs.rm(local, { force: true }).catch(() => {});
               }
             });
-            return asset!;
+            return { asset: asset!, duplicate: false as const, restored: false };
           });
-          return { id: row.id, name: row.name, kind: row.kind, durationSec: row.durationSec };
+          if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
+          return { id: row.asset.id, name: row.asset.name, kind: row.asset.kind, durationSec: row.asset.durationSec, duplicate: row.duplicate, restored: row.restored };
         } catch (err) {
           await fs.rm(local, { force: true }).catch(() => {});
           throw err;

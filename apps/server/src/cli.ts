@@ -42,7 +42,7 @@ import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
 import { sweepRetention } from "./retention.js";
-import { sweepScratch } from "./storage/sweep.js";
+import { sweepScratch, purgeBumperAssets } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
@@ -300,6 +300,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const r = await sweepScratch(svc, { dryRun: dry });
       table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
+      const gone = await purgeBumperAssets(svc, { dryRun: dry });
+      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) removed over 30 days ago and used nowhere`);
       return;
     }
     const r = await storageReport(svc);

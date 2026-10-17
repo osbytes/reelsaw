@@ -6,7 +6,9 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { DEFAULT_IMAGE_BUMPER_SEC } from "@reelsaw/shared";
 import { keys, type Storage } from "../storage/index.js";
 import type { ProbeInfo } from "../media.js";
 
@@ -16,7 +18,7 @@ export const BUMPER_VIDEO_EXTS = [".mp4", ".mov", ".webm"] as const;
 export const BUMPER_IMAGE_EXTS = [".png", ".jpg", ".jpeg"] as const;
 export const BUMPER_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const BUMPER_IMAGE_MAX_PX = 8192;
-export const BUMPER_IMAGE_SEC = { min: 1, max: 10, default: 3 } as const;
+export const BUMPER_IMAGE_SEC = { min: 1, max: 10, default: DEFAULT_IMAGE_BUMPER_SEC } as const;
 export const bumperKind = (ext: string): "video" | "image" | null =>
   (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : null;
 export const BUMPER_FPS = 30;
@@ -211,4 +213,11 @@ export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; stora
   })().finally(() => thumbRuns.delete(asset.id));
   thumbRuns.set(asset.id, run);
   return run;
+}
+
+/** sha256 of a file, streamed (bumpers can be 50 MB; never read whole into memory). */
+export async function sha256File(file: string): Promise<string> {
+  const h = createHash("sha256");
+  for await (const chunk of createReadStream(file)) h.update(chunk as Buffer);
+  return h.digest("hex");
 }
