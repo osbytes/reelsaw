@@ -29,6 +29,7 @@ export interface LibraryAsset {
   hasAudio: boolean;
   sizeBytes: number;
   usedBy: number;
+  usedByClips: number;
   thumbnailUrl: string;
 }
 
@@ -404,14 +405,15 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
 function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
+  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   return (
     <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
       {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
-      {a.usedBy ? (
+      {a.usedBy || a.usedByClips ? (
         <Popover.Root>
           <Popover.Trigger asChild>
             <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
-              {defaults ? `· used by ${a.usedBy}${fix}` : `Used by ${a.usedBy} project${a.usedBy === 1 ? "" : "s"}${fix}`}
+              {defaults ? `· used by ${used}${fix}` : `Used by ${used}${fix}`}
             </button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -422,7 +424,7 @@ function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAss
           </Popover.Portal>
         </Popover.Root>
       ) : (
-        !defaults && <span className="text-ink3">{applied ? "Saved" : "○ Empty, not used yet"}</span>
+        !defaults && <span className="text-ink3">{applied ? "Saved" : "○ Not used yet"}</span>
       )}
     </div>
   );

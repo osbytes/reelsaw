@@ -24,7 +24,7 @@ import { keys } from "../storage/index.js";
 import { BUMPER_MAX_BYTES, BUMPER_VIDEO_EXTS, BUMPER_IMAGE_EXTS, BUMPER_IMAGE_SEC, resolveClipBumpers } from "../pipeline/bumpers.js";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/index.js";
-import { bumperCoverage, type BumperCoverage, type SlotCoverage } from "./summary.js";
+import { bumperCoverage, countBumperUsage, type BumperCoverage, type SlotCoverage } from "./summary.js";
 
 export const FETCH_MAX_BYTES = BUMPER_MAX_BYTES;
 export const FETCH_TIMEOUT_MS = 60_000;
@@ -211,6 +211,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     isDefaultIntro: defaults.introAssetId === a.id,
     isDefaultOutro: defaults.outroAssetId === a.id,
     usedBy: a.usedBy,
+    usedByClips: a.usedByClips,
     thumbnailUrl: abs(a.thumbnailUrl),
   });
   return { assets: lib.assets.map(row), removed: lib.deleted.map(row) };
@@ -229,6 +230,8 @@ export interface SlotSummary {
   otherCount: number;
   /** clips with nothing in this slot */
   noneCount: number;
+  /** every distinct asset used in this slot (soft-deleted ones included), most used first */
+  assets: { assetId: string; name: string; kind: "video" | "image"; thumbnailUrl: string; withCount: number }[];
 }
 export interface ProjectBumperSummary {
   intro: SlotSummary | null;
@@ -241,7 +244,7 @@ export async function projectBumperSummaries(
 ): Promise<Map<string, ProjectBumperSummary>> {
   const coverage = new Map<string, BumperCoverage>(projects.map((p) => [p.id, bumperCoverage(p, p.clips)]));
   const ids = new Set<string>();
-  for (const c of coverage.values()) for (const s of [c.intro, c.outro]) if (s) ids.add(s.assetId);
+  for (const c of coverage.values()) for (const s of [c.intro, c.outro]) if (s) for (const a of s.assets) ids.add(a.assetId);
   const assets = ids.size
     ? await db.select({ id: schema.bumperAssets.id, name: schema.bumperAssets.name, kind: schema.bumperAssets.kind }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, userId), inArray(schema.bumperAssets.id, [...ids])))
     : [];
@@ -249,7 +252,25 @@ export async function projectBumperSummaries(
   const slot = (s: SlotCoverage | null): SlotSummary | null => {
     const a = s && byId.get(s.assetId);
     if (!s || !a) return null;
-    return { assetId: s.assetId, name: a.name, kind: a.kind, thumbnailUrl: `/media/bumpers/${a.id}/thumb.jpg`, withCount: s.withCount, total: s.total, otherCount: s.others.reduce((n, o) => n + o.count, 0), noneCount: s.noneCount };
+    const assets = s.assets.flatMap((x) => {
+      const r = byId.get(x.assetId);
+      return r ? [{ assetId: r.id, name: r.name, kind: r.kind, thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, withCount: x.count }] : [];
+    });
+    return { assets, assetId: s.assetId, name: a.name, kind: a.kind, thumbnailUrl: `/media/bumpers/${a.id}/thumb.jpg`, withCount: s.withCount, total: s.total, otherCount: s.others.reduce((n, o) => n + o.count, 0), noneCount: s.noneCount };
   };
   return new Map([...coverage].map(([id, c]) => [id, { intro: slot(c.intro), outro: slot(c.outro) }]));
+}
+
+/** Per asset id, the projects and clips that use it (see `countBumperUsage`); loads the user's projects and clips once. */
+export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number }>> {
+  const projects = await db.select({ id: schema.projects.id, settings: schema.projects.settings }).from(schema.projects).where(eq(schema.projects.userId, userId));
+  if (!projects.length) return new Map();
+  const clips = await db.select({ projectId: schema.clips.projectId, bumpers: schema.clips.bumpers }).from(schema.clips).where(inArray(schema.clips.projectId, projects.map((p) => p.id)));
+  const byProject = new Map<string, { bumpers: (typeof clips)[number]["bumpers"] }[]>();
+  for (const c of clips) {
+    const list = byProject.get(c.projectId) ?? [];
+    list.push(c);
+    byProject.set(c.projectId, list);
+  }
+  return countBumperUsage(projects.map((p) => ({ settings: p.settings, clips: byProject.get(p.id) ?? [] })));
 }

@@ -16,7 +16,7 @@ import { requestRender, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries } from "../bumpers/service.js";
+import { projectBumperSummaries, bumperUsageCounts } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -314,14 +314,8 @@ export const appRouter = router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
       const rows = await db.select().from(schema.bumperAssets).where(eq(schema.bumperAssets.userId, ctx.user.id)).orderBy(desc(schema.bumperAssets.createdAt));
-      const used = await db.execute(sql`
-        select a.id as id, count(p.id)::int as n
-        from bumper_assets a
-        left join projects p on p.user_id = a.user_id and (p.settings ->> 'introAssetId' = a.id or p.settings ->> 'outroAssetId' = a.id)
-        where a.user_id = ${ctx.user.id}
-        group by a.id`);
-      const usedBy = new Map((used.rows as Array<{ id: string; n: number }>).map((r) => [r.id, r.n]));
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usedBy.get(r.id) ?? 0 });
+      const usage = await bumperUsageCounts(db, ctx.user.id);
+      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
       // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
@@ -373,6 +367,12 @@ export const appRouter = router({
         const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
         out.set(p.id, p);
         p.clips.push({ id: c.id, index: c.index, title: c.title, slots: slots.filter((s) => mine.includes(s) || inherited.includes(s)), via: mine.length ? "clip" : "project" });
+      }
+      // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
+      const bare = [...out.values()].filter((p) => !p.clips.length).map((p) => p.id);
+      if (bare.length) {
+        const withClips = new Set((await db.selectDistinct({ id: schema.clips.projectId }).from(schema.clips).where(inArray(schema.clips.projectId, bare))).map((r) => r.id));
+        for (const id of bare) if (withClips.has(id)) out.delete(id);
       }
       return { projects: [...out.values()] };
     }),

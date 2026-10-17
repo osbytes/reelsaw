@@ -6,7 +6,7 @@ import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
 import { useCommandPalette } from "../components/CommandPalette";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
-import { BumperChips } from "../components/BumperChips";
+import { PosterBumperCards } from "../components/PosterBumperCards";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
@@ -140,8 +140,8 @@ export function ProjectsPage() {
                   ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;
             return (
-              <div key={p.id} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink transition hover:border-line2 hover:shadow-pop">
-              <Link to={`/p/${p.id}`} className="flex flex-col text-ink no-underline">
+              <div key={p.id} className="group relative">
+              <Link to={`/p/${p.id}`} className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
                 <div className="film relative aspect-video">
                   {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
                     <img src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!} alt="" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
@@ -177,8 +177,8 @@ export function ProjectsPage() {
                   <div className="truncate text-xs text-ink3">{detail}</div>
                 </div>
               </Link>
-              <BumperChips bumpers={p.bumpers} onOpen={() => setBumperFor(p.id)} />
-              <div className="h-2" />
+              {/* a sibling over the link, so a click on a card opens the dialog instead of navigating */}
+              <PosterBumperCards bumpers={p.bumpers} onOpen={() => setBumperFor(p.id)} />
               </div>
             );
           })}
