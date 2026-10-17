@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronRight, ChevronsUpDown, Download, ExternalLink, KeyRound, Server } from "lucide-react";
 import { ScrollArea } from "./scroll-area";
-import { fuzzyFilter } from "../lib/fuzzy";
+import { createFuzzy } from "../lib/fuzzy";
 
 export interface PickerModel {
   id: string;
@@ -86,12 +86,22 @@ export function ModelPicker({
   const typed = query.trim();
   const q = typed.toLowerCase();
   const canUseTyped = /^[a-z0-9_-]+:\S+$/i.test(typed) && !known.has(typed);
-  // fuzzy across every available provider's models: "gpt4m" finds "openai:gpt-4o-mini", ranked by closeness
-  const hits = useMemo(() => {
-    if (!q) return [] as Array<{ m: PickerModel; p: PickerProvider }>;
-    const all = providers.flatMap((p) => p.models.map((m) => ({ m, p })));
-    return fuzzyFilter(q, all, ({ m, p }) => `${m.id} ${m.label} ${p.title} ${m.note ?? ""}`);
-  }, [q, providers]);
+  // fuzzy across every provider's models (Fuse, shared with the command palette): typos, scattered
+  // characters and multi-word queries ("haiku gateway") all rank by closeness
+  const index = useMemo(
+    () =>
+      createFuzzy(
+        providers.flatMap((p) => p.models.map((m) => ({ m, p, id: m.id, label: m.label, title: p.title, note: m.note ?? "" }))),
+        [
+          { name: "label", weight: 3 },
+          { name: "id", weight: 2 },
+          { name: "title", weight: 1 },
+          { name: "note", weight: 0.5 },
+        ],
+      ),
+    [providers],
+  );
+  const hits = useMemo(() => (q ? index.filter(q, 60) : []), [q, index]);
   const selected = picked ? byProvider.get(picked) : undefined;
   const selectedState = picked ? stateOf(picked) : undefined;
 

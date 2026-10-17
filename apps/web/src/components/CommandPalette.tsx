@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
-import Fuse, { type FuseResult, type FuseResultMatch } from "fuse.js";
+import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
 import { Film, FolderOpen, LifeBuoy, Link2, Moon, Plus, Search, Settings, Upload } from "lucide-react";
 import { openReportHere } from "../lib/report";
@@ -87,8 +87,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     const d = indexQ.data;
     if (!d) return null;
     return {
-      projects: fuzzy(d.projects, [{ name: "title", weight: 1 }]),
-      clips: fuzzy(d.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }]),
+      projects: createFuzzy(d.projects, [{ name: "title", weight: 1 }]),
+      clips: createFuzzy(d.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }]),
     };
   }, [indexQ.data]);
   const [cursor, setCursor] = useState(0);
@@ -116,8 +116,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         out.push({ key: `p-${p.id}`, group: "Recent projects", thumb: p.thumbnailUrl, label: p.title, hint: <StatusText status={p.status} />, run: go(() => nav(`/p/${p.id}`)) });
       return [...out, ...actions];
     }
-    const actionFuse = new Fuse(actions, { keys: ["label", "hint"], threshold: 0.4, ignoreLocation: true, includeMatches: true });
-    for (const r of actionFuse.search(ql).slice(0, 3)) out.push({ ...r.item, label: <Highlight text={String(r.item.label)} matches={r.matches} k="label" /> });
+    const actionFuse = createFuzzy(actions, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 });
+    for (const r of actionFuse.search(ql, 3)) out.push({ ...r.item, label: <Highlight text={String(r.item.label)} matches={r.matches} k="label" /> });
     if (fuse) {
       for (const r of fuse.projects.search(ql).slice(0, 6))
         out.push({ key: `p-${r.item.id}`, group: "Projects", thumb: r.item.thumbnailUrl, label: <Highlight text={r.item.title} matches={r.matches} k="title" />, hint: <StatusText status={r.item.status} />, run: go(() => nav(`/p/${r.item.id}`)) });
@@ -247,48 +247,4 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       </Dialog.Portal>
     </Dialog.Root>
   );
-}
-
-/**
- * Fuzzy matcher that handles both shapes of query: the whole string as one pattern ("chia jm"),
- * and words that each match somewhere, typos and all ("revnge sucess"). Best score wins.
- */
-function fuzzy<T>(items: T[], keys: Array<{ name: string; weight: number }>): { search: (q: string) => FuseResult<T>[] } {
-  const base = { keys, includeMatches: true, includeScore: true, ignoreLocation: true, threshold: 0.38, minMatchCharLength: 2 };
-  const whole = new Fuse(items, base);
-  const words = new Fuse(items, { ...base, useExtendedSearch: true });
-  return {
-    search(q: string) {
-      const best = new Map<T, FuseResult<T>>();
-      const add = (rs: FuseResult<T>[]) => {
-        for (const r of rs) {
-          const prev = best.get(r.item);
-          if (!prev || (r.score ?? 1) < (prev.score ?? 1)) best.set(r.item, r);
-        }
-      };
-      add(whole.search(q));
-      if (/\s/.test(q.trim())) add(words.search(q.trim().replace(/[!'=^$|]/g, " ")));
-      return [...best.values()].sort((a, b) => (a.score ?? 1) - (b.score ?? 1));
-    },
-  };
-}
-
-/** Bold the characters Fuse matched in one key of a result. */
-function Highlight({ text, matches, k }: { text: string; matches?: readonly FuseResultMatch[]; k: string }) {
-  const m = matches?.find((x) => x.key === k && x.value === text);
-  if (!m?.indices.length) return <>{text}</>;
-  const parts: ReactNode[] = [];
-  let at = 0;
-  // ignore single-letter scatter; keep runs of 2+ so highlights read as words
-  for (const [a, b] of m.indices.filter(([a, b]) => b - a >= 1)) {
-    if (a > at) parts.push(text.slice(at, a));
-    parts.push(
-      <mark key={a} className="rounded-[3px] bg-acc-soft text-acc-text">
-        {text.slice(a, b + 1)}
-      </mark>,
-    );
-    at = b + 1;
-  }
-  parts.push(text.slice(at));
-  return <>{parts}</>;
 }
