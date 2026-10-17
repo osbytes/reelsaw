@@ -131,15 +131,27 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         {list.data && keys.length === 0 && <span className="text-ink3">No keys yet.</span>}
         {keys.length > 0 && (
           <ul className="divide-y divide-line">
+            <li aria-hidden className="hidden grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem] items-center gap-x-3 pb-1 text-xs text-ink3 sm:grid">
+              <span>Name</span>
+              <span>Key</span>
+              <span>Created</span>
+              <span>Last used</span>
+              <span />
+            </li>
             {keys.map((k) => (
-              <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-                <span className="min-w-0 flex-1 truncate font-semibold">{k.name ?? "unnamed"}</span>
-                <span className="font-mono text-xs text-ink2">{k.start ?? "rs_"}…</span>
-                <span className="text-xs text-ink3">created {when(k.createdAt)}</span>
-                <span className="text-xs text-ink3">last used {when(k.lastRequest)}</span>
-                <button className="btn-danger text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
-                  Revoke
-                </button>
+              <li key={k.id} className="grid min-h-[3.25rem] grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-3 gap-y-0.5 py-2 sm:min-h-[2.75rem] sm:grid-cols-[minmax(0,1fr)_5rem_9rem_9.5rem_5rem]">
+                <span className="truncate font-semibold">{k.name ?? "unnamed"}</span>
+                <span className="row-span-2 row-start-1 col-start-2 justify-self-end sm:order-last sm:row-span-1 sm:col-start-5">
+                  <button className="btn-danger w-[4.5rem] text-xs" onClick={() => setConfirm(k)} disabled={remove.isPending}>
+                    Revoke
+                  </button>
+                </span>
+                <span className="hidden font-mono text-xs text-ink2 sm:block">{k.start ?? "rs_"}…</span>
+                <span className="col-span-1 truncate text-xs text-ink3 sm:hidden">
+                  {k.start ?? "rs_"}… · created {when(k.createdAt)} · used {when(k.lastRequest)}
+                </span>
+                <span className="hidden text-xs text-ink3 sm:block">created {when(k.createdAt)}</span>
+                <span className="hidden text-xs text-ink3 sm:block">last used {when(k.lastRequest)}</span>
               </li>
             ))}
           </ul>
