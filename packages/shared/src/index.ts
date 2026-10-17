@@ -130,6 +130,13 @@ export interface DetectedSegment {
   offsetX?: number;
 }
 
+/**
+ * Per-clip intro/outro choice. A missing key inherits the project's, `null` means none, a string is a
+ * library asset id. Stored on the clip, so it survives pipeline re-runs.
+ */
+export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), outro: z.string().min(1).max(100).nullable().optional() });
+export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
+
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
@@ -144,7 +151,7 @@ export interface ClipDiagnostics {
   };
   outDurationSec: number;
   /** intro/outro attached to this render (ids, seconds) and which were skipped, and why */
-  bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[]; off?: boolean };
+  bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[]; fromClip?: Array<"intro" | "outro"> };
   renderMs: number;
 }
 

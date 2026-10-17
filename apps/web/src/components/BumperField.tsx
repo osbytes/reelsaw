@@ -6,6 +6,8 @@ import { useToast } from "../lib/toast";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { ConfirmDialog, Modal } from "./ui";
+import * as Popover from "@radix-ui/react-popover";
+import type { ClipBumpers } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -205,6 +207,138 @@ export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsse
       danger
       onConfirm={() => asset && onConfirm(asset)}
     />
+  );
+}
+
+/** A per-clip slot choice in a select: "inherit" (follow the project), "none", or a library asset id. */
+export type SlotChoice = string;
+export interface SlotChoices {
+  intro: SlotChoice;
+  outro: SlotChoice;
+}
+const toChoice = (v: string | null | undefined): SlotChoice => (v === undefined ? "inherit" : v === null ? "none" : v);
+export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({ intro: toChoice(b?.intro), outro: toChoice(b?.outro) });
+/** The value stored on the clip: slots that inherit are left out. */
+export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
+  ...(c.intro !== "inherit" ? { intro: c.intro === "none" ? null : c.intro } : {}),
+  ...(c.outro !== "inherit" ? { outro: c.outro === "none" ? null : c.outro } : {}),
+});
+/** The asset a slot ends up using on a clip: its own choice, else the project's. */
+export const effectiveAsset = (own: string | null | undefined, project: string | null | undefined) => (own === undefined ? project || null : own);
+
+/** Intro and Outro selects for one clip or a selection of clips: Project default (name) / None / each library asset. */
+export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean }) {
+  const library = useBumperLibrary();
+  const assets = library.data?.assets ?? [];
+  const all = [...assets, ...(library.data?.deleted ?? [])];
+  const name = (id: string | null | undefined) => (id ? (all.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const select = (slot: "intro" | "outro", label: string, projectId: string | null | undefined) => (
+    <label className="flex min-w-0 items-center gap-1.5 text-xs text-ink2">
+      {label}
+      <select className="input min-w-0 max-w-[11rem] py-1 text-xs" value={value[slot]} onChange={(e) => onChange({ ...value, [slot]: e.target.value })} aria-label={`${label} choice`}>
+        {keep && <option value="keep">Leave as it is</option>}
+        <option value="inherit">{`Project default (${name(projectId)})`}</option>
+        <option value="none">None</option>
+        {assets.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name} · {lengthText(a)}
+          </option>
+        ))}
+        {value[slot] !== "inherit" && value[slot] !== "none" && value[slot] !== "keep" && !assets.some((a) => a.id === value[slot]) && <option value={value[slot]}>{name(value[slot])} (removed)</option>}
+      </select>
+    </label>
+  );
+  return (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${className}`}>
+      {select("intro", "Intro", projectIntroId)}
+      {select("outro", "Outro", projectOutroId)}
+    </div>
+  );
+}
+
+/** "Intro / outro…" on a clip card: this clip's own choice without opening the editor. */
+export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId, className }: { clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null; className: string }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
+  const update = useMutation(trpc.clips.update.mutationOptions());
+  const dirty = JSON.stringify(clipBumpersFrom(v)) !== JSON.stringify(clipBumpersFrom(choicesFrom(bumpers)));
+  const save = (rerender: boolean) =>
+    update.mutate(
+      { id: clipId, bumpers: clipBumpersFrom(v), rerender },
+      {
+        onSuccess: () => {
+          void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+          toast(rerender ? "Saved · re-rendering this clip" : "Saved for this clip");
+          setOpen(false);
+        },
+        onError: (e) => toast(e.message),
+      },
+    );
+  return (
+    <Popover.Root open={open} onOpenChange={(o) => (o && setV(choicesFrom(bumpers)), setOpen(o))}>
+      <Popover.Trigger asChild>
+        <button className={className} title="Choose an intro and outro for just this clip">
+          Intro / outro…
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(320px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+          <b className="text-[13px]">Intro and outro for this clip</b>
+          <BumperSelects value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className="flex-col items-stretch" />
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
+              Save
+            </button>
+            <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
+              Save & re-render
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** Applies an intro and/or outro to every selected clip (project page). Slots left on "Leave as it is" are untouched. */
+export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [v, setV] = useState<SlotChoices>({ intro: "keep", outro: "keep" });
+  const many = useMutation(trpc.clips.setBumpersMany.mutationOptions());
+  const nothing = v.intro === "keep" && v.outro === "keep";
+  const apply = (rerender: boolean) =>
+    many.mutate(
+      { projectId, clipIds, rerender, ...(v.intro !== "keep" ? { intro: v.intro } : {}), ...(v.outro !== "keep" ? { outro: v.outro } : {}) },
+      {
+        onSuccess: (r) => {
+          void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+          const what = [v.intro !== "keep" ? "intro" : "", v.outro !== "keep" ? "outro" : ""].filter(Boolean).join(" and ");
+          toast(`Updated the ${what} on ${r.updated} clip${r.updated === 1 ? "" : "s"}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
+          setV({ intro: "keep", outro: "keep" });
+          onDone();
+        },
+        onError: (e) => toast(e.message),
+      },
+    );
+  return (
+    <div className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-line bg-panel p-3 shadow-pop">
+      <b className="text-[13px]">
+        {clipIds.length} clip{clipIds.length === 1 ? "" : "s"} selected
+      </b>
+      <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className="flex-col items-stretch sm:flex-row" />
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
+          Apply
+        </button>
+        <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} onClick={() => apply(true)}>
+          {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
+        </button>
+      </div>
+    </div>
   );
 }
 

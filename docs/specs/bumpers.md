@@ -25,8 +25,12 @@ another editor. Today branding is added by hand. Appetite: about 3 days for phas
   `me.updateProjectDefaults`). Applies to new projects only, like every other default.
 - **Project settings**: same rows with Default / Custom / None. A change asks "Re-render N clips?"
   like other style changes.
-- **Per clip**: "Add intro and outro" toggle in the clip menu, on by default. Off goes through
-  `requestRender` with a clip patch; it is a user decision, so it survives pipeline re-runs.
+- **Per clip**: each clip can choose its own intro and outro, per slot: Project default (inherit),
+  None, or a library asset. This replaces the earlier all-or-nothing opt-out, so "only an intro, only
+  on these clips" is expressible. The choice is stored on the clip (`clips.bumpers`), so it survives
+  pipeline re-runs. Set it in the editor (two selects under the transport), from the clip card's
+  "Intro / outro..." popover, or for many clips at once with the project page's multi-select bar
+  (`#sel=id1,id2` in the hash, `clips.setBumpersMany`). Each goes through Save / Save & re-render.
 
 ### Accepted assets and limits
 | Type | Accepted | Limits |
@@ -64,7 +68,10 @@ Settings (shared zod; rebuild `@reelsaw/shared`):
   nothing; `null` = "None, although my default has one".
 - `userProjectDefaultsSchema`: the same two fields. `resolveProjectSettings` copies them into the new
   project, so later default changes never alter old projects.
-- `clips.bumpers_off boolean not null default false`.
+- `clips.bumpers jsonb` (nullable): `{ intro?: string | null, outro?: string | null }`. A missing key
+  inherits the project, `null` means none, a string is a library asset. Resolved by the pure
+  `resolveClipBumpers(project, clip)` in `pipeline/bumpers.ts`. (An interim `bumpers_off` boolean
+  shipped first; its migration maps `true` to `{"intro":null,"outro":null}` and drops it.)
 
 Ownership is checked in the same transaction as the write (`user_id = ctx.user.id`).
 
@@ -112,7 +119,7 @@ About the cost of encoding the extra seconds, plus one-time normalisation. Progr
 
 ### Render generations and idempotency
 - Naming is unchanged: `{clipId}.{gen}.mp4`, committed only while `render_gen` is current. Bumper
-  ids are read at job start from `projects.settings` and `clips.bumpers_off`, and recorded in
+  ids are read at job start from `projects.settings` and `clips.bumpers`, and recorded in
   `clips.diagnostics` (`bumpers: { introId, outroId, introSec, outroSec }`) so reports and the CLI show
   what was attached.
 - A change is `rerenderClips` -> `requestRender` (bumps `render_gen`, cancels live jobs, enqueues, one
@@ -169,7 +176,8 @@ body + outro within a frame, no click at the seams (ffprobe packet timestamps pl
 timing identical to a render without bumpers.
 
 **Phase 2 (~1 day):** image bumpers with seconds, project override with re-render prompt, per-clip
-opt-out, editor label, restore, "Used by N projects".
+selection (inherit / none / asset per slot, replacing the opt-out) with bulk apply and a card
+popover, editor label, a library of several assets with restore, "Used by N projects".
 
 **Phase 3:** image + sound, loudness warning, MCP and CLI, cleanup job, optional 0.15 s crossfade.
 

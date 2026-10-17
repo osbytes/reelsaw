@@ -11,7 +11,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -348,8 +348,8 @@ export const clips = pgTable(
     emphasis: jsonb("emphasis").$type<string[]>(),
     /** Per-clip caption/hook style override on top of the project settings. */
     style: jsonb("style").$type<StyleOverride>(),
-    /** user decision: render this clip without the project's intro/outro (survives pipeline re-runs) */
-    bumpersOff: boolean("bumpers_off").notNull().default(false),
+    /** user decision per slot: missing key = inherit the project, null = none, string = that library asset (survives pipeline re-runs) */
+    bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

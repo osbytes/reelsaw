@@ -4,7 +4,8 @@ import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
 import { ProgressBar, StatusText } from "./ui";
 import { useToast } from "../lib/toast";
-import { formatTime, type ClipScores, type ClipDiagnostics, type DetectedSegment } from "@reelsaw/shared";
+import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
+import { ClipBumpersPopover } from "./BumperField";
 import { MODE_LABEL } from "./Timeline";
 
 export interface ClipView {
@@ -28,6 +29,7 @@ export interface ClipView {
   layoutSegments?: DetectedSegment[];
   scores?: ClipScores | null;
   diagnostics?: ClipDiagnostics | null;
+  bumpers?: ClipBumpers | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
 }
@@ -62,19 +64,16 @@ function cutsNote(d: ClipDiagnostics | null | undefined) {
   return parts.length ? parts.join(" · ") : "No disfluencies found";
 }
 
-/** What the last render attached: lengths, "off for this clip", or which part was skipped (glyph plus word, never colour alone). */
+/** What the last render attached: lengths, none, or which part was skipped (glyph plus word, never colour alone), and whose choice it was. */
 function bumpersNote(d: ClipDiagnostics | null | undefined): { text: string; skipped: boolean; title?: string } {
   if (!d) return { text: "Shown after the first render", skipped: false };
   const b = d.bumpers;
+  const who = b?.fromClip?.length ? "set for this clip" : "project default";
   if (!b) return { text: "None", skipped: false };
-  if (b.off) return { text: "Off for this clip", skipped: false };
   const skipped = (b.skipped ?? []).map((s) => (s.startsWith("outro") ? "Outro" : "Intro"));
-  if (skipped.length) {
-    const kept = [b.introSec ? `intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
-    return { text: `▲ ${[...new Set(skipped)].join(" and ")} skipped${kept.length ? ` · kept ${kept.join(", ")}` : ""}`, skipped: true, title: (b.skipped ?? []).join("; ") };
-  }
   const parts = [b.introSec ? `+ intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `+ outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
-  return { text: parts.length ? parts.join(" · ") : "None", skipped: false };
+  if (skipped.length) return { text: `▲ ${[...new Set(skipped)].join(" and ")} skipped${parts.length ? ` · kept ${parts.join(", ")}` : ""}`, skipped: true, title: (b.skipped ?? []).join("; ") };
+  return { text: parts.length ? `${parts.join(" · ")} · ${who}` : b.fromClip?.length ? "None · set for this clip" : "None", skipped: false };
 }
 
 export function ClipCard({
@@ -87,7 +86,18 @@ export function ClipCard({
   onSeek,
   onPlay,
   onCopyLink,
+  projectIntroId,
+  projectOutroId,
+  selected = false,
+  selecting = false,
+  onToggleSelect,
 }: {
+  projectIntroId?: string | null;
+  projectOutroId?: string | null;
+  selected?: boolean;
+  /** some clip is selected: every card shows its checkbox */
+  selecting?: boolean;
+  onToggleSelect?: () => void;
   onCopyLink?: () => void;
   clip: ClipView;
   projectId: string;
@@ -126,8 +136,18 @@ export function ClipCard({
   const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <article data-clip={clip.id} className={`scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active ? "border-acc" : "border-line"}`}>
+    <article data-clip={clip.id} className={`group scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
       <div className="flex gap-3">
+        {/* reserved column: the checkbox appears on hover, focus, touch, or once anything is selected, without moving the card */}
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            aria-label={`Select clip ${clip.index + 1}`}
+            className={`mt-0.5 h-4 w-4 shrink-0 accent-[var(--acc)] focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
+          />
+        )}
         <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
@@ -272,6 +292,7 @@ export function ClipCard({
         <button className={ghost} disabled={working || busy} onClick={onRerender}>
           Re-render
         </button>
+        <ClipBumpersPopover clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className={ghost} />
       </div>
     </article>
   );

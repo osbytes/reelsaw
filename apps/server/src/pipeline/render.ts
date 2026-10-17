@@ -22,7 +22,7 @@ import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { resolveStyle, speakerCrop, cropX, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
-import { bumperConcat, bumperFrames, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
+import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
 
 const OUT_W = 1080;
 const OUT_H = 1920;
@@ -389,8 +389,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
 
   const tmpOut = `${outPath}.tmp.mp4`;
   // intro/outro from the project's settings; an unusable one is skipped, never fatal
-  // a clip the user opted out renders plain, whatever the project says
-  const bumpers: Awaited<ReturnType<typeof loadBumpers>> = clip.bumpersOff ? { skipped: [] } : await loadBumpers(ctx, project, clip.id, log);
+  // the clip's own choice per slot, else the project's
+  const chosen = resolveClipBumpers(settings, clip);
+  const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, clip.id, log);
   const srcHasAudio = bumpers.intro || bumpers.outro ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean): { graph: string; audioMap: string[] } => {
@@ -504,7 +505,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       skipped: cutResult.skipped.map((sk) => ({ start: Number((sk.range.start + clip.startSec).toFixed(3)), end: Number((sk.range.end + clip.startSec).toFixed(3)), reason: sk.reason.slice(0, 2000) })),
     },
     outDurationSec: Number(outDuration.toFixed(2)),
-    ...(clip.bumpersOff || settings.introAssetId || settings.outroAssetId
+    ...(chosen.introId || chosen.outroId || chosen.fromClip.length
       ? {
           bumpers: {
             ...(usedBumpers && bumpers.intro ? { introId: bumpers.intro.id } : {}),
@@ -512,7 +513,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
             introSec: Number(attached.introSec.toFixed(3)),
             outroSec: Number(attached.outroSec.toFixed(3)),
             ...(bumpers.skipped.length ? { skipped: bumpers.skipped } : {}),
-            ...(clip.bumpersOff ? { off: true } : {}),
+            ...(chosen.fromClip.length ? { fromClip: chosen.fromClip } : {}),
           },
         }
       : {}),
@@ -555,11 +556,11 @@ interface LoadedBumper {
  * that snapshotted the id keep working); a missing, foreign or unreadable one is skipped with a
  * plain-language event so the clip renders without it instead of failing.
  */
-async function loadBumpers(ctx: StageContext, project: { userId: string; settings: { introAssetId?: string | null; outroAssetId?: string | null } }, clipId: string, log: Logger) {
+async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, clipId: string, log: Logger) {
   const { svc, projectId, db } = ctx;
   const out: { intro?: LoadedBumper; outro?: LoadedBumper; skipped: string[] } = { skipped: [] };
   for (const slot of ["intro", "outro"] as const) {
-    const id = slot === "intro" ? project.settings.introAssetId : project.settings.outroAssetId;
+    const id = ids[slot];
     if (!id) continue;
     const skip = async (reason: string, error?: unknown) => {
       out.skipped.push(`${slot}: ${reason}`);
@@ -567,7 +568,7 @@ async function loadBumpers(ctx: StageContext, project: { userId: string; setting
       await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
     const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, id) });
-    if (!asset || asset.userId !== project.userId) {
+    if (!asset || asset.userId !== userId) {
       await skip(`the ${slot} file is no longer available`);
       continue;
     }
