@@ -26,6 +26,7 @@ import { spawn } from "node:child_process";
 import pg from "pg";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { percentile } from "./meter.js";
+import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 
 const argv = process.argv.slice(2);
 const BOOL = new Set(["keep", "verbose", "no-recreate"]);
@@ -232,21 +233,16 @@ async function waitForProject(pool: pg.Pool, projectId: string, opts: { since?: 
 /** Seconds per stage from the project's events at or after `since` (all events when omitted). */
 async function stageSeconds(pool: pg.Pool, projectId: string, since: Date | undefined, fallbackStart: Date, fallbackEnd: Date, until: Date = fallbackEnd) {
   const events = (await pool.query("select type, payload, created_at from project_events where project_id = $1 and ($2::timestamptz is null or created_at >= $2) and created_at <= $3 order by id", [projectId, since ?? null, new Date(until.getTime() + 5000)])).rows as Array<{ type: string; payload: Record<string, unknown>; created_at: Date }>;
+  // runs.ts is the one reader of stage timings (payload durations, with timestamp fallbacks for old events)
+  const runs = runsOf(events.map((e) => ({ type: e.type, payload: e.payload, createdAt: e.created_at })));
   const stages: RunResult["stages"] = {};
   for (const stage of STAGES) {
-    const started = events.find((e) => e.type === "stage.started" && e.payload.stage === stage);
-    const completed = [...events].reverse().find((e) => e.type === "stage.completed" && e.payload.stage === stage);
-    if (started && completed) stages[stage] = round((completed.created_at.getTime() - started.created_at.getTime()) / 1000);
+    const sec = firstStageSeconds(runs)[stage];
+    if (sec !== undefined) stages[stage] = round(sec);
   }
-  // render has no stage events of its own: it runs per clip (clip.done each) and ends with project.done. It starts when the
-  // stage before it finished: analyze on a full run, refine on a refine-only re-run (refine re-renders the clips it touched).
-  const last = (pred: (e: (typeof events)[number]) => boolean) => [...events].reverse().find(pred);
-  const projectEnd = last((e) => e.type === "project.done" || e.type === "project.failed");
-  const renderStart = last((e) => e.type === "stage.completed" && e.payload.stage === "analyze") ?? last((e) => e.type === "stage.completed" && e.payload.stage === "refine");
-  const renderEnd = projectEnd ?? last((e) => e.type === "clip.done");
-  if (renderStart && renderEnd && stages.render === undefined && renderEnd.created_at > renderStart.created_at) stages.render = round((renderEnd.created_at.getTime() - renderStart.created_at.getTime()) / 1000);
-  const first = events.find((e) => e.type === "project.created") ?? events[0];
-  const totalSec = round(((projectEnd?.created_at ?? fallbackEnd).getTime() - (first?.created_at ?? fallbackStart).getTime()) / 1000);
+  const lastFinished = [...runs].reverse().find((r) => r.finishedAt);
+  const startMs = runs[0] ? new Date(runs[0].startedAt).getTime() : (events[0]?.created_at ?? fallbackStart).getTime();
+  const totalSec = round(((lastFinished?.finishedAt ? new Date(lastFinished.finishedAt) : fallbackEnd).getTime() - startMs) / 1000);
   return { stages, totalSec };
 }
 

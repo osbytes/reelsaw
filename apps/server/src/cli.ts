@@ -1,4 +1,5 @@
-import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
+import { requestRender, startRun } from "./pipeline/lifecycle.js";
+import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
  * workers off), so it sees exactly the config, models and storage the pipeline uses.
@@ -133,6 +134,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         error: c.error ?? "",
       })),
     );
+    const runs = await runsOfProject(db, id);
+    console.log("\nruns");
+    if (!runs.length) console.log("  (none recorded)");
+    for (const r of runs) console.log(`  ${describeRun(r)}`);
     const keys = [id, ...clips.map((c) => c.id)];
     const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; singleton_key: string; started_on: Date | null }>(
       `select name, state, retry_count, singleton_key, started_on from pgboss.job where singleton_key = any($1) and state in ('created','retry','active') order by created_on`,
@@ -342,7 +347,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
           await u.cancelLiveJobs(QUEUES.prepare, c.id);
           await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
           await u.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
-          await reopenProject(u, c.projectId);
+          await startRun(u, c.projectId, { reason: "retry", status: "rendering", stage: "render" });
         });
         return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
       }

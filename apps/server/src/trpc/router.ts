@@ -12,7 +12,7 @@ import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSc
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { requestRender, reopenProject } from "../pipeline/lifecycle.js";
+import { requestRender, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
@@ -696,6 +696,7 @@ export const appRouter = router({
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
           .returning();
         await u.emit(id, "project.created", { title });
+        await startRun(u, id, { reason: "created", status: "queued" });
         await u.enqueue(QUEUES.ingest, { projectId: id });
         return row!;
       });
@@ -718,7 +719,7 @@ export const appRouter = router({
         else if (p.sourceKey) queue = QUEUES.transcribe;
 
         if (queue === QUEUES.render) {
-          await db.update(schema.projects).set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
           for (const c of clips) {
             if (c.status === "done") continue;
             // a user-made clip whose AI preparation never finished goes back through clip.prepare
@@ -728,14 +729,15 @@ export const appRouter = router({
               await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
               continue;
             }
-            await requestRender(svc, u, p.id, c.id);
+            await requestRender(svc, u, p.id, c.id, {}, "retry");
           }
         } else if (queue === QUEUES.refineEntities) {
+          await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
           for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
           await enqueueRefine(svc, p.id, undefined, u);
         } else {
           for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-          await db.update(schema.projects).set({ status: "queued", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
           await u.enqueue(queue, { projectId: p.id });
         }
         await u.emit(p.id, "stage.started", { stage: queue, retried: true });
@@ -760,6 +762,7 @@ export const appRouter = router({
         await svc.tx(async (u) => {
           for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
           const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
+          await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
           const refine = { ...(cur?.refine ?? t.refine) };
           for (const s of steps) delete refine[s];
           await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
@@ -858,7 +861,7 @@ export const appRouter = router({
         }
         await u.cancelLiveJobs(QUEUES.analyze, p.id);
         await u.db.delete(schema.clips).where(eq(schema.clips.projectId, p.id));
-        await u.db.update(schema.projects).set({ settings, status: "analyzing", stage: "analyze", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+        await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
         await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true });
         await u.enqueue(QUEUES.analyze, { projectId: p.id });
         // files go only once the rows that point at them are gone for good
@@ -1138,7 +1141,7 @@ export const appRouter = router({
             origin: input.mode === "ai" ? "manual-ai" : "manual",
           })
           .returning();
-        await reopenProject(u, p.id);
+        await startRun(u, p.id, { reason: "clip_added", status: "rendering", stage: "render" });
         await u.emit(p.id, "clip.created", { clipId: inserted!.id, index, title: inserted!.title });
         await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: inserted!.id, mode: input.mode });
         return inserted!;
@@ -1159,7 +1162,7 @@ export const appRouter = router({
           await u.cancelLiveJobs(QUEUES.prepare, c.id);
           await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
           await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
-          await reopenProject(u, p.id);
+          await startRun(u, p.id, { reason: "rerender", status: "rendering", stage: "render" });
           return { ok: true, step: "prepare" as const };
         }
         await requestRender(svc, u, p.id, c.id);

@@ -5,7 +5,7 @@ import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, modelsUsed } from "./common.js";
+import { StageContext, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
@@ -45,7 +45,7 @@ export async function enqueueRefine(svc: Services, projectId: string, steps: rea
   for (const s of REFINE_STEPS) if (!stepEnabled(svc, s)) refine[s] = "done"; // disabled steps count as done
   for (const s of toRun) refine[s] = "queued";
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
-  await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+  await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
   await u.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
   for (const s of toRun) await u.enqueue(REFINE_QUEUE[s], { projectId });
   if (!toRun.length) await finishIfComplete(svc, projectId, u);
@@ -130,13 +130,14 @@ export async function finishIfComplete(svc: Services, projectId: string, u?: Uni
   if (!u) return svc.tx((tx) => finishIfComplete(svc, projectId, tx));
   const t = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { refine: true } });
   if (!t || !REFINE_STEPS.every((s) => t.refine[s] === "done" || t.refine[s] === "failed")) return;
+  const durationSec = await stageElapsed(u.db, projectId, "refine");
   const moved = await u.db
     .update(schema.projects)
-    .set({ status: "analyzing", stage: "analyze", stageProgress: 0, updatedAt: new Date() })
+    .set({ status: "analyzing", stage: "analyze", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.status, "refining")))
     .returning({ id: schema.projects.id });
   if (!moved.length) return;
-  await u.emit(projectId, "stage.completed", { stage: "refine", refine: t.refine });
+  await u.emit(projectId, "stage.completed", { stage: "refine", ...(durationSec !== undefined ? { durationSec } : {}), refine: t.refine });
   await u.enqueue(QUEUES.analyze, { projectId });
 }
 
@@ -246,6 +247,7 @@ export async function refineScenes(ctx: StageContext) {
 export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   svc.log.error({ stage: "refine", step, projectId, error: message }, "refine step gave up");
-  await svc.events.emit(projectId, "stage.failed", { stage: "refine", step, error: message.slice(0, 500), attempt: 0, max: 0, final: true });
+  const durationSec = await stageElapsed(svc.database.db, projectId, "refine");
+  await svc.events.emit(projectId, "stage.failed", { stage: "refine", step, error: message.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
   await mergeRefine(svc, projectId, step, { status: "failed" });
 }
