@@ -179,7 +179,7 @@ timing identical to a render without bumpers.
 selection (inherit / none / asset per slot, replacing the opt-out) with bulk apply and a card
 popover, editor label, a library of several assets with restore, "Used by N projects".
 
-**Phase 3:** image + sound, loudness warning, MCP and CLI, cleanup job, optional 0.15 s crossfade.
+**Phase 3:** image + sound, loudness warning, MCP and CLI (done: `list_bumpers`, `add_bumper`, `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`, `set_project_bumpers`, `set_clip_bumpers`, effective bumpers in `get_project`/`get_clip`; `reelsaw bumpers|project-bumpers|clip-bumpers`), cleanup job, optional 0.15 s crossfade.
 
 ## Risks
 - Concat needs audio in every slot; the no-cuts branch has optional audio today.
