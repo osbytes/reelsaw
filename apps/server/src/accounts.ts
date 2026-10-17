@@ -13,6 +13,7 @@ import { templates } from "./email.js";
 import { listClips } from "./pipeline/analyze.js";
 import { QUEUES } from "./queue/boss.js";
 import { keys } from "./storage/index.js";
+import { releaseUpload } from "./storage/uploads.js";
 import type { UserRole } from "./db/schema.js";
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
@@ -24,7 +25,8 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
     await u.cancelLiveJobs(QUEUES.prepare, c.id);
   }
   for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, projectId);
-  await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId));
+  const [gone] = await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId)).returning({ sourceMeta: schema.projects.sourceMeta });
+  await releaseUpload(svc, u, projectId, gone?.sourceMeta?.uploadId);
   u.afterCommit(async () => {
     await fs.rm(svc.paths.project(projectId), { recursive: true, force: true });
     await svc.storage.deletePrefix(keys.projectPrefix(projectId));

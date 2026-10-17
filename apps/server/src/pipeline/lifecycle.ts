@@ -8,6 +8,7 @@ import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
 import { cleanupWorkdir } from "./common.js";
+import { removeScratchClip } from "../storage/sweep.js";
 
 /**
  * Ask for a fresh render of a clip. Bumps clips.render_gen so any render still running for an
@@ -26,7 +27,14 @@ export async function requestRender(svc: Services, u: UnitOfWork, projectId: str
   await u.cancelLiveJobs(QUEUES.render, clipId);
   await u.enqueue(QUEUES.render, { projectId, clipId, gen: row!.gen });
   await reopenProject(u, projectId);
-  for (const key of [prev.outputKey, prev.thumbnailKey]) if (key) u.afterCommit(() => svc.storage.delete(key));
+  // the store copy and the scratch copy (a hardlink locally) both go, or no disk is freed
+  for (const key of [prev.outputKey, prev.thumbnailKey]) {
+    if (!key) continue;
+    u.afterCommit(async () => {
+      await svc.storage.delete(key);
+      await removeScratchClip(svc, projectId, key);
+    });
+  }
   return row!.gen;
 }
 

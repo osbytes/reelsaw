@@ -82,6 +82,12 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
+- **Disk use: `reelsaw storage`** prints unique bytes under `/data` (hardlinks counted once), scratch-only leftovers,
+  duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
+  `reelsaw storage sweep [--dry-run]` removes the leftovers: older render generations, files of deleted clips or
+  projects, and `tmp/hear-*` older than a day. The reconciler runs the same sweep about hourly; it skips files
+  younger than an hour and any project with a live job or an unfinished status.  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
+  project deletes it.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
   `fs.statfs`), so it behaves the same on Linux, macOS and Windows; thresholds in Settings.
