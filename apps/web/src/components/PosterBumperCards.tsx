@@ -31,7 +31,7 @@ export function cardText(slot: "intro" | "outro", a: SlotAsset, s: SlotSummary) 
   return `${label} ${a.name} · ${all ? `all ${s.total} clips` : `${a.withCount} of ${s.total} clips`}${none}`;
 }
 
-/** The same fanned stack of 9:16 cards as the clips, mirrored for the outro side. */
+/** The same fan as the clip stack, at about a quarter of its size (17% of the poster), mirrored for the outro side. */
 function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary }) {
   const shown = summary.assets.slice(0, MAX_CARDS);
   const more = summary.assets.length - shown.length;
@@ -42,7 +42,7 @@ function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary 
       role="img"
       aria-label={`${text}${more > 0 ? `; ${more} more` : ""}`}
       title={text}
-      className={`absolute top-2 flex h-[42%] items-start ${outro ? "right-2 flex-row-reverse" : "left-2"}`}
+      className={`absolute top-2 flex h-[17%] items-start ${outro ? "right-2 flex-row-reverse" : "left-2"}`}
     >
       {shown.map((a, i) => {
         const all = a.withCount === summary.total;
