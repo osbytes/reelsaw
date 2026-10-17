@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronRight, ChevronsUpDown, Download, ExternalLink, KeyRound, Server } from "lucide-react";
 import { ScrollArea } from "./scroll-area";
+import { fuzzyFilter } from "../lib/fuzzy";
 
 export interface PickerModel {
   id: string;
@@ -85,7 +86,12 @@ export function ModelPicker({
   const typed = query.trim();
   const q = typed.toLowerCase();
   const canUseTyped = /^[a-z0-9_-]+:\S+$/i.test(typed) && !known.has(typed);
-  const matches = (m: PickerModel, p: PickerProvider) => !q || `${p.title} ${m.id} ${m.note ?? ""}`.toLowerCase().includes(q);
+  // fuzzy across every available provider's models: "gpt4m" finds "openai:gpt-4o-mini", ranked by closeness
+  const hits = useMemo(() => {
+    if (!q) return [] as Array<{ m: PickerModel; p: PickerProvider }>;
+    const all = providers.flatMap((p) => p.models.map((m) => ({ m, p })));
+    return fuzzyFilter(q, all, ({ m, p }) => `${m.id} ${m.label} ${p.title} ${m.note ?? ""}`);
+  }, [q, providers]);
   const selected = picked ? byProvider.get(picked) : undefined;
   const selectedState = picked ? stateOf(picked) : undefined;
 
@@ -172,8 +178,8 @@ export function ModelPicker({
                     <span className="shrink-0 text-xs text-ink3">not in any listing; checked on save</span>
                   </button>
                 )}
-                {providers.flatMap((p) => p.models.filter((m) => matches(m, p)).map((m) => modelRow(m, p, true)))}
-                {!canUseTyped && !providers.some((p) => p.models.some((m) => matches(m, p))) && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? "Asking providers…" : "No matches"}</div>}
+                {hits.map(({ m, p }) => modelRow(m, p, true))}
+                {!canUseTyped && !hits.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? "Asking providers…" : "No matches"}</div>}
               </div>
             </ScrollArea>
           ) : (

@@ -114,7 +114,7 @@ export function ModelsSection() {
           const value = shown(kind);
           const changed = draft[kind] !== undefined && draft[kind] !== s?.current[kind];
           return (
-            <div key={kind} className="flex flex-col gap-1.5">
+            <div key={kind} className="flex min-w-0 flex-col gap-1.5">
               <div className="flex items-baseline justify-between gap-2">
                 <label className="text-[13px] font-semibold">{title}</label>
                 <span className="text-[11px] text-ink3">{changed ? "unsaved" : sourceOf(kind)}</span>
@@ -133,13 +133,15 @@ export function ModelsSection() {
                 saving={saveCredentials.isPending || clearCredentials.isPending}
               />
               <p className="flex-1 text-[11px] leading-4 text-ink3">{help}</p>
-              <div className="mt-auto flex gap-1 pt-1">
+              <div className="mt-auto flex min-w-0 gap-1 pt-1">
                 <button type="button" className="btn-quiet text-xs" disabled={!value || test.isPending} onClick={() => test.mutate({ kind: catalog, id: value })}>
                   {test.isPending && test.variables?.id === value ? "Testing…" : "Test"}
                 </button>
                 {s?.override[kind] && (
-                  <button type="button" className="btn-quiet text-xs" disabled={save.isPending} onClick={() => save.mutate({ [kind]: null })}>
-                    Back to .env ({s.env[kind]})
+                  <button type="button" className="btn-quiet min-w-0 max-w-full text-xs" title={`Back to .env: ${s.env[kind]}`} disabled={save.isPending} onClick={() => save.mutate({ [kind]: null })}>
+                    <span className="block truncate">
+                      Back to .env <span className="font-mono">({s.env[kind]})</span>
+                    </span>
                   </button>
                 )}
               </div>
