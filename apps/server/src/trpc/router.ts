@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
@@ -14,6 +15,7 @@ import type { UnitOfWork } from "../uow.js";
 import { requestRender, reopenProject } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
+import { bumperProblem } from "../pipeline/bumpers.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -265,12 +267,94 @@ export const appRouter = router({
     })),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
-      const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== ""));
-      await ctx.svc.database.db
-        .insert(schema.userSettings)
-        .values({ userId: ctx.user.id, projectDefaults: clean })
-        .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: clean, updatedAt: new Date() } });
-      return { ok: true, projectDefaults: clean };
+      const { introAssetId: _i, outroAssetId: _o, ...rest } = input; // intro/outro change only through `bumpers.*`
+      const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
+      return ctx.svc.tx(async (u) => {
+        const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
+        const keep = Object.fromEntries((["introAssetId", "outroAssetId"] as const).filter((k) => cur?.d?.[k]).map((k) => [k, cur!.d[k]]));
+        const next = { ...clean, ...keep };
+        await u.db
+          .insert(schema.userSettings)
+          .values({ userId: ctx.user.id, projectDefaults: next })
+          .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: next, updatedAt: new Date() } });
+        return { ok: true, projectDefaults: next };
+      });
+    }),
+  }),
+
+  /** The user's intro/outro videos (docs/specs/bumpers.md). Files arrive through POST /api/upload first. */
+  bumpers: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const rows = await ctx.svc.database.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt))).orderBy(desc(schema.bumperAssets.createdAt));
+      return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString() }));
+    }),
+    /** Validate an uploaded video with ffprobe, store it as an asset and make it the user's default for `slot`. */
+    create: protectedProcedure.input(z.object({ uploadId: z.string().min(1).max(100), slot: z.enum(["intro", "outro"]) })).mutation(async ({ ctx, input }) => {
+      const { svc } = ctx;
+      const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
+      if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+      const ext = path.extname(up.filename).toLowerCase();
+      const id = randomUUID();
+      const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
+      try {
+        // cheap checks first so a huge file is not pulled out of storage just to be refused
+        const early = bumperProblem(input.slot, { ext, sizeBytes: up.sizeBytes }, { durationSec: 1, width: 1, height: 1 });
+        if (early) throw new TRPCError({ code: "BAD_REQUEST", message: early });
+        await fs.mkdir(svc.paths.tmp, { recursive: true });
+        await svc.storage.ensureLocal(up.storageKey, local);
+        const probe = await svc.media.ffprobe(local).catch(() => null);
+        if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: "This file could not be read as a video." });
+        const problem = bumperProblem(input.slot, { ext, sizeBytes: up.sizeBytes }, probe);
+        if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+        const sourceKey = keys.bumper(id, ext);
+        const key = input.slot === "intro" ? "introAssetId" : "outroAssetId";
+        const row = await svc.tx(async (u) => {
+          // ownership is re-checked in the unit of work that writes
+          const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, ctx.user.id)));
+          if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+          const [asset] = await u.db
+            .insert(schema.bumperAssets)
+            .values({ id, userId: ctx.user.id, kind: "video", name: up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled", durationSec: probe.durationSec, width: probe.width!, height: probe.height!, hasAudio: probe.hasAudio, sourceKey, sizeBytes: up.sizeBytes })
+            .returning();
+          // replacing: the previous asset for this slot is hidden (projects that snapshotted it keep rendering with it)
+          const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
+          const prev = cur?.d?.[key];
+          if (prev) await u.db.update(schema.bumperAssets).set({ deletedAt: new Date() }).where(and(eq(schema.bumperAssets.id, prev), eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt)));
+          const patch = { [key]: id };
+          await u.db
+            .insert(schema.userSettings)
+            .values({ userId: ctx.user.id, projectDefaults: patch })
+            .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: sql`${schema.userSettings.projectDefaults} || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() } });
+          // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
+          u.afterCommit(async () => {
+            try {
+              await svc.storage.putFile(sourceKey, local);
+            } finally {
+              await fs.rm(local, { force: true }).catch(() => {});
+            }
+          });
+          return asset!;
+        });
+        return { id: row.id, name: row.name, durationSec: row.durationSec, slot: input.slot };
+      } catch (err) {
+        await fs.rm(local, { force: true }).catch(() => {});
+        throw err;
+      }
+    }),
+    /** Soft delete: hidden from the list and cleared from the defaults; renders that already use it keep working. */
+    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        const gone = await u.db
+          .update(schema.bumperAssets)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt)))
+          .returning({ id: schema.bumperAssets.id });
+        if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+        for (const key of ["introAssetId", "outroAssetId"]) {
+          await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
+        }
+        return { ok: true };
+      });
     }),
   }),
 

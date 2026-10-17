@@ -141,6 +141,13 @@
       "when": 1792268435217,
       "tag": "0019_provider_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792271878397,
+      "tag": "0020_bumpers",
+      "breakpoints": true
     }
   ]
 }

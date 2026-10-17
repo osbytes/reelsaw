@@ -38,6 +38,8 @@ export function describeEvent(e: ProjectEvent): { text: string; tone: Tone } | n
       return { text: `A clip failed to render: ${p.error}`, tone: "err" };
     case "clip.retrying":
       return { text: `Retrying ${p.step} (attempt ${p.attempt} of ${p.max}) after: ${p.reason}`, tone: "warn" };
+    case "clip.bumper_skipped":
+      return { text: `${p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
     case "job.stalled":
       return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:
