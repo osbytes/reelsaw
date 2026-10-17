@@ -118,6 +118,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
   const setDefault = useMutation(trpc.bumpers.setDefault.mutationOptions());
   const removeAsset = useMutation(trpc.bumpers.delete.mutationOptions());
+  const restoreAsset = useMutation(trpc.bumpers.restore.mutationOptions());
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
@@ -670,7 +671,11 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         onConfirm={() => {
           const c = confirm!;
           removeAsset.mutateAsync({ id: c.id }).then(
-            () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }), toast("Removed. You can restore it in the library.")),
+            () => {
+              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
+              refresh();
+              toast(`Removed ${c.title}`, { duration: 8000, action: { label: "Undo", onClick: () => void restoreAsset.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
+            },
             (err: Error) => toast.error(`Couldn’t remove: ${err.message.slice(0, 120)}`),
           );
         }}

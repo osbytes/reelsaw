@@ -1,16 +1,17 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { Ban, ChevronRight, Equal, Loader2, Star, Trash2, Upload, Undo2, X } from "lucide-react";
+import { Ban, Equal, Loader2, Pencil, Star, Trash2, Upload, X } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { Modal } from "./ui";
 import { ScrollArea } from "./scroll-area";
-import { BumperCombobox, Thumb, type FixedOption } from "./BumperCombobox";
+import { BumperCombobox, type FixedOption } from "./BumperCombobox";
+import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
-import type { ClipBumpers } from "@reelsaw/shared";
+import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -26,6 +27,7 @@ export interface LibraryAsset {
   width: number;
   height: number;
   hasAudio: boolean;
+  sizeBytes: number;
   usedBy: number;
   thumbnailUrl: string;
 }
@@ -36,25 +38,21 @@ export function useBumperLibrary() {
   return useQuery(trpc.bumpers.list.queryOptions());
 }
 
-/** The server-made thumbnail in a fixed 9:16 box; a video swaps to its player on click so nothing moves. */
-export function Preview({ asset, className = "" }: { asset: Pick<LibraryAsset, "id" | "kind" | "name" | "thumbnailUrl">; className?: string }) {
-  const [playing, setPlaying] = useState(false);
-  const video = asset.kind === "video";
+/** The server-made thumbnail in a fixed 9:16 box (a placeholder shows until it loads, so nothing moves). Click opens the viewer. */
+function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "kind" | "name" | "thumbnailUrl">; onOpen: () => void }) {
+  const [failed, setFailed] = useState(false);
   return (
-    <button
-      type="button"
-      className={`relative aspect-[9/16] overflow-hidden rounded-[10px] border border-line bg-sunk ${video ? "" : "cursor-default"} ${className}`}
-      aria-label={video ? `${playing ? "Stop" : "Play"} ${asset.name}` : `${asset.name} (image)`}
-      onClick={() => video && setPlaying((p) => !p)}
-    >
-      <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
-      {video && !playing && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
-      {playing && <video src={`/media/bumpers/${asset.id}`} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" onEnded={() => setPlaying(false)} />}
+    <button type="button" className="relative block aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk" aria-label={`View ${asset.name}`} title="View larger" onClick={onOpen}>
+      {!failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
+      {asset.kind === "video" && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
     </button>
   );
 }
 
 export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
+const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+/** "video · 4 s · 1080×1920" (images are drawn separately: their length is a control). */
+const metaText = (a: LibraryAsset) => `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
 
 export interface UploadJob {
   key: string;
@@ -62,17 +60,21 @@ export interface UploadJob {
   pct: number;
   state: "queued" | "uploading" | "saving" | "done" | "failed";
   error?: string;
+  /** shown instead of "added" when the file was already in the library */
+  note?: string;
 }
 
 /** Upload (several at once, two at a time), default and remove/restore actions for the library. */
-export function useBumperActions() {
+export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) => void } = {}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [error, setError] = useState("");
-  const queue = useRef<Array<{ key: string; file: File; seconds: number }>>([]);
+  const queue = useRef<Array<{ key: string; file: File }>>([]);
   const running = useRef(0);
   const finished = useRef({ ok: 0, failed: 0 });
+  const dupRef = useRef(onDuplicate);
+  dupRef.current = onDuplicate;
   const create = useMutation(trpc.bumpers.create.mutationOptions());
   const setDefaultM = useMutation(trpc.bumpers.setDefault.mutationOptions());
   const removeM = useMutation(trpc.bumpers.delete.mutationOptions());
@@ -91,14 +93,21 @@ export function useBumperActions() {
     running.current++;
     for (let next = queue.current.shift(); next; next = queue.current.shift()) {
       toast.loading(`Adding ${queue.current.length + 1} file${queue.current.length ? "s" : ""} to your library…`, { id: "bumper-batch" });
-      const { key, file, seconds } = next;
+      const { key, file } = next;
       try {
         patch(key, { state: "uploading" });
         const uploadId = await uploadFile(file, (pct) => patch(key, { pct }));
         patch(key, { state: "saving", pct: 1 });
-        await create.mutateAsync({ uploadId, ...(isImageFile(file) ? { imageSeconds: seconds } : {}) });
-        patch(key, { state: "done" });
-        finished.current.ok++;
+        const r = await create.mutateAsync({ uploadId });
+        if (r.duplicate) {
+          // nothing new was stored: say so, and point at the card that already has it
+          patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
+          toast(r.restored ? `Already in your library, restored: ${r.name}` : `Already in your library: ${r.name}`, { id: `bumper-dup-${r.id}` });
+          dupRef.current?.(r.id);
+        } else {
+          patch(key, { state: "done" });
+          finished.current.ok++;
+        }
         refresh();
       } catch (e) {
         patch(key, { state: "failed", error: (e as Error).message.replace(/^"|"$/g, "").slice(0, 200) });
@@ -109,14 +118,14 @@ export function useBumperActions() {
       const { ok, failed } = finished.current;
       finished.current = { ok: 0, failed: 0 };
       if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
+      else if (ok === 0) toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
       else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
     }
   };
   /** Checks sizes, then uploads and adds each file to the library, two at a time. */
-  const uploadMany = (files: File[], imageSec: string) => {
+  const uploadMany = (files: File[]) => {
     if (!files.length) return;
     setError("");
-    const seconds = clampSec(Number(imageSec) || 3);
     const fresh: UploadJob[] = [];
     for (const file of files) {
       const key = `${file.name}:${file.size}:${Date.now()}:${Math.random()}`;
@@ -127,7 +136,7 @@ export function useBumperActions() {
         continue;
       }
       fresh.push({ key, name: file.name, pct: 0, state: "queued" });
-      queue.current.push({ key, file, seconds });
+      queue.current.push({ key, file });
     }
     setJobs((js) => [...js, ...fresh]);
     // each worker takes its first file synchronously, so this starts at most two and never an idle one
@@ -139,14 +148,15 @@ export function useBumperActions() {
     setError("");
     setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
   };
-  const remove = (a: LibraryAsset) =>
-    removeM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast("Removed. You can restore it below."), true),
+  const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
+    restoreM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast(`Restored ${a.name}`), true),
       (e) => (fail(e), false),
     );
-  const restore = (a: LibraryAsset) =>
-    restoreM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast("Restored"), true),
+  /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
+  const remove = (a: LibraryAsset) =>
+    removeM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast(`Removed ${a.name}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
       (e) => (fail(e), false),
     );
   /** Image length; resolves true when saved. */
@@ -158,11 +168,11 @@ export function useBumperActions() {
   return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds };
 }
 
-/** The "Add to library" button, image length and limits; the file input is owned by the caller so it can be opened from a link. */
-export function UploadBar({ inputRef, actions, imageSec, setImageSec }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions>; imageSec: string; setImageSec: (s: string) => void }) {
+/** The dashed dropzone card: choose files, limits, and the batch progress in space that is always reserved. */
+export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
   const { uploading } = actions;
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <section className="flex flex-col gap-3 rounded-[16px] border border-dashed border-line2 bg-panel p-4" aria-label="Add to your library">
       <input
         ref={inputRef}
         type="file"
@@ -172,38 +182,47 @@ export function UploadBar({ inputRef, actions, imageSec, setImageSec }: { inputR
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
-          actions.uploadMany(files, imageSec);
+          actions.uploadMany(files);
         }}
         aria-label="Choose intro or outro files"
       />
-      <button type="button" className="btn-ink min-w-[8.5rem]" onClick={() => inputRef.current?.click()}>
-        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-        {uploading ? "Uploading…" : "Add to library"}
-      </button>
-      <label className="flex items-center gap-1.5 text-xs text-ink2">
-        Image length
-        <input className="input w-16" type="number" min={1} max={10} step={0.5} value={imageSec} onChange={(e) => setImageSec(e.target.value)} aria-label="Seconds an image is shown" />s
-      </label>
-      <span className="text-xs text-ink3">MP4, MOV or WebM up to 10 s and 50 MB, or PNG or JPG up to 20 MB. Pick or drop several at once.</span>
-    </div>
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sunk text-ink2">{uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">
+            Drop videos or images here, or{" "}
+            <button type="button" className="font-semibold text-acc-text underline-offset-2 hover:underline" onClick={() => inputRef.current?.click()}>
+              choose files
+            </button>
+          </p>
+          <p className="mt-0.5 text-xs text-ink3">MP4, MOV or WebM up to 10 s and 50 MB, or PNG or JPG up to 20 MB. Images are shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card.</p>
+        </div>
+      </div>
+      <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
+      <div className="min-h-4 text-xs text-err" role="status">
+        {actions.error}
+      </div>
+    </section>
   );
 }
 
-/** Per-file progress for the current batch; rows stay until dismissed. The space is reserved so the page below does not jump. */
+/** Per-file progress for the current batch; rows stay until dismissed. Fixed height, so the page below never jumps. */
 export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
   const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
   return (
-    <div className="min-h-[3.5rem]" aria-live="polite">
-      {jobs.length > 0 && (
-        <div className="rounded-[10px] border border-line bg-panel">
-          <ScrollArea className="max-h-[9rem]">
+    <div className="flex h-[8.5rem] flex-col rounded-[10px] border border-line bg-sunk" aria-live="polite">
+      {jobs.length === 0 ? (
+        <p className="m-auto px-3 text-center text-xs text-ink3">Uploads show up here.</p>
+      ) : (
+        <>
+          <ScrollArea className="min-h-0 flex-1">
             <ul className="flex flex-col gap-1.5 p-2 text-xs">
               {jobs.map((j) => (
                 <li key={j.key} className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
                     <span className="min-w-0 flex-1 truncate">{j.name}</span>
-                    <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? "added" : "failed"}</span>
+                    <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
                     {(j.state === "done" || j.state === "failed") && (
                       <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
                         <X className="h-3.5 w-3.5" />
@@ -211,7 +230,7 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
                     )}
                   </div>
                   {j.state === "uploading" && (
-                    <div className="h-1 overflow-hidden rounded-full bg-sunk">
+                    <div className="h-1 overflow-hidden rounded-full bg-line">
                       <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
                     </div>
                   )}
@@ -220,14 +239,14 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
               ))}
             </ul>
           </ScrollArea>
-          {finished > 0 && (
-            <div className="border-t border-line px-2 py-1 text-right">
-              <button type="button" className="text-xs font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
+          <div className="h-7 shrink-0 border-t border-line px-2 text-right">
+            {finished > 0 && (
+              <button type="button" className="h-full text-xs font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
                 Dismiss finished
               </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -295,86 +314,104 @@ function SlotRow({
   );
 }
 
-/** One library card: preview, facts, image length, default toggles and remove. */
-export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onSeconds: (sec: number) => void }) {
-  const isIntro = introId === a.id;
-  const isOutro = outroId === a.id;
-  const [secs, setSecs] = useState<string | null>(null);
-  const shown = secs ?? String(a.durationSec);
-  const commit = () => {
-    const n = Number(secs);
-    setSecs(null);
-    if (secs !== null && Number.isFinite(n) && secs !== "" && clampSec(n) !== a.durationSec) onSeconds(n);
-  };
+/** Intro / outro / remove, in the same order on the card and in the viewer. */
+function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
+  const slotBtn = (slot: "intro" | "outro", on: boolean) => (
+    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
+      {on ? "● " : ""}
+      {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
+    </button>
+  );
   return (
-    <div id={`asset-${a.id}`} className={`flex flex-col gap-1.5 rounded-[12px] border p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
-      <Preview asset={a} className="w-full" />
-      <div className="flex min-h-[2.5rem] items-start gap-1 text-xs text-ink2">
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect} title="Link to this item">
-          <div className="truncate font-semibold text-ink" title={a.name}>
-            {a.name}
-          </div>
-          <div className="font-mono text-ink3">
-            {a.kind} · {a.kind === "video" ? `${lengthText(a)} · ` : ""}
-            {a.width}×{a.height}
-            {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
-          </div>
-        </button>
-        <button type="button" className="btn-quiet shrink-0 px-1.5 py-1" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
-      <UsageButton asset={a} applied={applied} />
-      {/* the length row is on every card so image and video cards stay the same height */}
-      <div className="flex h-7 items-center gap-1.5 text-xs text-ink2">
-        {a.kind === "image" ? (
-          <>
-            Shown for
-            <input
-              className="input h-7 w-14 px-1.5 py-0 text-xs"
-              type="number"
-              min={1}
-              max={10}
-              step={0.5}
-              value={shown}
-              disabled={busy}
-              aria-label={`Seconds ${a.name} is shown`}
-              onChange={(e) => setSecs(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            />
-            s
-          </>
-        ) : (
-          <span className="text-ink3">Plays its own length</span>
-        )}
-      </div>
-      <div className="flex min-h-5 flex-wrap gap-x-2 text-[11px] font-semibold text-acc-text">
-        {isIntro && <span>● Default intro</span>}
-        {isOutro && <span>● Default outro</span>}
-      </div>
-      <div className="grid grid-cols-2 gap-1">
-        <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-pressed={isIntro} onClick={() => onUse("intro")}>
-          {isIntro ? "Not intro" : "Use as intro"}
-        </button>
-        <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-pressed={isOutro} onClick={() => onUse("outro")}>
-          {isOutro ? "Not outro" : "Use as outro"}
-        </button>
-      </div>
+    <div className="grid grid-cols-3 gap-1">
+      {slotBtn("intro", introId === a.id)}
+      {slotBtn("outro", outroId === a.id)}
+      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+        <Trash2 className="h-3.5 w-3.5" />
+        {withLabels && "Remove"}
+      </button>
     </div>
   );
 }
 
-/** "Used by N projects" as a control: opens the list of projects and clips that use an asset. */
-function UsageButton({ asset: a, applied }: { asset: LibraryAsset; applied: boolean }) {
-  const label = a.usedBy ? `Used by ${a.usedBy} project${a.usedBy === 1 ? "" : "s"}${applied ? ", re-render to apply" : ""}` : applied ? "Saved" : "Not used yet";
+/** "3 s" with a pencil for an image: a tiny popover with the seconds field. */
+function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; busy: boolean; onSeconds: (sec: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(String(a.durationSec));
+  const save = () => {
+    const n = Number(v);
+    if (v !== "" && Number.isFinite(n) && clampSec(n) !== a.durationSec) onSeconds(n);
+    setOpen(false);
+  };
   return (
-    <div className="flex h-5 items-center text-xs">
+    <Popover.Root open={open} onOpenChange={(o) => (o && setV(String(a.durationSec)), setOpen(o))}>
+      <Popover.Trigger asChild>
+        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink" aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`} title="Change how long it is shown">
+          {lengthText(a)}
+          <Pencil className="h-3 w-3" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+          <label className="flex items-center gap-1.5 text-ink2">
+            Shown for
+            <input className="input h-7 w-16 px-1.5 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={v} disabled={busy} autoFocus aria-label={`Seconds ${a.name} is shown`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />s
+          </label>
+          <div className="flex justify-end gap-1.5">
+            <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-ink px-2 py-1 text-xs" disabled={busy} onClick={save}>
+              Save
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** One library card: fixed-size thumbnail, one-line name and facts, an always-present status line, and equal-width actions. */
+export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void }) {
+  return (
+    <div id={`asset-${a.id}`} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
+      <CardThumb asset={a} onOpen={onOpen} />
+      <div className="min-w-0 text-xs">
+        <button type="button" className="block w-full truncate text-left font-semibold text-ink" onClick={onSelect} title={`${a.name} (link to this item)`}>
+          {a.name}
+        </button>
+        <div className="flex h-4 items-center gap-1 overflow-hidden whitespace-nowrap font-mono text-ink3">
+          {a.kind === "image" ? (
+            <>
+              <span className="shrink-0">image ·</span>
+              <LengthPopover asset={a} busy={busy} onSeconds={onSeconds} />
+              <span className="truncate">
+                · {a.width}×{a.height}
+              </span>
+            </>
+          ) : (
+            <span className="truncate">{metaText(a)}</span>
+          )}
+        </div>
+      </div>
+      <StatusLine asset={a} isIntro={introId === a.id} isOutro={outroId === a.id} applied={applied} />
+      <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} />
+    </div>
+  );
+}
+
+/** Always one line: default intro / outro, and where it is used (a popover with the projects), or "Empty". */
+function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
+  const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
+  const fix = applied ? ", re-render to apply" : "";
+  return (
+    <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
+      {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
       {a.usedBy ? (
         <Popover.Root>
           <Popover.Trigger asChild>
             <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
-              {label}
+              {defaults ? `· used by ${a.usedBy}${fix}` : `Used by ${a.usedBy} project${a.usedBy === 1 ? "" : "s"}${fix}`}
             </button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -385,9 +422,44 @@ function UsageButton({ asset: a, applied }: { asset: LibraryAsset; applied: bool
           </Popover.Portal>
         </Popover.Root>
       ) : (
-        <span className="text-ink3">{label}</span>
+        !defaults && <span className="text-ink3">{applied ? "Saved" : "○ Empty, not used yet"}</span>
       )}
     </div>
+  );
+}
+
+/** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove }: { asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void }) {
+  return (
+    <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/70" />
+        <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4">
+          {a && (
+            <>
+              <div className="flex items-center gap-2">
+                <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
+                <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
+                  <X className="h-4 w-4" />
+                </Dialog.Close>
+              </div>
+              <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
+                {a.kind === "video" ? (
+                  <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                ) : (
+                  <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
+                )}
+              </div>
+              <p className="truncate font-mono text-xs text-ink3">
+                {a.kind} · {lengthText(a)} · {a.width}×{a.height} · {sizeText(a.sizeBytes)}
+                {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
+              </p>
+              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
+            </>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -424,40 +496,6 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
         ))}
       </div>
     </ScrollArea>
-  );
-}
-
-/**
- * Removed assets, always below the grid. The header row has a fixed height whether the list is empty, closed or open,
- * and the open list scrolls inside its own ScrollArea, so restoring never moves anything around it.
- */
-export function RemovedList({ deleted, busy, onRestore }: { deleted: LibraryAsset[]; busy: boolean; onRestore: (a: LibraryAsset) => void }) {
-  const [open, setOpen] = useState(false);
-  const shown = open && deleted.length > 0;
-  return (
-    <div className="text-xs text-ink2">
-      <button type="button" className="flex h-9 w-full items-center gap-1.5 rounded-[8px] px-1 text-left font-semibold enabled:hover:text-ink disabled:cursor-default disabled:text-ink3" disabled={deleted.length === 0} aria-expanded={shown} onClick={() => setOpen((o) => !o)}>
-        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${shown ? "rotate-90" : ""}`} />
-        Recently removed ({deleted.length})
-      </button>
-      {shown && (
-        <ScrollArea className="max-h-[12rem]">
-          <ul className="flex flex-col gap-1.5 pr-2">
-            {deleted.map((a) => (
-              <li key={a.id} className="flex h-9 items-center gap-2">
-                <Thumb asset={a} className="h-7 w-4" />
-                <span className="min-w-0 flex-1 truncate">
-                  {a.name} <span className="font-mono text-ink3">· {a.kind} · {lengthText(a)}</span>
-                </span>
-                <button type="button" className="btn-ghost shrink-0 px-2 py-1 text-xs" disabled={busy} aria-label={`Restore ${a.name}`} onClick={() => onRestore(a)}>
-                  <Undo2 className="h-3.5 w-3.5" /> Restore
-                </button>
-              </li>
-            ))}
-          </ul>
-        </ScrollArea>
-      )}
-    </div>
   );
 }
 

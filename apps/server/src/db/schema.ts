@@ -234,10 +234,12 @@ export const bumperAssets = pgTable(
     /** 270x480 jpg for pickers and cards; null until generated (made lazily for older assets) */
     thumbnailKey: text("thumbnail_key"),
     sizeBytes: integer("size_bytes").notNull(),
+    /** sha256 of the uploaded file, to refuse duplicates; null for assets added before it existed (no backfill) */
+    contentHash: text("content_hash"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("bumper_assets_user_idx").on(t.userId)],
+  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash)],
 );
 export type BumperAsset = typeof bumperAssets.$inferSelect;
 

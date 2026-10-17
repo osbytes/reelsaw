@@ -142,6 +142,8 @@ export interface DetectedSegment {
  * library asset id. Stored on the clip, so it survives pipeline re-runs.
  */
 export const bumperSecondsSchema = z.number().min(1).max(10);
+/** How long an image intro/outro is shown unless its card or a use says otherwise. */
+export const DEFAULT_IMAGE_BUMPER_SEC = 3;
 /** `introSec` / `outroSec` override how long an image shown in that slot lasts (videos keep their own length). */
 export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), introSec: bumperSecondsSchema.optional(), outro: z.string().min(1).max(100).nullable().optional(), outroSec: bumperSecondsSchema.optional() });
 export type ClipBumpers = z.infer<typeof clipBumpersSchema>;

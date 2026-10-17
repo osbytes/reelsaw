@@ -91,7 +91,7 @@ is that line, not the gap between events. A run still `running` with no live job
   duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
   `reelsaw storage sweep [--dry-run]` removes the leftovers: older render generations, files of deleted clips or
   projects, and `tmp/hear-*` older than a day. The reconciler runs the same sweep about hourly; it skips files
-  younger than an hour and any project with a live job or an unfinished status.  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
+  younger than an hour and any project with a live job or an unfinished status. The same sweep purges library intros/outros removed over 30 days ago that no project setting or clip uses (row, `bumpers/<id>/…` and local cache).  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
   project deletes it.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
