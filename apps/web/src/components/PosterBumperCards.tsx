@@ -31,58 +31,55 @@ export function cardText(slot: "intro" | "outro", a: SlotAsset, s: SlotSummary) 
   return `${label} ${a.name} · ${all ? `all ${s.total} clips` : `${a.withCount} of ${s.total} clips`}${none}`;
 }
 
-function Column({ slot, summary, onOpen }: { slot: "intro" | "outro"; summary: SlotSummary; onOpen: () => void }) {
+/** The same fanned stack of 9:16 cards as the clips, mirrored for the outro side. */
+function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary }) {
   const shown = summary.assets.slice(0, MAX_CARDS);
   const more = summary.assets.length - shown.length;
-  const label = slot === "intro" ? "Intro" : "Outro";
+  const outro = slot === "outro";
+  const text = shown.map((a) => cardText(slot, a, summary)).join("; ");
   return (
-    <div className={`pointer-events-none absolute top-2 flex h-[50%] flex-col ${slot === "intro" ? "left-2 items-start" : "right-2 items-end"}`}>
+    <div
+      role="img"
+      aria-label={`${text}${more > 0 ? `; ${more} more` : ""}`}
+      title={text}
+      className={`absolute top-2 flex h-[42%] items-start ${outro ? "right-2 flex-row-reverse" : "left-2"}`}
+    >
       {shown.map((a, i) => {
         const all = a.withCount === summary.total;
-        const text = cardText(slot, a, summary);
         return (
-          <button
+          <span
             key={a.assetId}
-            type="button"
-            title={text}
-            aria-label={`${text}. Edit intro and outro`}
-            onClick={onOpen}
-            className={`pointer-events-auto relative h-[34%] shrink-0 overflow-hidden rounded-[6px] bg-sunk shadow-[0_4px_12px_rgba(0,0,0,.45)] ring-2 ring-white/90 transition-transform duration-200 hover:z-20 hover:scale-110 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc ${i ? "-mt-1.5" : ""}`}
-            style={{ aspectRatio: "9 / 16", zIndex: 10 - i }}
+            className="relative h-full shrink-0 overflow-hidden rounded-[6px] bg-sunk shadow-[0_4px_12px_rgba(0,0,0,.45)] ring-2 ring-white/90 transition-transform duration-200 group-hover:translate-y-[2px]"
+            style={{
+              aspectRatio: "9 / 16",
+              [outro ? "marginRight" : "marginLeft"]: i ? "-14%" : 0,
+              zIndex: 10 - i,
+              // the clip fan rotates around its centre; mirror the direction on the right edge
+              transform: `rotate(${(outro ? -1 : 1) * (i - (shown.length - 1) / 2) * 4}deg)`,
+            }}
           >
             {a.thumbnailUrl && <img src={a.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />}
             <span aria-hidden className="absolute bottom-0 right-0 rounded-tl-[4px] bg-black/75 px-[3px] text-[8px] leading-[11px] text-white">
               {all ? "●" : "◐"}
             </span>
-          </button>
+          </span>
         );
       })}
-      {more > 0 && (
-        <button
-          type="button"
-          title={`${more} more ${slot} ${more === 1 ? "asset" : "assets"}`}
-          aria-label={`${more} more ${label.toLowerCase()} ${more === 1 ? "asset" : "assets"}. Edit intro and outro`}
-          onClick={onOpen}
-          className="pointer-events-auto z-0 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] leading-none text-white"
-        >
-          +{more}
-        </button>
-      )}
+      {more > 0 && <span className={`z-10 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white ${outro ? "mr-1.5" : "ml-1.5"}`}>+{more}</span>}
     </div>
   );
 }
 
 /**
- * Small cards on the poster's top corners: the assets the project's clips use as intro (left) and outro (right),
- * most used first. Rendered as a sibling over the card's link (an overlay with `pointer-events-none`; only the cards take clicks),
- * so a click opens the intro / outro dialog without navigating. Same size and look as the clip stack's thumbnails.
+ * The assets the project's clips use as intro (top-left) and outro (top-right), most used first, drawn like the
+ * clip stack at the bottom. Purely visual: the whole poster is the project link, and the tooltip / aria-label carry
+ * the coverage ("● all clips", "◐ some").
  */
-export function PosterBumperCards({ bumpers, onOpen }: { bumpers: ProjectBumpers; onOpen: () => void }) {
-  if (!bumpers.intro?.assets.length && !bumpers.outro?.assets.length) return null;
+export function PosterBumperCards({ bumpers }: { bumpers: ProjectBumpers }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 aspect-video">
-      {bumpers.intro && bumpers.intro.assets.length > 0 && <Column slot="intro" summary={bumpers.intro} onOpen={onOpen} />}
-      {bumpers.outro && bumpers.outro.assets.length > 0 && <Column slot="outro" summary={bumpers.outro} onOpen={onOpen} />}
-    </div>
+    <>
+      {bumpers.intro && bumpers.intro.assets.length > 0 && <Fan slot="intro" summary={bumpers.intro} />}
+      {bumpers.outro && bumpers.outro.assets.length > 0 && <Fan slot="outro" summary={bumpers.outro} />}
+    </>
   );
 }

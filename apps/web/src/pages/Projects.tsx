@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
@@ -7,7 +7,6 @@ import { useCommandPalette } from "../components/CommandPalette";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
 import { PosterBumperCards } from "../components/PosterBumperCards";
-import { ProjectBumpersModal } from "../components/BumperField";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
@@ -92,8 +91,6 @@ export function ProjectsPage() {
     refetchInterval: (query) => (query.state.data?.some((p) => ACTIVE.has(p.status)) ? 3000 : false),
   });
   const projects = q.data ?? [];
-  const [bumperFor, setBumperFor] = useState<string | null>(null);
-  const bumperProject = projects.find((p) => p.id === bumperFor);
   const running = projects.filter((p) => ACTIVE.has(p.status)).length;
   const clips = projects.reduce((a, p) => a + p.clipsDone, 0);
 
@@ -164,6 +161,8 @@ export function ProjectsPage() {
                       )}
                     </div>
                   )}
+                  {/* intro (left) and outro (right) assets, fanned like the clips */}
+                  <PosterBumperCards bumpers={p.bumpers} />
                   {p.durationSec ? <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">{formatTime(p.durationSec)}</span> : null}
                   {active && (
                     <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
@@ -177,25 +176,11 @@ export function ProjectsPage() {
                   <div className="truncate text-xs text-ink3">{detail}</div>
                 </div>
               </Link>
-              {/* a sibling over the link, so a click on a card opens the dialog instead of navigating */}
-              <PosterBumperCards bumpers={p.bumpers} onOpen={() => setBumperFor(p.id)} />
               </div>
             );
           })}
         </div>
       </main>
-      {bumperProject && (
-        <ProjectBumpersModal
-          open
-          onOpenChange={(o) => !o && setBumperFor(null)}
-          projectId={bumperProject.id}
-          clipCount={bumperProject.clipsDone}
-          introId={bumperProject.settings.introAssetId}
-          outroId={bumperProject.settings.outroAssetId}
-          introSec={bumperProject.settings.introSec}
-          outroSec={bumperProject.settings.outroSec}
-        />
-      )}
     </ScrollArea>
   );
 }
