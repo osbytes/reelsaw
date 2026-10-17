@@ -33,6 +33,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  */
+import { projectBumperSummaries } from "./bumpers/service.js";
+import { describeCoverage } from "./bumpers/summary.js";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout } from "./pipeline/layout.js";
@@ -134,6 +136,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         error: c.error ?? "",
       })),
     );
+    const bumpers = (await projectBumperSummaries(db, p.userId, [{ id, settings: p.settings, clips }])).get(id)!;
+    for (const slot of ["intro", "outro"] as const) {
+      const b = bumpers[slot];
+      if (b) console.log(`  ${describeCoverage(slot, b.name, b)}`);
+    }
     const runs = await runsOfProject(db, id);
     console.log("\nruns");
     if (!runs.length) console.log("  (none recorded)");

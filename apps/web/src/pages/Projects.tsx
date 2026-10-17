@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
 import { useCommandPalette } from "../components/CommandPalette";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
+import { BumperChips } from "../components/BumperChips";
+import { ProjectBumpersModal } from "../components/BumperField";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
@@ -90,6 +92,8 @@ export function ProjectsPage() {
     refetchInterval: (query) => (query.state.data?.some((p) => ACTIVE.has(p.status)) ? 3000 : false),
   });
   const projects = q.data ?? [];
+  const [bumperFor, setBumperFor] = useState<string | null>(null);
+  const bumperProject = projects.find((p) => p.id === bumperFor);
   const running = projects.filter((p) => ACTIVE.has(p.status)).length;
   const clips = projects.reduce((a, p) => a + p.clipsDone, 0);
 
@@ -136,7 +140,8 @@ export function ProjectsPage() {
                   ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;
             return (
-              <Link key={p.id} to={`/p/${p.id}`} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
+              <div key={p.id} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink transition hover:border-line2 hover:shadow-pop">
+              <Link to={`/p/${p.id}`} className="flex flex-col text-ink no-underline">
                 <div className="film relative aspect-video">
                   {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
                     <img src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!} alt="" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
@@ -172,10 +177,25 @@ export function ProjectsPage() {
                   <div className="truncate text-xs text-ink3">{detail}</div>
                 </div>
               </Link>
+              <BumperChips bumpers={p.bumpers} onOpen={() => setBumperFor(p.id)} />
+              <div className="h-2" />
+              </div>
             );
           })}
         </div>
       </main>
+      {bumperProject && (
+        <ProjectBumpersModal
+          open
+          onOpenChange={(o) => !o && setBumperFor(null)}
+          projectId={bumperProject.id}
+          clipCount={bumperProject.clipsDone}
+          introId={bumperProject.settings.introAssetId}
+          outroId={bumperProject.settings.outroAssetId}
+          introSec={bumperProject.settings.introSec}
+          outroSec={bumperProject.settings.outroSec}
+        />
+      )}
     </ScrollArea>
   );
 }
