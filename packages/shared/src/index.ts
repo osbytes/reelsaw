@@ -14,6 +14,13 @@ export const PROJECT_STATUSES = [
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
+/**
+ * Why a run started. A run is one stretch of work on a project, from the moment it leaves idle
+ * (created, or done / failed) until it is done or failed again.
+ */
+export const RUN_REASONS = ["created", "retry", "rerender", "refine", "reanalyze", "clip_added"] as const;
+export type RunReason = (typeof RUN_REASONS)[number];
+
 export const PIPELINE_STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
 
 /** Sub-steps of the refine stage; they run as independent jobs after transcription. */
@@ -318,6 +325,8 @@ export type ClipCandidate = z.infer<typeof clipCandidateSchema>;
 
 export const PROJECT_EVENT_TYPES = [
   "project.created",
+  /** a run began: the project went from idle (or was created) to working; payload { seq, reason } */
+  "run.started",
   "stage.started",
   "stage.progress",
   "stage.completed",

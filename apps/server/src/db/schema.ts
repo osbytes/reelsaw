@@ -11,7 +11,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -261,6 +261,12 @@ export const projects = pgTable(
     sourceExpiredAt: timestamp("source_expired_at", { withTimezone: true }),
     stage: text("stage"),
     stageProgress: real("stage_progress"),
+    /** explicit runs (see pipeline/lifecycle.ts startRun): how many have started, when and why the current/last one did */
+    runSeq: integer("run_seq").notNull().default(0),
+    runStartedAt: timestamp("run_started_at", { withTimezone: true }),
+    runReason: text("run_reason").$type<RunReason>(),
+    /** when the stage now running began; stage.completed / stage.failed durations come from it */
+    stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
     settings: jsonb("settings").$type<ProjectSettings>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
