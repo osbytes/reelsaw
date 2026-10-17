@@ -25,7 +25,7 @@ export interface Storage {
   deletePrefix(prefix: string): Promise<void>;
 }
 
-const MIME: Record<string, string> = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg" };
+const MIME: Record<string, string> = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg" };
 export function contentTypeFor(file: string) {
   return MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 }

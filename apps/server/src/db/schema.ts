@@ -348,6 +348,8 @@ export const clips = pgTable(
     emphasis: jsonb("emphasis").$type<string[]>(),
     /** Per-clip caption/hook style override on top of the project settings. */
     style: jsonb("style").$type<StyleOverride>(),
+    /** user decision: render this clip without the project's intro/outro (survives pipeline re-runs) */
+    bumpersOff: boolean("bumpers_off").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

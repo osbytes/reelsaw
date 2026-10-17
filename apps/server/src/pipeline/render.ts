@@ -389,7 +389,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
 
   const tmpOut = `${outPath}.tmp.mp4`;
   // intro/outro from the project's settings; an unusable one is skipped, never fatal
-  const bumpers = await loadBumpers(ctx, project, clip.id, log);
+  // a clip the user opted out renders plain, whatever the project says
+  const bumpers: Awaited<ReturnType<typeof loadBumpers>> = clip.bumpersOff ? { skipped: [] } : await loadBumpers(ctx, project, clip.id, log);
   const srcHasAudio = bumpers.intro || bumpers.outro ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean): { graph: string; audioMap: string[] } => {
@@ -503,7 +504,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       skipped: cutResult.skipped.map((sk) => ({ start: Number((sk.range.start + clip.startSec).toFixed(3)), end: Number((sk.range.end + clip.startSec).toFixed(3)), reason: sk.reason.slice(0, 2000) })),
     },
     outDurationSec: Number(outDuration.toFixed(2)),
-    ...(settings.introAssetId || settings.outroAssetId
+    ...(clip.bumpersOff || settings.introAssetId || settings.outroAssetId
       ? {
           bumpers: {
             ...(usedBumpers && bumpers.intro ? { introId: bumpers.intro.id } : {}),
@@ -511,6 +512,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
             introSec: Number(attached.introSec.toFixed(3)),
             outroSec: Number(attached.outroSec.toFixed(3)),
             ...(bumpers.skipped.length ? { skipped: bumpers.skipped } : {}),
+            ...(clip.bumpersOff ? { off: true } : {}),
           },
         }
       : {}),

@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bumperConcat, bumperFrames, bumperProblem, ensureNormalised, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
+import { bumperConcat, bumperFrames, bumperKind, bumperProblem, ensureNormalised, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
 import { FIT_CHAIN } from "../src/pipeline/render.js";
 
 const run = promisify(execFile);
@@ -68,6 +68,9 @@ describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () =
     await ffmpeg(["-f", "lavfi", "-i", "testsrc=size=1080x1920:rate=30:duration=5", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=44100:duration=5", "-ac", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(dir, "body.mp4")]);
     store.set("bumpers/intro/source.mp4", path.join(dir, "intro.mp4"));
     store.set("bumpers/outro/source.mp4", path.join(dir, "outro.mp4"));
+    // a 600x400 PNG logo card (not 9:16, so it gets the blurred fit)
+    await ffmpeg(["-f", "lavfi", "-i", "testsrc2=size=600x400:rate=1", "-frames:v", "1", path.join(dir, "card.png")]);
+    store.set("bumpers/card/source.png", path.join(dir, "card.png"));
   });
   after(() => fs.rm(dir, { recursive: true, force: true }));
 
@@ -127,6 +130,37 @@ describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () =
       assert.ok(Math.abs(ap[ap.length - 1]! - (expected - 0.0213)) < 0.05, `audio ends ${ap[ap.length - 1]} vs ${expected}`);
     });
   }
+
+  for (const seconds of [3, 1, 2.5]) {
+    it(`turns an image into a ${seconds} s video with silence and joins it as an outro`, async (t) => {
+      const asset = { id: `card-${seconds}`, sourceKey: "bumpers/card/source.png", durationSec: seconds, hasAudio: false, kind: "image" as const };
+      const file = await ensureNormalised(deps, asset, canvas);
+      const info = await probe(file);
+      const v = info.streams.find((x) => x.codec_type === "video")!;
+      assert.deepEqual([v.width, v.height, v.r_frame_rate], [1080, 1920, "30/1"]);
+      assert.equal(info.streams.filter((x) => x.codec_type === "video").length, 1);
+      assert.equal(info.streams.filter((x) => x.codec_type === "audio").length, 1);
+      assert.ok(Math.abs(Number(info.format.duration) - seconds) <= FRAME, `duration ${info.format.duration} vs ${seconds}`);
+      // joined after the body in one encode
+      const out = path.join(dir, `img-${seconds}.mp4`);
+      const graph = `[0:v]null[bodyraw];[0:a:0]anull[ca];` + bumperConcat({ outroInput: 1, bodyVideo: "[bodyraw]", bodyAudio: "[ca]", bodySec: 5 });
+      await ffmpeg(["-i", path.join(dir, "body.mp4"), "-i", file, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-ar", "48000", out]);
+      const joined = await probe(out);
+      t.diagnostic(`image ${seconds} s -> normalised ${info.format.duration}, joined ${joined.format.duration} (expected ${5 + seconds})`);
+      assert.ok(Math.abs(Number(joined.format.duration) - (5 + seconds)) <= FRAME * 1.5, `joined ${joined.format.duration}`);
+      assert.equal(joined.streams.length, 2);
+    });
+  }
+
+  it("refuses unusable images with a sentence", () => {
+    assert.equal(bumperProblem(undefined, { ext: ".png", sizeBytes: 1e6 }, { durationSec: 0, width: 1200, height: 800 }), null);
+    assert.match(bumperProblem(undefined, { ext: ".png", sizeBytes: 21 * 1024 * 1024 }, { durationSec: 0, width: 1200, height: 800 })!, /at most 20 MB/);
+    assert.match(bumperProblem(undefined, { ext: ".jpg", sizeBytes: 1e5 }, { durationSec: 0, width: 9000, height: 800 })!, /8192 px/);
+    assert.match(bumperProblem(undefined, { ext: ".jpg", sizeBytes: 1e5 }, { durationSec: 0, width: 20, height: 800 })!, /at least 64 px/);
+    assert.equal(bumperKind(".jpeg"), "image");
+    assert.equal(bumperKind(".mov"), "video");
+    assert.equal(bumperKind(".gif"), null);
+  });
 
   it("refuses unusable files with a sentence", () => {
     const ok = { durationSec: 4, width: 1280, height: 720 };

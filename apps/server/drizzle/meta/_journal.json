@@ -148,6 +148,13 @@
       "when": 1792271878397,
       "tag": "0020_bumpers",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792273406800,
+      "tag": "0021_clip_bumpers_off",
+      "breakpoints": true
     }
   ]
 }

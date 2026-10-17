@@ -9,6 +9,7 @@ import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
 import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
 import { Segmented, Modal, Kbd } from "./ui";
+import { ProjectBumpersModal, useBumperLibrary } from "./BumperField";
 import { ThemeToggle } from "../App";
 import { useHistory } from "../lib/history";
 import {
@@ -43,6 +44,7 @@ export interface EditorClip {
   layoutSegments: DetectedSegment[];
   style: StyleOverride | null;
   emphasis: string[];
+  bumpersOff?: boolean;
   status: string;
   diagnostics: ClipDiagnostics | null;
 }
@@ -87,6 +89,8 @@ interface EditorDoc {
   hashtags: string[];
   style: Style;
   emphasis: string[];
+  /** render without the project's intro/outro */
+  bumpersOff: boolean;
 }
 
 const MODE_EXPLAIN: Record<string, string> = {
@@ -237,8 +241,11 @@ export function ClipEditor(props: Props) {
     hashtags: clip.hashtags,
     style: resolveStyle(settings, clip.style),
     emphasis: clip.emphasis,
+    bumpersOff: !!clip.bumpersOff,
   }));
-  const { range, sections, title, hook, caption, hashtags, style, emphasis } = history.state;
+  const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpersOff } = history.state;
+  const [bumpersDialog, setBumpersDialog] = useState(false);
+  const library = useBumperLibrary();
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) => history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
   const [selected, setSelected] = useState<number | null>(null);
@@ -461,9 +468,10 @@ export function ClipEditor(props: Props) {
   const tagsChanged = JSON.stringify(hashtags) !== JSON.stringify(clip.hashtags);
   const boundsChanged = range[0] !== clip.startSec || range[1] !== clip.endSec;
   const hookChanged = hook !== clip.hook;
-  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged].filter(Boolean).length;
+  const bumpersChanged = bumpersOff !== !!clip.bumpersOff;
+  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged].filter(Boolean).length;
   const changed = dirtyCount > 0;
-  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged;
+  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged;
 
   async function save(rerender: boolean): Promise<boolean> {
     try {
@@ -477,6 +485,7 @@ export function ClipEditor(props: Props) {
         startSec: range[0],
         endSec: range[1],
         ...(emphasisChanged ? { emphasis } : {}),
+        ...(bumpersChanged ? { bumpersOff } : {}),
         ...(sectionsChanged ? { layoutSections: forcedSections, layoutOverride: null } : {}),
         ...(styleChanged && styleScope === "clip" ? { style: Object.keys(styleOverride).length ? styleOverride : null } : {}),
         rerender,
@@ -489,6 +498,17 @@ export function ClipEditor(props: Props) {
       return false;
     }
   }
+  // what the rendered file adds around the source range, from the library (or the last render if the asset is gone)
+  const hasBumpers = !!(settings.introAssetId || settings.outroAssetId);
+  const libAll = [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])];
+  const secLabel = (id: string | null | undefined, last: number | undefined) => {
+    const n = id ? (libAll.find((a) => a.id === id)?.durationSec ?? last) : undefined;
+    return n ? ` ${n.toFixed(n % 1 ? 1 : 0)} s` : "";
+  };
+  const bumpersLabel =
+    !hasBumpers || bumpersOff
+      ? "no intro / outro"
+      : [settings.introAssetId ? `+ intro${secLabel(settings.introAssetId, clip.diagnostics?.bumpers?.introSec)}` : "", settings.outroAssetId ? `+ outro${secLabel(settings.outroAssetId, clip.diagnostics?.bumpers?.outroSec)}` : ""].filter(Boolean).join(" · ");
   const busy = update.isPending || updateStyle.isPending;
   const requestExit = () => (changed ? setGuard(true) : onExit());
 
@@ -1091,6 +1111,20 @@ export function ClipEditor(props: Props) {
           Out ]
         </button>
       </div>
+      {/* fixed-height row: what the rendered file adds around this source range (the timeline above is source time only) */}
+      <div className="flex h-7 w-full flex-wrap items-center justify-center gap-x-3 overflow-hidden text-xs text-ink2">
+        <span className="font-mono" title="Added around the clip in the rendered file; not part of the source timeline">
+          {bumpersLabel}
+        </span>
+        {hasBumpers && (
+          <label className="flex cursor-pointer items-center gap-1.5" title="Render this clip without the project's intro and outro">
+            <input type="checkbox" checked={!bumpersOff} onChange={(e) => edit({ bumpersOff: !e.target.checked })} className="accent-[var(--acc)]" /> Intro and outro
+          </label>
+        )}
+        <button className="font-semibold text-acc-text" onClick={() => setBumpersDialog(true)}>
+          Project…
+        </button>
+      </div>
     </div>
   );
 
@@ -1264,6 +1298,8 @@ export function ClipEditor(props: Props) {
           </div>
         </div>
       )}
+
+      <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} />
 
       <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">

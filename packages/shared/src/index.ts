@@ -144,7 +144,7 @@ export interface ClipDiagnostics {
   };
   outDurationSec: number;
   /** intro/outro attached to this render (ids, seconds) and which were skipped, and why */
-  bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[] };
+  bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[]; off?: boolean };
   renderMs: number;
 }
 

@@ -62,6 +62,21 @@ function cutsNote(d: ClipDiagnostics | null | undefined) {
   return parts.length ? parts.join(" · ") : "No disfluencies found";
 }
 
+/** What the last render attached: lengths, "off for this clip", or which part was skipped (glyph plus word, never colour alone). */
+function bumpersNote(d: ClipDiagnostics | null | undefined): { text: string; skipped: boolean; title?: string } {
+  if (!d) return { text: "Shown after the first render", skipped: false };
+  const b = d.bumpers;
+  if (!b) return { text: "None", skipped: false };
+  if (b.off) return { text: "Off for this clip", skipped: false };
+  const skipped = (b.skipped ?? []).map((s) => (s.startsWith("outro") ? "Outro" : "Intro"));
+  if (skipped.length) {
+    const kept = [b.introSec ? `intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
+    return { text: `▲ ${[...new Set(skipped)].join(" and ")} skipped${kept.length ? ` · kept ${kept.join(", ")}` : ""}`, skipped: true, title: (b.skipped ?? []).join("; ") };
+  }
+  const parts = [b.introSec ? `+ intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `+ outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
+  return { text: parts.length ? parts.join(" · ") : "None", skipped: false };
+}
+
 export function ClipCard({
   clip,
   projectId,
@@ -97,6 +112,7 @@ export function ClipCard({
       .then(() => toast("Caption + hashtags copied"))
       .catch(() => toast("Couldn’t copy"));
   const skipped = clip.diagnostics?.cuts.skipped ?? [];
+  const bumpers = bumpersNote(clip.diagnostics);
   const detail =
     clip.status === "failed"
       ? { text: clip.error ?? "Render failed", cls: "bg-err-soft" }
@@ -177,9 +193,13 @@ export function ClipCard({
       )}
 
       {clip.status !== "preparing" && (
-        <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-xs">
+        <dl className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-1 text-xs">
           <dt className="text-ink3">Framing</dt>
           <dd className="text-ink">{framingText(clip)}</dd>
+          <dt className="text-ink3">Intro/outro</dt>
+          <dd className={bumpers.skipped ? "font-semibold text-warn" : "text-ink"} title={bumpers.title}>
+            {bumpers.text}
+          </dd>
           <dt className="text-ink3">Cuts</dt>
           <dd className="text-ink">
             {cutsNote(clip.diagnostics)}{" "}

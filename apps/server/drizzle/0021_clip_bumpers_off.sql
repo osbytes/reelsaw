@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "bumpers_off" boolean DEFAULT false NOT NULL;
