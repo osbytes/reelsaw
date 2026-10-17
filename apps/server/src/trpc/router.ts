@@ -16,6 +16,7 @@ import { requestRender, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { projectBumperSummaries } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -693,9 +694,10 @@ export const appRouter = router({
       const clipRows = rows.length
         ? await db.query.clips.findMany({
             where: inArray(schema.clips.projectId, rows.map((r) => r.id)),
-            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true },
+            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true, bumpers: true },
           })
         : [];
+      const bumperSummaries = await projectBumperSummaries(db, ctx.user.id, rows.map((p) => ({ id: p.id, settings: p.settings, clips: clipRows.filter((c) => c.projectId === p.id) })));
       return rows.map((p) => {
         const mine = clipRows.filter((c) => c.projectId === p.id);
         const firstThumb = mine.find((c) => c.thumbnailKey);
@@ -711,6 +713,7 @@ export const appRouter = router({
           // the source's own thumbnail stays the card image; clip thumbnails stack on top of it
           sourceThumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
           clipThumbs,
+          bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
           thumbnailUrl: firstThumb ? `/media/clips/${p.id}/${firstThumb.id}.jpg` : ((p.sourceMeta?.thumbnail as string | undefined) ?? null),
         };
       });
@@ -724,7 +727,8 @@ export const appRouter = router({
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
-      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates };
+      const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
+      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates, bumpers };
     }),
 
     create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
