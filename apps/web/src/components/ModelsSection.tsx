@@ -132,8 +132,8 @@ export function ModelsSection() {
                 onClearCredentials={onClearCredentials}
                 saving={saveCredentials.isPending || clearCredentials.isPending}
               />
-              <p className="text-[11px] leading-4 text-ink3">{help}</p>
-              <div className="flex gap-1">
+              <p className="flex-1 text-[11px] leading-4 text-ink3">{help}</p>
+              <div className="mt-auto flex gap-1 pt-1">
                 <button type="button" className="btn-quiet text-xs" disabled={!value || test.isPending} onClick={() => test.mutate({ kind: catalog, id: value })}>
                   {test.isPending && test.variables?.id === value ? "Testing…" : "Test"}
                 </button>

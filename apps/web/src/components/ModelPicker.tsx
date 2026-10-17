@@ -145,7 +145,8 @@ export function ModelPicker({
         <button type="button" role="combobox" aria-expanded={open} aria-label={label} className="input flex min-h-[38px] items-center gap-2 py-1 text-left">
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={`truncate font-mono text-xs ${value ? "" : "text-ink3"}`}>{value || placeholder}</span>
-            {current?.note && <span className="truncate text-[11px] text-ink3">{current.note}</span>}
+            {/* always two lines, so pickers side by side stay the same height */}
+            <span className="min-h-4 truncate text-[11px] text-ink3">{current?.note ?? (value ? value.split(":")[0] : "")}</span>
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
         </button>
