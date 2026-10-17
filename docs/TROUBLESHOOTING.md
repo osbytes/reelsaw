@@ -9,7 +9,7 @@ Everything here runs against the live stack; nothing needs a rebuild.
 docker compose exec app reelsaw stuck                  # everything unfinished: age, last event, live jobs, problems
 docker compose exec app reelsaw recover <clipId|projectId>  # re-run the right step (prepare vs render) / reconcile
 docker compose exec app reelsaw logs <id> [n]          # log lines for a project/clip/job, from the log file (survives redeploys)
-docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, live jobs, errors
+docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, runs, live jobs, errors
 docker compose exec app reelsaw events <projectId> 50  # what the pipeline emitted, in order
 docker compose exec app reelsaw clip <clipId>          # one clip: bounds, layout segments, last render's cuts + reasons
 docker compose exec app reelsaw faces <clipId> [a-b]   # face boxes per frame (clip-relative range) + split speaker tracks; --json for eval fixtures
@@ -30,6 +30,11 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
+
+Reading runs: the `runs` block of `reelsaw status` lists one line per run (`#3 re-render … done 0:41 clips 1 [render 0:41]`):
+sequence, why it started (new project, retry, re-render, refine, re-analyze, clip added; blank reason means
+the log predates explicit runs), outcome, total time and per-stage seconds. "How long did that re-render take"
+is that line, not the gap between events. A run still `running` with no live job is stuck; see the reconciler notes below.
 
 ## 2. Tools
 

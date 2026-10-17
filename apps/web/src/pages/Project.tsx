@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSubscription } from "@trpc/tanstack-react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
-import { describeEvent, type Tone } from "../lib/activity";
+import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ConfirmDialog, ProgressBar } from "../components/ui";
 import { NotFound } from "../components/NotFound";
@@ -18,7 +18,7 @@ import { BulkBumpersBar, ProjectBumpersModal } from "../components/BumperField";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
-import { eventDurations, stageTimes, useNow } from "../lib/timing";
+import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
@@ -112,25 +112,15 @@ export function ProjectPage() {
   const estimates = p?.estimates ?? null;
   const expectedFor = (stage: string) => estimates?.find((e) => e.stage === stage) ?? null;
   const now = useNow(active);
-  const activity = useMemo(() => {
-    const durations = eventDurations(log);
-    return log
-      .filter((e) => e.type !== "stage.progress")
-      .map((e) => {
-        const d = describeEvent(e);
-        if (!d) return { e, d };
-        // "Transcribe finished in 4:50 (expected ~4:00)" / "All done … in 19:53": each event's own run
-        const sec = e.type === "project.failed" ? undefined : durations.get(e);
-        if (sec !== undefined) {
-          const est = e.type === "stage.completed" ? expectedFor(String((e.payload as { stage?: unknown }).stage)) : null;
-          d.text += ` in ${formatTime(sec)}${est ? ` (expected ~${formatTime(est.expectedSec)})` : ""}`;
-        }
-        return { e, d };
-      })
-      .filter((x): x is { e: ProjectEvent; d: NonNullable<ReturnType<typeof describeEvent>> } => !!x.d)
-      .reverse();
+  // the log grouped by run (newest first); each finished event carries its own duration from the server
+  const runGroups = useMemo(
+    () => groupByRun(log, (e) => describeEvent(e, (stage) => expectedFor(stage)?.expectedSec ?? null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [log, estimates]);
+    [log, estimates],
+  );
+  const activity = useMemo(() => runGroups.flatMap((g) => g.entries), [runGroups]);
+  // the latest run is open, older ones collapsed; a click or #run=<seq> overrides
+  const [openRuns, setOpenRuns] = useState<Record<number, boolean>>({});
   // the running stage: elapsed so far and what to expect, for the header and the waiting panel
   const eta = (() => {
     if (!p || !active || !p.stage) return null;
@@ -160,6 +150,12 @@ export function ProjectPage() {
   const hashClip = hash.get("clip");
   const hashCard = hash.get("card");
   const hashT = hash.get("t");
+  const hashRun = Number(hash.get("run")) || null;
+  useEffect(() => {
+    if (!hashRun) return;
+    setOpenRuns((o) => ({ ...o, [hashRun]: true }));
+    setActOpen(true);
+  }, [hashRun]);
   const clipsLoaded = !!q.data;
   // multi-select for bulk actions; kept in the hash (#sel=id1,id2) so it survives reloads and can be shared
   const [sel, setSel] = useState<string[]>(() => (readHash().get("sel") ?? "").split(",").filter(Boolean));
@@ -262,34 +258,67 @@ export function ProjectPage() {
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
 
+  const fmtRun = (sec: number) => (sec < 60 ? `${Math.round(sec)} s` : formatTime(sec));
   const activityList = (
-    <ol className="flex flex-col gap-1.5 text-[13px]">
-      {activity.length === 0 && <li className="text-ink3">Nothing yet.</li>}
-      {activity.map(({ e, d }) => {
-        // entries about a clip jump to its card
-        const cid = (e.payload as { clipId?: string }).clipId;
-        const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
+    <div className="flex flex-col gap-1 text-[13px]">
+      {runGroups.length === 0 && <p className="text-ink3">Nothing yet.</p>}
+      {runGroups.map((g, i) => {
+        const open = openRuns[g.seq] ?? i === 0;
+        const dur = g.outcome === "running" ? `running ${formatTime(Math.max(0, (now - g.startedAt) / 1000))}` : g.runSec !== null ? `${g.outcome === "failed" ? "failed after" : "done in"} ${fmtRun(g.runSec)}` : g.outcome;
+        const why = reasonLabel(g.reason);
+        const label = [`Run ${g.seq}`, why ? why[0]!.toUpperCase() + why.slice(1) : null, dur, new Date(g.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · ");
+        const tone: Tone = g.outcome === "running" ? "run" : g.outcome === "failed" ? "err" : "ok";
         return (
-          <li key={e.id} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2" title={d.text}>
-            <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-            <ToneGlyph tone={d.tone} />
-            {target ? (
-              <button
-                className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
-                onClick={() => {
-                  focusCard(target, true);
-                  setActOpen(false);
-                }}
-              >
-                {d.text}
-              </button>
-            ) : (
-              <span className="min-w-0 truncate leading-5">{d.text}</span>
+          <section key={g.seq} id={`run-${g.seq}`}>
+            <button
+              className="flex h-6 w-full items-center gap-2 rounded-[6px] text-left hover:text-acc-text"
+              aria-expanded={open}
+              onClick={() => {
+                setOpenRuns((o) => ({ ...o, [g.seq]: !open }));
+                writeHash({ run: open ? null : g.seq });
+              }}
+            >
+              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-ink3 ${open ? "rotate-90" : ""}`} />
+              <ToneGlyph tone={tone} />
+              <b className="min-w-0 flex-1 truncate font-semibold leading-5" title={label}>
+                {label}
+              </b>
+              <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums text-ink3">
+                {g.entries.length} event{g.entries.length === 1 ? "" : "s"}
+              </span>
+            </button>
+            {open && (
+              <ol className="mt-1.5 flex flex-col gap-1.5 pb-2">
+                {g.entries.map(({ e, d }) => {
+                  // entries about a clip jump to its card
+                  const cid = (e.payload as { clipId?: string }).clipId;
+                  const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
+                  return (
+                    <li key={e.id} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2" title={d.text}>
+                      <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                      <ToneGlyph tone={d.tone} />
+                      {target ? (
+                        <button
+                          className="min-w-0 truncate text-left leading-5 hover:text-acc-text"
+                          onClick={() => {
+                            focusCard(target, true);
+                            setActOpen(false);
+                          }}
+                        >
+                          {d.text}
+                        </button>
+                      ) : (
+                        <span className="min-w-0 truncate leading-5">{d.text}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
             )}
-          </li>
+          </section>
         );
       })}
-    </ol>
+    </div>
   );
 
   // latest status line in the header; the full feed opens in a popover below it

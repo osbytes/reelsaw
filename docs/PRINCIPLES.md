@@ -67,8 +67,18 @@ project already hit the problem it prevents.
   self-check at boot, and fail fast with a readable reason. Config comes from the environment and
   nothing else.
 - **One path per transition.** Shared transitions live in `pipeline/lifecycle.ts`
-  (`requestRender`, `reopenProject`, `finalizeProjectIfDone`). API routes, workers, the
+  (`requestRender`, `startRun`, `finalizeProjectIfDone`). API routes, workers, the
   reconciler and the CLI call them instead of re-implementing them.
+- **Runs are explicit.** A run is one stretch of work on a project, from leaving idle (created,
+  or done / failed) until it is done / failed again. It starts in exactly one place,
+  `startRun` in `pipeline/lifecycle.ts`: a conditional update on the idle status that bumps
+  `projects.run_seq`, stamps `run_started_at` / `run_reason`, and emits `run.started { seq, reason }`
+  only for the caller that got a row back. Every API route, worker and CLI path that moves an idle
+  project to working goes through it. Durations are facts written into payloads when they happen
+  (`stage.completed.durationSec` from `stage_started_at`; `project.done` / `project.failed`
+  `runSec`, `runSeq`, `runReason`), never recomputed from event timestamps by a reader. The only
+  reader of history is `pipeline/runs.ts` (`runsOf`); it alone falls back to timestamps for old
+  events. Expected-time estimates, the Processing times page, `reelsaw status` and the bench use it.
 - **Validate at the edge.** Inputs are zod schemas on the tRPC procedure. Ownership is checked
   in the same transaction as the write.
 - **Migrations come from the schema.** Change `db/schema.ts`, then run
