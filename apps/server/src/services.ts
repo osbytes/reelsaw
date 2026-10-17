@@ -5,6 +5,7 @@ import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
+import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
 import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
 import { createAsr, type Asr } from "./ai/asr.js";
 import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
@@ -36,6 +37,8 @@ export interface Services {
   ai: AiService;
   /** the model ids in force now: environment defaults, or the admin's runtime override (ai/models.ts) */
   models: ModelSettings;
+  /** provider keys and base URLs in force: environment, or what an admin entered (ai/providers.ts) */
+  providers: ProviderSettings;
   /** what the configured providers offer, and downloads onto Ollama / Speaches (ai/catalog.ts) */
   catalog: ModelCatalog;
   /** LLM call capture (LLM_TRACE) */
@@ -128,15 +131,17 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return t;
   });
 
-  // the environment's models are checked at boot; an admin override is loaded (and verified) once the database is up
+  // the environment's models and keys are checked at boot; what an admin saved (keys, model override)
+  // is loaded, and verified, once the database is up
+  const providers = createProviderSettings(config, log.child({ module: "providers" }));
   let models!: ReturnType<typeof createModelSettings>;
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
-    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get());
+    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers);
     models = createModelSettings(config, log.child({ module: "models" }), a.verify);
     await a.check();
     return a;
   });
-  const catalog = createModelCatalog(config, log.child({ module: "models" }));
+  const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
 
   const faces = await step(config.FACE_DETECTION ? "face detector (UltraFace ONNX)" : "face detector (disabled)", async () => {
     if (!config.FACE_DETECTION) return null;
@@ -194,6 +199,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   await step("model settings", async () => {
+    await providers.attach(database.db);
     const s = await models.attach(database.db);
     if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
@@ -238,11 +244,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
   const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
-  return { log, config, paths, otel, database, storage, ai, models, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
+  return { log, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
   s.models.stop();
+  s.providers.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));
   await s.faces?.release().catch(() => {});
   await s.text?.release().catch(() => {});

@@ -8,7 +8,7 @@
  */
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
-import { providerKeyEnv, supportsWordTimestamps } from "./registry.js";
+import { providerKeyEnv, supportsWordTimestamps, envCredentialSource, type CredentialSource } from "./registry.js";
 
 export type CatalogKind = "language" | "transcription";
 
@@ -54,6 +54,11 @@ export interface PullJob {
 
 export interface ModelCatalog {
   list(kind: CatalogKind, opts?: { refresh?: boolean }): Promise<CatalogProvider[]>;
+  /**
+   * Try credentials before they are saved: list the provider's models with them. Returns how many
+   * models answered per kind, or the error the provider gave (bad key, unreachable server).
+   */
+  probe(provider: string, creds: { apiKey?: string; baseUrl?: string }): Promise<{ ok: boolean; language: number; transcription: number; error?: string }>;
   /** Start a download on a self-hosted server; one per model at a time. Returns the job to poll. */
   pull(provider: string, model: string): Promise<PullJob>;
   pulls(): PullJob[];
@@ -95,15 +100,17 @@ function isOpenAiLanguageModel(id: string) {
   return !/(realtime|audio|tts|transcribe|embedding|image|search|instruct|moderation|dall-e|whisper)/.test(id);
 }
 
-export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
+export function createModelCatalog(config: Config, log: Logger, credentials: CredentialSource = envCredentialSource(config)): ModelCatalog {
+  const compat = config.OPENAI_COMPATIBLE_NAME;
   const cache = new Map<string, { at: number; value: CatalogProvider }>();
   const jobs = new Map<string, PullJob & { abort: AbortController }>();
   let seq = 0;
 
-  const keyFor = (provider: string) => (providerKeyEnv[provider] ?? []).find((k) => process.env[k]);
-  const missing = (provider: string) => `set ${(providerKeyEnv[provider] ?? []).join(" or ")} in .env and restart`;
+  const keyFor = (provider: string) => credentials.get(provider).apiKey;
+  const missing = (provider: string) => `needs an API key: enter one here, or set ${(providerKeyEnv[provider] ?? []).join(" or ")} in .env`;
   const get = async (url: string, headers: Record<string, string> = {}, timeoutMs = 10_000) => {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 401 || res.status === 403) throw new Error(`the key was rejected (HTTP ${res.status})`);
     if (!res.ok) throw new Error(`${url.replace(/\?.*$/, "")} returned HTTP ${res.status}`);
     return (await res.json()) as any;
   };
@@ -112,7 +119,7 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
   async function selfHosted(provider: string, baseUrl: string, apiKey: string | undefined, kind: CatalogKind): Promise<CatalogProvider> {
     const base = baseUrl.replace(/\/+$/, "");
     const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
-    const out: CatalogProvider = { provider, title: provider === "openai" ? `OpenAI-compatible server (${base})` : `${config.OPENAI_COMPATIBLE_NAME} (${base})`, kind, available: true, source: "installed", models: [] };
+    const out: CatalogProvider = { provider, title: provider === "openai" ? `OpenAI-compatible server (${base})` : `${compat} (${base})`, kind, available: true, source: "installed", models: [] };
     try {
       const installed = ((await get(`${base}/models`, headers)) as { data?: Array<{ id: string }> }).data?.map((m) => m.id) ?? [];
       // Ollama: native API has sizes and can pull
@@ -149,9 +156,10 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
     }
   }
 
-  async function cloud(provider: string, kind: CatalogKind): Promise<CatalogProvider> {
+  async function cloud(provider: string, kind: CatalogKind, override?: { apiKey?: string }): Promise<CatalogProvider> {
     const title = TITLES[provider] ?? provider;
-    const out: CatalogProvider = { provider, title, kind, available: !!keyFor(provider), source: "live", models: [] };
+    const apiKey = override?.apiKey ?? keyFor(provider);
+    const out: CatalogProvider = { provider, title, kind, available: !!apiKey, source: "live", models: [] };
     if (!out.available) {
       out.reason = missing(provider);
       out.source = "static";
@@ -162,7 +170,7 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
       return out;
     }
     if (!out.available) return out;
-    const key = process.env[keyFor(provider)!]!;
+    const key = apiKey!;
     try {
       if (provider === "openai") {
         const data = ((await get("https://api.openai.com/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string }> }).data;
@@ -195,7 +203,12 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
       } else if (provider === "gateway") {
         if (kind === "language") {
           const { createGateway } = await import("@ai-sdk/gateway");
-          const { models } = await createGateway({ apiKey: key }).getAvailableModels();
+          const gw = createGateway({ apiKey: key });
+          // the model listing is public; only an authenticated call proves the key
+          await gw.getCredits().catch((err) => {
+            throw new Error(/40[13]|unauthori|forbidden|invalid/i.test(String((err as Error).message)) ? `the gateway rejected the key (${(err as Error).message})` : (err as Error).message);
+          });
+          const { models } = await gw.getAvailableModels();
           for (const m of models) {
             if (m.modelType && m.modelType !== "language") continue;
             const price = m.pricing ? `$${(Number(m.pricing.input) * 1e6).toFixed(2)} / $${(Number(m.pricing.output) * 1e6).toFixed(2)} per 1M tokens` : undefined;
@@ -213,13 +226,14 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
     return out;
   }
 
-  async function providerFor(provider: string, kind: CatalogKind): Promise<CatalogProvider> {
-    if (provider === "openai" && config.OPENAI_BASE_URL) return selfHosted("openai", config.OPENAI_BASE_URL, config.OPENAI_API_KEY, kind);
-    if (provider === config.OPENAI_COMPATIBLE_NAME) {
-      if (!config.OPENAI_COMPATIBLE_BASE_URL) return { provider, title: provider, kind, available: false, reason: "set OPENAI_COMPATIBLE_BASE_URL in .env and restart", source: "static", models: [] };
-      return selfHosted(provider, config.OPENAI_COMPATIBLE_BASE_URL, config.OPENAI_COMPATIBLE_API_KEY, kind);
+  async function providerFor(provider: string, kind: CatalogKind, override?: { apiKey?: string; baseUrl?: string }): Promise<CatalogProvider> {
+    const creds = override ?? credentials.get(provider);
+    if (provider === "openai" && creds.baseUrl) return selfHosted("openai", creds.baseUrl, creds.apiKey, kind);
+    if (provider === compat) {
+      if (!creds.baseUrl) return { provider, title: "Ollama / OpenAI-compatible server", kind, available: false, reason: "needs the server's base URL, e.g. http://host.docker.internal:11434/v1: enter it here, or set OPENAI_COMPATIBLE_BASE_URL in .env", source: "static", models: [] };
+      return selfHosted(provider, creds.baseUrl, creds.apiKey, kind);
     }
-    return cloud(provider, kind);
+    return cloud(provider, kind, override);
   }
 
   async function pullOllama(job: PullJob & { abort: AbortController }, base: string, apiKey: string | undefined) {
@@ -259,10 +273,10 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
 
   return {
     async list(kind, opts = {}) {
-      const providers = [...new Set([...Object.keys(providerKeyEnv), ...(config.OPENAI_COMPATIBLE_BASE_URL ? [config.OPENAI_COMPATIBLE_NAME] : [])])];
+      const providers = [...new Set([compat, ...Object.keys(providerKeyEnv)])];
       const out = await Promise.all(
         providers.map(async (p) => {
-          const k = `${kind}:${p}`;
+          const k = `${kind}:${p}:${credentials.version()}`;
           const hit = cache.get(k);
           if (hit && !opts.refresh && Date.now() - hit.at < CACHE_MS) return hit.value;
           const v = await providerFor(p, kind);
@@ -273,12 +287,16 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
       // self-hosted and available providers first, then the ones that need a key
       return out.sort((a, b) => Number(!!b.selfHosted) - Number(!!a.selfHosted) || Number(b.available) - Number(a.available) || a.title.localeCompare(b.title));
     },
+    async probe(provider, creds) {
+      const [l, t] = await Promise.all([providerFor(provider, "language", creds), providerFor(provider, "transcription", creds)]);
+      const error = l.error ?? t.error ?? (!l.available ? l.reason : undefined);
+      return { ok: !error, language: l.models.length, transcription: t.models.length, ...(error ? { error } : {}) };
+    },
     async pull(provider, model) {
       const existing = [...jobs.values()].find((j) => j.provider === provider && j.model === model && j.status === "running");
       if (existing) return existing;
-      const base = provider === "openai" ? config.OPENAI_BASE_URL : provider === config.OPENAI_COMPATIBLE_NAME ? config.OPENAI_COMPATIBLE_BASE_URL : undefined;
-      if (!base) throw new Error(`"${provider}" is not a self-hosted server here; models are downloaded only onto Ollama or Speaches (OPENAI_COMPATIBLE_BASE_URL / OPENAI_BASE_URL)`);
-      const apiKey = provider === "openai" ? config.OPENAI_API_KEY : config.OPENAI_COMPATIBLE_API_KEY;
+      const { baseUrl: base, apiKey } = provider === "openai" || provider === compat ? credentials.get(provider) : {};
+      if (!base) throw new Error(`"${provider}" is not a self-hosted server here; models are downloaded only onto Ollama or Speaches (a base URL under Settings → Models, or OPENAI_COMPATIBLE_BASE_URL / OPENAI_BASE_URL)`);
       const b = base.replace(/\/+$/, "");
       const server = (await providerFor(provider, "language")).selfHosted?.server ?? (await providerFor(provider, "transcription")).selfHosted?.server;
       if (server !== "ollama" && server !== "speaches") throw new Error(`${b} is neither Ollama nor Speaches, so it cannot download models on request`);
@@ -298,7 +316,7 @@ export function createModelCatalog(config: Config, log: Logger): ModelCatalog {
         })
         .finally(() => {
           job.finishedAt = new Date().toISOString();
-          for (const k of [`language:${provider}`, `transcription:${provider}`]) cache.delete(k);
+          for (const k of [...cache.keys()]) if (k.split(":")[1] === provider) cache.delete(k);
           // keep the last few for the UI; drop the rest
           const done = [...jobs.values()].filter((j) => j.status !== "running").sort((a, b) => (a.finishedAt ?? "").localeCompare(b.finishedAt ?? ""));
           for (const j of done.slice(0, Math.max(0, done.length - 10))) jobs.delete(j.id);

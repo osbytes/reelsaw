@@ -68,7 +68,7 @@ export async function transcribe(ctx: StageContext) {
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
   }
 
-  const selfHosted = provider === "openai" && !!svc.config.OPENAI_BASE_URL;
+  const selfHosted = provider === "openai" && !!svc.providers.get("openai").baseUrl;
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
   const pending = chunkFiles.map((_, i) => i).filter((i) => !doneIdx.has(i));
   let completed = chunkFiles.length - pending.length;

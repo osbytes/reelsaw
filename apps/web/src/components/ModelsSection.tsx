@@ -30,6 +30,16 @@ export function ModelsSection() {
   const language = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "language" }));
   const transcription = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "transcription" }));
   const catalogs = { language, transcription };
+  const providers = useQuery(trpc.admin.providers.get.queryOptions());
+  const refreshCatalogs = () => {
+    void qc.invalidateQueries({ queryKey: trpc.admin.providers.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.admin.models.catalog.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
+  };
+  const saveCredentials = useMutation(trpc.admin.providers.set.mutationOptions({ onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()) }));
+  const clearCredentials = useMutation(trpc.admin.providers.clear.mutationOptions({ onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()), onError: (e) => toast(e.message) }));
+  const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => saveCredentials.mutateAsync({ provider, ...patch });
+  const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });
 
   const s = state.data;
   const [draft, setDraft] = useState<Partial<Record<Kind, string>>>({});
@@ -87,7 +97,7 @@ export function ModelsSection() {
         <span className="text-xs text-ink3">{s?.updatedAt ? `changed ${new Date(s.updatedAt).toLocaleString()}` : "as configured in .env"}</span>
       </div>
       <p className="text-[13px] text-ink2">
-        Switch models without a restart. Providers need their key or base URL in <span className="font-mono text-xs">.env</span>; the lists show what each one offers. A change applies to the next stage that starts; running stages finish with the model they began with.
+        Switch models without a restart. Pick a provider, enter its key or server URL right there if it has none (stored encrypted; <span className="font-mono text-xs">.env</span> stays the default), and its models appear. A change applies to the next stage that starts; running stages finish with the model they began with.
       </p>
       {s && Object.keys(s.ignored).length > 0 && (
         <div className="rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[13px]">
@@ -100,7 +110,7 @@ export function ModelsSection() {
       )}
       <div className="grid gap-4 md:grid-cols-3">
         {KINDS.map(({ kind, title, help, catalog }) => {
-          const providers = (catalogs[catalog].data ?? []) as PickerProvider[];
+          const providerList = (catalogs[catalog].data ?? []) as PickerProvider[];
           const value = shown(kind);
           const changed = draft[kind] !== undefined && draft[kind] !== s?.current[kind];
           return (
@@ -109,7 +119,19 @@ export function ModelsSection() {
                 <label className="text-[13px] font-semibold">{title}</label>
                 <span className="text-[11px] text-ink3">{changed ? "unsaved" : sourceOf(kind)}</span>
               </div>
-              <ModelPicker label={title} value={value} onChange={(id) => setDraft((d) => ({ ...d, [kind]: id }))} providers={providers} loading={catalogs[catalog].isLoading} onPull={(id) => pull.mutate({ id })} pulling={pulling} />
+              <ModelPicker
+                label={title}
+                value={value}
+                onChange={(id) => setDraft((d) => ({ ...d, [kind]: id }))}
+                providers={providerList}
+                states={providers.data ?? []}
+                loading={catalogs[catalog].isLoading}
+                onPull={(id) => pull.mutate({ id })}
+                pulling={pulling}
+                onSaveCredentials={onSaveCredentials}
+                onClearCredentials={onClearCredentials}
+                saving={saveCredentials.isPending || clearCredentials.isPending}
+              />
               <p className="text-[11px] leading-4 text-ink3">{help}</p>
               <div className="flex gap-1">
                 <button type="button" className="btn-quiet text-xs" disabled={!value || test.isPending} onClick={() => test.mutate({ kind: catalog, id: value })}>

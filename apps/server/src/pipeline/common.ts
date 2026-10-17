@@ -144,7 +144,7 @@ export function modelsUsed(svc: Services, ...which: Array<"language" | "transcri
   const out: Record<string, string> = {};
   const host = (model: string) => {
     const provider = model.split(":")[0];
-    return provider === "compat" ? endpointHost(c.OPENAI_COMPATIBLE_BASE_URL) : provider === "openai" ? endpointHost(c.OPENAI_BASE_URL) : undefined;
+    return provider === c.OPENAI_COMPATIBLE_NAME || provider === "openai" ? endpointHost(svc.providers.get(provider).baseUrl) : undefined;
   };
   const add = (key: string, model: string) => {
     out[key] = model;

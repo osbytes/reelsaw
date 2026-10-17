@@ -28,6 +28,8 @@ import { generateText } from "ai";
 
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
+/** Base URLs in force (environment or entered by an admin), for local-vs-cloud decisions. */
+const localConfig = (svc: Services) => ({ OPENAI_BASE_URL: svc.providers.get("openai").baseUrl, OPENAI_COMPATIBLE_BASE_URL: svc.providers.get(svc.config.OPENAI_COMPATIBLE_NAME).baseUrl, OPENAI_COMPATIBLE_NAME: svc.config.OPENAI_COMPATIBLE_NAME });
 
 const modelId = z.string().trim().min(3).max(200).regex(/^[a-z0-9_-]+:[^\s]+$/i, "a model id looks like provider:model, e.g. anthropic:claude-haiku-4.5");
 
@@ -278,8 +280,8 @@ export const appRouter = router({
       version: { version: ctx.svc.config.REELSAW_VERSION, commit: ctx.svc.config.REELSAW_COMMIT, builtAt: ctx.svc.config.REELSAW_BUILT_AT },
       aiModel: ctx.svc.models.get().language,
       transcriptionModel: ctx.svc.models.get().transcription,
-      openaiBaseUrl: ctx.svc.config.OPENAI_BASE_URL ?? null,
-      compatBaseUrl: ctx.svc.config.OPENAI_COMPATIBLE_BASE_URL ?? null,
+      openaiBaseUrl: ctx.svc.providers.get("openai").baseUrl ?? null,
+      compatBaseUrl: ctx.svc.providers.get(ctx.svc.config.OPENAI_COMPATIBLE_NAME).baseUrl ?? null,
       storage: ctx.svc.storage.driver,
       faceDetection: !!ctx.svc.faces,
       signupMode: ctx.svc.config.SIGNUP_MODE,
@@ -369,7 +371,37 @@ export const appRouter = router({
       return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
     }),
     /**
-     * Which models run, changed without a restart. Keys and base URLs stay in the environment: the
+     * Provider keys and base URLs, entered by an admin and stored encrypted (ai/providers.ts). A key
+     * is never returned; `set` tries the credentials (lists the provider's models) before saving.
+     */
+    providers: router({
+      get: adminProcedure.query(({ ctx }) => ctx.svc.providers.state()),
+      set: adminProcedure
+        .input(z.object({ provider: z.string().min(1).max(40), apiKey: z.string().trim().min(1).max(500).nullable().optional(), baseUrl: z.string().trim().url().max(500).nullable().optional() }))
+        .mutation(async ({ ctx, input }) => {
+          const known = ctx.svc.providers.describe().find((d) => d.provider === input.provider);
+          if (!known) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown provider "${input.provider}"` });
+          if (input.baseUrl !== undefined && !known.baseUrlEnv) throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} has no base URL to set` });
+          if (input.apiKey && known.keyEnv.length === 0 && input.provider !== ctx.svc.config.OPENAI_COMPATIBLE_NAME) throw new TRPCError({ code: "BAD_REQUEST", message: `${known.title} takes no API key` });
+          const now = ctx.svc.providers.get(input.provider);
+          const next = { ...now, ...(input.apiKey === undefined ? {} : input.apiKey ? { apiKey: input.apiKey } : { apiKey: undefined }), ...(input.baseUrl === undefined ? {} : input.baseUrl ? { baseUrl: input.baseUrl } : { baseUrl: undefined }) };
+          // try before saving, unless this clears everything
+          if (next.apiKey || next.baseUrl) {
+            const probe = await ctx.svc.catalog.probe(input.provider, next);
+            if (!probe.ok) throw new TRPCError({ code: "BAD_REQUEST", message: probe.error ?? "The provider did not answer" });
+          }
+          await ctx.svc.providers.set(input.provider, input, { id: ctx.user.id, email: ctx.user.email });
+          return ctx.svc.providers.state().find((p) => p.provider === input.provider)!;
+        }),
+      /** Remove what was entered here; the environment (if any) applies again. */
+      clear: adminProcedure.input(z.object({ provider: z.string().min(1).max(40) })).mutation(async ({ ctx, input }) => {
+        await ctx.svc.providers.set(input.provider, { apiKey: null, baseUrl: null }, { id: ctx.user.id, email: ctx.user.email });
+        return ctx.svc.providers.state().find((p) => p.provider === input.provider)!;
+      }),
+    }),
+    /**
+     * Which models run, changed without a restart. Keys and base URLs come from the environment or
+     * from what an admin entered under `providers`: the
      * picker only offers models the configured providers can reach (ai/catalog.ts), and `set` refuses
      * anything that does not resolve, lacks its key, lacks word timestamps or is not installed on the
      * self-hosted server. Stages that are already running keep their model; new ones use the change.
@@ -415,7 +447,7 @@ export const appRouter = router({
     /** Expected vs actual seconds per stage on this machine with the current models (Settings → System → Machine; admins only, so hosted users never see the operator's hardware). */
     processingTimes: adminProcedure.query(async ({ ctx }) => {
       const models = currentModels(ctx.svc);
-      return processingTimes(models, await loadHistory(ctx.svc.database.db), defaultFactors(models, ctx.svc.config));
+      return processingTimes(models, await loadHistory(ctx.svc.database.db), defaultFactors(models, localConfig(ctx.svc)));
     }),
   }),
 
@@ -471,7 +503,7 @@ export const appRouter = router({
       const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true, deletedFlags: true } });
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
-      const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, ctx.svc.config)) : null;
+      const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
       return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates };
     }),
 
