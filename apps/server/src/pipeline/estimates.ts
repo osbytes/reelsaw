@@ -108,16 +108,21 @@ export async function loadHistory(db: Db, limit = 40): Promise<StageSample[]> {
         where status in ('done', 'failed') and duration_sec is not null and duration_sec > 0
         order by updated_at desc limit ${limit}
       ),
-      stage_times as (
-        select e.project_id, e.payload->>'stage' as stage,
-          min(e.created_at) filter (where e.type = 'stage.started') as started,
-          max(e.created_at) filter (where e.type = 'stage.completed') as completed
+      -- the first run of each stage: a later refine / re-analyze on the same project must not stretch it
+      stage_starts as (
+        select e.project_id, e.payload->>'stage' as stage, min(e.created_at) as started
         from project_events e join recent r on r.id = e.project_id
-        where e.type in ('stage.started', 'stage.completed') and e.payload ? 'stage'
+        where e.type = 'stage.started' and e.payload ? 'stage'
         group by 1, 2
       ),
+      stage_times as (
+        select s.project_id, s.stage, s.started,
+          (select min(c.created_at) from project_events c
+            where c.project_id = s.project_id and c.type = 'stage.completed' and c.payload->>'stage' = s.stage and c.created_at > s.started) as completed
+        from stage_starts s
+      ),
       done_at as (
-        select e.project_id, max(e.created_at) as at from project_events e join recent r on r.id = e.project_id where e.type = 'project.done' group by 1
+        select e.project_id, min(e.created_at) as at from project_events e join recent r on r.id = e.project_id where e.type = 'project.done' group by 1
       ),
       models as (
         select a.project_id, jsonb_object_agg(k, v) as models

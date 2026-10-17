@@ -17,7 +17,7 @@ import { ClipCard, type ClipView } from "../components/ClipCard";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
-import { stageTimes, useNow } from "../lib/timing";
+import { eventDurations, stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
@@ -109,29 +109,25 @@ export function ProjectPage() {
   const estimates = p?.estimates ?? null;
   const expectedFor = (stage: string) => estimates?.find((e) => e.stage === stage) ?? null;
   const now = useNow(active);
-  const activity = useMemo(
-    () =>
-      log
-        .filter((e) => e.type !== "stage.progress")
-        .map((e) => {
-          const d = describeEvent(e);
-          if (!d) return { e, d };
-          // "Transcribe finished in 4:50 (expected ~4:00)" / "All done … in 19:53"
-          if (e.type === "stage.completed") {
-            const stage = String((e.payload as { stage?: unknown }).stage);
-            const t = times[stage];
-            const est = expectedFor(stage);
-            if (t?.completedAt !== undefined) d.text += ` in ${formatTime((t.completedAt - t.startedAt) / 1000)}${est ? ` (expected ~${formatTime(est.expectedSec)})` : ""}`;
-          } else if (e.type === "project.done" && times.createdAt !== undefined && times.finishedAt !== undefined) {
-            d.text += ` in ${formatTime((times.finishedAt - times.createdAt) / 1000)}`;
-          }
-          return { e, d };
-        })
-        .filter((x): x is { e: ProjectEvent; d: NonNullable<ReturnType<typeof describeEvent>> } => !!x.d)
-        .reverse(),
+  const activity = useMemo(() => {
+    const durations = eventDurations(log);
+    return log
+      .filter((e) => e.type !== "stage.progress")
+      .map((e) => {
+        const d = describeEvent(e);
+        if (!d) return { e, d };
+        // "Transcribe finished in 4:50 (expected ~4:00)" / "All done … in 19:53": each event's own run
+        const sec = e.type === "project.failed" ? undefined : durations.get(e);
+        if (sec !== undefined) {
+          const est = e.type === "stage.completed" ? expectedFor(String((e.payload as { stage?: unknown }).stage)) : null;
+          d.text += ` in ${formatTime(sec)}${est ? ` (expected ~${formatTime(est.expectedSec)})` : ""}`;
+        }
+        return { e, d };
+      })
+      .filter((x): x is { e: ProjectEvent; d: NonNullable<ReturnType<typeof describeEvent>> } => !!x.d)
+      .reverse();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [log, times, estimates],
-  );
+  }, [log, estimates]);
   // the running stage: elapsed so far and what to expect, for the header and the waiting panel
   const eta = (() => {
     if (!p || !active || !p.stage) return null;
