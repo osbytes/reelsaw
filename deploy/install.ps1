@@ -1,7 +1,7 @@
 # Reelsaw, fully local on Windows: Ollama for the language model, Speaches (faster-whisper) for
 # speech-to-text. PowerShell 5.1+ or 7, Docker Desktop. Same behaviour as install.sh.
 #
-#   irm <this script's raw URL> | iex
+#   irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex
 #
 # Creates ~\reelsaw (docker-compose.yml + .env with generated secrets), pulls the model, starts the
 # stack and waits until it answers. Re-running is safe and is how you update: the existing .env is

@@ -13,7 +13,7 @@ On macOS install [Ollama](https://ollama.com/download) first; on Linux and Windo
 a host Ollama if there is one and otherwise runs it in a container.
 
 ```bash
-curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash
 ```
 
 (or `bash install.sh` from this folder; same script)
@@ -21,7 +21,7 @@ curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160
 On Windows, in PowerShell with Docker Desktop running:
 
 ```powershell
-irm https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.ps1 | iex
+irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex
 ```
 
 (or `.\install.ps1` from this folder; same script. If script execution is blocked, run

@@ -61,10 +61,8 @@ changelog and version stay ahead.
 - `secrets.RELEASE_TOKEN`: fine-grained PAT or GitHub App token with `contents: write` and
   `pull-requests: write`. Required: tags pushed with the default `GITHUB_TOKEN` do not trigger
   `release.yml`.
-- `secrets.GIST_TOKEN`: classic personal access token with the `gist` scope, owned by the account
-  that owns the install gist (`f49ef08b41d0bd1c160f789026c2f065`). On every final (non-pre-release)
-  tag, `release.yml` pushes `deploy/install.sh` and `deploy/install.ps1` to the gist with
-  `gh gist edit`, so the public one-liners always serve the released scripts; nothing is edited by
-  hand. Without the secret the step is skipped. `GITHUB_TOKEN` cannot edit gists.
 - Settings → Actions → "Allow GitHub Actions to create and approve pull requests".
 - Branch protection on `main`: require `ci` to pass; the release PR is merged like any other.
+
+The installers (`deploy/install.sh`, `deploy/install.ps1`) are served from `main` via
+raw.githubusercontent.com, so the scripts on `main` must always work against the `:latest` image.
