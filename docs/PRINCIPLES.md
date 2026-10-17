@@ -131,6 +131,23 @@ project already hit the problem it prevents.
   - Skeletons use the `Skeleton` primitive in `components/ui.tsx` (wrap a region in
     `SkeletonRegion` for the screen-reader "Loading…") and the same layout classes as the real rows,
     so the swap is a content change, not a layout change.
+- **Lists align.**
+  - Rows of one list share one column grid (a `<table>` with fixed layout, or CSS grid with fixed
+    tracks), never per-row flex that wraps differently. Every column has a fixed or minimum width
+    and an explicit alignment: text left, numbers right with `tabular-nums`, status glyph plus word
+    left, actions right. Headers take the alignment of their data.
+  - Conditional cells keep their slot. An action that does not apply renders disabled (with a title
+    saying why) or as an invisible placeholder of the same width, so buttons line up down the list.
+    Badges ("admin", "you") live inside the name cell and never move another column.
+  - One row height per list. Secondary text goes on a second line inside the cell, not into extra
+    height for some rows.
+  - Actions: up to three primary inline, the rest in a ⋯ menu. Never hover-only: touch and keyboard
+    users cannot find them.
+  - Responsive: columns collapse in a defined order. Hide the least important first, then fold them
+    into a second line inside the row, then scroll the row. The actions column stays reachable.
+  - Semantics: a real `<table>` when the data is tabular and column headers help (add `scope`,
+    `aria-sort` and a caption); `role="grid"` only for a keyboard-navigable widget. Headers are
+    sticky inside the list's `ScrollArea`.
 - **One source of truth.** State shared by several components lives in one store (for example
   the theme in `lib/theme.ts`), not in separate copies of local state that can drift apart.
 - **The URL is state.** Anything worth linking to (a fix, a selection, a clip, a time, an editor

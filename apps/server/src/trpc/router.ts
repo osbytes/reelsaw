@@ -23,7 +23,7 @@ import { REFINE_STEPS } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
-import { checkProjectQuota, limitsFor, LIMIT_KEYS } from "../quota.js";
+import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { providerOf } from "../ai/registry.js";
@@ -557,7 +557,7 @@ export const appRouter = router({
       /** Per-user quota overrides; null = back to the instance setting. */
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
         const row = await ctx.svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true } });
-        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.config[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.config, input.id) };
+        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.config[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.config, input.id), usage: await limitUsage(ctx.svc.database.db, input.id) };
       }),
       setLimits: adminProcedure
         .input(z.object({ id: z.string(), limits: z.partialRecord(z.enum(LIMIT_KEYS), z.number().int().min(0).nullable()) }))
@@ -565,27 +565,8 @@ export const appRouter = router({
     }),
     /** Usage per user over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
     usage: adminProcedure.input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional()).query(async ({ ctx, input }) => {
-      const db = ctx.svc.database.db;
       const days = input?.days ?? 30;
-      const since = sql`now() - make_interval(days => ${days}::int)`;
-      const rows = await db
-        .select({
-          id: schema.user.id,
-          name: schema.user.name,
-          email: schema.user.email,
-          projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')} and p.created_at >= ${since})`,
-          projectsTotal: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')})`,
-          sourceMinutes: sql<number>`(select coalesce(sum(p.duration_sec), 0) / 60.0 from projects p where p.user_id = ${sql.raw('"user"."id"')} and p.created_at >= ${since})`,
-          clipsRendered: sql<number>`(select count(*)::int from clips c join projects p on p.id = c.project_id where p.user_id = ${sql.raw('"user"."id"')} and c.status = 'done' and c.updated_at >= ${since})`,
-          storedBytes: sql<number>`(select coalesce(sum(p.source_bytes), 0) from projects p where p.user_id = ${sql.raw('"user"."id"')}) + (select coalesce(sum(u.size_bytes), 0) from uploads u where u.user_id = ${sql.raw('"user"."id"')})`,
-          llmCalls: sql<number>`(select count(*)::int from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
-          llmInputTokens: sql<number>`(select coalesce(sum(l.input_tokens), 0) from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
-          llmOutputTokens: sql<number>`(select coalesce(sum(l.output_tokens), 0) from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
-        })
-        .from(schema.user)
-        .orderBy(sql`3 desc`)
-        .limit(500);
-      return { days, users: rows.map((r) => ({ ...r, sourceMinutes: Math.round(Number(r.sourceMinutes)), storedBytes: Number(r.storedBytes), llmInputTokens: Number(r.llmInputTokens), llmOutputTokens: Number(r.llmOutputTokens) })) };
+      return { days, users: await usageByUser(ctx.svc.database.db, days) };
     }),
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
       const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
