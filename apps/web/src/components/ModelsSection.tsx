@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { ModelPicker, type PickerProvider } from "./ModelPicker";
 import { ProgressBar } from "./ui";
 
@@ -25,7 +25,6 @@ function fmtBytes(n: number) {
 export function ModelsSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const state = useQuery({ ...trpc.admin.models.get.queryOptions(), refetchInterval: (q) => (q.state.data?.pulls.some((p) => p.status === "running") ? 1000 : 10_000) });
   const language = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "language" }));
   const transcription = useQuery(trpc.admin.models.catalog.queryOptions({ kind: "transcription" }));
@@ -37,7 +36,7 @@ export function ModelsSection() {
     void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
   };
   const saveCredentials = useMutation(trpc.admin.providers.set.mutationOptions({ onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()) }));
-  const clearCredentials = useMutation(trpc.admin.providers.clear.mutationOptions({ onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()), onError: (e) => toast(e.message) }));
+  const clearCredentials = useMutation(trpc.admin.providers.clear.mutationOptions({ onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()), onError: (e) => toast.error(e.message) }));
   const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => saveCredentials.mutateAsync({ provider, ...patch });
   const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });
 
@@ -58,13 +57,13 @@ export function ModelsSection() {
         toast(`Models saved: ${st.current.language} · ${st.current.transcription}`);
         invalidate();
       },
-      onError: (e) => toast(e.message),
+      onError: (e) => toast.error(e.message),
     }),
   );
   const test = useMutation(
     trpc.admin.models.test.mutationOptions({
       onSuccess: (r, input) => toast(r.ok ? `${input.id} answered in ${(r.ms / 1000).toFixed(1)} s${r.reply ? `: “${r.reply}”` : ""}` : `${input.id}: ${r.error}`),
-      onError: (e) => toast(e.message),
+      onError: (e) => toast.error(e.message),
     }),
   );
   const pull = useMutation(
@@ -73,7 +72,7 @@ export function ModelsSection() {
         toast(`Downloading ${job.model}…`);
         invalidate();
       },
-      onError: (e) => toast(e.message),
+      onError: (e) => toast.error(e.message),
     }),
   );
   const cancel = useMutation(trpc.admin.models.cancelPull.mutationOptions({ onSuccess: invalidate }));

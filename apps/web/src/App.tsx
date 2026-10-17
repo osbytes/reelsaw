@@ -22,6 +22,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
+import { Toaster } from "sonner";
 
 export function Logo() {
   return (
@@ -179,6 +180,28 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   return <Shell>{children}</Shell>;
 }
 
+/** The one toast host (sonner), themed with the app tokens so light and dark follow lib/theme.ts. Narrow screens get sonner's full-width bottom layout. */
+function AppToaster() {
+  const [theme] = useTheme();
+  return (
+    <Toaster
+      theme={theme}
+      position="bottom-right"
+      richColors={false}
+      offset={16}
+      mobileOffset={12}
+      toastOptions={{
+        classNames: {
+          toast: "!rounded-[14px] !border !border-line !bg-panel !text-ink !shadow-pop !text-[13px] !font-semibold",
+          title: "!text-ink",
+          description: "!text-ink2",
+          error: "!border-err",
+        },
+      }}
+    />
+  );
+}
+
 export function App() {
   return (
     <UploadsProvider>
@@ -196,6 +219,7 @@ export function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <ReportDialog />
+    <AppToaster />
     </CommandPaletteProvider>
     </UploadsProvider>
   );

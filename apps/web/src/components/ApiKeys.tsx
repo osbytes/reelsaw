@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { ConfirmDialog } from "./ui";
 
 type Key = { id: string; name: string | null; start: string | null; createdAt: Date | string; lastRequest: Date | string | null };
@@ -18,7 +18,6 @@ function when(d: Date | string | null | undefined) {
  */
 export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const qc = useQueryClient();
-  const toast = useToast();
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [confirm, setConfirm] = useState<Key | null>(null);
@@ -42,7 +41,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       setName("");
       void qc.invalidateQueries({ queryKey: ["apiKeys"] });
     },
-    onError: (e) => toast(e.message),
+    onError: (e) => toast.error(e.message),
   });
   const remove = useMutation({
     mutationFn: async (id: string) => {
@@ -53,7 +52,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       toast("Key revoked");
       void qc.invalidateQueries({ queryKey: ["apiKeys"] });
     },
-    onError: (e) => toast(e.message),
+    onError: (e) => toast.error(e.message),
   });
 
   const copy = (s: string, what: string) => {

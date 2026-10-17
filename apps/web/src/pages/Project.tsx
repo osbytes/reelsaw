@@ -7,7 +7,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { describeEvent, type Tone } from "../lib/activity";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ConfirmDialog, ProgressBar } from "../components/ui";
@@ -42,7 +42,6 @@ export function ProjectPage() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
-  const toast = useToast();
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
   const retry = useMutation(trpc.projects.retry.mutationOptions());
   const reanalyze = useMutation(trpc.projects.reanalyze.mutationOptions());
@@ -219,7 +218,7 @@ export function ProjectPage() {
     navigator.clipboard
       .writeText(linkWith(params))
       .then(() => toast("Link copied"))
-      .catch(() => toast("Couldn’t copy the link"));
+      .catch(() => toast.error("Couldn’t copy the link"));
   
   // Space plays / pauses the source video anywhere on the page except while typing
   useEffect(() => {

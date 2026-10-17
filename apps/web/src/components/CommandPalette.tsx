@@ -10,7 +10,7 @@ import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useMe } from "../lib/account";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { extractUrls, isOnlyUrls, linkKey } from "../lib/links";
 import { ago } from "../lib/time";
 import { ScrollArea } from "./scroll-area";
@@ -105,7 +105,6 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
-  const toast = useToast();
   const [, toggleTheme] = useTheme();
   const { startProjects, openWithFile } = useUploads();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -199,8 +198,9 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       void (async () => {
         let ok = 0;
         let firstError = "";
+        const tid = toast.loading(`Starting project 1 of ${urls.length}…`);
         for (const [i, sourceUrl] of urls.entries()) {
-          toast(`Starting project ${i + 1} of ${urls.length}…`);
+          toast.loading(`Starting project ${i + 1} of ${urls.length}…`, { id: tid });
           try {
             await create.mutateAsync({ sourceUrl });
             ok++;
@@ -212,7 +212,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         const parts = [`Started ${plural(ok, "project")}`];
         if (skipped) parts.push(`${skipped} already existed`);
         if (ok < urls.length) parts.push(`${urls.length - ok} failed${firstError ? ` (${firstError.slice(0, 80)})` : ""}`);
-        toast(parts.join(" · "));
+        (ok < urls.length ? toast.error : toast.success)(parts.join(" · "), { id: tid });
       })();
     });
 
@@ -257,7 +257,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
             const secs = isImage && pickSec !== "" && Number.isFinite(sec) ? { [`${slot}Sec`]: Math.min(10, Math.max(1, sec)) } : {};
             setBumpers.mutateAsync({ id: projectId, [slot]: choice, ...secs, rerender: false }).then(
               () => (refresh(projectId), toast(`${label}: ${name}. Saved; re-render ${plural(n, "clip")} to apply`)),
-              (err: Error) => toast(`Couldn’t set the ${slot}: ${err.message.slice(0, 120)}`),
+              (err: Error) => toast.error(`Couldn’t set the ${slot}: ${err.message.slice(0, 120)}`),
             );
           });
         const P = (key: string, text: string, icon: ReactNode, run: () => void, hint?: string, thumb?: string): Item => ({ key: `tp-${key}`, group: label, label: text, hint, icon, thumb, tall: !!thumb, run });
@@ -656,7 +656,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           const c = confirm!;
           refine.mutateAsync({ id: c.id }).then(
             () => (refresh(c.id), toast("Re-running refine")),
-            (err: Error) => toast(`Couldn’t re-run refine: ${err.message.slice(0, 120)}`),
+            (err: Error) => toast.error(`Couldn’t re-run refine: ${err.message.slice(0, 120)}`),
           );
         }}
       />
@@ -671,7 +671,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           const c = confirm!;
           removeAsset.mutateAsync({ id: c.id }).then(
             () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }), toast("Removed. You can restore it in the library.")),
-            (err: Error) => toast(`Couldn’t remove: ${err.message.slice(0, 120)}`),
+            (err: Error) => toast.error(`Couldn’t remove: ${err.message.slice(0, 120)}`),
           );
         }}
       />
@@ -686,7 +686,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           const c = confirm!;
           del.mutateAsync({ id: c.id }).then(
             () => (refresh(), toast("Project deleted")),
-            (err: Error) => toast(`Couldn’t delete: ${err.message.slice(0, 120)}`),
+            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
       />
