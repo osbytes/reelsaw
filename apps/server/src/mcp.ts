@@ -121,10 +121,23 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     "create_project",
     {
       title: "Create project",
-      description: "Start clipping a video from a URL (YouTube, Vimeo, a direct video link, anything yt-dlp can fetch). Returns immediately; the pipeline runs in the background. Follow with wait_for_project.",
-      inputSchema: { sourceUrl: z.url(), title: z.string().min(1).max(200).optional(), settings: settingsInput.optional() },
+      description: "Start clipping a video from a URL (YouTube, Vimeo, a direct video link, anything yt-dlp can fetch). Intro/outro: by default your default intro/outro (list_bumpers) are used; pass introAssetId/outroAssetId (a library id, or null for none) to override. Returns immediately; the pipeline runs in the background. Follow with wait_for_project.",
+      inputSchema: {
+        sourceUrl: z.url(),
+        title: z.string().min(1).max(200).optional(),
+        settings: settingsInput.optional(),
+        introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id for the intro of every clip; null = no intro; omitted = your default intro"),
+        outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
+        introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows"),
+        outroSec: z.number().min(1).max(10).optional(),
+      },
     },
-    ({ sourceUrl, title, settings }) => run(async () => ({ ...(await api.projects.create({ sourceUrl, title, settings })), next: "wait_for_project" })),
+    ({ sourceUrl, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+      run(async () => {
+        // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
+        const merged = { ...settings, ...(introAssetId !== undefined ? { introAssetId } : {}), ...(outroAssetId !== undefined ? { outroAssetId } : {}), ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}) };
+        return { ...(await api.projects.create({ sourceUrl, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
+      }),
   );
 
   server.registerTool(
