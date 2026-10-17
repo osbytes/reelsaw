@@ -50,9 +50,10 @@ function MachineChip() {
   const status = useSystemStatus(10_000);
   const why = status.data?.paused;
   if (!why) return null;
+  const reason = why === "disk" ? "disk nearly full" : `${why} busy`;
   return (
-    <Link to="/settings" className="chip bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room">
-      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused ·</span> {why === "disk" ? "disk nearly full" : `${why} busy`}
+    <Link to="/settings" className="chip min-w-0 shrink-0 whitespace-nowrap bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room" aria-label={`Jobs paused: ${reason}`}>
+      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused · {reason}</span>
     </Link>
   );
 }
@@ -133,8 +134,8 @@ export function TopBar() {
         <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
-      <SearchButton />
       <MachineChip />
+      <SearchButton />
       <button className="btn-ghost h-[34px] w-[34px] px-0" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
         <LifeBuoy className="h-4 w-4" />
       </button>

@@ -64,6 +64,7 @@ export function ProjectPage() {
   const compact = width < 900;
   const [mtab, setMtab] = useState<"transcript" | "clips" | "activity">("transcript");
   const sourceRef = useRef<HTMLVideoElement>(null);
+  const previewRef = useRef<HTMLVideoElement>(null);
   // one owner for what's audible: Space, the Play button and the transcript's play-in-context share it
   const playback = usePlayback(sourceRef);
   const playing = playback.playing;
@@ -213,6 +214,16 @@ export function ProjectPage() {
       if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement;
       if (el.closest("input, textarea, select, [contenteditable]")) return;
+      // the clip preview dialog owns Space: it controls the preview video, never the source
+      const pv = previewRef.current;
+      if (pv) {
+        e.preventDefault();
+        if (pv.paused) void pv.play().catch(() => {});
+        else pv.pause();
+        return;
+      }
+      // any other dialog (confirm, report, ...) keeps Space for itself
+      if (el.closest('[role="dialog"]')) return;
       if (!sourceRef.current) return;
       e.preventDefault(); // also stops Space from re-clicking the focused button
       togglePlay(); // pauses / resumes play-in-context too, keeping it armed
@@ -669,7 +680,7 @@ export function ProjectPage() {
                 <X className="h-4 w-4" />
               </Dialog.Close>
             </div>
-            {preview?.videoUrl && <video src={preview.videoUrl} poster={preview.thumbnailUrl ?? undefined} controls autoPlay playsInline className="aspect-[9/16] max-h-[70vh] w-full rounded-[12px] bg-black object-contain" />}
+            {preview?.videoUrl && <video ref={previewRef} src={preview.videoUrl} poster={preview.thumbnailUrl ?? undefined} controls autoPlay playsInline className="aspect-[9/16] max-h-[70vh] w-full rounded-[12px] bg-black object-contain" />}
             <div className="flex items-center justify-between text-xs text-ink2">
               <span className="font-mono">
                 {preview && `${formatTime(preview.startSec)}–${formatTime(preview.endSec)}`}
