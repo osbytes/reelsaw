@@ -73,6 +73,13 @@ project already hit the problem it prevents.
   in the same transaction as the write.
 - **Migrations come from the schema.** Change `db/schema.ts`, then run
   `npx drizzle-kit generate --name <what>`. Never edit an applied migration.
+- **Don't rebuild what exists.** Before writing a utility, matcher, parser, retry loop or UI
+  primitive, look in this order: something in the repo already does it (`apps/*/src/lib`,
+  `components`, `packages/shared`, the `reelsaw` CLI); a dependency already in a `package.json`
+  does it (fuzzy search is Fuse.js, comboboxes are Radix + cmdk, schemas are zod, dates are
+  the platform); a canonical, maintained library does it. Only then write it, and put it where the
+  next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
+  question to answer in review is "what did you search for first?"
 
 ### Quality
 
