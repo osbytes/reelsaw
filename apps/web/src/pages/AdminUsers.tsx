@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal } from "../components/ui";
+import { ConfirmDialog, Modal, Skeleton } from "../components/ui";
 
 type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null };
 type Usage = { id: string; projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
@@ -51,8 +51,8 @@ export function AdminUsersPage() {
   const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
-  const usage = useQuery(trpc.admin.usage.queryOptions({ days }));
-  const list = useQuery({ ...trpc.admin.users.list.queryOptions({ search: search || undefined }), refetchInterval: 15_000 });
+  const usage = useQuery({ ...trpc.admin.usage.queryOptions({ days }), placeholderData: keepPreviousData });
+  const list = useQuery({ ...trpc.admin.users.list.queryOptions({ search: search || undefined }), refetchInterval: 15_000, placeholderData: keepPreviousData });
   const done = (msg: string) => () => {
     toast(msg);
     void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
@@ -100,7 +100,9 @@ export function AdminUsersPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-[28px] font-bold tracking-tight">Users</h1>
-            <p className="mt-1 min-h-5 text-sm text-ink2">{list.data ? `${rows.length} accounts${pending ? ` · ${pending} waiting for approval` : ""}` : ""}</p>
+            <div className="mt-1 flex min-h-5 items-center text-sm text-ink2">
+              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `${rows.length} accounts${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <select className="input w-[7.5rem]" value={days} onChange={(e) => setDays(Number(e.target.value) as (typeof WINDOWS)[number])} aria-label="Usage window">
@@ -115,10 +117,9 @@ export function AdminUsersPage() {
         </div>
 
         <div className="min-h-10 text-[13px]">
-          {list.isLoading && <span className="text-ink3">Loading…</span>}
           {list.error && <span className="text-err">✕ {list.error.message}</span>}
           {list.data && rows.length === 0 && <span className="text-ink3">No accounts match.</span>}
-          {rows.length > 0 && (
+          {(rows.length > 0 || list.isPending) && (
             <div className="rounded-[16px] border border-line bg-panel">
               <table className="w-full table-fixed border-separate border-spacing-0">
                 <caption className="sr-only">Accounts, with usage over the last {days} days</caption>
@@ -147,6 +148,26 @@ export function AdminUsersPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {list.isPending &&
+                    Array.from({ length: 5 }, (_, i) => {
+                      const cell = "border-t border-line px-3 align-middle";
+                      return (
+                        <tr key={`sk-${i}`} className="h-[84px] min-[900px]:h-[60px]" aria-hidden>
+                          <td className={cell}>
+                            <Skeleton className={`h-4 ${["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5"][i]}`} />
+                            <Skeleton className="mt-1.5 h-3 w-3/5" />
+                            <Skeleton className="mt-1.5 h-3 w-4/5 min-[900px]:hidden" />
+                          </td>
+                          <td className={`${cell} ${FULL}`}><Skeleton className="h-3.5 w-16" /></td>
+                          {[0, 1, 2].map((j) => (
+                            <td key={j} className={`${cell} ${FULL}`}><Skeleton className="ml-auto h-3.5 w-8" /></td>
+                          ))}
+                          <td className={`${cell} ${FULL}`}><Skeleton className="ml-auto h-3.5 w-12" /></td>
+                          <td className={`${cell} ${FULL}`}><Skeleton className="h-3.5 w-14" /></td>
+                          <td className={cell}><Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[900px]:w-[11rem]" /></td>
+                        </tr>
+                      );
+                    })}
                   {rows.map((r) => {
                     const st = STATUS[r.status];
                     const self = r.id === me.data?.id;
@@ -325,6 +346,9 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               <label htmlFor={`limit-${key}`} className="text-xs font-semibold text-ink2">
                 {label}
               </label>
+              {q.isPending ? (
+                <Skeleton className="h-[38px] w-full rounded-[10px]" />
+              ) : (
               <input
                 id={`limit-${key}`}
                 className="input"
@@ -334,12 +358,17 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                 placeholder={q.data ? `instance: ${q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]}` : ""}
                 onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
               />
+              )}
+              {q.isPending ? (
+                <Skeleton className="h-1 w-full rounded-full" />
+              ) : (
               <div className="h-1 w-full overflow-hidden rounded-full bg-sunk" aria-hidden>
                 <div className={`h-full rounded-full ${state?.bar ?? "bg-acc"}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
               </div>
+              )}
               <div className="flex min-h-4 items-center justify-between gap-2 text-xs tabular-nums text-ink3">
                 <span>
-                  {used === undefined ? "…" : cap ? `${num.format(used)} of ${num.format(cap)} ${unit}` : `${num.format(used)} ${unit}, no cap`} · {window}
+                  {used === undefined ? <Skeleton className="inline-block h-3 w-32 align-middle" /> : cap ? `${num.format(used)} of ${num.format(cap)} ${unit}` : `${num.format(used)} ${unit}, no cap`} · {window}
                 </span>
                 <span className={`shrink-0 ${state?.tone ?? ""}`}>{state ? `${state.glyph} ${state.word}` : ""}</span>
               </div>
