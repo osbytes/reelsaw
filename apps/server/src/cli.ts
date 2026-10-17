@@ -23,6 +23,8 @@ import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
  *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies) with status
+ *   storage [sweep [--dry-run]]            disk use: unique, scratch-only, duplicate-source, expired-but-present bytes;
+ *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
  *   logs    <id> [n=60]                     log lines mentioning a project/clip/job id from LOG_FILE (survives redeploys)
@@ -39,6 +41,8 @@ import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
 import { sweepRetention } from "./retention.js";
+import { sweepScratch } from "./storage/sweep.js";
+import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
@@ -281,8 +285,24 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const file = await svc.storage.ensureLocal(c.outputKey, `${svc.paths.tmp}/hear-${c.id}.mp4`);
     const start = Number(pos[1] ?? 0);
     const dur = Number(pos[2] ?? c.endSec - c.startSec);
-    const r = await words(svc, await ffmpegWav(svc, file, start, dur));
+    const r = await words(svc, await ffmpegWav(svc, file, start, dur)).finally(() => void import("node:fs/promises").then((f) => f.rm(file, { force: true })));
     console.log(`${r.model} hears (rendered ${start.toFixed(1)}s +${dur.toFixed(1)}s):\n${r.text}`);
+  },
+
+  async storage(svc) {
+    if (pos[0] === "sweep") {
+      const dry = args.includes("--dry-run");
+      const r = await sweepScratch(svc, { dryRun: dry });
+      table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
+      console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
+      return;
+    }
+    const r = await storageReport(svc);
+    console.log(`unique bytes under DATA_DIR (hardlinks counted once)  ${formatBytes(r.uniqueBytes)}`);
+    console.log(`scratch-only leftovers (sweep would remove)          ${formatBytes(r.scratchOrphanBytes)} in ${r.scratchOrphanFiles} file(s)`);
+    console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
+    console.log(`expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`);
+    if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");
   },
 
   async stuck(svc) {
@@ -416,7 +436,7 @@ async function userByEmail(svc: Services, email: string | undefined) {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
+import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
@@ -473,13 +474,21 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     await u.emit(projectId, "clip.done", { clipId, index: clip.index });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
-    for (const k of [cur.outputKey, cur.thumbnailKey]) if (k && k !== outputKey && k !== thumbnailKey) u.afterCommit(() => svc.storage.delete(k));
+    for (const k of [cur.outputKey, cur.thumbnailKey]) {
+      if (!k || k === outputKey || k === thumbnailKey) continue;
+      u.afterCommit(async () => {
+        await svc.storage.delete(k);
+        await removeScratchClip(svc, projectId, k);
+      });
+    }
     return true;
   });
   if (!committed) {
     log.info({ gen }, "render finished for a superseded version; discarding its output");
     await svc.storage.delete(outputKey).catch(() => {});
     await svc.storage.delete(thumbnailKey).catch(() => {});
+    await fs.rm(outPath, { force: true }).catch(() => {});
+    await fs.rm(thumbPath, { force: true }).catch(() => {});
   }
 }
 

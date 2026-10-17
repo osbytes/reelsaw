@@ -6,6 +6,7 @@
 import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
+import { removeScratchSource } from "./storage/sweep.js";
 
 export async function sweepRetention(svc: Services): Promise<{ sources: number; clips: number }> {
   const { config } = svc;
@@ -15,7 +16,8 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
   if (config.SOURCE_RETENTION_DAYS > 0) {
     const cutoff = new Date(Date.now() - config.SOURCE_RETENTION_DAYS * 86_400_000);
     const rows = await svc.database.db.query.projects.findMany({
-      where: and(isNotNull(schema.projects.sourceKey), isNull(schema.projects.sourceExpiredAt), lt(schema.projects.updatedAt, cutoff), sql`${schema.projects.status} in ('done', 'failed')`),
+      // uploads are skipped: their upload object is deleted once the source is stored, so the source is the only copy
+      where: and(eq(schema.projects.sourceType, "url"), isNotNull(schema.projects.sourceKey), isNull(schema.projects.sourceExpiredAt), lt(schema.projects.updatedAt, cutoff), sql`${schema.projects.status} in ('done', 'failed')`),
       columns: { id: true, sourceKey: true },
       limit: 200,
     });
@@ -24,7 +26,10 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
         const [cur] = await u.db.update(schema.projects).set({ sourceExpiredAt: new Date(), sourceBytes: null }).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.sourceExpiredAt))).returning({ id: schema.projects.id });
         if (!cur) return;
         await u.emit(p.id, "source.expired", { days: config.SOURCE_RETENTION_DAYS });
-        u.afterCommit(() => svc.storage.delete(p.sourceKey!).catch((err) => log.warn({ err, projectId: p.id }, "source delete failed")));
+        u.afterCommit(async () => {
+          await svc.storage.delete(p.sourceKey!).catch((err) => log.warn({ err, projectId: p.id }, "source delete failed"));
+          await removeScratchSource(svc, p.id); // the local store hardlinks it: without this no disk is freed
+        });
         sources++;
       });
     }
