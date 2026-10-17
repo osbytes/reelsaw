@@ -10,6 +10,7 @@ import { useMe, useSystemStatus } from "../lib/account";
 import { useToast } from "../lib/toast";
 import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
+import { youtubeId } from "../lib/links";
 
 const LENGTHS = [
   { id: "short", label: "< 30s", min: 10, max: 30 },
@@ -21,18 +22,6 @@ const LENGTHS = [
 const SAMPLE = "This is how your captions will look on every clip you make".split(" ");
 const SAMPLE_WORDS: PreviewWord[] = SAMPLE.map((text, i) => ({ text, start: i * 0.38, end: i * 0.38 + 0.34 }));
 const SAMPLE_LOOP = SAMPLE_WORDS.at(-1)!.end + 0.6;
-
-function youtubeId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\.|^m\./, "");
-    if (host === "youtu.be") return u.pathname.slice(1) || null;
-    if (host.endsWith("youtube.com")) return u.searchParams.get("v") ?? /^\/(?:shorts|live|embed)\/([\w-]+)/.exec(u.pathname)?.[1] ?? null;
-  } catch {
-    /* not a url yet */
-  }
-  return null;
-}
 
 function useDebounced<T>(v: T, ms: number) {
   const [d, setD] = useState(v);

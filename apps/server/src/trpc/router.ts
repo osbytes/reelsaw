@@ -454,15 +454,15 @@ export const appRouter = router({
   /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
   searchIndex: protectedProcedure.query(async ({ ctx }) => {
     const db = ctx.svc.database.db;
-    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
+    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true, sourceUrl: true, updatedAt: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
     const ids = projects.map((p) => p.id);
     const clips = ids.length
-      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, thumbnailKey: true }, limit: 5000 })
+      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, endSec: true, outputKey: true, thumbnailKey: true }, limit: 5000 })
       : [];
     const titleOf = new Map(projects.map((p) => [p.id, p.title]));
     return {
-      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
-      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
+      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, sourceUrl: p.sourceUrl, updatedAt: p.updatedAt.toISOString(), thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
+      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, endSec: c.endSec, videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
     };
   }),
 
