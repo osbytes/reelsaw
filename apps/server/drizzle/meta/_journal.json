@@ -169,6 +169,13 @@
       "when": 1792274180699,
       "tag": "0023_clip_bumpers_drop_off",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792274908665,
+      "tag": "0024_bumper_thumbs",
+      "breakpoints": true
     }
   ]
 }

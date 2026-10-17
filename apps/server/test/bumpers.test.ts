@@ -47,6 +47,14 @@ describe("resolveClipBumpers", () => {
     assert.deepEqual(resolveClipBumpers(project, { bumpers: { outro: null } }), { introId: "pi", outroId: null, fromClip: ["outro"] });
     assert.deepEqual(resolveClipBumpers(project, { bumpers: { intro: null, outro: null } }), { introId: null, outroId: null, fromClip: ["intro", "outro"] });
   });
+  it("resolves seconds: the clip's own for its own pick, else the project's, else left to the asset", () => {
+    const p = { introAssetId: "pi", outroAssetId: "po", introSec: 5 };
+    assert.deepEqual(resolveClipBumpers(p, {}), { introId: "pi", outroId: "po", introSec: 5, fromClip: [] });
+    assert.deepEqual(resolveClipBumpers(p, { bumpers: { introSec: 2 } }), { introId: "pi", outroId: "po", introSec: 5, fromClip: [] }, "seconds without a pick do not apply");
+    assert.deepEqual(resolveClipBumpers(p, { bumpers: { intro: "ci", introSec: 2, outroSec: 9 } }), { introId: "ci", outroId: "po", introSec: 2, fromClip: ["intro"] });
+    assert.deepEqual(resolveClipBumpers(p, { bumpers: { intro: "ci" } }), { introId: "ci", outroId: "po", fromClip: ["intro"] }, "a clip's own asset ignores the project's seconds");
+    assert.deepEqual(resolveClipBumpers(p, { bumpers: { intro: null, introSec: 4 } }), { introId: null, outroId: "po", fromClip: ["intro"] });
+  });
   it("lets a clip add just one slot when the project has none, and treats project null/unset as none", () => {
     assert.deepEqual(resolveClipBumpers({ introAssetId: null }, { bumpers: { outro: "co" } }), { introId: null, outroId: "co", fromClip: ["outro"] });
     assert.deepEqual(resolveClipBumpers({}, {}), { introId: null, outroId: null, fromClip: [] });

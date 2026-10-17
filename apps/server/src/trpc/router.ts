@@ -8,14 +8,14 @@ import { router, protectedProcedure, publicProcedure, signedInProcedure, adminPr
 import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { requestRender, reopenProject } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
-import { bumperKind, bumperProblem, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { bumperKind, bumperProblem, ensureBumperThumb, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -292,7 +292,7 @@ export const appRouter = router({
     })),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
-      const { introAssetId: _i, outroAssetId: _o, ...rest } = input; // intro/outro change only through `bumpers.*`
+      const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`
       const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
       return ctx.svc.tx(async (u) => {
         const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
@@ -320,12 +320,25 @@ export const appRouter = router({
         where a.user_id = ${ctx.user.id}
         group by a.id`);
       const usedBy = new Map((used.rows as Array<{ id: string; n: number }>).map((r) => [r.id, r.n]));
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), usedBy: usedBy.get(r.id) ?? 0 });
+      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usedBy.get(r.id) ?? 0 });
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
         assets: rows.filter((r) => !r.deletedAt).map(pub),
         deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
       };
+    }),
+    /**
+     * Change how long an image lasts. Assets are otherwise immutable; the normalised file is named by its
+     * seconds, so projects pick up the new length on their next render (the web says "re-render to apply").
+     */
+    update: protectedProcedure.input(z.object({ id: z.string(), imageSeconds: bumperSecondsSchema })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        const [a] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id))).for("update");
+        if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+        if (a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
+        await u.db.update(schema.bumperAssets).set({ durationSec: input.imageSeconds }).where(eq(schema.bumperAssets.id, a.id));
+        return { ok: true };
+      });
     }),
     /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. */
     create: protectedProcedure
@@ -373,6 +386,9 @@ export const appRouter = router({
             u.afterCommit(async () => {
               try {
                 await svc.storage.putFile(sourceKey, local);
+                // the picker thumbnail; if this fails the media route makes it on first request
+                const thumbKey = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
+                if (thumbKey) await svc.database.db.update(schema.bumperAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.bumperAssets.id, id)).catch(() => {});
               } finally {
                 await fs.rm(local, { force: true }).catch(() => {});
               }
@@ -772,17 +788,18 @@ export const appRouter = router({
      * default has one) or a library asset id. Re-renders every finished clip only when `rerender` is set.
      */
     setBumpers: protectedProcedure
-      .input(z.object({ id: z.string(), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), rerender: z.boolean().default(false) }))
+      .input(z.object({ id: z.string(), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         const rerendered = await svc.tx(async (u) => {
           const p = await ownedProject(u.db, ctx.user.id, input.id);
           const mine = await userDefaults(u.db, ctx.user.id);
           let expr = sql`${schema.projects.settings}`;
-          const patch: Record<string, string | null> = {};
-          for (const [slot, key, choice] of [["intro", "introAssetId", input.intro], ["outro", "outroAssetId", input.outro]] as const) {
+          const patch: Record<string, string | number | null> = {};
+          for (const [slot, key, choice, secs] of [["intro", "introAssetId", input.intro, input.introSec], ["outro", "outroAssetId", input.outro, input.outroSec]] as const) {
             if (choice === undefined) continue;
-            expr = sql`(${expr}) - ${key}::text`;
+            expr = sql`(${expr}) - ${key}::text - ${`${slot}Sec`}::text`;
+            if (secs !== undefined && choice !== "none") patch[`${slot}Sec`] = secs;
             if (choice === "none") patch[key] = null;
             else if (choice === "default") {
               if (mine[key]) patch[key] = mine[key]!;
@@ -1021,7 +1038,7 @@ export const appRouter = router({
         const sectionsChanged = input.layoutSections !== undefined && JSON.stringify(input.layoutSections ?? []) !== JSON.stringify(c.layoutSections ?? []);
         const styleChanged = input.style !== undefined && JSON.stringify(input.style ?? null) !== JSON.stringify(c.style ?? null);
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
-        const cleanBumpers = input.bumpers && Object.keys(input.bumpers).some((k) => input.bumpers![k as "intro" | "outro"] !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}) } : null;
+        const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
         const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged; // these are burned into the video
         const updated = await svc.tx(async (u) => {
@@ -1062,7 +1079,7 @@ export const appRouter = router({
      * with a render request per clip only when `rerender` is set.
      */
     setBumpersMany: protectedProcedure
-      .input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), rerender: z.boolean().default(false) }))
+      .input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         return svc.tx(async (u) => {
@@ -1071,12 +1088,12 @@ export const appRouter = router({
           if (clips.length !== new Set(input.clipIds).size) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
           await assertOwnedBumpers(u.db, ctx.user.id, [input.intro, input.outro].map((x) => (x === "none" || x === "inherit" ? null : x)));
           const ids = clips.map((c) => c.id);
-          for (const [slot, choice] of [["intro", input.intro], ["outro", input.outro]] as const) {
+          for (const [slot, choice, secs] of [["intro", input.intro, input.introSec], ["outro", input.outro, input.outroSec]] as const) {
             if (choice === undefined) continue;
-            const patch = choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice };
+            const patch = choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice, ...(secs !== undefined && choice !== "none" ? { [`${slot}Sec`]: secs } : {}) };
             await u.db
               .update(schema.clips)
-              .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
+              .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
               .where(inArray(schema.clips.id, ids));
           }
           let rerendered = 0;
