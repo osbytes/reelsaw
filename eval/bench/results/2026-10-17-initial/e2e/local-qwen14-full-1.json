@@ -1,0 +1,92 @@
+{
+  "profile": "local-qwen14",
+  "env": {
+    "AI_MODEL": "compat:qwen2.5:14b",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "projectId": "9e82471a-7ea1-40fe-9596-1296e444302b",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T15:51:40.056Z",
+  "finishedAt": "2026-10-17T16:11:37.214Z",
+  "stages": {
+    "ingest": 15.5,
+    "transcribe": 290.6,
+    "refine": 601.7,
+    "analyze": 236.6,
+    "render": 46.7
+  },
+  "totalSec": 1193.1,
+  "models": {
+    "language": "compat:qwen2.5:14b",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Teacher's Lesson on Revenge",
+      "hook": "Success is the only revenge",
+      "startSec": 11.5,
+      "endSec": 60.7,
+      "score": 68,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 1,
+      "title": "Exceptional vs Average",
+      "hook": "Be Different",
+      "startSec": 522.7,
+      "endSec": 581.9,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Risk vs Reward",
+      "hook": "Nothing to Lose",
+      "startSec": 886.9,
+      "endSec": 941.5,
+      "score": 67,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 46,
+    "failed": 0,
+    "totalSec": 2118.5,
+    "p50Ms": 42510,
+    "inputTokens": 31863,
+    "outputTokens": 7534,
+    "byStage": {
+      "refine.disfluency": {
+        "calls": 38,
+        "totalSec": 1740.4
+      },
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 141.8
+      },
+      "analyze": {
+        "calls": 6,
+        "totalSec": 236.4
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  },
+  "step": "full"
+}

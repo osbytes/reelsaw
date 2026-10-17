@@ -1,0 +1,128 @@
+{
+  "at": "2026-10-17T19:35:42.754Z",
+  "offline": false,
+  "noCache": true,
+  "profiles": [
+    {
+      "name": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1",
+        "TRANSCRIPT_ALIGN_MODEL": "gateway:openai/whisper-1"
+      }
+    }
+  ],
+  "report": [
+    {
+      "profile": "cloud-best",
+      "suite": "selection-model",
+      "results": [
+        {
+          "id": "apollo/chunk-0",
+          "pass": true,
+          "metrics": {
+            "candidates": 4,
+            "outside": 0,
+            "snappable": 4,
+            "inRange": 3,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 15.7
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-1",
+          "pass": true,
+          "metrics": {
+            "candidates": 7,
+            "outside": 0,
+            "snappable": 7,
+            "inRange": 7,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 25.3
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-2",
+          "pass": true,
+          "metrics": {
+            "candidates": 7,
+            "outside": 0,
+            "snappable": 7,
+            "inRange": 5,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 29.1
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-3",
+          "pass": true,
+          "metrics": {
+            "candidates": 4,
+            "outside": 0,
+            "snappable": 4,
+            "inRange": 4,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 15.3
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "passRate": {
+          "value": 1,
+          "better": "higher"
+        },
+        "candidatesPerChunk": {
+          "value": 5.5,
+          "better": "higher"
+        },
+        "inRangeRate": {
+          "value": 0.86,
+          "better": "higher",
+          "tolerance": 0.1
+        },
+        "overlapRate": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0.1
+        },
+        "weakHookRate": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0.1
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 85380,
+      "meter": {
+        "llm": {
+          "calls": 4,
+          "errors": 0,
+          "p50Ms": 15645,
+          "p95Ms": 29128,
+          "totalMs": 85318,
+          "inputTokens": 15660,
+          "outputTokens": 3358,
+          "costUsd": 0.09735
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    }
+  ]
+}

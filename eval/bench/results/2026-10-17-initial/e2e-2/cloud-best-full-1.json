@@ -1,0 +1,37 @@
+{
+  "profile": "cloud-best",
+  "env": {
+    "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+    "TRANSCRIPTION_MODEL": "gateway:openai/gpt-4o-transcribe"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "1b76f4ee-3571-42a7-8cb1-1f4f2efbf714",
+  "status": "failed",
+  "error": "Transcription returned no words. Is the audio silent?",
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T17:30:20.264Z",
+  "finishedAt": "2026-10-17T17:34:16.646Z",
+  "stages": {
+    "ingest": 13.3
+  },
+  "totalSec": 233.8,
+  "models": {},
+  "clips": [],
+  "llm": {
+    "calls": 0,
+    "failed": 0,
+    "totalSec": 0,
+    "p50Ms": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "byStage": {}
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

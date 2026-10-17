@@ -21,6 +21,10 @@ import { toSentences } from "../pipeline/transcript.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS } from "../quota.js";
+import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
+
+/** The models a new stage would run with, for expected-time lookups. */
+const currentModels = (svc: Services): Models => ({ language: svc.config.AI_MODEL, transcription: svc.config.TRANSCRIPTION_MODEL });
 
 function publicClip(c: schema.Clip) {
   return {
@@ -359,6 +363,11 @@ export const appRouter = router({
       const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
       return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
     }),
+    /** Expected vs actual seconds per stage on this machine with the current models (Settings → System → Machine; admins only, so hosted users never see the operator's hardware). */
+    processingTimes: adminProcedure.query(async ({ ctx }) => {
+      const models = currentModels(ctx.svc);
+      return processingTimes(models, await loadHistory(ctx.svc.database.db), defaultFactors(models, ctx.svc.config));
+    }),
   }),
 
   /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
@@ -411,7 +420,10 @@ export const appRouter = router({
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
       const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true, deletedFlags: true } });
-      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null };
+      // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
+      const models = currentModels(ctx.svc);
+      const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, ctx.svc.config)) : null;
+      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates };
     }),
 
     create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {

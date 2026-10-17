@@ -1,0 +1,87 @@
+{
+  "profile": "cloud-gemini-flash",
+  "env": {
+    "AI_MODEL": "gateway:google/gemini-2.5-flash",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "e4b3fcca-0541-4250-be83-944b641f83e0",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T17:25:12.628Z",
+  "finishedAt": "2026-10-17T17:30:16.995Z",
+  "stages": {
+    "ingest": 13.3,
+    "transcribe": 74.3,
+    "refine": 50.6,
+    "analyze": 78.9,
+    "render": 80.2
+  },
+  "totalSec": 300.7,
+  "models": {
+    "language": "gateway:google/gemini-2.5-flash"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Embrace The Hard: Your Path To Success",
+      "hook": "If it's hard, that's good.",
+      "startSec": 586.3,
+      "endSec": 615.8,
+      "score": 75,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Mastering The Soul-Crushing Middle",
+      "hook": "Embrace the lonely middle",
+      "startSec": 312.6,
+      "endSec": 364.7,
+      "score": 85,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Why an \"Okay\" Life is Terrifying",
+      "hook": "An \"okay\" life is terrifying.",
+      "startSec": 1060.8,
+      "endSec": 1117.6,
+      "score": 74,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 53,
+    "failed": 0,
+    "totalSec": 384.2,
+    "p50Ms": 4671,
+    "inputTokens": 36619,
+    "outputTokens": 76085,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 16.8
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 134.4
+      },
+      "analyze": {
+        "calls": 17,
+        "totalSec": 233.2
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

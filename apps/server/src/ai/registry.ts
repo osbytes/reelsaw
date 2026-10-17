@@ -11,7 +11,10 @@ import type { Logger } from "../log.js";
 export interface AiService {
   languageModel(id?: string): Promise<LanguageModel>;
   transcriptionModel(id?: string): Promise<TranscriptionModel>;
-  /** Provider-specific options that request word-level timestamps for a transcription model id. */
+  /**
+   * Provider-specific options that request word-level timestamps for a transcription model id,
+   * keyed by the vendor the options belong to (see `underlyingProvider`).
+   */
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
   /** Static validation of configured models + required keys. No network calls. */
   check(): Promise<void>;
@@ -38,6 +41,29 @@ const wordTimestampOptions: Record<string, Record<string, unknown>> = {
 export function providerOf(id: string): string {
   return id.split(":")[0]!;
 }
+
+/**
+ * The vendor whose options a model understands. Direct providers are themselves; through the
+ * Vercel AI Gateway the model id carries the vendor ("gateway:openai/whisper-1" → "openai"), and
+ * the gateway forwards `providerOptions.<vendor>` unchanged. Microsoft models are served via Azure.
+ */
+export function underlyingProvider(id: string): string {
+  const provider = providerOf(id);
+  if (provider !== "gateway") return provider;
+  const vendor = id.slice(provider.length + 1).split("/")[0] ?? "";
+  return vendor === "microsoft" ? "azure" : vendor;
+}
+
+/**
+ * OpenAI's strict structured outputs (the AI SDK default, also what the AI Gateway forwards) reject
+ * any schema with a non-required property, and ours have some on purpose (`caption` defaults to "",
+ * `confidence` / `relevance` are optional so weaker models can omit them). Ask for the lenient
+ * json_schema mode instead: the model still gets the schema, the pipeline keeps its own salvage
+ * and validation. Other providers ignore the option.
+ */
+const lenientJsonSchema: LanguageModelMiddleware = {
+  transformParams: async ({ params }) => ({ ...params, providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } } }),
+};
 
 export function createAi(config: Config, log: Logger, middleware?: LanguageModelMiddleware | null): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
@@ -151,12 +177,12 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
   return {
     languageModel: async (id = config.AI_MODEL) => {
       const model = (await resolve("language", id)) as Exclude<LanguageModel, string>;
-      // LLM_TRACE capture (logs / Langfuse) wraps every model handed out
-      return middleware ? (wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware }) as LanguageModel) : model;
+      // every model handed out: lenient OpenAI schemas, then LLM_TRACE capture (logs / Langfuse) when on
+      return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: middleware ? [lenientJsonSchema, middleware] : lenientJsonSchema }) as LanguageModel;
     },
     transcriptionModel: async (id = config.TRANSCRIPTION_MODEL) => (await resolve("transcription", id)) as TranscriptionModel,
     transcriptionOptions: (id = config.TRANSCRIPTION_MODEL) => {
-      const p = providerOf(id);
+      const p = underlyingProvider(id);
       return { [p]: wordTimestampOptions[p] ?? {} };
     },
     async check() {

@@ -1,0 +1,81 @@
+{
+  "profile": "cloud-best",
+  "env": {
+    "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "refine",
+  "since": "2026-10-17T18:37:33.140Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:37:33.140Z",
+  "finishedAt": "2026-10-17T18:42:33.478Z",
+  "stages": {
+    "refine": 31.6,
+    "render": 267.6
+  },
+  "totalSec": 299.2,
+  "models": {
+    "language": "gateway:anthropic/claude-sonnet-4.5"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "If It's Hard, Good.",
+      "hook": "This is what hard feels like.",
+      "startSec": 586.3,
+      "endSec": 615.8,
+      "score": 92,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Why You Must Master the Boring Middle",
+      "hook": "Master the boring middle",
+      "startSec": 335.3,
+      "endSec": 359.1,
+      "score": 86,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Define Your Story: Hero or Victim?",
+      "hook": "Winners make it happen",
+      "startSec": 1142.1,
+      "endSec": 1173,
+      "score": 80,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 36,
+    "failed": 0,
+    "totalSec": 78.6,
+    "p50Ms": 2028,
+    "inputTokens": 20237,
+    "outputTokens": 4926,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 6.8
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 71.9
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

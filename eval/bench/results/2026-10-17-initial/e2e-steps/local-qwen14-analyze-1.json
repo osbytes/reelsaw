@@ -1,0 +1,82 @@
+{
+  "profile": "local-qwen14",
+  "env": {
+    "AI_MODEL": "compat:qwen2.5:14b",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "step": "analyze",
+  "since": "2026-10-17T18:53:57.700Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:53:57.700Z",
+  "finishedAt": "2026-10-17T19:06:06.271Z",
+  "stages": {
+    "analyze": 206.5,
+    "render": 518.6
+  },
+  "totalSec": 725.1,
+  "models": {
+    "language": "compat:qwen2.5:14b",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The Boring Middle",
+      "hook": "Winning happens alone in the boring middle",
+      "startSec": 551.2,
+      "endSec": 605.1,
+      "score": 78,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Teacher's Advice on Revenge",
+      "hook": "Success is the only revenge",
+      "startSec": 0,
+      "endSec": 53.9,
+      "score": 72,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Apology from Father",
+      "hook": "Middle Eastern father apologizes",
+      "startSec": 1090.3,
+      "endSec": 1150.7,
+      "score": 68,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 6,
+    "failed": 0,
+    "totalSec": 205.5,
+    "p50Ms": 32425,
+    "inputTokens": 12744,
+    "outputTokens": 1670,
+    "byStage": {
+      "analyze": {
+        "calls": 6,
+        "totalSec": 205.5
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

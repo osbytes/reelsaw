@@ -1,0 +1,53 @@
+{
+  "$comment": "Profiles for `pnpm eval <suites> --matrix eval/bench/models.json [--profiles a,b]` and `pnpm bench:e2e --matrix ...`. Each is a set of env overrides on the repo .env; keys (AI_GATEWAY_API_KEY, OPENAI_API_KEY, ...) stay in .env. Cloud models go through the Vercel AI Gateway (one key, per-request cost in the report); local ones through compat (Ollama) and openai+OPENAI_BASE_URL (Speaches). Edit freely; this is a starting grid, not a baseline. Two rules learned the hard way: (1) STT must return word timestamps: whisper-1, deepgram, assemblyai, groq whisper and Speaches do; openai/gpt-4o-transcribe does not (segments only), so it is not in the grid. (2) A profile must set TRANSCRIPT_ALIGN_MODEL to match its STT, or it inherits the .env value (a local Speaches model on a self-hosted box) and render becomes the slowest stage: every cut is re-aligned on the CPU.",
+  "profiles": {
+    "cloud-cheap": {
+      "AI_MODEL": "gateway:openai/gpt-4o-mini",
+      "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1",
+      "TRANSCRIPT_ALIGN_MODEL": "gateway:openai/whisper-1"
+    },
+    "cloud-haiku": {
+      "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+      "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1",
+      "TRANSCRIPT_ALIGN_MODEL": "gateway:openai/whisper-1"
+    },
+    "cloud-gemini-flash": {
+      "AI_MODEL": "gateway:google/gemini-2.5-flash",
+      "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1",
+      "TRANSCRIPT_ALIGN_MODEL": "gateway:openai/whisper-1"
+    },
+    "cloud-best": {
+      "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+      "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1",
+      "TRANSCRIPT_ALIGN_MODEL": "gateway:openai/whisper-1"
+    },
+    "stt-deepgram": {
+      "AI_MODEL": "gateway:openai/gpt-4o-mini",
+      "TRANSCRIPTION_MODEL": "deepgram:nova-3",
+      "TRANSCRIPT_ALIGN_MODEL": "deepgram:nova-3"
+    },
+    "stt-groq-whisper": {
+      "AI_MODEL": "gateway:openai/gpt-4o-mini",
+      "TRANSCRIPTION_MODEL": "groq:whisper-large-v3-turbo",
+      "TRANSCRIPT_ALIGN_MODEL": "groq:whisper-large-v3-turbo"
+    },
+    "local-qwen14": {
+      "AI_MODEL": "compat:qwen2.5:14b",
+      "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+      "OPENAI_COMPATIBLE_API_KEY": "ollama",
+      "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+      "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-medium",
+      "OPENAI_BASE_URL": "http://localhost:8000/v1",
+      "OPENAI_API_KEY": "local"
+    },
+    "local-gemma3": {
+      "AI_MODEL": "compat:gemma3:latest",
+      "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+      "OPENAI_COMPATIBLE_API_KEY": "ollama",
+      "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+      "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-medium",
+      "OPENAI_BASE_URL": "http://localhost:8000/v1",
+      "OPENAI_API_KEY": "local"
+    }
+  }
+}

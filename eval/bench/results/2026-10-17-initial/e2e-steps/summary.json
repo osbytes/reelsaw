@@ -1,0 +1,956 @@
+{
+  "at": "2026-10-17T19:33:55.773Z",
+  "source": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+  "maxClips": 3,
+  "profiles": [
+    {
+      "name": "cloud-cheap",
+      "env": {
+        "AI_MODEL": "gateway:openai/gpt-4o-mini",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "local-qwen14",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "local"
+      }
+    },
+    {
+      "name": "local-gemma3",
+      "env": {
+        "AI_MODEL": "compat:gemma3:latest",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "local"
+      }
+    }
+  ],
+  "results": [
+    {
+      "profile": "cloud-cheap",
+      "env": {
+        "AI_MODEL": "gateway:openai/gpt-4o-mini",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:11:05.865Z",
+      "finishedAt": "2026-10-17T18:16:14.225Z",
+      "stages": {
+        "ingest": 12.7,
+        "transcribe": 75.4,
+        "refine": 30.6,
+        "analyze": 9.7,
+        "render": 173.1
+      },
+      "totalSec": 304.4,
+      "models": {
+        "language": "gateway:openai/gpt-4o-mini"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Power of Having Nothing to Lose",
+          "hook": "Nothing to lose? You're dangerous!",
+          "startSec": 92.7,
+          "endSec": 120.8,
+          "score": 68,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Persistence Over Time",
+          "hook": "The secret to big achievements",
+          "startSec": 168.6,
+          "endSec": 205.9,
+          "score": 81,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Finding Strength in Solitude",
+          "hook": "Embrace your solitude",
+          "startSec": 140.4,
+          "endSec": 175.1,
+          "score": 68,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 50,
+        "failed": 0,
+        "totalSec": 86.1,
+        "p50Ms": 1563,
+        "inputTokens": 30028,
+        "outputTokens": 6651,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 4.8
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 54
+          },
+          "analyze": {
+            "calls": 14,
+            "totalSec": 27.4
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "refine",
+      "since": "2026-10-17T18:16:17.425Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:16:17.425Z",
+      "finishedAt": "2026-10-17T18:21:17.767Z",
+      "stages": {
+        "refine": 31.7,
+        "render": 267.8
+      },
+      "totalSec": 299.5,
+      "models": {
+        "language": "gateway:anthropic/claude-haiku-4.5"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Power of Having Nothing to Lose",
+          "hook": "Nothing to lose? You're dangerous!",
+          "startSec": 92.7,
+          "endSec": 120.8,
+          "score": 68,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Persistence Over Time",
+          "hook": "The secret to big achievements",
+          "startSec": 168.6,
+          "endSec": 205.9,
+          "score": 81,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Finding Strength in Solitude",
+          "hook": "Embrace your solitude",
+          "startSec": 140.4,
+          "endSec": 175.1,
+          "score": 68,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 36,
+        "failed": 0,
+        "totalSec": 46.9,
+        "p50Ms": 1225,
+        "inputTokens": 20277,
+        "outputTokens": 4952,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 3.7
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 43
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "analyze",
+      "since": "2026-10-17T18:21:17.880Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:21:17.880Z",
+      "finishedAt": "2026-10-17T18:30:14.237Z",
+      "stages": {
+        "analyze": 19.3,
+        "render": 514.3
+      },
+      "totalSec": 533.6,
+      "models": {
+        "language": "gateway:anthropic/claude-haiku-4.5"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Hard Is the Moat",
+          "hook": "If it's hard, no one else will",
+          "startSec": 594.6,
+          "endSec": 643.6,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Teacher Stops Student's Revenge Fantasy Cold",
+          "hook": "Win so big they forget you exist",
+          "startSec": 0,
+          "endSec": 49.5,
+          "score": 86,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 2,
+          "title": "Having Nothing to Lose Makes You Dangerous",
+          "hook": "No resources equals infinite shots",
+          "startSec": 551.2,
+          "endSec": 605.1,
+          "score": 85,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 17,
+        "failed": 0,
+        "totalSec": 59.7,
+        "p50Ms": 1840,
+        "inputTokens": 29414,
+        "outputTokens": 5066,
+        "byStage": {
+          "analyze": {
+            "calls": 17,
+            "totalSec": 59.6
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "refine",
+      "since": "2026-10-17T18:30:17.335Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:30:17.335Z",
+      "finishedAt": "2026-10-17T18:35:17.676Z",
+      "stages": {
+        "refine": 52.5,
+        "render": 246.9
+      },
+      "totalSec": 299.4,
+      "models": {
+        "language": "gateway:google/gemini-2.5-flash"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Hard Is the Moat",
+          "hook": "If it's hard, no one else will",
+          "startSec": 594.6,
+          "endSec": 643.6,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Teacher Stops Student's Revenge Fantasy Cold",
+          "hook": "Win so big they forget you exist",
+          "startSec": 0,
+          "endSec": 49.5,
+          "score": 86,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 2,
+          "title": "Having Nothing to Lose Makes You Dangerous",
+          "hook": "No resources equals infinite shots",
+          "startSec": 551.2,
+          "endSec": 605.1,
+          "score": 85,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 35,
+        "failed": 0,
+        "totalSec": 159.2,
+        "p50Ms": 3560,
+        "inputTokens": 13743,
+        "outputTokens": 29015,
+        "byStage": {
+          "refine.disfluency": {
+            "calls": 33,
+            "totalSec": 135.1
+          },
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 24.6
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "analyze",
+      "since": "2026-10-17T18:35:17.835Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:35:17.835Z",
+      "finishedAt": "2026-10-17T18:37:29.993Z",
+      "stages": {
+        "analyze": 108.7,
+        "render": 21.3
+      },
+      "totalSec": 130,
+      "models": {
+        "language": "gateway:google/gemini-2.5-flash"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "If It's Hard, Good.",
+          "hook": "This is what hard feels like.",
+          "startSec": 586.3,
+          "endSec": 615.8,
+          "score": 92,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Why You Must Master the Boring Middle",
+          "hook": "Master the boring middle",
+          "startSec": 335.3,
+          "endSec": 359.1,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Define Your Story: Hero or Victim?",
+          "hook": "Winners make it happen",
+          "startSec": 1142.1,
+          "endSec": 1173,
+          "score": 80,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 17,
+        "failed": 0,
+        "totalSec": 295.7,
+        "p50Ms": 12979,
+        "inputTokens": 21988,
+        "outputTokens": 53808,
+        "byStage": {
+          "analyze": {
+            "calls": 17,
+            "totalSec": 295.8
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "refine",
+      "since": "2026-10-17T18:37:33.140Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:37:33.140Z",
+      "finishedAt": "2026-10-17T18:42:33.478Z",
+      "stages": {
+        "refine": 31.6,
+        "render": 267.6
+      },
+      "totalSec": 299.2,
+      "models": {
+        "language": "gateway:anthropic/claude-sonnet-4.5"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "If It's Hard, Good.",
+          "hook": "This is what hard feels like.",
+          "startSec": 586.3,
+          "endSec": 615.8,
+          "score": 92,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Why You Must Master the Boring Middle",
+          "hook": "Master the boring middle",
+          "startSec": 335.3,
+          "endSec": 359.1,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Define Your Story: Hero or Victim?",
+          "hook": "Winners make it happen",
+          "startSec": 1142.1,
+          "endSec": 1173,
+          "score": 80,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 36,
+        "failed": 0,
+        "totalSec": 78.6,
+        "p50Ms": 2028,
+        "inputTokens": 20237,
+        "outputTokens": 4926,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 6.8
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 71.9
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "analyze",
+      "since": "2026-10-17T18:42:33.631Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:42:33.631Z",
+      "finishedAt": "2026-10-17T18:43:53.725Z",
+      "stages": {
+        "analyze": 48.2,
+        "render": 29.2
+      },
+      "totalSec": 77.4,
+      "models": {
+        "language": "gateway:anthropic/claude-sonnet-4.5"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The lonely chapter lasts 5 years not 90 seconds",
+          "hook": "Rocky montage: 90 seconds vs 5 years",
+          "startSec": 1150.1,
+          "endSec": 1190.7,
+          "score": 90,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Why people only cheer at the wrong times",
+          "hook": "They cheer when you don't need it",
+          "startSec": 335.3,
+          "endSec": 364.7,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Nothing to lose makes you dangerous",
+          "hook": "Having nothing makes you incredibly dangerous",
+          "startSec": 541.2,
+          "endSec": 585.7,
+          "score": 80,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 17,
+        "failed": 0,
+        "totalSec": 135.9,
+        "p50Ms": 4095,
+        "inputTokens": 28232,
+        "outputTokens": 5461,
+        "byStage": {
+          "analyze": {
+            "calls": 17,
+            "totalSec": 135.9
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "local-qwen14",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+        "OPENAI_API_KEY": "local"
+      },
+      "run": 1,
+      "step": "refine",
+      "since": "2026-10-17T18:43:56.889Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:43:56.889Z",
+      "finishedAt": "2026-10-17T18:53:57.482Z",
+      "stages": {
+        "refine": 481.2,
+        "render": 117.9
+      },
+      "totalSec": 599.1,
+      "models": {
+        "language": "compat:qwen2.5:14b",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The lonely chapter lasts 5 years not 90 seconds",
+          "hook": "Rocky montage: 90 seconds vs 5 years",
+          "startSec": 1150.1,
+          "endSec": 1190.7,
+          "score": 90,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Why people only cheer at the wrong times",
+          "hook": "They cheer when you don't need it",
+          "startSec": 335.3,
+          "endSec": 364.7,
+          "score": 86,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Nothing to lose makes you dangerous",
+          "hook": "Having nothing makes you incredibly dangerous",
+          "startSec": 541.2,
+          "endSec": 585.7,
+          "score": 80,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 36,
+        "failed": 0,
+        "totalSec": 1464.1,
+        "p50Ms": 35963,
+        "inputTokens": 13224,
+        "outputTokens": 5022,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 97.4
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 1366.7
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "local-qwen14",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+        "OPENAI_API_KEY": "local"
+      },
+      "run": 1,
+      "step": "analyze",
+      "since": "2026-10-17T18:53:57.700Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T18:53:57.700Z",
+      "finishedAt": "2026-10-17T19:06:06.271Z",
+      "stages": {
+        "analyze": 206.5,
+        "render": 518.6
+      },
+      "totalSec": 725.1,
+      "models": {
+        "language": "compat:qwen2.5:14b",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Boring Middle",
+          "hook": "Winning happens alone in the boring middle",
+          "startSec": 551.2,
+          "endSec": 605.1,
+          "score": 78,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Teacher's Advice on Revenge",
+          "hook": "Success is the only revenge",
+          "startSec": 0,
+          "endSec": 53.9,
+          "score": 72,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Apology from Father",
+          "hook": "Middle Eastern father apologizes",
+          "startSec": 1090.3,
+          "endSec": 1150.7,
+          "score": 68,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 6,
+        "failed": 0,
+        "totalSec": 205.5,
+        "p50Ms": 32425,
+        "inputTokens": 12744,
+        "outputTokens": 1670,
+        "byStage": {
+          "analyze": {
+            "calls": 6,
+            "totalSec": 205.5
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "local-gemma3",
+      "env": {
+        "AI_MODEL": "compat:gemma3:latest",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+        "OPENAI_API_KEY": "local"
+      },
+      "run": 1,
+      "step": "refine",
+      "since": "2026-10-17T19:06:09.580Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T19:06:09.580Z",
+      "finishedAt": "2026-10-17T19:32:11.350Z",
+      "stages": {
+        "refine": 1323.5,
+        "render": 237.1
+      },
+      "totalSec": 1560.6,
+      "models": {
+        "language": "compat:gemma3:latest",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Boring Middle",
+          "hook": "Winning happens alone in the boring middle",
+          "startSec": 551.2,
+          "endSec": 605.1,
+          "score": 78,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Teacher's Advice on Revenge",
+          "hook": "Success is the only revenge",
+          "startSec": 0,
+          "endSec": 53.9,
+          "score": 72,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Apology from Father",
+          "hook": "Middle Eastern father apologizes",
+          "startSec": 1090.3,
+          "endSec": 1150.7,
+          "score": 68,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 14,
+        "failed": 14,
+        "totalSec": 5278.5,
+        "p50Ms": 302301,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "byStage": {
+          "refine.disfluency": {
+            "calls": 11,
+            "totalSec": 3959.4
+          },
+          "refine.entities": {
+            "calls": 3,
+            "totalSec": 1319.2
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "local-gemma3",
+      "env": {
+        "AI_MODEL": "compat:gemma3:latest",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+        "OPENAI_API_KEY": "local"
+      },
+      "run": 1,
+      "step": "analyze",
+      "since": "2026-10-17T19:32:11.561Z",
+      "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T19:32:11.561Z",
+      "finishedAt": "2026-10-17T19:33:55.660Z",
+      "stages": {
+        "analyze": 80.5,
+        "render": 21
+      },
+      "totalSec": 101.5,
+      "models": {
+        "language": "compat:gemma3:latest",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Lonely Chapter",
+          "hook": "Let them go.",
+          "startSec": 199.5,
+          "endSec": 229.6,
+          "score": 86,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 1,
+          "title": "Root for Yourself",
+          "hook": "Root for yourself first.",
+          "startSec": 234.5,
+          "endSec": 260.3,
+          "score": 83,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Success is the Revenge",
+          "hook": "Success is the only revenge.",
+          "startSec": 113.5,
+          "endSec": 133.9,
+          "score": 82,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 6,
+        "failed": 0,
+        "totalSec": 78.7,
+        "p50Ms": 11662,
+        "inputTokens": 12172,
+        "outputTokens": 2414,
+        "byStage": {
+          "analyze": {
+            "calls": 6,
+            "totalSec": 78.7
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    }
+  ]
+}

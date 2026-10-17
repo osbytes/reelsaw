@@ -1,0 +1,77 @@
+{
+  "profile": "cloud-gemini-flash",
+  "env": {
+    "AI_MODEL": "gateway:google/gemini-2.5-flash",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "analyze",
+  "since": "2026-10-17T18:35:17.835Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:35:17.835Z",
+  "finishedAt": "2026-10-17T18:37:29.993Z",
+  "stages": {
+    "analyze": 108.7,
+    "render": 21.3
+  },
+  "totalSec": 130,
+  "models": {
+    "language": "gateway:google/gemini-2.5-flash"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "If It's Hard, Good.",
+      "hook": "This is what hard feels like.",
+      "startSec": 586.3,
+      "endSec": 615.8,
+      "score": 92,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Why You Must Master the Boring Middle",
+      "hook": "Master the boring middle",
+      "startSec": 335.3,
+      "endSec": 359.1,
+      "score": 86,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Define Your Story: Hero or Victim?",
+      "hook": "Winners make it happen",
+      "startSec": 1142.1,
+      "endSec": 1173,
+      "score": 80,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 17,
+    "failed": 0,
+    "totalSec": 295.7,
+    "p50Ms": 12979,
+    "inputTokens": 21988,
+    "outputTokens": 53808,
+    "byStage": {
+      "analyze": {
+        "calls": 17,
+        "totalSec": 295.8
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

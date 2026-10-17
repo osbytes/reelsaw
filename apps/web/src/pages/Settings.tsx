@@ -5,6 +5,7 @@ import { ApiKeysSection } from "../components/ApiKeys";
 import { AccountSection } from "../components/AccountSection";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
+import { ProcessingTimes } from "../components/ProcessingTimes";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -122,6 +123,7 @@ export function SettingsPage() {
                 </div>
               ))}
             </div>
+            <ProcessingTimes />
           </section>
         )}
         <div className="grid gap-4 sm:grid-cols-2">

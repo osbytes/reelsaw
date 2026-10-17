@@ -1,0 +1,24 @@
+# A second, isolated stack for end-to-end benchmarks, so the stack you use stays untouched:
+#
+#   PORT=3200 POSTGRES_PORT=127.0.0.1:5442 docker compose -p reelsaw-bench \
+#     -f docker-compose.yml -f eval/bench/compose.bench.yml up -d --build app
+#
+# Own image tag, own volumes (project-prefixed), own ports (PORT / POSTGRES_PORT are the base file's
+# port variables; `eval/bench/e2e.ts` sets them from --base and --db). Reuses the host's Ollama and
+# the main stack's Speaches through host.docker.internal. e2e.ts recreates the app container once
+# per profile with that profile's env on top of the repo .env.
+services:
+  app:
+    image: reelsaw-bench:latest
+    stop_grace_period: 15s
+    environment:
+      SHUTDOWN_GRACE_SECONDS: "10"
+      # auth trusts this origin; e2e.ts signs up and calls the API at it (--base to change both)
+      APP_URL: ${BENCH_APP_URL:-http://localhost:3200}
+      # per-call LLM lines (ms, tokens, stage) land in LOG_FILE; e2e.ts reads them per project
+      LLM_TRACE: logs
+      LLM_TRACE_MAX_CHARS: "200"
+      # (the ASR cache under /data/cache/asr survives container recreation; e2e.ts deletes it per profile so transcription is timed for real)
+      # this stack has no speaches/ollama services of its own: reach the host's
+      OPENAI_BASE_URL: http://host.docker.internal:8000/v1
+      OPENAI_COMPATIBLE_BASE_URL: http://host.docker.internal:11434/v1

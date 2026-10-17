@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { extractEntities, biasProviderOptions, correctTranscript } from "../../pipeline/entities.js";
-import { providerOf } from "../../ai/registry.js";
+import { underlyingProvider } from "../../ai/registry.js";
 import { isUnavailable, type CaseResult, type Suite } from "../framework.js";
 import { evalAi, transcribeCached } from "../asr.js";
 
@@ -90,7 +90,7 @@ export const transcriptionSuite: Suite = {
         try {
           const audio = new Uint8Array(await fs.readFile(file));
           const entities = extractEntities(c.meta);
-          const bias = cfg.TRANSCRIPT_BIAS ? biasProviderOptions(providerOf(modelId), entities) : {};
+          const bias = cfg.TRANSCRIPT_BIAS ? biasProviderOptions(underlyingProvider(modelId), entities) : {};
           const heard = await transcribeCached(ctx, modelId, audio, bias as Record<string, unknown>);
           let words = heard.words;
           let applied = 0;

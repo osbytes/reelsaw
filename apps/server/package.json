@@ -15,6 +15,7 @@
     "cli": "tsx src/cli.ts",
     "eval": "tsx src/eval/run.ts",
     "eval:cuts": "tsx src/eval/run.ts cuts",
+    "bench:e2e": "tsx src/eval/e2e.ts",
     "bundle": "node scripts/bundle.mjs",
     "test": "node --import tsx --test test/*.test.ts"
   },

@@ -1,0 +1,87 @@
+{
+  "profile": "cloud-cheap",
+  "env": {
+    "AI_MODEL": "gateway:openai/gpt-4o-mini",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:11:05.865Z",
+  "finishedAt": "2026-10-17T18:16:14.225Z",
+  "stages": {
+    "ingest": 12.7,
+    "transcribe": 75.4,
+    "refine": 30.6,
+    "analyze": 9.7,
+    "render": 173.1
+  },
+  "totalSec": 304.4,
+  "models": {
+    "language": "gateway:openai/gpt-4o-mini"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The Power of Having Nothing to Lose",
+      "hook": "Nothing to lose? You're dangerous!",
+      "startSec": 92.7,
+      "endSec": 120.8,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Persistence Over Time",
+      "hook": "The secret to big achievements",
+      "startSec": 168.6,
+      "endSec": 205.9,
+      "score": 81,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Finding Strength in Solitude",
+      "hook": "Embrace your solitude",
+      "startSec": 140.4,
+      "endSec": 175.1,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 50,
+    "failed": 0,
+    "totalSec": 86.1,
+    "p50Ms": 1563,
+    "inputTokens": 30028,
+    "outputTokens": 6651,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 4.8
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 54
+      },
+      "analyze": {
+        "calls": 14,
+        "totalSec": 27.4
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}
