@@ -39,11 +39,19 @@ macOS install [Ollama](https://ollama.com/download) first:
 curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
 ```
 
+On Windows (Docker Desktop), in PowerShell:
+
+```powershell
+irm https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.ps1 | iex
+```
+
+WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
+
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
 the model (`qwen2.5:14b`, ~9 GB; `REELSAW_LLM=qwen2.5:7b` for less RAM), starts everything and waits
 until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
-The script is [deploy/install.sh](deploy/install.sh); the gist mirrors it (update with
-`gh gist edit f49ef08b41d0bd1c160f789026c2f065 deploy/install.sh`).
+The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
+the release workflow publishes both to the gist on every release (see [docs/RELEASING.md](docs/RELEASING.md)).
 
 ## Quick start (from source)
 

@@ -118,8 +118,8 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           mkdir -p out/reelsaw
-          cp deploy/docker-compose.yml deploy/.env.example deploy/README.md deploy/install.sh out/reelsaw/
-          sed -i "s#ghcr.io/osbytes/reelsaw:latest#${GHCR_IMAGE}:${VERSION}#g" out/reelsaw/install.sh
+          cp deploy/docker-compose.yml deploy/.env.example deploy/README.md deploy/install.sh deploy/install.ps1 out/reelsaw/
+          sed -i "s#ghcr.io/osbytes/reelsaw:latest#${GHCR_IMAGE}:${VERSION}#g" out/reelsaw/install.sh out/reelsaw/install.ps1
           # pin the default image to this release
           sed -i "s#\${REELSAW_IMAGE:-[^}]*}#\${REELSAW_IMAGE:-${GHCR_IMAGE}:${VERSION}}#" out/reelsaw/docker-compose.yml
           (cd out && zip -r "reelsaw-${VERSION}.zip" reelsaw)
@@ -129,3 +129,16 @@ jobs:
         with:
           files: out/reelsaw-${{ steps.v.outputs.version }}.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      # the public one-liners (README) fetch the installers from a gist: keep it at the released
+      # version instead of editing it by hand. Final releases only; skipped without the secret.
+      - name: Publish installers to the gist
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && env.GH_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}   # PAT with the "gist" scope; GITHUB_TOKEN cannot edit gists
+          GIST_ID: f49ef08b41d0bd1c160f789026c2f065
+        run: |
+          for f in install.sh install.ps1; do
+            # --add creates the file the first time (install.ps1 is new to the gist)
+            gh gist edit "$GIST_ID" --filename "$f" "deploy/$f" || gh gist edit "$GIST_ID" --add "deploy/$f"
+          done
