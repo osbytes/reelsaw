@@ -136,17 +136,13 @@ export function ClipCard({
   const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <article data-clip={clip.id} className={`group scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
+    <article data-clip={clip.id} className={`group relative scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
       <div className="flex gap-3">
-        {/* reserved column: the checkbox appears on hover, focus, touch, or once anything is selected, without moving the card */}
+        {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
         {onToggleSelect && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            aria-label={`Select clip ${clip.index + 1}`}
-            className={`mt-0.5 h-4 w-4 shrink-0 accent-[var(--acc)] focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
-          />
+          <span className={`absolute left-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}>
+            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select clip ${clip.index + 1}`} className="h-4 w-4 accent-[var(--acc)]" />
+          </span>
         )}
         <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}

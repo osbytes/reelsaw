@@ -54,9 +54,9 @@ export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: 
  * otherwise the project's, otherwise none. `fromClip` lists the slots the clip decided itself.
  */
 export function resolveClipBumpers(
-  project: { introAssetId?: string | null; outroAssetId?: string | null },
-  clip: { bumpers?: { intro?: string | null; outro?: string | null } | null },
-): { introId: string | null; outroId: string | null; fromClip: Array<"intro" | "outro"> } {
+  project: { introAssetId?: string | null; outroAssetId?: string | null; introSec?: number; outroSec?: number },
+  clip: { bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null },
+): { introId: string | null; outroId: string | null; introSec?: number; outroSec?: number; fromClip: Array<"intro" | "outro"> } {
   const own = clip.bumpers ?? {};
   const fromClip: Array<"intro" | "outro"> = [];
   const pick = (slot: "intro" | "outro", inherited: string | null | undefined) => {
@@ -67,7 +67,12 @@ export function resolveClipBumpers(
   };
   const introId = pick("intro", project.introAssetId);
   const outroId = pick("outro", project.outroAssetId);
-  return { introId, outroId, fromClip };
+  // seconds belong to the choice they were made with: a clip that picked its own asset uses its own seconds,
+  // a clip that follows the project uses the project's. The caller falls back to the asset's own length.
+  const sec = (slot: "intro" | "outro", id: string | null) => (!id ? undefined : fromClip.includes(slot) ? own[`${slot}Sec`] : project[`${slot}Sec`]);
+  const introSec = sec("intro", introId);
+  const outroSec = sec("outro", outroId);
+  return { introId, outroId, ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}), fromClip };
 }
 
 export interface Canvas {
@@ -133,7 +138,8 @@ async function nonEmpty(file: string) {
  * place, so racing renders converge on the same bytes-equivalent file.
  */
 export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFile, canvas: Canvas, signal?: AbortSignal): Promise<string> {
-  const variant = normVariant(canvas.width, canvas.height);
+  // an image's length is part of the file, so it is part of the name; videos keep their own length
+  const variant = `${normVariant(canvas.width, canvas.height)}${asset.kind === "image" ? `.${asset.durationSec}s` : ""}`;
   const dir = path.join(deps.dir, asset.id);
   const local = path.join(dir, `norm.${variant}.mp4`);
   if (await nonEmpty(local)) return local;
@@ -172,4 +178,37 @@ export function bumperConcat(o: { introInput?: number; outroInput?: number; body
     `${o.bodyAudio}${fade}apad=whole_dur=${body},atrim=end=${body},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp[bodya];` +
     `${slots.join("")}concat=n=${slots.length}:v=1:a=1[v][a]`
   );
+}
+
+export const BUMPER_THUMB = { width: 270, height: 480 } as const;
+
+/**
+ * Makes (or finds) the 270x480 jpg for a library asset: one frame at a third of a video, or the image
+ * resized to cover. Idempotent: written to a temp name, renamed, then stored; concurrent callers share one run.
+ */
+const thumbRuns = new Map<string, Promise<string>>();
+export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string }, asset: { id: string; kind: "video" | "image"; durationSec: number; sourceKey: string }, localSource?: string): Promise<string> {
+  const running = thumbRuns.get(asset.id);
+  if (running) return running;
+  const run = (async () => {
+    const key = keys.bumperThumb(asset.id);
+    if (await deps.storage.exists(key)) return key;
+    const dir = path.join(deps.dir, `bumper-thumb-${asset.id}`);
+    await fs.mkdir(dir, { recursive: true });
+    const tmp = path.join(dir, `${randomUUID()}.tmp.jpg`);
+    const final = path.join(dir, "thumb.jpg");
+    try {
+      const source = localSource ?? (await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey))));
+      const seek = asset.kind === "video" ? ["-ss", (asset.durationSec / 3).toFixed(2)] : [];
+      await deps.ffmpeg(["-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}:force_original_aspect_ratio=increase,crop=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}`, "-q:v", "4", tmp]);
+      if (!(await nonEmpty(tmp))) throw new Error("thumbnail was empty");
+      await fs.rename(tmp, final);
+      await deps.storage.putFile(key, final, "image/jpeg");
+      return key;
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  })().finally(() => thumbRuns.delete(asset.id));
+  thumbRuns.set(asset.id, run);
+  return run;
 }

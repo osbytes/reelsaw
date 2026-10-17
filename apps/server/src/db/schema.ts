@@ -231,6 +231,8 @@ export const bumperAssets = pgTable(
     height: integer("height").notNull(),
     hasAudio: boolean("has_audio").notNull(),
     sourceKey: text("source_key").notNull(),
+    /** 270x480 jpg for pickers and cards; null until generated (made lazily for older assets) */
+    thumbnailKey: text("thumbnail_key"),
     sizeBytes: integer("size_bytes").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
