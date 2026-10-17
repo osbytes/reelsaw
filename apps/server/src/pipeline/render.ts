@@ -525,7 +525,7 @@ export async function planClipCuts(
   const clipWords = (transcript?.rawWords ?? transcript?.words ?? [])
     .filter((w) => w.end > clip.startSec - 1 && w.start < clip.endSec + 1)
     .map((w) => ({ text: w.text, start: w.start - clip.startSec, end: w.end - clip.startSec }));
-  const alignModelId = svc.config.TRANSCRIPT_ALIGN_MODEL ?? svc.config.TRANSCRIPTION_MODEL;
+  const alignModelId = svc.models.get().align;
 
   const refined = await refineCuts(
     {

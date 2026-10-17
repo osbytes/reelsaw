@@ -151,10 +151,11 @@ export function modelsUsed(svc: Services, ...which: Array<"language" | "transcri
     const h = host(model);
     if (h) out[`${key}Endpoint`] = h;
   };
+  const m = svc.models.get();
   for (const w of which) {
-    if (w === "language") add("language", c.AI_MODEL);
-    if (w === "transcription") add("transcription", c.TRANSCRIPTION_MODEL);
-    if (w === "align") add("align", c.TRANSCRIPT_ALIGN_MODEL ?? c.TRANSCRIPTION_MODEL);
+    if (w === "language") add("language", m.language);
+    if (w === "transcription") add("transcription", m.transcription);
+    if (w === "align") add("align", m.align);
     if (w === "aligner" && svc.aligner) out.aligner = path.basename(c.ALIGN_MODEL_DIR ?? "wav2vec2");
   }
   return out;

@@ -4,6 +4,8 @@ import { loadConfig, makePaths, ConfigError, type Config, type Paths } from "./c
 import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { createAi, type AiService } from "./ai/registry.js";
+import { createModelSettings, type ModelSettings } from "./ai/models.js";
+import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
 import { createAsr, type Asr } from "./ai/asr.js";
 import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
 import path from "node:path";
@@ -32,6 +34,10 @@ export interface Services {
   database: Database;
   storage: Storage;
   ai: AiService;
+  /** the model ids in force now: environment defaults, or the admin's runtime override (ai/models.ts) */
+  models: ModelSettings;
+  /** what the configured providers offer, and downloads onto Ollama / Speaches (ai/catalog.ts) */
+  catalog: ModelCatalog;
   /** LLM call capture (LLM_TRACE) */
   llmTrace: LlmTracer;
   /** cached speech-to-text (content-addressed) */
@@ -122,11 +128,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return t;
   });
 
+  // the environment's models are checked at boot; an admin override is loaded (and verified) once the database is up
+  let models!: ReturnType<typeof createModelSettings>;
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
-    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware);
+    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get());
+    models = createModelSettings(config, log.child({ module: "models" }), a.verify);
     await a.check();
     return a;
   });
+  const catalog = createModelCatalog(config, log.child({ module: "models" }));
 
   const faces = await step(config.FACE_DETECTION ? "face detector (UltraFace ONNX)" : "face detector (disabled)", async () => {
     if (!config.FACE_DETECTION) return null;
@@ -156,7 +166,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const asr = await step("asr cache", async () => {
-    const a = createAsr(ai, config.TRANSCRIPTION_MODEL, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }));
+    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }));
     if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
     return a;
   });
@@ -181,6 +191,11 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     await d.check();
     await d.migrate();
     return d;
+  });
+
+  await step("model settings", async () => {
+    const s = await models.attach(database.db);
+    if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
 
   // usage accounting: one row per model call, attributed to the project's owner
@@ -223,10 +238,11 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
   const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
-  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
+  return { log, config, paths, otel, database, storage, ai, models, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
+  s.models.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));
   await s.faces?.release().catch(() => {});
   await s.text?.release().catch(() => {});

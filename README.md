@@ -121,6 +121,18 @@ Rule of thumb: **a vendor stack finishes a video in about a fifth of its length;
 
 These factors are only the starting point. The app learns from its own finished projects: each stage's expected time is the median over your recent projects that ran with the same models, shown next to the elapsed time on the project page while it runs, in the activity feed when a stage finishes (`Transcribe finished in 4:50 (expected ~4:00)`), and as a per-stage expected vs actual table under Settings → Machine. There is no calibration step; the runs are the calibration.
 
+### Switching models without a restart
+
+`.env` names the default models; an admin can change them at any time under **Settings → System →
+Models**. The three pickers (language, transcription, alignment) list what every provider you have a
+key or base URL for offers, with a typeahead across all of them: cloud vendors are asked live, a
+self-hosted Ollama or Speaches shows what is installed and downloads anything else with a progress
+bar. Save checks each model first (key present, server reachable and model installed, transcription
+returns word timestamps) and refuses with a sentence that says what to fix. The change is stored in
+the database, so it survives restarts and reaches worker processes within seconds; a stage already
+running finishes with the model it started with. Keys and base URLs are never editable in the UI.
+"Back to .env" removes an override. Over the API the same lives at `admin.models.*`.
+
 ## Accounts and roles
 
 The first account created on an instance is the **admin**; everyone else is a **user**. Admins see

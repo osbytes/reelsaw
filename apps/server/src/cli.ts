@@ -72,7 +72,7 @@ function ffmpegWav(svc: Services, input: string, start: number, dur: number): Pr
 }
 
 async function words(svc: Services, audio: Buffer) {
-  const id = svc.config.TRANSCRIPT_ALIGN_MODEL ?? svc.config.TRANSCRIPTION_MODEL;
+  const id = svc.models.get().align;
   const res = await svc.asr.transcribe(audio, { modelId: id });
   return { model: id, text: res.text, words: toWords(res.segments) };
 }

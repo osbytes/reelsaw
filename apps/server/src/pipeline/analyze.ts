@@ -145,7 +145,7 @@ export async function analyze(ctx: StageContext) {
   await ctx.start("analyzing");
 
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
-  const selfHosted = isSelfHostedModel(svc.config);
+  const selfHosted = isSelfHostedModel({ AI_MODEL: svc.models.get().language, OPENAI_BASE_URL: svc.config.OPENAI_BASE_URL });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
   const samples = svc.config.ANALYZE_SCORE_SAMPLES || (selfHosted ? 1 : 3);
   const pairwise = svc.config.ANALYZE_PAIRWISE === "on" || (svc.config.ANALYZE_PAIRWISE === "auto" && !selfHosted);

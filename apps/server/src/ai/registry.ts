@@ -18,6 +18,20 @@ export interface AiService {
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
   /** Static validation of configured models + required keys. No network calls. */
   check(): Promise<void>;
+  /**
+   * Can `id` run here? Resolves it against the configured providers, checks the vendor's key is set
+   * and, for a self-hosted server, that it is reachable and has the model installed (Speaches pulls
+   * missing whisper models itself). Throws a sentence that says what to do.
+   */
+  verify(kind: "language" | "transcription", id: string): Promise<void>;
+}
+
+/** Transcription models known to return word timestamps, which the pipeline needs; others fail at "no words". */
+export function supportsWordTimestamps(id: string): boolean {
+  const vendor = underlyingProvider(id);
+  const model = id.slice(providerOf(id).length + 1).replace(/^[^/]+\//, "");
+  if (vendor === "openai") return /whisper/i.test(model); // whisper-1 and Speaches' faster-whisper-*; gpt-4o-transcribe gives segments only
+  return ["groq", "deepgram", "assemblyai"].includes(vendor);
 }
 
 /** Env var(s) that must be present for each built-in provider (compat/custom providers need none). */
@@ -65,7 +79,13 @@ const lenientJsonSchema: LanguageModelMiddleware = {
   transformParams: async ({ params }) => ({ ...params, providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } } }),
 };
 
-export function createAi(config: Config, log: Logger, middleware?: LanguageModelMiddleware | null): AiService {
+export function createAi(
+  config: Config,
+  log: Logger,
+  middleware?: LanguageModelMiddleware | null,
+  /** the models in force now (ai/models.ts); the environment when not given */
+  current: () => { language: string; transcription: string } = () => ({ language: config.AI_MODEL, transcription: config.TRANSCRIPTION_MODEL }),
+): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
   let registry: Promise<Registry> | undefined;
 
@@ -174,17 +194,25 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
     throw new Error(`model "${modelId}" is not installed on ${base}. Installed: ${installed.join(", ") || "(none)"}.${hint}`);
   }
 
+  async function verify(kind: "language" | "transcription", id: string) {
+    await resolve(kind, id);
+    requireKeys(id);
+    if (kind === "transcription" && !supportsWordTimestamps(id)) throw new Error(`"${id}" does not return word timestamps, which cuts and captions need. Use whisper-1 (also through the gateway), a Speaches faster-whisper model, deepgram:nova-3, assemblyai:best or groq:whisper-large-v3-turbo.`);
+    await checkSelfHosted(id);
+  }
+
   return {
-    languageModel: async (id = config.AI_MODEL) => {
+    languageModel: async (id = current().language) => {
       const model = (await resolve("language", id)) as Exclude<LanguageModel, string>;
       // every model handed out: lenient OpenAI schemas, then LLM_TRACE capture (logs / Langfuse) when on
       return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: middleware ? [lenientJsonSchema, middleware] : lenientJsonSchema }) as LanguageModel;
     },
-    transcriptionModel: async (id = config.TRANSCRIPTION_MODEL) => (await resolve("transcription", id)) as TranscriptionModel,
-    transcriptionOptions: (id = config.TRANSCRIPTION_MODEL) => {
+    transcriptionModel: async (id = current().transcription) => (await resolve("transcription", id)) as TranscriptionModel,
+    transcriptionOptions: (id = current().transcription) => {
       const p = underlyingProvider(id);
       return { [p]: wordTimestampOptions[p] ?? {} };
     },
+    verify,
     async check() {
       const errors: string[] = [];
       for (const [label, kind, id] of [

@@ -127,6 +127,13 @@
       "when": 1792252579607,
       "tag": "0017_hosted_usage_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792267546486,
+      "tag": "0018_instance_settings",
+      "breakpoints": true
     }
   ]
 }

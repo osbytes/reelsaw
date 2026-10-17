@@ -6,6 +6,7 @@ import { AccountSection } from "../components/AccountSection";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
+import { ModelsSection } from "../components/ModelsSection";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -55,12 +56,10 @@ export function SettingsPage() {
   const cfg = s
     ? [
         {
-          title: "Models",
+          title: "Model servers",
           rows: [
-            ["Language model", s.aiModel],
-            ["Transcription", s.transcriptionModel],
-            ...(s.openaiBaseUrl ? [["OpenAI base URL", s.openaiBaseUrl]] : []),
-            ...(s.compatBaseUrl ? [["Compatible base URL", s.compatBaseUrl]] : []),
+            ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
+            ["Compatible base URL", s.compatBaseUrl ?? "not set"],
             ["Face detection", s.faceDetection ? "on" : "off"],
           ],
         },
@@ -87,7 +86,7 @@ export function SettingsPage() {
             <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
             <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
           </div>
-          <p className="mt-1 min-h-5 text-sm text-ink2">{isAdmin ? "Your account and defaults, then this machine (read from the server environment; change .env and restart)." : "Your account, project defaults and API keys."}</p>
+          <p className="mt-1 min-h-5 text-sm text-ink2">{isAdmin ? "Your account and defaults, then this machine: models can be switched here; keys, servers and limits come from .env (change and restart)." : "Your account, project defaults and API keys."}</p>
         </div>
         <AccountSection />
         <ProjectDefaultsSection />
@@ -126,6 +125,7 @@ export function SettingsPage() {
             <ProcessingTimes />
           </section>
         )}
+        {isAdmin && <ModelsSection />}
         <div className="grid gap-4 sm:grid-cols-2">
           {cfg.map((sec) => (
             <section key={sec.title} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">

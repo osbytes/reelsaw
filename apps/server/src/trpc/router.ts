@@ -22,9 +22,14 @@ import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
+import { MODEL_KINDS } from "../ai/models.js";
+import { providerOf } from "../ai/registry.js";
+import { generateText } from "ai";
 
 /** The models a new stage would run with, for expected-time lookups. */
-const currentModels = (svc: Services): Models => ({ language: svc.config.AI_MODEL, transcription: svc.config.TRANSCRIPTION_MODEL });
+const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
+
+const modelId = z.string().trim().min(3).max(200).regex(/^[a-z0-9_-]+:[^\s]+$/i, "a model id looks like provider:model, e.g. anthropic:claude-haiku-4.5");
 
 function publicClip(c: schema.Clip) {
   return {
@@ -271,8 +276,8 @@ export const appRouter = router({
     /** Machine-level configuration and live resources. Read from the environment; admins only. */
     system: adminProcedure.query(async ({ ctx }) => ({
       version: { version: ctx.svc.config.REELSAW_VERSION, commit: ctx.svc.config.REELSAW_COMMIT, builtAt: ctx.svc.config.REELSAW_BUILT_AT },
-      aiModel: ctx.svc.config.AI_MODEL,
-      transcriptionModel: ctx.svc.config.TRANSCRIPTION_MODEL,
+      aiModel: ctx.svc.models.get().language,
+      transcriptionModel: ctx.svc.models.get().transcription,
       openaiBaseUrl: ctx.svc.config.OPENAI_BASE_URL ?? null,
       compatBaseUrl: ctx.svc.config.OPENAI_COMPATIBLE_BASE_URL ?? null,
       storage: ctx.svc.storage.driver,
@@ -362,6 +367,50 @@ export const appRouter = router({
     events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
       const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
       return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
+    }),
+    /**
+     * Which models run, changed without a restart. Keys and base URLs stay in the environment: the
+     * picker only offers models the configured providers can reach (ai/catalog.ts), and `set` refuses
+     * anything that does not resolve, lacks its key, lacks word timestamps or is not installed on the
+     * self-hosted server. Stages that are already running keep their model; new ones use the change.
+     */
+    models: router({
+      get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
+      catalog: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), refresh: z.boolean().optional() })).query(({ ctx, input }) => ctx.svc.catalog.list(input.kind, { refresh: input.refresh })),
+      set: adminProcedure
+        .input(z.object({ language: modelId.nullable().optional(), transcription: modelId.nullable().optional(), align: modelId.nullable().optional() }))
+        .mutation(async ({ ctx, input }) => {
+          if (!MODEL_KINDS.some((k) => input[k] !== undefined)) throw new TRPCError({ code: "BAD_REQUEST", message: "Nothing to change" });
+          try {
+            return await ctx.svc.models.set(input, { id: ctx.user.id, email: ctx.user.email });
+          } catch (err) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
+          }
+        }),
+      /** One tiny real call, so "saved" also means "answers". Transcription is checked statically (word timestamps, installed). */
+      test: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), id: modelId })).mutation(async ({ ctx, input }) => {
+        const t0 = Date.now();
+        try {
+          await ctx.svc.ai.verify(input.kind, input.id);
+          if (input.kind === "language") {
+            const r = await generateText({ model: await ctx.svc.ai.languageModel(input.id), prompt: "Reply with the single word: ready", maxOutputTokens: 8, abortSignal: AbortSignal.timeout(60_000) });
+            return { ok: true as const, ms: Date.now() - t0, reply: r.text.trim().slice(0, 40) };
+          }
+          return { ok: true as const, ms: Date.now() - t0, reply: null };
+        } catch (err) {
+          return { ok: false as const, ms: Date.now() - t0, error: (err as Error).message };
+        }
+      }),
+      /** Download onto Ollama / Speaches; progress through `get().pulls`. */
+      pull: adminProcedure.input(z.object({ id: modelId })).mutation(async ({ ctx, input }) => {
+        const provider = providerOf(input.id);
+        try {
+          return await ctx.svc.catalog.pull(provider, input.id.slice(provider.length + 1));
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
+        }
+      }),
+      cancelPull: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => ({ ok: ctx.svc.catalog.cancelPull(input.id) })),
     }),
     /** Expected vs actual seconds per stage on this machine with the current models (Settings → System → Machine; admins only, so hosted users never see the operator's hardware). */
     processingTimes: adminProcedure.query(async ({ ctx }) => {

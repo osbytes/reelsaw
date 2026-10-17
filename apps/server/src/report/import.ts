@@ -266,7 +266,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       failedStage: null,
       clips: {},
       flags: {},
-      models: { AI_MODEL: config.AI_MODEL, TRANSCRIPTION_MODEL: config.TRANSCRIPTION_MODEL, TRANSCRIPT_ALIGN_MODEL: config.TRANSCRIPT_ALIGN_MODEL },
+      models: { AI_MODEL: svc.models.get().language, TRANSCRIPTION_MODEL: svc.models.get().transcription, TRANSCRIPT_ALIGN_MODEL: svc.models.get().align, env: { AI_MODEL: config.AI_MODEL, TRANSCRIPTION_MODEL: config.TRANSCRIPTION_MODEL, TRANSCRIPT_ALIGN_MODEL: config.TRANSCRIPT_ALIGN_MODEL } },
       media: [],
       notes: manifest.notes,
       warnings: [],

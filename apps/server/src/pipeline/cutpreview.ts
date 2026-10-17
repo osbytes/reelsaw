@@ -87,7 +87,7 @@ export async function planCutPreview(svc: Services, userId: string, projectId: s
       const ws = Math.max(0, flag.start - 3);
       const we = Math.min(project.durationSec ?? flag.end + 3, flag.end + 3);
       const words = (transcript.rawWords ?? transcript.words).filter((w) => w.end > ws && w.start < we).map((w) => ({ text: w.text, start: w.start - ws, end: w.end - ws }));
-      const modelId = svc.config.TRANSCRIPT_ALIGN_MODEL ?? svc.config.TRANSCRIPTION_MODEL;
+      const modelId = svc.models.get().align;
       const res = await refineCuts(
         {
           ffmpegPath: svc.config.FFMPEG_PATH,
