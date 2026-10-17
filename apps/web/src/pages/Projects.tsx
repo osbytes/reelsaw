@@ -1,20 +1,87 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router";
-import { Plus } from "lucide-react";
+import { useRef } from "react";
+import { Link, useNavigate } from "react-router";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
+import { useCommandPalette } from "../components/CommandPalette";
+import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
+import { PosterBumperCards } from "../components/PosterBumperCards";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
+import { ago } from "../lib/time";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
-function ago(d: string | Date) {
-  const s = (Date.now() - new Date(d).getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)} d ago`;
-  return new Date(d).toLocaleDateString();
+
+/** New project plus a chevron menu for the other ways to add things. Both parts have fixed widths. */
+function NewProjectMenu() {
+  const nav = useNavigate();
+  const openPalette = useCommandPalette();
+  const { startProjects, openWithFile } = useUploads();
+  const videos = useRef<HTMLInputElement>(null);
+  const bumper = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex shrink-0">
+      <Link to="/new" className="btn-primary w-[9.5rem] justify-center rounded-r-none py-2.5 text-sm no-underline">
+        <Plus className="h-4 w-4" /> New project
+      </Link>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" className="btn-primary w-10 justify-center rounded-l-none border-l border-white/30 px-0 py-2.5" aria-label="More ways to add" title="More ways to add">
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[240px]">
+            <DropdownMenu.Item className="menu-item" onSelect={() => videos.current?.click()}>
+              <Film className="h-4 w-4" /> Upload videos…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => openPalette()}>
+              <Link2 className="h-4 w-4" /> Paste links…
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+            <DropdownMenu.Item className="menu-item" onSelect={() => bumper.current?.click()}>
+              <Upload className="h-4 w-4" /> Upload intro / outro…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => nav("/library")}>
+              <Images className="h-4 w-4" /> Open library
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <input
+        ref={videos}
+        type="file"
+        multiple
+        accept="video/*,.mkv,.mov,.mp4,.webm"
+        className="hidden"
+        aria-label="Choose videos"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = "";
+          if (files.length === 1) openWithFile(files[0]!);
+          else if (files.length > 1) startProjects(files);
+        }}
+      />
+      <input
+        ref={bumper}
+        type="file"
+        multiple
+        accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
+        className="hidden"
+        aria-label="Choose intro or outro files"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = "";
+          if (!files.length) return;
+          setPendingBumperFiles(files);
+          nav("/library");
+        }}
+      />
+    </div>
+  );
 }
 
 export function ProjectsPage() {
@@ -43,9 +110,7 @@ export function ProjectsPage() {
               <p className="mt-1 min-h-5" />
             )}
           </div>
-          <Link to="/new" className="btn-primary py-2.5 text-sm no-underline">
-            <Plus className="h-4 w-4" /> New project
-          </Link>
+          <NewProjectMenu />
         </div>
 
         {q.isLoading && <p className="text-ink3">Loading projects…</p>}
@@ -72,7 +137,8 @@ export function ProjectsPage() {
                   ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;
             return (
-              <Link key={p.id} to={`/p/${p.id}`} className="group flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
+              <div key={p.id} className="group relative">
+              <Link to={`/p/${p.id}`} className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
                 <div className="film relative aspect-video">
                   {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
                     <img src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!} alt="" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
@@ -95,6 +161,8 @@ export function ProjectsPage() {
                       )}
                     </div>
                   )}
+                  {/* intro (left) and outro (right) assets, fanned like the clips */}
+                  <PosterBumperCards bumpers={p.bumpers} />
                   {p.durationSec ? <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">{formatTime(p.durationSec)}</span> : null}
                   {active && (
                     <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
@@ -108,6 +176,7 @@ export function ProjectsPage() {
                   <div className="truncate text-xs text-ink3">{detail}</div>
                 </div>
               </Link>
+              </div>
             );
           })}
         </div>

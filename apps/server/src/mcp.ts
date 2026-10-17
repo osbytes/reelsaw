@@ -17,10 +17,12 @@ import type { AuthUser } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
+import { addBumperInput, assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput, type AssetRef } from "./bumpers/service.js";
 
 const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (poll until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Clips can be edited (update_clip: title, hook, caption, hashtags, bounds, framing) and re-rendered. get_transcript gives the timed transcript for picking your own moments with create_clip.
+Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). get_project and get_clip show the effective intro/outro and where it comes from. Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
 All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses).");
@@ -83,6 +85,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     thumbnailUrl: abs(c.thumbnailUrl),
   });
 
+  /** Names and lengths of every library asset (removed ones too: clips that still use them keep rendering with them). */
+  const assetsById = async () => {
+    const lib = await api.bumpers.list();
+    return assetMap([...lib.assets, ...lib.deleted] as AssetRef[]);
+  };
+
   server.registerTool(
     "list_projects",
     { title: "List projects", description: "Your projects, newest first, with pipeline status and how many clips are rendered.", annotations: { readOnlyHint: true } },
@@ -96,13 +104,15 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
       run(async () => {
         const p = await api.projects.get({ id });
         const { clips, transcript, ...rest } = p;
+        const assets = await assetsById();
         return {
           ...rest,
+          bumpers: effectiveBumpers(p.settings, {}, assets),
           url: abs(`/p/${p.id}`),
           sourceVideoUrl: abs(p.sourceVideoUrl),
           exportZipUrl: abs(`/api/projects/${p.id}/export.zip`),
           transcript: transcript ? { language: transcript.language, words: transcript.words.length, pendingFlags: transcript.flags.filter((f) => f.status === "pending").length } : null,
-          clips: clips.map(clipSummary),
+          clips: clips.map((c) => ({ ...clipSummary(c), bumpers: effectiveBumpers(p.settings, c, assets) })),
         };
       }),
   );
@@ -111,10 +121,23 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     "create_project",
     {
       title: "Create project",
-      description: "Start clipping a video from a URL (YouTube, Vimeo, a direct video link, anything yt-dlp can fetch). Returns immediately; the pipeline runs in the background. Follow with wait_for_project.",
-      inputSchema: { sourceUrl: z.url(), title: z.string().min(1).max(200).optional(), settings: settingsInput.optional() },
+      description: "Start clipping a video from a URL (YouTube, Vimeo, a direct video link, anything yt-dlp can fetch). Intro/outro: by default your default intro/outro (list_bumpers) are used; pass introAssetId/outroAssetId (a library id, or null for none) to override. Returns immediately; the pipeline runs in the background. Follow with wait_for_project.",
+      inputSchema: {
+        sourceUrl: z.url(),
+        title: z.string().min(1).max(200).optional(),
+        settings: settingsInput.optional(),
+        introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id for the intro of every clip; null = no intro; omitted = your default intro"),
+        outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
+        introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows"),
+        outroSec: z.number().min(1).max(10).optional(),
+      },
     },
-    ({ sourceUrl, title, settings }) => run(async () => ({ ...(await api.projects.create({ sourceUrl, title, settings })), next: "wait_for_project" })),
+    ({ sourceUrl, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+      run(async () => {
+        // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
+        const merged = { ...settings, ...(introAssetId !== undefined ? { introAssetId } : {}), ...(outroAssetId !== undefined ? { outroAssetId } : {}), ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}) };
+        return { ...(await api.projects.create({ sourceUrl, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
+      }),
   );
 
   server.registerTool(
@@ -196,7 +219,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
         if (!c) throw new TRPCError({ code: "NOT_FOUND" });
         const p = await api.projects.get({ id: c.projectId });
         const clip = p.clips.find((x) => x.id === id)!;
-        return { ...clip, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
+        return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsById()) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
       }),
   );
 
@@ -249,6 +272,75 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     "reanalyze_project",
     { title: "Re-analyze project", description: "Keep the transcript, pick clips again, optionally with new settings (focus topic, instructions, clip length, maxClips).", inputSchema: { id: z.string(), settings: settingsInput.optional() } },
     ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })),
+  );
+
+  // ── intro / outro library ────────────────────────────────────────────────
+
+  server.registerTool(
+    "list_bumpers",
+    { title: "List intros and outros", description: "Your intro/outro library: id, name, kind (video/image), length, size, whether each is your default intro or outro, how many projects use it, thumbnail. Removed items (restorable for 30 days) are listed separately.", annotations: { readOnlyHint: true } },
+    () => run(() => libraryView(svc, api, user.id, (p) => abs(p)!)),
+  );
+
+  server.registerTool(
+    "add_bumper",
+    {
+      title: "Add intro/outro",
+      description: "Add a video (MP4/MOV/WebM, at most 10 s, 50 MB) or image (PNG/JPG, at most 20 MB) to your library, from a public http(s) url the server downloads, or from an existing uploadId. Images show for imageSeconds (default per server, 1-10 s). setDefault also makes it your default intro or outro for NEW projects; existing projects are unchanged until set_project_bumpers. name applies to url downloads.",
+      inputSchema: addBumperInput,
+    },
+    (input) =>
+      run(async () => {
+        requireOneSource(input);
+        if (input.uploadId && input.name) throw new Error("name can only be set together with url");
+        const uploadId = input.uploadId ?? (await downloadAsUpload(svc, user.id, input.url!, { name: input.name })).uploadId;
+        const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault });
+        return { ...created, isDefault: input.setDefault ?? null };
+      }),
+  );
+
+  server.registerTool(
+    "set_default_bumper",
+    { title: "Set default intro/outro", description: "Make a library item your default intro or outro for new projects (assetId null clears the default). Existing projects keep what they have.", inputSchema: { slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() } },
+    ({ slot, assetId }) => run(() => api.bumpers.setDefault({ slot, assetId })),
+  );
+
+  server.registerTool(
+    "remove_bumper",
+    { title: "Remove intro/outro", description: "Remove an item from your library and clear it from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_bumper within 30 days.", inputSchema: { assetId: z.string().min(1).max(100) }, annotations: { destructiveHint: true } },
+    ({ assetId }) => run(() => api.bumpers.delete({ id: assetId })),
+  );
+
+  server.registerTool(
+    "restore_bumper",
+    { title: "Restore intro/outro", description: "Bring a removed intro/outro back into the library.", inputSchema: { assetId: z.string().min(1).max(100) } },
+    ({ assetId }) => run(() => api.bumpers.restore({ id: assetId })),
+  );
+
+  server.registerTool(
+    "bumper_usage",
+    { title: "Where an intro/outro is used", description: "The projects and clips that use a library item, and whether through the project's setting or the clip's own choice. Check before removing one.", inputSchema: { assetId: z.string().min(1).max(100) }, annotations: { readOnlyHint: true } },
+    ({ assetId }) => run(() => api.bumpers.usage({ id: assetId })),
+  );
+
+  server.registerTool(
+    "set_project_bumpers",
+    {
+      title: "Set a project's intro/outro",
+      description: "Choose the intro and/or outro for a project: \"default\" (your current default), \"none\", or a library asset id; a slot left out is untouched. introSec/outroSec set how long an image shows. Takes effect on the next render of each clip; rerender: true re-renders the project's finished clips now (clips with their own choice for a slot keep it).",
+      inputSchema: setProjectBumpersInput,
+    },
+    (input) => run(() => api.projects.setBumpers(projectBumpersCall(input))),
+  );
+
+  server.registerTool(
+    "set_clip_bumpers",
+    {
+      title: "Set clips' intro/outro",
+      description: "Override the intro and/or outro of one or many clips of a project: \"inherit\" (follow the project), \"none\", or a library asset id; a slot left out is untouched. rerender: true re-renders only these clips now.",
+      inputSchema: setClipBumpersInput,
+    },
+    (input) => run(() => api.clips.setBumpersMany(clipBumpersCall(input))),
   );
 
   server.registerTool(

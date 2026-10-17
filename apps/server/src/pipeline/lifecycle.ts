@@ -7,7 +7,9 @@ import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { cleanupWorkdir } from "./common.js";
+import { cleanupWorkdir, runFacts } from "./common.js";
+import type { PipelineStage, ProjectStatus, RunReason } from "@reelsaw/shared";
+import { removeScratchClip } from "../storage/sweep.js";
 
 /**
  * Ask for a fresh render of a clip. Bumps clips.render_gen so any render still running for an
@@ -15,7 +17,7 @@ import { cleanupWorkdir } from "./common.js";
  * new job, and moves a finished project back to "rendering". `patch` applies clip edits in the same
  * transaction (e.g. new bounds). Superseded output files are deleted after commit.
  */
-export async function requestRender(svc: Services, u: UnitOfWork, projectId: string, clipId: string, patch: Partial<typeof schema.clips.$inferInsert> = {}): Promise<number | null> {
+export async function requestRender(svc: Services, u: UnitOfWork, projectId: string, clipId: string, patch: Partial<typeof schema.clips.$inferInsert> = {}, reason: RunReason = "rerender"): Promise<number | null> {
   const [prev] = await u.db.select({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId))).for("update");
   if (!prev) return null;
   const [row] = await u.db
@@ -25,17 +27,52 @@ export async function requestRender(svc: Services, u: UnitOfWork, projectId: str
     .returning({ gen: schema.clips.renderGen });
   await u.cancelLiveJobs(QUEUES.render, clipId);
   await u.enqueue(QUEUES.render, { projectId, clipId, gen: row!.gen });
-  await reopenProject(u, projectId);
-  for (const key of [prev.outputKey, prev.thumbnailKey]) if (key) u.afterCommit(() => svc.storage.delete(key));
+  await startRun(u, projectId, { reason, status: "rendering", stage: "render" });
+  // the store copy and the scratch copy (a hardlink locally) both go, or no disk is freed
+  for (const key of [prev.outputKey, prev.thumbnailKey]) {
+    if (!key) continue;
+    u.afterCommit(async () => {
+      await svc.storage.delete(key);
+      await removeScratchClip(svc, projectId, key);
+    });
+  }
   return row!.gen;
 }
 
-/** A finished/failed project whose clips are being (re)rendered is "rendering" again. */
-export async function reopenProject(u: UnitOfWork, projectId: string) {
-  await u.db
-    .update(schema.projects)
-    .set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() })
-    .where(and(eq(schema.projects.id, projectId), sql`${schema.projects.status} in ('done', 'failed')`));
+export interface StartRunOptions {
+  reason: RunReason;
+  status: ProjectStatus;
+  /** the stage the run begins in; omitted leaves the project's stage as it is */
+  stage?: PipelineStage | null;
+  /** other project columns to write in the same statement (e.g. new settings) */
+  set?: Partial<typeof schema.projects.$inferInsert>;
+  /** when the project is already mid-run, still apply status/stage/set (no new run). For resumes of a stuck run. */
+  continueActive?: boolean;
+}
+
+/**
+ * Begin a run: the one place an idle project starts working. A run is the stretch of work from
+ * leaving idle (created, or done / failed) to being done / failed again. The flip is a conditional
+ * update (`done`/`failed` for a restart, `run_seq = 0` for a project just created), so when several
+ * callers ask at once (six clips re-rendered in one request, a retry racing a re-render) exactly one
+ * gets a row back and only it bumps `run_seq` and emits `run.started`. Returns the new sequence
+ * number, or null when the project was already running (the request joins the current run).
+ */
+export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOptions): Promise<number | null> {
+  const t = schema.projects;
+  const values = { ...o.set, status: o.status, ...(o.stage !== undefined ? { stage: o.stage } : {}), error: null, updatedAt: new Date() };
+  const idle = o.reason === "created" ? sql`${t.runSeq} = 0` : sql`${t.status} in ('done', 'failed')`;
+  const [row] = await u.db
+    .update(t)
+    .set({ ...values, runSeq: sql`${t.runSeq} + 1`, runStartedAt: sql`now()`, runReason: o.reason, stageStartedAt: sql`now()` })
+    .where(and(eq(t.id, projectId), idle))
+    .returning({ seq: t.runSeq });
+  if (row) {
+    await u.emit(projectId, "run.started", { seq: row.seq, reason: o.reason });
+    return row.seq;
+  }
+  if (o.continueActive) await u.db.update(t).set(values).where(and(eq(t.id, projectId), sql`${t.status} not in ('done', 'failed')`));
+  return null;
 }
 
 /**
@@ -49,12 +86,14 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   if (!clips.length || !clips.every((c) => c.status === "done" || c.status === "failed")) return;
   const doneCount = clips.filter((c) => c.status === "done").length;
   if (doneCount === 0) {
+    const facts = await runFacts(u.db, projectId);
     await u.db.update(schema.projects).set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render" });
+    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", ...facts });
     return;
   }
+  const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount });
+  await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });
   u.afterCommit(() => cleanupWorkdir(svc, projectId));
 }
 

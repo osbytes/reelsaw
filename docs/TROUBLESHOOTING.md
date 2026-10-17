@@ -9,7 +9,7 @@ Everything here runs against the live stack; nothing needs a rebuild.
 docker compose exec app reelsaw stuck                  # everything unfinished: age, last event, live jobs, problems
 docker compose exec app reelsaw recover <clipId|projectId>  # re-run the right step (prepare vs render) / reconcile
 docker compose exec app reelsaw logs <id> [n]          # log lines for a project/clip/job, from the log file (survives redeploys)
-docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, live jobs, errors
+docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, runs, live jobs, errors
 docker compose exec app reelsaw events <projectId> 50  # what the pipeline emitted, in order
 docker compose exec app reelsaw clip <clipId>          # one clip: bounds, layout segments, last render's cuts + reasons
 docker compose exec app reelsaw faces <clipId> [a-b]   # face boxes per frame (clip-relative range) + split speaker tracks; --json for eval fixtures
@@ -31,6 +31,11 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
 
+Reading runs: the `runs` block of `reelsaw status` lists one line per run (`#3 re-render … done 0:41 clips 1 [render 0:41]`):
+sequence, why it started (new project, retry, re-render, refine, re-analyze, clip added; blank reason means
+the log predates explicit runs), outcome, total time and per-stage seconds. "How long did that re-render take"
+is that line, not the gap between events. A run still `running` with no live job is stuck; see the reconciler notes below.
+
 ## 2. Tools
 
 - **`reelsaw` CLI** (`apps/server/src/cli.ts`, also `pnpm --filter @reelsaw/server cli`): same composition root as
@@ -38,6 +43,10 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   `clip`, `rerender`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
   and context audio; `--fixture` exports a regression case), `align` (raw word timestamps for any source window),
   `hear` (transcribe a range of the *rendered* clip: what viewers actually hear), `flags`.
+  Intro/outro: `bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]`,
+  `project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--rerender]`, `clip-bumpers <projectId>
+  <clipId…> [--intro inherit|none|<id>] [--outro …] [--rerender]`. They run the same tRPC procedures as the web app
+  and the MCP tools, as the project's owner (`--user` for library commands when the install has several accounts).
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
   output length and render time.
 - **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `stage`, `projectId`, `clipId`,
@@ -82,6 +91,12 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
+- **Disk use: `reelsaw storage`** prints unique bytes under `/data` (hardlinks counted once), scratch-only leftovers,
+  duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
+  `reelsaw storage sweep [--dry-run]` removes the leftovers: older render generations, files of deleted clips or
+  projects, and `tmp/hear-*` older than a day. The reconciler runs the same sweep about hourly; it skips files
+  younger than an hour and any project with a live job or an unfinished status. The same sweep purges library intros/outros removed over 30 days ago that no project setting or clip uses (row, `bumpers/<id>/…` and local cache).  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
+  project deletes it.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
   `fs.statfs`), so it behaves the same on Linux, macOS and Windows; thresholds in Settings.

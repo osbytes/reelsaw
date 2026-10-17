@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
 import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2, Link2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { useLocation } from "react-router";
 import { readHash, writeHash, linkWith } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
@@ -127,7 +127,6 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   useEffect(() => setFixText(null), [pick?.start, pick?.end]);
   const createClip = useMutation(trpc.clips.create.mutationOptions());
   const addCut = useMutation(trpc.transcripts.addCut.mutationOptions());
-  const toast = useToast();
   const delFlag = useMutation(trpc.transcripts.deleteFlag.mutationOptions());
   async function deleteOne(f: TranscriptFlag) {
     try {
@@ -139,7 +138,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
       toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""} · restore it from Deleted`);
     } catch (err) {
-      toast((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
   const restore = useMutation(trpc.transcripts.restoreFlag.mutationOptions());
@@ -150,7 +149,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       if (deletedFlags.length <= 1) setFilter("all");
       toast(`Restored${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`);
     } catch (err) {
-      toast((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
   const addCorrection = useMutation(trpc.transcripts.addCorrection.mutationOptions());
@@ -430,7 +429,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     navigator.clipboard
       .writeText(linkWith(params))
       .then(() => toast("Link copied"))
-      .catch(() => toast("Couldn’t copy the link"));
+      .catch(() => toast.error("Couldn’t copy the link"));
   const selectRange = (a: number, b: number, tries = 0) => {
     const v = viewportRef.current;
     const content = contentRef.current;

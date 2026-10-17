@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { UserProjectDefaults } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { useMe } from "../lib/account";
+import { Link } from "react-router";
+import { useBumperLibrary } from "./BumperField";
 
 type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no" };
 
@@ -52,7 +54,6 @@ function toSaved(f: Form): UserProjectDefaults {
 export function ProjectDefaultsSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const me = useMe();
   const [f, setF] = useState<Form>(EMPTY);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export function ProjectDefaultsSection() {
       toast("Defaults saved");
       void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
     },
-    onError: (e) => toast(e.message),
+    onError: (e) => toast.error(e.message),
   });
   const b = me.data?.builtInDefaults;
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
@@ -159,6 +160,26 @@ export function ProjectDefaultsSection() {
           <span className="min-h-5 text-xs text-ink3">{dirty ? "Unsaved changes" : ""}</span>
         </div>
       </form>
+      <BumperDefaultsRow introId={me.data?.projectDefaults.introAssetId} outroId={me.data?.projectDefaults.outroAssetId} />
     </section>
+  );
+}
+
+/** Settings keeps only a summary; the library itself lives on /library. */
+function BumperDefaultsRow({ introId, outroId }: { introId?: string; outroId?: string }) {
+  const lib = useBumperLibrary();
+  const name = (id?: string) => (id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isLoading ? "…" : "removed")) : "none");
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-4">
+      <div className="min-w-0 flex-1">
+        <h3 className="text-[13px] font-bold">Intro and outro defaults</h3>
+        <p className="mt-1 min-h-5 truncate text-[13px] text-ink2">
+          Intro: <b className="font-semibold text-ink">{name(introId)}</b> · Outro: <b className="font-semibold text-ink">{name(outroId)}</b>
+        </p>
+      </div>
+      <Link to="/library" className="text-[13px] font-semibold text-acc-text no-underline">
+        Manage library →
+      </Link>
+    </div>
   );
 }

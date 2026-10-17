@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Loader2, X } from "lucide-react";
 import { useTRPC } from "./trpc";
 import { useSession } from "./auth";
@@ -35,6 +35,25 @@ export function takePendingFile(): File | null {
   return f;
 }
 
+/** An intro/outro file picked outside the Library page (⌘K, the Projects menu); the page uploads it on arrival. */
+let pendingBumpers: File[] = [];
+const BUMPER_EVENT = "reelsaw:bumper-files";
+/** Hands files to the Library page: it picks them up on arrival, or right away if it is already open. */
+export function setPendingBumperFiles(files: File[]) {
+  pendingBumpers = [...pendingBumpers, ...files];
+  window.dispatchEvent(new Event(BUMPER_EVENT));
+}
+export function takePendingBumperFiles(): File[] {
+  const f = pendingBumpers;
+  pendingBumpers = [];
+  return f;
+}
+export const onBumperFiles = (fn: () => void) => {
+  window.addEventListener(BUMPER_EVENT, fn);
+  return () => window.removeEventListener(BUMPER_EVENT, fn);
+};
+export const isBumperFile = (f: File) => isVideo(f) || f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+
 interface Job {
   key: string;
   name: string;
@@ -55,6 +74,10 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
+  const { pathname } = useLocation();
+  // read live by the window listeners below, which are registered once
+  const inLibrary = useRef(false);
+  inLibrary.current = pathname === "/library";
   const { data: session } = useSession();
   const create = useMutation(trpc.projects.create.mutationOptions());
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -119,6 +142,11 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       setDragging(false);
       // a drop target inside the page (e.g. the New project picker) handles its own files
       if ((e.target as HTMLElement | null)?.closest?.("[data-own-drop]")) return;
+      if (inLibrary.current) {
+        const picked = [...(e.dataTransfer?.files ?? [])].filter(isBumperFile);
+        if (picked.length) setPendingBumperFiles(picked);
+        return;
+      }
       const files = [...(e.dataTransfer?.files ?? [])].filter(isVideo);
       if (files.length === 1) openWithFile(files[0]!);
       else if (files.length > 1) startProjects(files);
@@ -142,8 +170,8 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-[90] grid place-items-center bg-acc/15 p-6 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-2 rounded-[20px] border-2 border-dashed border-acc bg-panel px-10 py-8 text-center shadow-pop">
-            <b className="text-lg">Drop videos to start projects</b>
-            <span className="text-sm text-ink2">One video opens New project. Several start a project each with the default settings.</span>
+            <b className="text-lg">{inLibrary.current ? "Drop to add to the library" : "Drop videos to start projects"}</b>
+            <span className="text-sm text-ink2">{inLibrary.current ? "Videos up to 10 s and images become intros and outros." : "One video opens New project. Several start a project each with the default settings."}</span>
           </div>
         </div>
       )}

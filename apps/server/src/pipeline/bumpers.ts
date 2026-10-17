@@ -1,0 +1,223 @@
+/**
+ * Intro / outro videos ("bumpers"): validation, the normalised-file cache, and the filter graph
+ * that joins them to a clip inside the clip's single encode. See docs/specs/bumpers.md.
+ *
+ * Nothing here touches the database, so it can be tested with ffmpeg alone.
+ */
+import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID, createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { DEFAULT_IMAGE_BUMPER_SEC } from "@reelsaw/shared";
+import { keys, type Storage } from "../storage/index.js";
+import type { ProbeInfo } from "../media.js";
+
+export const BUMPER_MAX_SEC = 10;
+export const BUMPER_MAX_BYTES = 50 * 1024 * 1024;
+export const BUMPER_VIDEO_EXTS = [".mp4", ".mov", ".webm"] as const;
+export const BUMPER_IMAGE_EXTS = [".png", ".jpg", ".jpeg"] as const;
+export const BUMPER_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+export const BUMPER_IMAGE_MAX_PX = 8192;
+export const BUMPER_IMAGE_SEC = { min: 1, max: 10, default: DEFAULT_IMAGE_BUMPER_SEC } as const;
+export const bumperKind = (ext: string): "video" | "image" | null =>
+  (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : null;
+export const BUMPER_FPS = 30;
+/** Seconds of the body's audio faded out when an outro follows. */
+export const OUTRO_FADE_SEC = 0.2;
+
+/**
+ * Names the normalised file. Bump the version when the canvas, fps or audio format in render.ts
+ * change, so a stale cache can never be joined to a clip with different parameters.
+ */
+export const NORM_VERSION = "v1";
+export const normVariant = (w: number, h: number) => `${NORM_VERSION}.${w}x${h}`;
+
+/** A sentence for the user, or null when the probed file is an acceptable bumper. */
+export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height">): string | null {
+  const label = slot === "intro" ? "Intros" : slot === "outro" ? "Outros" : "Intros and outros";
+  const kind = bumperKind(file.ext);
+  if (!kind) return "Use an MP4, MOV or WebM video, or a PNG or JPG image.";
+  if (kind === "image") {
+    if (file.sizeBytes > BUMPER_IMAGE_MAX_BYTES) return `This image is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Images can be at most ${BUMPER_IMAGE_MAX_BYTES / 1024 / 1024} MB.`;
+    if (!probe.width || !probe.height) return "This file could not be read as an image.";
+    if (probe.width > BUMPER_IMAGE_MAX_PX || probe.height > BUMPER_IMAGE_MAX_PX) return `This image is ${probe.width}x${probe.height}. Images can be at most ${BUMPER_IMAGE_MAX_PX} px on a side.`;
+    if (Math.min(probe.width, probe.height) < 64) return `This image is only ${probe.width}x${probe.height}. Use one at least 64 px on each side.`;
+    return null;
+  }
+  if (file.sizeBytes > BUMPER_MAX_BYTES) return `This file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. ${label} can be at most ${BUMPER_MAX_BYTES / 1024 / 1024} MB.`;
+  if (!probe.width || !probe.height) return "This file has no video that could be read.";
+  if (!(probe.durationSec >= 0.3)) return "This video is too short to use (under 0.3 s).";
+  if (probe.durationSec > BUMPER_MAX_SEC + 0.05) return `This video is ${Math.round(probe.durationSec)} s long. ${label} can be at most ${BUMPER_MAX_SEC} s.`;
+  return null;
+}
+
+/**
+ * Which asset each slot uses for a clip: its own choice if it made one (a string, or null = none),
+ * otherwise the project's, otherwise none. `fromClip` lists the slots the clip decided itself.
+ */
+export function resolveClipBumpers(
+  project: { introAssetId?: string | null; outroAssetId?: string | null; introSec?: number; outroSec?: number },
+  clip: { bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null },
+): { introId: string | null; outroId: string | null; introSec?: number; outroSec?: number; fromClip: Array<"intro" | "outro"> } {
+  const own = clip.bumpers ?? {};
+  const fromClip: Array<"intro" | "outro"> = [];
+  const pick = (slot: "intro" | "outro", inherited: string | null | undefined) => {
+    const v = own[slot];
+    if (v === undefined) return inherited || null;
+    fromClip.push(slot);
+    return v || null;
+  };
+  const introId = pick("intro", project.introAssetId);
+  const outroId = pick("outro", project.outroAssetId);
+  // seconds belong to the choice they were made with: a clip that picked its own asset uses its own seconds,
+  // a clip that follows the project uses the project's. The caller falls back to the asset's own length.
+  const sec = (slot: "intro" | "outro", id: string | null) => (!id ? undefined : fromClip.includes(slot) ? own[`${slot}Sec`] : project[`${slot}Sec`]);
+  const introSec = sec("intro", introId);
+  const outroSec = sec("outro", outroId);
+  return { introId, outroId, ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}), fromClip };
+}
+
+export interface Canvas {
+  width: number;
+  height: number;
+  /** fit-and-blur-fill filter chain reading [0:v] (render.ts FIT_CHAIN) */
+  fitChain: string;
+}
+
+/** Frame-exact length of a normalised bumper. */
+export const bumperFrames = (durationSec: number) => Math.max(1, Math.round(durationSec * BUMPER_FPS));
+
+/**
+ * ffmpeg arguments that turn any readable video into the render canvas: fitted with a blurred
+ * background, 30 fps constant, yuv420p, AAC stereo 48 kHz (generated silence when it has none),
+ * trimmed or padded to a whole number of frames so audio and video end together.
+ */
+export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" }, canvas: Canvas): string[] {
+  const image = asset.kind === "image";
+  const frames = bumperFrames(asset.durationSec);
+  const sec = frames / BUMPER_FPS;
+  const video = `${canvas.fitChain},setsar=1,fps=${BUMPER_FPS},tpad=stop_mode=clone:stop_duration=1,format=yuv420p[v]`;
+  const audio = asset.hasAudio && !image ? `[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp,apad[a]` : `[1:a]anull[a]`;
+  return [
+    // an image is looped into a video of the requested length
+    ...(image ? ["-loop", "1", "-framerate", String(BUMPER_FPS)] : []),
+    "-i", input,
+    ...(asset.hasAudio && !image ? [] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
+    "-filter_complex", `${video};${audio}`,
+    "-map", "[v]", "-map", "[a]",
+    "-frames:v", String(frames), "-t", sec.toFixed(4),
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-r", String(BUMPER_FPS),
+    "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+    "-movflags", "+faststart", "-f", "mp4", output,
+  ];
+}
+
+export interface NormaliseDeps {
+  ffmpeg: (args: string[], opts?: { signal?: AbortSignal }) => Promise<unknown>;
+  storage: Pick<Storage, "exists" | "ensureLocal" | "putFile">;
+  /** local scratch/cache root (`<data>/bumpers`) */
+  dir: string;
+}
+export interface BumperAssetFile {
+  id: string;
+  sourceKey: string;
+  durationSec: number;
+  hasAudio: boolean;
+  kind?: "video" | "image";
+}
+
+async function nonEmpty(file: string) {
+  try {
+    return (await fs.stat(file)).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The normalised file for an asset, built once per (asset id, canvas) and cached locally and in
+ * storage. Safe to run concurrently and twice: each run writes its own temp file and renames it into
+ * place, so racing renders converge on the same bytes-equivalent file.
+ */
+export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFile, canvas: Canvas, signal?: AbortSignal): Promise<string> {
+  // an image's length is part of the file, so it is part of the name; videos keep their own length
+  const variant = `${normVariant(canvas.width, canvas.height)}${asset.kind === "image" ? `.${asset.durationSec}s` : ""}`;
+  const dir = path.join(deps.dir, asset.id);
+  const local = path.join(dir, `norm.${variant}.mp4`);
+  if (await nonEmpty(local)) return local;
+  await fs.mkdir(dir, { recursive: true });
+  const normKey = keys.bumperNorm(asset.id, variant);
+  if (await deps.storage.exists(normKey)) return deps.storage.ensureLocal(normKey, local);
+  const source = await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
+  const tmp = `${local}.${randomUUID()}.tmp.mp4`;
+  try {
+    await deps.ffmpeg(normaliseArgs(source, tmp, asset, canvas), { signal });
+    if (!(await nonEmpty(tmp))) throw new Error("normalising produced an empty file");
+    await fs.rename(tmp, local);
+  } finally {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+  }
+  await deps.storage.putFile(normKey, local, "video/mp4");
+  return local;
+}
+
+/**
+ * Filter-graph tail that joins `intro + body + outro` in the clip's one encode. Takes the body's
+ * video and audio labels (the body already has captions burned in) and the ffmpeg input indexes of the
+ * normalised files; produces [v] and [a]. Audio is sequential, never mixed: the body's last 0.2 s fade
+ * out when an outro follows, and its audio is forced to the bumpers' format and the video's length.
+ */
+export function bumperConcat(o: { introInput?: number; outroInput?: number; bodyVideo: string; bodyAudio: string; bodySec: number }): string {
+  const fade = o.outroInput !== undefined && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
+  const body = o.bodySec.toFixed(3);
+  const slots = [
+    ...(o.introInput !== undefined ? [`[${o.introInput}:v][${o.introInput}:a]`] : []),
+    "[bodyv][bodya]",
+    ...(o.outroInput !== undefined ? [`[${o.outroInput}:v][${o.outroInput}:a]`] : []),
+  ];
+  return (
+    `${o.bodyVideo}fps=${BUMPER_FPS},format=yuv420p,setsar=1[bodyv];` +
+    `${o.bodyAudio}${fade}apad=whole_dur=${body},atrim=end=${body},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp[bodya];` +
+    `${slots.join("")}concat=n=${slots.length}:v=1:a=1[v][a]`
+  );
+}
+
+export const BUMPER_THUMB = { width: 270, height: 480 } as const;
+
+/**
+ * Makes (or finds) the 270x480 jpg for a library asset: one frame at a third of a video, or the image
+ * resized to cover. Idempotent: written to a temp name, renamed, then stored; concurrent callers share one run.
+ */
+const thumbRuns = new Map<string, Promise<string>>();
+export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string }, asset: { id: string; kind: "video" | "image"; durationSec: number; sourceKey: string }, localSource?: string): Promise<string> {
+  const running = thumbRuns.get(asset.id);
+  if (running) return running;
+  const run = (async () => {
+    const key = keys.bumperThumb(asset.id);
+    if (await deps.storage.exists(key)) return key;
+    const dir = path.join(deps.dir, `bumper-thumb-${asset.id}`);
+    await fs.mkdir(dir, { recursive: true });
+    const tmp = path.join(dir, `${randomUUID()}.tmp.jpg`);
+    const final = path.join(dir, "thumb.jpg");
+    try {
+      const source = localSource ?? (await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey))));
+      const seek = asset.kind === "video" ? ["-ss", (asset.durationSec / 3).toFixed(2)] : [];
+      await deps.ffmpeg(["-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}:force_original_aspect_ratio=increase,crop=${BUMPER_THUMB.width}:${BUMPER_THUMB.height}`, "-q:v", "4", tmp]);
+      if (!(await nonEmpty(tmp))) throw new Error("thumbnail was empty");
+      await fs.rename(tmp, final);
+      await deps.storage.putFile(key, final, "image/jpeg");
+      return key;
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  })().finally(() => thumbRuns.delete(asset.id));
+  thumbRuns.set(asset.id, run);
+  return run;
+}
+
+/** sha256 of a file, streamed (bumpers can be 50 MB; never read whole into memory). */
+export async function sha256File(file: string): Promise<string> {
+  const h = createHash("sha256");
+  for await (const chunk of createReadStream(file)) h.update(chunk as Buffer);
+  return h.digest("hex");
+}

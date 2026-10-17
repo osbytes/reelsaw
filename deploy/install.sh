@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reelsaw, fully local: Ollama for the language model, Speaches (faster-whisper) for speech-to-text.
 #
-#   curl -fsSL <this script's raw URL> | bash
+#   curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash
 #
 # Creates ~/reelsaw (docker-compose.yml + .env with generated secrets), pulls the model, starts the
 # stack and waits until it answers. Re-running is safe and is how you update: the existing .env is

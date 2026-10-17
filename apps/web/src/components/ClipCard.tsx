@@ -3,8 +3,9 @@ import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
 import { ProgressBar, StatusText } from "./ui";
-import { useToast } from "../lib/toast";
-import { formatTime, type ClipScores, type ClipDiagnostics, type DetectedSegment } from "@reelsaw/shared";
+import { toast } from "sonner";
+import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
+import { ClipBumpersPopover } from "./BumperField";
 import { MODE_LABEL } from "./Timeline";
 
 export interface ClipView {
@@ -28,6 +29,7 @@ export interface ClipView {
   layoutSegments?: DetectedSegment[];
   scores?: ClipScores | null;
   diagnostics?: ClipDiagnostics | null;
+  bumpers?: ClipBumpers | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
 }
@@ -62,6 +64,18 @@ function cutsNote(d: ClipDiagnostics | null | undefined) {
   return parts.length ? parts.join(" · ") : "No disfluencies found";
 }
 
+/** What the last render attached: lengths, none, or which part was skipped (glyph plus word, never colour alone), and whose choice it was. */
+function bumpersNote(d: ClipDiagnostics | null | undefined): { text: string; skipped: boolean; title?: string } {
+  if (!d) return { text: "Shown after the first render", skipped: false };
+  const b = d.bumpers;
+  const who = b?.fromClip?.length ? "set for this clip" : "project default";
+  if (!b) return { text: "None", skipped: false };
+  const skipped = (b.skipped ?? []).map((s) => (s.startsWith("outro") ? "Outro" : "Intro"));
+  const parts = [b.introSec ? `+ intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `+ outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
+  if (skipped.length) return { text: `▲ ${[...new Set(skipped)].join(" and ")} skipped${parts.length ? ` · kept ${parts.join(", ")}` : ""}`, skipped: true, title: (b.skipped ?? []).join("; ") };
+  return { text: parts.length ? `${parts.join(" · ")} · ${who}` : b.fromClip?.length ? "None · set for this clip" : "None", skipped: false };
+}
+
 export function ClipCard({
   clip,
   projectId,
@@ -72,7 +86,18 @@ export function ClipCard({
   onSeek,
   onPlay,
   onCopyLink,
+  projectIntroId,
+  projectOutroId,
+  selected = false,
+  selecting = false,
+  onToggleSelect,
 }: {
+  projectIntroId?: string | null;
+  projectOutroId?: string | null;
+  selected?: boolean;
+  /** some clip is selected: every card shows its checkbox */
+  selecting?: boolean;
+  onToggleSelect?: () => void;
   onCopyLink?: () => void;
   clip: ClipView;
   projectId: string;
@@ -83,7 +108,6 @@ export function ClipCard({
   onSeek: () => void;
   onPlay: () => void;
 }) {
-  const toast = useToast();
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
   const [whyOpen, setWhy] = useState(false);
@@ -95,8 +119,9 @@ export function ClipCard({
     navigator.clipboard
       .writeText([clip.title, clip.caption, tags].filter(Boolean).join("\n\n"))
       .then(() => toast("Caption + hashtags copied"))
-      .catch(() => toast("Couldn’t copy"));
+      .catch(() => toast.error("Couldn’t copy"));
   const skipped = clip.diagnostics?.cuts.skipped ?? [];
+  const bumpers = bumpersNote(clip.diagnostics);
   const detail =
     clip.status === "failed"
       ? { text: clip.error ?? "Render failed", cls: "bg-err-soft" }
@@ -110,8 +135,14 @@ export function ClipCard({
   const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <article data-clip={clip.id} className={`scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active ? "border-acc" : "border-line"}`}>
+    <article data-clip={clip.id} className={`group relative scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
       <div className="flex gap-3">
+        {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
+        {onToggleSelect && (
+          <span className={`absolute left-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}>
+            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select clip ${clip.index + 1}`} className="h-4 w-4 accent-[var(--acc)]" />
+          </span>
+        )}
         <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
@@ -177,9 +208,13 @@ export function ClipCard({
       )}
 
       {clip.status !== "preparing" && (
-        <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-xs">
+        <dl className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-1 text-xs">
           <dt className="text-ink3">Framing</dt>
           <dd className="text-ink">{framingText(clip)}</dd>
+          <dt className="text-ink3">Intro/outro</dt>
+          <dd className={bumpers.skipped ? "font-semibold text-warn" : "text-ink"} title={bumpers.title}>
+            {bumpers.text}
+          </dd>
           <dt className="text-ink3">Cuts</dt>
           <dd className="text-ink">
             {cutsNote(clip.diagnostics)}{" "}
@@ -252,6 +287,7 @@ export function ClipCard({
         <button className={ghost} disabled={working || busy} onClick={onRerender}>
           Re-render
         </button>
+        <ClipBumpersPopover clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className={ghost} />
       </div>
     </article>
   );

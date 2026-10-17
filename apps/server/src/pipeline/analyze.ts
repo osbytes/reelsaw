@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "../db/index.js";
 import { StageContext, modelsUsed } from "./common.js";
@@ -134,7 +134,7 @@ export async function analyze(ctx: StageContext) {
   const existingClips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) });
   if (existingClips.length) {
     await svc.tx(async (u) => {
-      await u.db.update(schema.projects).set({ status: "rendering", stage: "render", updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+      await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
       for (const c of existingClips) if (c.status !== "done") await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
     });
     return;
@@ -253,7 +253,7 @@ export async function analyze(ctx: StageContext) {
     if (rows.length) await u.db.insert(schema.clips).values(rows);
     await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), modelsUsed(svc, "language"));
     for (const r of rows) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
-    await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
     for (const r of rows) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
   });
   void db;

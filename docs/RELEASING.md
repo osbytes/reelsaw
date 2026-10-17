@@ -63,3 +63,6 @@ changelog and version stay ahead.
   `release.yml`.
 - Settings → Actions → "Allow GitHub Actions to create and approve pull requests".
 - Branch protection on `main`: require `ci` to pass; the release PR is merged like any other.
+
+The installers (`deploy/install.sh`, `deploy/install.ps1`) are served from `main` via
+raw.githubusercontent.com, so the scripts on `main` must always work against the `:latest` image.

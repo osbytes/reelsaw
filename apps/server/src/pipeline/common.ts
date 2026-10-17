@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { schema, type Project } from "../db/index.js";
+import { schema, type Db, type Project } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
@@ -55,7 +55,7 @@ export class StageContext {
     await this.svc.tx(async (u) => {
       await u.db
         .update(schema.projects)
-        .set({ status, stage: this.stage, stageProgress: 0, error: null, updatedAt: new Date() })
+        .set({ status, stage: this.stage, stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
         .where(eq(schema.projects.id, this.projectId));
       await u.emit(this.projectId, "stage.started", { stage: this.stage, status });
     });
@@ -78,8 +78,9 @@ export class StageContext {
    */
   async complete(extra: Record<string, unknown> = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
     await this.svc.tx(async (u) => {
+      const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
       await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
-      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra });
+      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...(durationSec !== undefined ? { durationSec } : {}), ...extra });
       if (handoff) await handoff(u);
     });
   }
@@ -97,17 +98,48 @@ export async function exists(file: string): Promise<boolean> {
   }
 }
 
+/**
+ * Seconds the stage now running has taken, from projects.stage_started_at (set by `stage.started`).
+ * Durations are stored in event payloads so nothing downstream recomputes them from timestamps.
+ * Undefined when `stage` is not the stage that row says is running.
+ */
+export async function stageElapsed(db: Db, projectId: string, stage: string): Promise<number | undefined> {
+  const [r] = await db
+    .select({ stage: schema.projects.stage, sec: sql<number | null>`round(extract(epoch from (clock_timestamp() - ${schema.projects.stageStartedAt}))::numeric, 1)::float8` })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId));
+  return r && r.stage === stage && r.sec !== null ? r.sec : undefined;
+}
+
+/** The current run's identity and age, for `project.done` / `project.failed` payloads. */
+export async function runFacts(db: Db, projectId: string): Promise<{ runSeq: number; runReason: string | null; runSec?: number; renderSec?: number }> {
+  const [r] = await db
+    .select({
+      seq: schema.projects.runSeq,
+      reason: schema.projects.runReason,
+      stage: schema.projects.stage,
+      runSec: sql<number | null>`round(extract(epoch from (clock_timestamp() - ${schema.projects.runStartedAt}))::numeric, 1)::float8`,
+      stageSec: sql<number | null>`round(extract(epoch from (clock_timestamp() - ${schema.projects.stageStartedAt}))::numeric, 1)::float8`,
+    })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId));
+  if (!r) return { runSeq: 0, runReason: null };
+  return { runSeq: r.seq, runReason: r.reason, ...(r.runSec !== null ? { runSec: r.runSec } : {}), ...(r.stage === "render" && r.stageSec !== null ? { renderSec: r.stageSec } : {}) };
+}
+
 export async function failProject(svc: Services, projectId: string, stage: PipelineStage, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   await svc.tx(async (u) => {
+    const facts = await runFacts(u.db, projectId);
     await u.db.update(schema.projects).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000) });
+    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), ...facts });
   });
 }
 
 export async function stageFailedAttempt(svc: Services, projectId: string, stage: PipelineStage, err: unknown, attempt: number, max: number) {
   const message = err instanceof Error ? err.message : String(err);
-  await svc.events.emit(projectId, "stage.failed", { stage, error: message.slice(0, 1000), attempt, max });
+  const durationSec = await stageElapsed(svc.database.db, projectId, stage);
+  await svc.events.emit(projectId, "stage.failed", { stage, error: message.slice(0, 1000), attempt, max, ...(durationSec !== undefined ? { durationSec } : {}) });
 }
 
 /** Remove intermediates (audio, chunks, subtitle files) once a project is finished. */

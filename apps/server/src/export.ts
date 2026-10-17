@@ -39,6 +39,8 @@ export interface ClipExport {
   startSec: number;
   endSec: number;
   durationSec: number;
+  /** length of the rendered file: the clip plus any intro/outro (durationSec is the source span only) */
+  renderedDurationSec: number | null;
   score: number;
   layout: string | null;
   parent: { url: string | null; atUrl: string | null; startSec: number };
@@ -176,6 +178,7 @@ export function buildClipExport(input: ExportInput, clip: Clip, videoId: string 
     startSec: clip.startSec,
     endSec: clip.endSec,
     durationSec: Math.round((clip.endSec - clip.startSec) * 100) / 100,
+    renderedDurationSec: clip.diagnostics ? Math.round((clip.diagnostics.outDurationSec + (clip.diagnostics.bumpers?.introSec ?? 0) + (clip.diagnostics.bumpers?.outroSec ?? 0)) * 100) / 100 : null,
     score: clip.score,
     layout: clip.layout,
     parent: { url: parentUrl, atUrl, startSec: start },
@@ -240,7 +243,7 @@ function csvCell(v: unknown) {
 }
 
 export function buildCsv(m: ExportManifest) {
-  const header = ["file", "thumbnail", "title", "hook", "caption", "hashtags", "start_sec", "end_sec", "duration_sec", "score", "layout", "parent_url", "parent_timestamp_url", "youtube_title", "youtube_description", "youtube_tags", "tiktok_caption"];
+  const header = ["file", "thumbnail", "title", "hook", "caption", "hashtags", "start_sec", "end_sec", "duration_sec", "rendered_duration_sec", "score", "layout", "parent_url", "parent_timestamp_url", "youtube_title", "youtube_description", "youtube_tags", "tiktok_caption"];
   const rows = m.clips.map((c) => [
     `clips/${c.video}`,
     c.thumbnail ? `clips/${c.thumbnail}` : "",
@@ -251,6 +254,7 @@ export function buildCsv(m: ExportManifest) {
     c.startSec,
     c.endSec,
     c.durationSec,
+    c.renderedDurationSec ?? "",
     c.score,
     c.layout ?? "",
     c.parent.url ?? "",
@@ -275,6 +279,11 @@ LAYOUT
   clips/NN-title.tiktok.json   TikTok Content Posting API "post_info" (Direct Post / Upload)
   manifest.json                everything above in one machine-readable file
   clips.csv                    one row per clip, for spreadsheets / bulk tools
+
+LENGTH
+  start_sec, end_sec and duration_sec describe the moment in the source video. If you set an intro or
+  outro in Settings, the mp4 also contains them, so check rendered_duration_sec (clips.csv) /
+  renderedDurationSec (manifest.json) against platform length limits.
 
 UPLOADING
   YouTube Studio: drag all clips/*.mp4 into Create → Upload videos (up to 15 at once). Studio has no

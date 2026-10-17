@@ -11,6 +11,7 @@ import { LoginPage } from "./pages/Login";
 import { ProjectsPage } from "./pages/Projects";
 import { NewProjectPage } from "./pages/NewProject";
 import { ProjectPage } from "./pages/Project";
+import { LibraryPage } from "./pages/Library";
 import { SettingsPage } from "./pages/Settings";
 import { PendingPage } from "./pages/Pending";
 import { AdminUsersPage } from "./pages/AdminUsers";
@@ -21,6 +22,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
+import { Toaster } from "sonner";
 
 export function Logo() {
   return (
@@ -50,9 +52,10 @@ function MachineChip() {
   const status = useSystemStatus(10_000);
   const why = status.data?.paused;
   if (!why) return null;
+  const reason = why === "disk" ? "disk nearly full" : `${why} busy`;
   return (
-    <Link to="/settings" className="chip bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room">
-      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused ·</span> {why === "disk" ? "disk nearly full" : `${why} busy`}
+    <Link to="/settings" className="chip min-w-0 shrink-0 whitespace-nowrap bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room" aria-label={`Jobs paused: ${reason}`}>
+      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused · {reason}</span>
     </Link>
   );
 }
@@ -127,14 +130,17 @@ export function TopBar() {
         <NavLink to="/" className={() => nav({ isActive: inProjects })}>
           Projects
         </NavLink>
+        <NavLink to="/library" className={nav}>
+          Library
+        </NavLink>
         <NavLink to="/settings" className={nav}>
           Settings
         </NavLink>
         <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
-      <SearchButton />
       <MachineChip />
+      <SearchButton />
       <button className="btn-ghost h-[34px] w-[34px] px-0" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
         <LifeBuoy className="h-4 w-4" />
       </button>
@@ -174,6 +180,28 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   return <Shell>{children}</Shell>;
 }
 
+/** The one toast host (sonner), themed with the app tokens so light and dark follow lib/theme.ts. Narrow screens get sonner's full-width bottom layout. */
+function AppToaster() {
+  const [theme] = useTheme();
+  return (
+    <Toaster
+      theme={theme}
+      position="bottom-right"
+      richColors={false}
+      offset={16}
+      mobileOffset={12}
+      toastOptions={{
+        classNames: {
+          toast: "!rounded-[14px] !border !border-line !bg-panel !text-ink !shadow-pop !text-[13px] !font-semibold",
+          title: "!text-ink",
+          description: "!text-ink2",
+          error: "!border-err",
+        },
+      }}
+    />
+  );
+}
+
 export function App() {
   return (
     <UploadsProvider>
@@ -183,6 +211,7 @@ export function App() {
       <Route path="/consent" element={<ConsentPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
+      <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
@@ -190,6 +219,7 @@ export function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <ReportDialog />
+    <AppToaster />
     </CommandPaletteProvider>
     </UploadsProvider>
   );

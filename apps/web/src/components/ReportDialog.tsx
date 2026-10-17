@@ -6,7 +6,7 @@ import type { ReportInclude } from "@reelsaw/shared";
 import { Modal } from "./ui";
 import { MultiCombobox } from "./MultiCombobox";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { clientContext } from "../lib/diagnostics";
 import { closeReport, isReportShortcut, openReportHere, useReportTarget } from "../lib/report";
 
@@ -30,7 +30,6 @@ export function ReportDialog() {
   const open = !!target;
   const projectId = target?.projectId;
   const trpc = useTRPC();
-  const toast = useToast();
   const project = useQuery({ ...trpc.projects.get.queryOptions({ id: projectId ?? "" }), enabled: !!projectId });
   const clips = (project.data?.clips ?? []).slice().sort((a, b) => a.index - b.index);
   const [preview, setPreview] = useState<Preview | null>(null);

@@ -1,0 +1,790 @@
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
+import { Ban, Equal, Loader2, Pencil, Star, Trash2, Upload, X } from "lucide-react";
+import { useTRPC } from "../lib/trpc";
+import { toast } from "sonner";
+import { uploadFile } from "../lib/uploads";
+import { useMe } from "../lib/account";
+import { Modal } from "./ui";
+import { ScrollArea } from "./scroll-area";
+import { BumperCombobox, type FixedOption } from "./BumperCombobox";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as Popover from "@radix-ui/react-popover";
+import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
+
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg";
+const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
+
+export interface LibraryAsset {
+  id: string;
+  kind: "video" | "image";
+  name: string;
+  durationSec: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
+  sizeBytes: number;
+  usedBy: number;
+  usedByClips: number;
+  thumbnailUrl: string;
+}
+
+/** The user's library (live assets and recently removed ones). */
+export function useBumperLibrary() {
+  const trpc = useTRPC();
+  return useQuery(trpc.bumpers.list.queryOptions());
+}
+
+/** The server-made thumbnail in a fixed 9:16 box (a placeholder shows until it loads, so nothing moves). Click opens the viewer. */
+function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "kind" | "name" | "thumbnailUrl">; onOpen: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <button type="button" className="relative block aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk" aria-label={`View ${asset.name}`} title="View larger" onClick={onOpen}>
+      {!failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
+      {asset.kind === "video" && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
+    </button>
+  );
+}
+
+export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
+const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+/** "video · 4 s · 1080×1920" (images are drawn separately: their length is a control). */
+const metaText = (a: LibraryAsset) => `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
+
+export interface UploadJob {
+  key: string;
+  name: string;
+  pct: number;
+  state: "queued" | "uploading" | "saving" | "done" | "failed";
+  error?: string;
+  /** shown instead of "added" when the file was already in the library */
+  note?: string;
+}
+
+/** Upload (several at once, two at a time), default and remove/restore actions for the library. */
+export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) => void } = {}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const [jobs, setJobs] = useState<UploadJob[]>([]);
+  const [error, setError] = useState("");
+  const queue = useRef<Array<{ key: string; file: File }>>([]);
+  const running = useRef(0);
+  const finished = useRef({ ok: 0, failed: 0 });
+  const dupRef = useRef(onDuplicate);
+  dupRef.current = onDuplicate;
+  const create = useMutation(trpc.bumpers.create.mutationOptions());
+  const setDefaultM = useMutation(trpc.bumpers.setDefault.mutationOptions());
+  const removeM = useMutation(trpc.bumpers.delete.mutationOptions());
+  const restoreM = useMutation(trpc.bumpers.restore.mutationOptions());
+  const updateM = useMutation(trpc.bumpers.update.mutationOptions());
+  const busy = setDefaultM.isPending || removeM.isPending || restoreM.isPending || updateM.isPending;
+  const uploading = jobs.some((j) => j.state === "queued" || j.state === "uploading" || j.state === "saving");
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+  };
+  const fail = (e: unknown) => setError((e as Error).message.slice(0, 200));
+  const patch = (key: string, p: Partial<UploadJob>) => setJobs((js) => js.map((j) => (j.key === key ? { ...j, ...p } : j)));
+
+  const work = async () => {
+    running.current++;
+    for (let next = queue.current.shift(); next; next = queue.current.shift()) {
+      toast.loading(`Adding ${queue.current.length + 1} file${queue.current.length ? "s" : ""} to your library…`, { id: "bumper-batch" });
+      const { key, file } = next;
+      try {
+        patch(key, { state: "uploading" });
+        const uploadId = await uploadFile(file, (pct) => patch(key, { pct }));
+        patch(key, { state: "saving", pct: 1 });
+        const r = await create.mutateAsync({ uploadId });
+        if (r.duplicate) {
+          // nothing new was stored: say so, and point at the card that already has it
+          patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
+          toast(r.restored ? `Already in your library, restored: ${r.name}` : `Already in your library: ${r.name}`, { id: `bumper-dup-${r.id}` });
+          dupRef.current?.(r.id);
+        } else {
+          patch(key, { state: "done" });
+          finished.current.ok++;
+        }
+        refresh();
+      } catch (e) {
+        patch(key, { state: "failed", error: (e as Error).message.replace(/^"|"$/g, "").slice(0, 200) });
+        finished.current.failed++;
+      }
+    }
+    if (--running.current === 0) {
+      const { ok, failed } = finished.current;
+      finished.current = { ok: 0, failed: 0 };
+      if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
+      else if (ok === 0) toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
+      else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
+    }
+  };
+  /** Checks sizes, then uploads and adds each file to the library, two at a time. */
+  const uploadMany = (files: File[]) => {
+    if (!files.length) return;
+    setError("");
+    const fresh: UploadJob[] = [];
+    for (const file of files) {
+      const key = `${file.name}:${file.size}:${Date.now()}:${Math.random()}`;
+      const image = isImageFile(file);
+      const max = image ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+      if (file.size > max) {
+        fresh.push({ key, name: file.name, pct: 0, state: "failed", error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.` });
+        continue;
+      }
+      fresh.push({ key, name: file.name, pct: 0, state: "queued" });
+      queue.current.push({ key, file });
+    }
+    setJobs((js) => [...js, ...fresh]);
+    // each worker takes its first file synchronously, so this starts at most two and never an idle one
+    while (running.current < 2 && queue.current.length > 0) void work();
+  };
+  const dismiss = (key?: string) => setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
+
+  const setDefault = (slot: "intro" | "outro", a: LibraryAsset, current: string | undefined) => {
+    setError("");
+    setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
+  };
+  const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
+    restoreM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast(`Restored ${a.name}`), true),
+      (e) => (fail(e), false),
+    );
+  /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
+  const remove = (a: LibraryAsset) =>
+    removeM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast(`Removed ${a.name}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
+      (e) => (fail(e), false),
+    );
+  /** Image length; resolves true when saved. */
+  const setSeconds = (a: LibraryAsset, sec: number) =>
+    updateM.mutateAsync({ id: a.id, imageSeconds: clampSec(sec) }).then(
+      () => (refresh(), true),
+      (e) => (fail(e), false),
+    );
+  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds };
+}
+
+/** The dashed dropzone card: choose files, limits, and the batch progress in space that is always reserved. */
+export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
+  const { uploading } = actions;
+  return (
+    <section className="flex flex-col gap-3 rounded-[16px] border border-dashed border-line2 bg-panel p-4" aria-label="Add to your library">
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = "";
+          actions.uploadMany(files);
+        }}
+        aria-label="Choose intro or outro files"
+      />
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sunk text-ink2">{uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">
+            Drop videos or images here, or{" "}
+            <button type="button" className="font-semibold text-acc-text underline-offset-2 hover:underline" onClick={() => inputRef.current?.click()}>
+              choose files
+            </button>
+          </p>
+          <p className="mt-0.5 text-xs text-ink3">MP4, MOV or WebM up to 10 s and 50 MB, or PNG or JPG up to 20 MB. Images are shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card.</p>
+        </div>
+      </div>
+      <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
+      <div className="min-h-4 text-xs text-err" role="status">
+        {actions.error}
+      </div>
+    </section>
+  );
+}
+
+/** Per-file progress for the current batch; rows stay until dismissed. Fixed height, so the page below never jumps. */
+export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
+  const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
+  return (
+    <div className="flex h-[8.5rem] flex-col rounded-[10px] border border-line bg-sunk" aria-live="polite">
+      {jobs.length === 0 ? (
+        <p className="m-auto px-3 text-center text-xs text-ink3">Uploads show up here.</p>
+      ) : (
+        <>
+          <ScrollArea className="min-h-0 flex-1">
+            <ul className="flex flex-col gap-1.5 p-2 text-xs">
+              {jobs.map((j) => (
+                <li key={j.key} className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
+                    <span className="min-w-0 flex-1 truncate">{j.name}</span>
+                    <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
+                    {(j.state === "done" || j.state === "failed") && (
+                      <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {j.state === "uploading" && (
+                    <div className="h-1 overflow-hidden rounded-full bg-line">
+                      <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
+                    </div>
+                  )}
+                  {j.error && <span className="text-err">{j.error}</span>}
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+          <div className="h-7 shrink-0 border-t border-line px-2 text-right">
+            {finished > 0 && (
+              <button type="button" className="h-full text-xs font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
+                Dismiss finished
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Seconds field for an image; empty means the library item's own length. */
+function SecField({ value, onChange, placeholder, label }: { value: number | undefined; onChange: (v: number | undefined) => void; placeholder: number; label: string }) {
+  return (
+    <label className="flex shrink-0 items-center gap-1 text-xs text-ink2">
+      <input
+        className="input h-[38px] w-[3.75rem] px-2 py-1 text-xs"
+        type="number"
+        min={1}
+        max={10}
+        step={0.5}
+        value={value ?? ""}
+        placeholder={String(placeholder)}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value === "" || !Number.isFinite(Number(e.target.value)) ? undefined : Number(e.target.value))}
+        onBlur={(e) => e.target.value !== "" && onChange(clampSec(Number(e.target.value)))}
+      />
+      s
+    </label>
+  );
+}
+
+/** One labelled row: the combobox, plus a seconds field when the chosen item is an image. */
+export function SlotRow({
+  slot,
+  label,
+  choice,
+  sec,
+  onChange,
+  fixed,
+  assets,
+  known,
+  defaultId,
+  inheritedId,
+  secOnInherit,
+}: {
+  slot: "intro" | "outro";
+  label: string;
+  choice: string;
+  sec: number | undefined;
+  onChange: (choice: string, sec: number | undefined) => void;
+  fixed: FixedOption[];
+  assets: LibraryAsset[];
+  known: LibraryAsset[];
+  defaultId?: string | null;
+  /** the asset a "follow the project / default" choice ends up using */
+  inheritedId?: string | null;
+  /** seconds may be set even when the choice is "default" (the project modal) */
+  secOnInherit?: boolean;
+}) {
+  const effective = fixed.some((f) => f.value === choice) ? (secOnInherit && (choice === "default" || choice === "inherit") ? inheritedId : null) : choice;
+  const image = effective ? known.find((a) => a.id === effective && a.kind === "image") : undefined;
+  return (
+    <>
+      <span className="text-xs text-ink2">{label}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <BumperCombobox className="min-w-0 flex-1" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} />
+        {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
+      </div>
+    </>
+  );
+}
+
+/** Intro / outro / remove, in the same order on the card and in the viewer. */
+function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
+  const slotBtn = (slot: "intro" | "outro", on: boolean) => (
+    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
+      {on ? "● " : ""}
+      {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
+    </button>
+  );
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {slotBtn("intro", introId === a.id)}
+      {slotBtn("outro", outroId === a.id)}
+      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+        <Trash2 className="h-3.5 w-3.5" />
+        {withLabels && "Remove"}
+      </button>
+    </div>
+  );
+}
+
+/** "3 s" with a pencil for an image: a tiny popover with the seconds field. */
+function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; busy: boolean; onSeconds: (sec: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(String(a.durationSec));
+  const save = () => {
+    const n = Number(v);
+    if (v !== "" && Number.isFinite(n) && clampSec(n) !== a.durationSec) onSeconds(n);
+    setOpen(false);
+  };
+  return (
+    <Popover.Root open={open} onOpenChange={(o) => (o && setV(String(a.durationSec)), setOpen(o))}>
+      <Popover.Trigger asChild>
+        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink" aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`} title="Change how long it is shown">
+          {lengthText(a)}
+          <Pencil className="h-3 w-3" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+          <label className="flex items-center gap-1.5 text-ink2">
+            Shown for
+            <input className="input h-7 w-16 px-1.5 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={v} disabled={busy} autoFocus aria-label={`Seconds ${a.name} is shown`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />s
+          </label>
+          <div className="flex justify-end gap-1.5">
+            <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-ink px-2 py-1 text-xs" disabled={busy} onClick={save}>
+              Save
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** One library card: fixed-size thumbnail, one-line name and facts, an always-present status line, and equal-width actions. */
+export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void }) {
+  return (
+    <div id={`asset-${a.id}`} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
+      <CardThumb asset={a} onOpen={onOpen} />
+      <div className="min-w-0 text-xs">
+        <button type="button" className="block w-full truncate text-left font-semibold text-ink" onClick={onSelect} title={`${a.name} (link to this item)`}>
+          {a.name}
+        </button>
+        <div className="flex h-4 items-center gap-1 overflow-hidden whitespace-nowrap font-mono text-ink3">
+          {a.kind === "image" ? (
+            <>
+              <span className="shrink-0">image ·</span>
+              <LengthPopover asset={a} busy={busy} onSeconds={onSeconds} />
+              <span className="truncate">
+                · {a.width}×{a.height}
+              </span>
+            </>
+          ) : (
+            <span className="truncate">{metaText(a)}</span>
+          )}
+        </div>
+      </div>
+      <StatusLine asset={a} isIntro={introId === a.id} isOutro={outroId === a.id} applied={applied} />
+      <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} />
+    </div>
+  );
+}
+
+/** Always one line: default intro / outro, and where it is used (a popover with the projects), or "Empty". */
+function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
+  const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
+  const fix = applied ? ", re-render to apply" : "";
+  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  return (
+    <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
+      {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
+      {a.usedBy || a.usedByClips ? (
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
+              {defaults ? `· used by ${used}${fix}` : `Used by ${used}${fix}`}
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+              <b className="text-[13px]">Where “{a.name}” is used</b>
+              <UsageList id={a.id} className="mt-2 max-h-[min(280px,50vh)]" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      ) : (
+        !defaults && <span className="text-ink3">{applied ? "Saved" : "○ Not used yet"}</span>
+      )}
+    </div>
+  );
+}
+
+/** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove }: { asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void }) {
+  return (
+    <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/70" />
+        <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4">
+          {a && (
+            <>
+              <div className="flex items-center gap-2">
+                <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
+                <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
+                  <X className="h-4 w-4" />
+                </Dialog.Close>
+              </div>
+              <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
+                {a.kind === "video" ? (
+                  <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                ) : (
+                  <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
+                )}
+              </div>
+              <p className="truncate font-mono text-xs text-ink3">
+                {a.kind} · {lengthText(a)} · {a.width}×{a.height} · {sizeText(a.sizeBytes)}
+                {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
+              </p>
+              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
+              <p className="text-center text-xs text-ink3">
+                New project with it as the{" "}
+                <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
+                  intro
+                </Link>{" "}
+                ·{" "}
+                <Link to={`/new?outro=${a.id}`} className="text-ink2 hover:text-ink">
+                  outro
+                </Link>
+              </p>
+            </>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/** Projects that use an asset (default or override) with the clips under each, and where each use comes from. */
+export function UsageList({ id, className = "" }: { id: string; className?: string }) {
+  const trpc = useTRPC();
+  const q = useQuery(trpc.bumpers.usage.queryOptions({ id }));
+  const projects = q.data?.projects ?? [];
+  return (
+    <ScrollArea className={className}>
+      <div className="flex min-h-[3rem] flex-col gap-2.5 pr-2 text-xs">
+        {q.isLoading && <span className="text-ink3">Loading…</span>}
+        {q.error && <span className="text-err">{q.error.message}</span>}
+        {q.data && projects.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
+        {projects.map((p) => (
+          <div key={p.id} className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-2">
+              <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
+                {p.title}
+              </Link>
+              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{p.slots.join(" + ")} · project</span>}
+            </div>
+            {p.clips.map((c) => (
+              <div key={c.id} className="flex items-baseline gap-2 pl-3">
+                <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
+                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled moment"}
+                </Link>
+                <span className="shrink-0 text-ink3">
+                  {c.slots.join(" + ")} · {c.via === "clip" ? "clip’s own choice" : "from project"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  );
+}
+
+/** Confirm before removing an asset; lists what still uses it. */
+export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsset | null; onClose: () => void; onConfirm: (a: LibraryAsset) => void }) {
+  return (
+    <Modal open={!!asset} onOpenChange={(o) => !o && onClose()} title="Remove from your library?" width={460}>
+      {asset && (
+        <>
+          <p className="text-sm leading-relaxed text-ink2">
+            {asset.usedBy
+              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
+              : `“${asset.name}” will be removed. You can restore it for 30 days.`}
+          </p>
+          {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35vh)]" />}
+          <div className="mt-1 flex justify-end gap-2">
+            <button className="btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="btn bg-err font-semibold text-white hover:brightness-110"
+              onClick={() => {
+                onConfirm(asset);
+                onClose();
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/** A per-clip slot choice: "inherit" (follow the project), "none", "keep" (bulk: leave alone), or a library asset id. */
+export type SlotChoice = string;
+export interface SlotChoices {
+  intro: SlotChoice;
+  outro: SlotChoice;
+  /** seconds for an image picked in that slot (overrides the library item's length) */
+  introSec?: number;
+  outroSec?: number;
+}
+const toChoice = (v: string | null | undefined): SlotChoice => (v === undefined ? "inherit" : v === null ? "none" : v);
+export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({ intro: toChoice(b?.intro), outro: toChoice(b?.outro), ...(b?.introSec ? { introSec: b.introSec } : {}), ...(b?.outroSec ? { outroSec: b.outroSec } : {}) });
+const isAssetChoice = (c: SlotChoice) => c !== "inherit" && c !== "none" && c !== "keep" && c !== "default";
+/** The value stored on the clip: slots that inherit are left out, seconds only travel with a picked asset. */
+export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
+  ...(c.intro !== "inherit" ? { intro: c.intro === "none" ? null : c.intro } : {}),
+  ...(isAssetChoice(c.intro) && c.introSec ? { introSec: clampSec(c.introSec) } : {}),
+  ...(c.outro !== "inherit" ? { outro: c.outro === "none" ? null : c.outro } : {}),
+  ...(isAssetChoice(c.outro) && c.outroSec ? { outroSec: clampSec(c.outroSec) } : {}),
+});
+/** The asset a slot ends up using on a clip: its own choice, else the project's. */
+export const effectiveAsset = (own: string | null | undefined, project: string | null | undefined) => (own === undefined ? project || null : own);
+/** Seconds a slot lasts on a clip: its own, else the project's, else the asset's own length. */
+export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string | null | undefined, projectSec: number | undefined, assetSec: number | undefined) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
+
+/** Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset. */
+export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean }) {
+  const library = useBumperLibrary();
+  const defaults = useMe().data?.projectDefaults;
+  const assets = library.data?.assets ?? [];
+  const known = [...assets, ...(library.data?.deleted ?? [])];
+  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const fixed = (projectId: string | null | undefined): FixedOption[] => [
+    ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
+    { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
+    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+  ];
+  const row = (slot: "intro" | "outro", label: string, projectId: string | null | undefined, defaultId: string | undefined) => (
+    <SlotRow
+      slot={slot}
+      label={label}
+      choice={value[slot]}
+      sec={value[`${slot}Sec`]}
+      onChange={(c, s) => onChange({ ...value, [slot]: c, [`${slot}Sec`]: s })}
+      fixed={fixed(projectId)}
+      assets={assets}
+      known={known}
+      defaultId={defaultId}
+    />
+  );
+  return (
+    <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 ${className}`}>
+      {row("intro", "Intro", projectIntroId, defaults?.introAssetId)}
+      {row("outro", "Outro", projectOutroId, defaults?.outroAssetId)}
+    </div>
+  );
+}
+
+/** "Intro / outro…" on a clip card: this clip's own choice without opening the editor. */
+export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId, className }: { clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null; className: string }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
+  const update = useMutation(trpc.clips.update.mutationOptions());
+  const dirty = JSON.stringify(clipBumpersFrom(v)) !== JSON.stringify(clipBumpersFrom(choicesFrom(bumpers)));
+  const save = (rerender: boolean) =>
+    update.mutate(
+      { id: clipId, bumpers: clipBumpersFrom(v), rerender },
+      {
+        onSuccess: () => {
+          void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+          toast(rerender ? "Saved · re-rendering this clip" : "Saved for this clip");
+          setOpen(false);
+        },
+        onError: (e) => toast.error(e.message),
+      },
+    );
+  return (
+    <Popover.Root open={open} onOpenChange={(o) => (o && setV(choicesFrom(bumpers)), setOpen(o))}>
+      <Popover.Trigger asChild>
+        <button className={className} title="Choose an intro and outro for just this clip">
+          Intro / outro…
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+          <b className="text-[13px]">Intro and outro for this clip</b>
+          <BumperSelects value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
+              Save
+            </button>
+            <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
+              Save & re-render
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** Applies an intro and/or outro to every selected clip (project page). Slots left on "Leave as it is" are untouched. */
+export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const [v, setV] = useState<SlotChoices>({ intro: "keep", outro: "keep" });
+  const many = useMutation(trpc.clips.setBumpersMany.mutationOptions());
+  const nothing = v.intro === "keep" && v.outro === "keep";
+  const apply = (rerender: boolean) =>
+    many.mutate(
+      {
+        projectId,
+        clipIds,
+        rerender,
+        ...(v.intro !== "keep" ? { intro: v.intro } : {}),
+        ...(v.outro !== "keep" ? { outro: v.outro } : {}),
+        ...(v.intro !== "keep" && isAssetChoice(v.intro) && v.introSec ? { introSec: clampSec(v.introSec) } : {}),
+        ...(v.outro !== "keep" && isAssetChoice(v.outro) && v.outroSec ? { outroSec: clampSec(v.outroSec) } : {}),
+      },
+      {
+        onSuccess: (r) => {
+          void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+          const what = [v.intro !== "keep" ? "intro" : "", v.outro !== "keep" ? "outro" : ""].filter(Boolean).join(" and ");
+          toast(`Updated the ${what} on ${r.updated} clip${r.updated === 1 ? "" : "s"}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
+          setV({ intro: "keep", outro: "keep" });
+          onDone();
+        },
+        onError: (e) => toast.error(e.message),
+      },
+    );
+  return (
+    <div className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-line bg-panel p-3 shadow-pop">
+      <b className="text-[13px]">
+        {clipIds.length} clip{clipIds.length === 1 ? "" : "s"} selected
+      </b>
+      <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className="max-w-[28rem]" />
+      <div className="flex flex-wrap justify-end gap-2">
+        <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
+          Apply
+        </button>
+        <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} onClick={() => apply(true)}>
+          {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type Choice = string; // "default" | "none" | library asset id
+
+/**
+ * This project's intro and outro: Default (what your Settings say now), None, or a specific one from the
+ * library, with a seconds field for an image. Saving asks whether to re-render the clips, like other project-wide changes.
+ */
+export function ProjectBumpersModal({
+  open,
+  onOpenChange,
+  projectId,
+  clipCount,
+  introId,
+  outroId,
+  introSec,
+  outroSec,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  projectId: string;
+  clipCount: number;
+  introId: string | null | undefined;
+  outroId: string | null | undefined;
+  introSec?: number;
+  outroSec?: number;
+}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const library = useBumperLibrary();
+  const defaults = useMe().data?.projectDefaults;
+  const save = useMutation(trpc.projects.setBumpers.mutationOptions());
+  const assets = library.data?.assets ?? [];
+  const known = [...assets, ...(library.data?.deleted ?? [])];
+  const known1 = (id: string | null | undefined, slotDefault: string | undefined): Choice => (id === null ? "none" : id ? (id === slotDefault ? "default" : id) : slotDefault ? "none" : "default");
+  const initial = { intro: known1(introId, defaults?.introAssetId), outro: known1(outroId, defaults?.outroAssetId) };
+  const [pick, setPick] = useState<{ intro?: Choice; outro?: Choice; introSec?: number | null; outroSec?: number | null }>({});
+  const intro = pick.intro ?? initial.intro;
+  const outro = pick.outro ?? initial.outro;
+  const iSec = pick.introSec === undefined ? introSec : (pick.introSec ?? undefined);
+  const oSec = pick.outroSec === undefined ? outroSec : (pick.outroSec ?? undefined);
+  const dirty = intro !== initial.intro || outro !== initial.outro || iSec !== introSec || oSec !== outroSec;
+  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const fixed = (slotDefault: string | undefined): FixedOption[] => [
+    { value: "default", label: `Default (${name(slotDefault)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
+    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+  ];
+  // a project may still use an asset that was removed since; keep it selectable as itself
+  const row = (slot: "intro" | "outro", label: string, choice: Choice, sec: number | undefined, slotDefault: string | undefined) => (
+    <SlotRow
+      slot={slot}
+      label={label}
+      choice={choice}
+      sec={sec}
+      onChange={(c, s) => setPick((p) => ({ ...p, [slot]: c, [`${slot}Sec`]: s ?? null }))}
+      fixed={fixed(slotDefault)}
+      assets={assets}
+      known={known}
+      defaultId={slotDefault}
+      inheritedId={slotDefault}
+      secOnInherit
+    />
+  );
+  const apply = (rerender: boolean) =>
+    save.mutate(
+      { id: projectId, intro, outro, ...(iSec && intro !== "none" ? { introSec: clampSec(iSec) } : {}), ...(oSec && outro !== "none" ? { outroSec: clampSec(oSec) } : {}), rerender },
+      {
+        onSuccess: (r) => {
+          void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+          void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+          toast(r.rerendered ? `Saved · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Saved");
+          setPick({});
+          onOpenChange(false);
+        },
+        onError: (e) => toast.error(e.message),
+      },
+    );
+  return (
+    <Modal open={open} onOpenChange={(o) => (setPick({}), onOpenChange(o))} title="Intro and outro for this project" width={460}>
+      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+        {row("intro", "Intro", intro, iSec, defaults?.introAssetId)}
+        {row("outro", "Outro", outro, oSec, defaults?.outroAssetId)}
+      </div>
+      <p className="min-h-8 text-xs text-ink3">{dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}</p>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button className="btn-ghost" onClick={() => onOpenChange(false)}>
+          Cancel
+        </button>
+        <button className="btn-ghost" disabled={!dirty || save.isPending} onClick={() => apply(false)}>
+          Save
+        </button>
+        <button className="btn-ink min-w-[10rem]" disabled={!dirty || save.isPending} onClick={() => apply(true)}>
+          {save.isPending ? "Saving…" : `Save & re-render ${clipCount}`}
+        </button>
+      </div>
+    </Modal>
+  );
+}

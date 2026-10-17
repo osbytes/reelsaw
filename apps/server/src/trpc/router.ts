@@ -1,19 +1,22 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { requestRender, reopenProject } from "../pipeline/lifecycle.js";
+import { requestRender, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
+import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { projectBumperSummaries, bumperUsageCounts } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
@@ -50,6 +53,7 @@ function publicClip(c: schema.Clip) {
     layoutSections: c.layoutSections ?? [],
     layoutSegments: c.layoutSegments ?? [],
     style: c.style ?? null,
+    bumpers: c.bumpers ?? null,
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -190,10 +194,34 @@ async function rerenderOverlapping(svc: Services, u: UnitOfWork, p: schema.Proje
 }
 
 /** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. */
+/** Set (or clear) the user's default intro/outro: one atomic JSON merge, ownership and liveness checked in the same unit of work. */
+async function setBumperDefault(db: Db, userId: string, slot: "intro" | "outro", assetId: string | null) {
+  const key = slot === "intro" ? "introAssetId" : "outroAssetId";
+  if (!assetId) {
+    await db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${userId}`);
+    return;
+  }
+  const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, assetId), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
+  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+  const patch = { [key]: assetId };
+  await db
+    .insert(schema.userSettings)
+    .values({ userId, projectDefaults: patch })
+    .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: sql`${schema.userSettings.projectDefaults} || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() } });
+}
+
 async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: schema.Clip) => boolean = (c) => c.status === "done" || c.status === "failed") {
   let n = 0;
   for (const c of await listClips(u.db, projectId)) if (which(c) && (await requestRender(svc, u, projectId, c.id)) !== null) n++;
   return n;
+}
+
+/** Every asset id is one of the user's library (an id the clip already uses stays valid even if it was removed since). */
+async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = []) {
+  const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
+  if (!want.length) return;
+  const rows = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(inArray(schema.bumperAssets.id, want), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
+  if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: "That intro or outro is not in your library" });
 }
 
 async function ownedProject(db: Db, userId: string, projectId: string) {
@@ -265,12 +293,205 @@ export const appRouter = router({
     })),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
-      const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== ""));
-      await ctx.svc.database.db
-        .insert(schema.userSettings)
-        .values({ userId: ctx.user.id, projectDefaults: clean })
-        .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: clean, updatedAt: new Date() } });
-      return { ok: true, projectDefaults: clean };
+      const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`
+      const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
+      return ctx.svc.tx(async (u) => {
+        const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
+        const keep = Object.fromEntries((["introAssetId", "outroAssetId"] as const).filter((k) => cur?.d?.[k]).map((k) => [k, cur!.d[k]]));
+        const next = { ...clean, ...keep };
+        await u.db
+          .insert(schema.userSettings)
+          .values({ userId: ctx.user.id, projectDefaults: next })
+          .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: next, updatedAt: new Date() } });
+        return { ok: true, projectDefaults: next };
+      });
+    }),
+  }),
+
+  /** The user's library of intro/outro videos and images (docs/specs/bumpers.md). Files arrive through POST /api/upload first. */
+  bumpers: router({
+    /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = ctx.svc.database.db;
+      const rows = await db.select().from(schema.bumperAssets).where(eq(schema.bumperAssets.userId, ctx.user.id)).orderBy(desc(schema.bumperAssets.createdAt));
+      const usage = await bumperUsageCounts(db, ctx.user.id);
+      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
+      // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
+      const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+      return {
+        assets: rows.filter((r) => !r.deletedAt).map(pub),
+        deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
+      };
+    }),
+    /**
+     * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
+     * choice. Two queries (projects whose settings name it, clips that name it or sit in such a project).
+     */
+    usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+      const db = ctx.svc.database.db;
+      const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)));
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+      const slots = ["intro", "outro"] as const;
+      const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
+      const projectRows = await db
+        .select({ id: schema.projects.id, title: schema.projects.title, settings: schema.projects.settings })
+        .from(schema.projects)
+        .where(and(eq(schema.projects.userId, ctx.user.id), or(sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`, sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`)))
+        .limit(500);
+      const clipRows = await db
+        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
+        .from(schema.clips)
+        .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
+        .where(
+          and(
+            eq(schema.projects.userId, ctx.user.id),
+            or(
+              sql`${schema.clips.bumpers} ->> 'intro' = ${input.id}`,
+              sql`${schema.clips.bumpers} ->> 'outro' = ${input.id}`,
+              sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`,
+              sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`,
+            ),
+          ),
+        )
+        .orderBy(schema.clips.index)
+        .limit(2000);
+      type Clip = { id: string; index: number; title: string; slots: Array<"intro" | "outro">; via: "clip" | "project" };
+      const out = new Map<string, { id: string; title: string; slots: Array<"intro" | "outro">; via: "project"; clips: Clip[] }>();
+      for (const p of projectRows) out.set(p.id, { id: p.id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === input.id), clips: [] });
+      for (const c of clipRows) {
+        const own = c.bumpers ?? {};
+        const mine = slots.filter((s) => own[s] === input.id);
+        // a slot the clip leaves alone follows the project
+        const inherited = slots.filter((s) => own[s] === undefined && c.settings[key[s]] === input.id);
+        if (!mine.length && !inherited.length) continue;
+        const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
+        out.set(p.id, p);
+        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: slots.filter((s) => mine.includes(s) || inherited.includes(s)), via: mine.length ? "clip" : "project" });
+      }
+      // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
+      const bare = [...out.values()].filter((p) => !p.clips.length).map((p) => p.id);
+      if (bare.length) {
+        const withClips = new Set((await db.selectDistinct({ id: schema.clips.projectId }).from(schema.clips).where(inArray(schema.clips.projectId, bare))).map((r) => r.id));
+        for (const id of bare) if (withClips.has(id)) out.delete(id);
+      }
+      return { projects: [...out.values()] };
+    }),
+    /**
+     * Change how long an image lasts. Assets are otherwise immutable; the normalised file is named by its
+     * seconds, so projects pick up the new length on their next render (the web says "re-render to apply").
+     */
+    update: protectedProcedure.input(z.object({ id: z.string(), imageSeconds: bumperSecondsSchema })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        const [a] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id))).for("update");
+        if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+        if (a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
+        await u.db.update(schema.bumperAssets).set({ durationSec: input.imageSeconds }).where(eq(schema.bumperAssets.id, a.id));
+        return { ok: true };
+      });
+    }),
+    /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. */
+    create: protectedProcedure
+      .input(z.object({ uploadId: z.string().min(1).max(100), imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(), setDefault: z.enum(["intro", "outro"]).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
+        if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+        const ext = path.extname(up.filename).toLowerCase();
+        const kind = bumperKind(ext) ?? "video";
+        const id = randomUUID();
+        const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
+        try {
+          // cheap checks first so a huge file is not pulled out of storage just to be refused
+          const early = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, { durationSec: 1, width: 1000, height: 1000 });
+          if (early) throw new TRPCError({ code: "BAD_REQUEST", message: early });
+          await fs.mkdir(svc.paths.tmp, { recursive: true });
+          await svc.storage.ensureLocal(up.storageKey, local);
+          const probe = await svc.media.ffprobe(local).catch(() => null);
+          if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : "a video"}.` });
+          const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
+          if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+          const sourceKey = keys.bumper(id, ext);
+          const contentHash = await sha256File(local);
+          const row = await svc.tx(async (u) => {
+            // one upload of a given file at a time per user, so two racing copies cannot both insert
+            await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bumper:${ctx.user.id}:${contentHash}`}))`);
+            const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
+            if (same) {
+              const wasRemoved = !!same.deletedAt;
+              if (wasRemoved) await u.db.update(schema.bumperAssets).set({ deletedAt: null }).where(eq(schema.bumperAssets.id, same.id));
+              if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, same.id);
+              return { asset: same, duplicate: true as const, restored: wasRemoved };
+            }
+            // ownership is re-checked in the unit of work that writes
+            const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, ctx.user.id)));
+            if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+            const [asset] = await u.db
+              .insert(schema.bumperAssets)
+              .values({
+                id,
+                userId: ctx.user.id,
+                kind,
+                name: up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
+                durationSec: kind === "image" ? (input.imageSeconds ?? BUMPER_IMAGE_SEC.default) : probe.durationSec,
+                width: probe.width!,
+                height: probe.height!,
+                hasAudio: kind === "video" && probe.hasAudio,
+                sourceKey,
+                sizeBytes: up.sizeBytes,
+                contentHash,
+              })
+              .returning();
+            if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, id);
+            // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
+            u.afterCommit(async () => {
+              try {
+                await svc.storage.putFile(sourceKey, local);
+                // the picker thumbnail; if this fails the media route makes it on first request
+                const thumbKey = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
+                if (thumbKey) await svc.database.db.update(schema.bumperAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.bumperAssets.id, id)).catch(() => {});
+              } finally {
+                await fs.rm(local, { force: true }).catch(() => {});
+              }
+            });
+            return { asset: asset!, duplicate: false as const, restored: false };
+          });
+          if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
+          return { id: row.asset.id, name: row.asset.name, kind: row.asset.kind, durationSec: row.asset.durationSec, duplicate: row.duplicate, restored: row.restored };
+        } catch (err) {
+          await fs.rm(local, { force: true }).catch(() => {});
+          throw err;
+        }
+      }),
+    /** Make a library asset the user's default intro or outro for new projects (assetId null clears it). */
+    setDefault: protectedProcedure.input(z.object({ slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        await setBumperDefault(u.db, ctx.user.id, input.slot, input.assetId);
+        return { ok: true };
+      });
+    }),
+    /** Soft delete: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
+    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        const gone = await u.db
+          .update(schema.bumperAssets)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt)))
+          .returning({ id: schema.bumperAssets.id });
+        if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+        for (const key of ["introAssetId", "outroAssetId"]) {
+          await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
+        }
+        return { ok: true };
+      });
+    }),
+    restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      const r = await ctx.svc.database.db
+        .update(schema.bumperAssets)
+        .set({ deletedAt: null })
+        .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)))
+        .returning({ id: schema.bumperAssets.id });
+      if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+      return { ok: true };
     }),
   }),
 
@@ -454,15 +675,15 @@ export const appRouter = router({
   /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
   searchIndex: protectedProcedure.query(async ({ ctx }) => {
     const db = ctx.svc.database.db;
-    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
+    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true, sourceUrl: true, updatedAt: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
     const ids = projects.map((p) => p.id);
     const clips = ids.length
-      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, thumbnailKey: true }, limit: 5000 })
+      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, endSec: true, outputKey: true, thumbnailKey: true }, limit: 5000 })
       : [];
     const titleOf = new Map(projects.map((p) => [p.id, p.title]));
     return {
-      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
-      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
+      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, sourceUrl: p.sourceUrl, updatedAt: p.updatedAt.toISOString(), thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
+      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, endSec: c.endSec, videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
     };
   }),
 
@@ -473,9 +694,10 @@ export const appRouter = router({
       const clipRows = rows.length
         ? await db.query.clips.findMany({
             where: inArray(schema.clips.projectId, rows.map((r) => r.id)),
-            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true },
+            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true, bumpers: true },
           })
         : [];
+      const bumperSummaries = await projectBumperSummaries(db, ctx.user.id, rows.map((p) => ({ id: p.id, settings: p.settings, clips: clipRows.filter((c) => c.projectId === p.id) })));
       return rows.map((p) => {
         const mine = clipRows.filter((c) => c.projectId === p.id);
         const firstThumb = mine.find((c) => c.thumbnailKey);
@@ -491,6 +713,7 @@ export const appRouter = router({
           // the source's own thumbnail stays the card image; clip thumbnails stack on top of it
           sourceThumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
           clipThumbs,
+          bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
           thumbnailUrl: firstThumb ? `/media/clips/${p.id}/${firstThumb.id}.jpg` : ((p.sourceMeta?.thumbnail as string | undefined) ?? null),
         };
       });
@@ -504,7 +727,8 @@ export const appRouter = router({
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
-      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates };
+      const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
+      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates, bumpers };
     }),
 
     create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
@@ -512,9 +736,6 @@ export const appRouter = router({
       const db = svc.database.db;
       if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a sourceUrl or an uploadId" });
       await checkProjectQuota(db, svc.config, ctx.user.id);
-      const settings = await resolveProjectSettings(db, ctx.user.id, input.settings);
-      if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
-
       let sourceMeta: schema.Project["sourceMeta"] = null;
       let title = input.title?.trim() || "";
       if (input.uploadId) {
@@ -531,11 +752,15 @@ export const appRouter = router({
       const id = randomUUID();
       // row, event and first job together: never a "queued" project with no job behind it
       const p = await svc.tx(async (u) => {
+        // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
+        const settings = await resolveProjectSettings(u.db, ctx.user.id, input.settings);
+        if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
         const [row] = await u.db
           .insert(schema.projects)
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
           .returning();
         await u.emit(id, "project.created", { title });
+        await startRun(u, id, { reason: "created", status: "queued" });
         await u.enqueue(QUEUES.ingest, { projectId: id });
         return row!;
       });
@@ -558,7 +783,7 @@ export const appRouter = router({
         else if (p.sourceKey) queue = QUEUES.transcribe;
 
         if (queue === QUEUES.render) {
-          await db.update(schema.projects).set({ status: "rendering", stage: "render", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
           for (const c of clips) {
             if (c.status === "done") continue;
             // a user-made clip whose AI preparation never finished goes back through clip.prepare
@@ -568,14 +793,15 @@ export const appRouter = router({
               await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
               continue;
             }
-            await requestRender(svc, u, p.id, c.id);
+            await requestRender(svc, u, p.id, c.id, {}, "retry");
           }
         } else if (queue === QUEUES.refineEntities) {
+          await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
           for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
           await enqueueRefine(svc, p.id, undefined, u);
         } else {
           for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-          await db.update(schema.projects).set({ status: "queued", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
           await u.enqueue(queue, { projectId: p.id });
         }
         await u.emit(p.id, "stage.started", { stage: queue, retried: true });
@@ -600,6 +826,7 @@ export const appRouter = router({
         await svc.tx(async (u) => {
           for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
           const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
+          await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
           const refine = { ...(cur?.refine ?? t.refine) };
           for (const s of steps) delete refine[s];
           await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
@@ -622,6 +849,39 @@ export const appRouter = router({
       });
       return { ok: true, rerendered };
     }),
+
+    /**
+     * Per-project intro/outro: for each slot "default" (the user's current default), "none" (even if the
+     * default has one) or a library asset id. Re-renders every finished clip only when `rerender` is set.
+     */
+    setBumpers: protectedProcedure
+      .input(z.object({ id: z.string(), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        const rerendered = await svc.tx(async (u) => {
+          const p = await ownedProject(u.db, ctx.user.id, input.id);
+          const mine = await userDefaults(u.db, ctx.user.id);
+          let expr = sql`${schema.projects.settings}`;
+          const patch: Record<string, string | number | null> = {};
+          for (const [slot, key, choice, secs] of [["intro", "introAssetId", input.intro, input.introSec], ["outro", "outroAssetId", input.outro, input.outroSec]] as const) {
+            if (choice === undefined) continue;
+            expr = sql`(${expr}) - ${key}::text - ${`${slot}Sec`}::text`;
+            if (secs !== undefined && choice !== "none") patch[`${slot}Sec`] = secs;
+            if (choice === "none") patch[key] = null;
+            else if (choice === "default") {
+              if (mine[key]) patch[key] = mine[key]!;
+            } else {
+              // a library asset of this user; the one the project already uses stays valid even if it was since removed
+              const [asset] = await u.db.select({ id: schema.bumperAssets.id, deletedAt: schema.bumperAssets.deletedAt }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, choice), eq(schema.bumperAssets.userId, ctx.user.id)));
+              if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
+              patch[key] = choice;
+            }
+          }
+          await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          return input.rerender ? rerenderClips(svc, u, p.id) : 0;
+        });
+        return { ok: true, rerendered };
+      }),
 
     /** oEmbed title/thumbnail for the new-project preview, before anything is created. */
     peek: protectedProcedure.input(z.object({ url: z.url() })).query(async ({ input }) => peekUrlMeta(input.url)),
@@ -665,7 +925,7 @@ export const appRouter = router({
         }
         await u.cancelLiveJobs(QUEUES.analyze, p.id);
         await u.db.delete(schema.clips).where(eq(schema.clips.projectId, p.id));
-        await u.db.update(schema.projects).set({ settings, status: "analyzing", stage: "analyze", error: null, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+        await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
         await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true });
         await u.enqueue(QUEUES.analyze, { projectId: p.id });
         // files go only once the rows that point at them are gone for good
@@ -820,6 +1080,8 @@ export const appRouter = router({
           style: styleOverrideSchema.nullable().optional(),
           /** Words the captions emphasise. */
           emphasis: z.array(z.string().min(1).max(40)).max(30).optional(),
+          /** This clip's own intro/outro choice, replacing the whole value: a missing key inherits the project, null is none. */
+          bumpers: clipBumpersSchema.nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
           rerender: z.boolean().optional(),
@@ -843,11 +1105,15 @@ export const appRouter = router({
         const sectionsChanged = input.layoutSections !== undefined && JSON.stringify(input.layoutSections ?? []) !== JSON.stringify(c.layoutSections ?? []);
         const styleChanged = input.style !== undefined && JSON.stringify(input.style ?? null) !== JSON.stringify(c.style ?? null);
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
-        const needsRender = boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged; // these are burned into the video
+        const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
+        const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
+        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged; // these are burned into the video
         const updated = await svc.tx(async (u) => {
         // re-read under lock: unchanged fields come from the current row, not a snapshot taken before
         const [cur] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id)).for("update");
         if (!cur) throw new TRPCError({ code: "NOT_FOUND" });
+        // ownership of the chosen assets is checked in the unit of work that writes
+        if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
         const [row] = await u.db
           .update(schema.clips)
           .set({
@@ -859,6 +1125,7 @@ export const appRouter = router({
             ...(input.layoutSections !== undefined ? { layoutSections: input.layoutSections?.length ? input.layoutSections : null } : {}),
             ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
+            ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
             updatedAt: new Date(),
@@ -871,6 +1138,35 @@ export const appRouter = router({
         return fresh ?? row!;
         });
         return publicClip(updated);
+      }),
+
+    /**
+     * Set the intro and/or outro of several clips at once. Per slot: "inherit" (follow the project), "none",
+     * or a library asset id; a slot left out is untouched. One atomic JSON merge per slot, in one transaction,
+     * with a render request per clip only when `rerender` is set.
+     */
+    setBumpersMany: protectedProcedure
+      .input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200), intro: z.string().min(1).max(100).optional(), outro: z.string().min(1).max(100).optional(), introSec: bumperSecondsSchema.optional(), outroSec: bumperSecondsSchema.optional(), rerender: z.boolean().default(false) }))
+      .mutation(async ({ ctx, input }) => {
+        const { svc } = ctx;
+        return svc.tx(async (u) => {
+          const p = await ownedProject(u.db, ctx.user.id, input.projectId);
+          const clips = await u.db.select({ id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(and(eq(schema.clips.projectId, p.id), inArray(schema.clips.id, input.clipIds))).for("update");
+          if (clips.length !== new Set(input.clipIds).size) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
+          await assertOwnedBumpers(u.db, ctx.user.id, [input.intro, input.outro].map((x) => (x === "none" || x === "inherit" ? null : x)));
+          const ids = clips.map((c) => c.id);
+          for (const [slot, choice, secs] of [["intro", input.intro, input.introSec], ["outro", input.outro, input.outroSec]] as const) {
+            if (choice === undefined) continue;
+            const patch = choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice, ...(secs !== undefined && choice !== "none" ? { [`${slot}Sec`]: secs } : {}) };
+            await u.db
+              .update(schema.clips)
+              .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
+              .where(inArray(schema.clips.id, ids));
+          }
+          let rerendered = 0;
+          if (input.rerender) for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
+          return { ok: true, updated: ids.length, rerendered };
+        });
       }),
 
     /**
@@ -909,7 +1205,7 @@ export const appRouter = router({
             origin: input.mode === "ai" ? "manual-ai" : "manual",
           })
           .returning();
-        await reopenProject(u, p.id);
+        await startRun(u, p.id, { reason: "clip_added", status: "rendering", stage: "render" });
         await u.emit(p.id, "clip.created", { clipId: inserted!.id, index, title: inserted!.title });
         await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: inserted!.id, mode: input.mode });
         return inserted!;
@@ -930,7 +1226,7 @@ export const appRouter = router({
           await u.cancelLiveJobs(QUEUES.prepare, c.id);
           await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
           await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
-          await reopenProject(u, p.id);
+          await startRun(u, p.id, { reason: "rerender", status: "rendering", stage: "render" });
           return { ok: true, step: "prepare" as const };
         }
         await requestRender(svc, u, p.id, c.id);

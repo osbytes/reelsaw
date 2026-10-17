@@ -67,7 +67,7 @@ describe("mcp", () => {
 
   it("lists the tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "get_clip", "update_clip", "create_clip", "rerender_clip", "delete_project"]) assert.ok(names.includes(n), n);
+    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "get_clip", "update_clip", "create_clip", "rerender_clip", "delete_project", "list_bumpers", "add_bumper", "set_default_bumper", "remove_bumper", "restore_bumper", "bumper_usage", "set_project_bumpers", "set_clip_bumpers"]) assert.ok(names.includes(n), n);
   });
 
   it("sees only the caller's projects", async () => {
@@ -91,6 +91,20 @@ describe("mcp", () => {
   it("validates tool input", async () => {
     const r = await client.callTool({ name: "create_project", arguments: { sourceUrl: "not a url" } });
     assert.equal(r.isError, true);
+  });
+
+  it("lists an empty bumper library and validates set_clip_bumpers input", async () => {
+    const r = await client.callTool({ name: "list_bumpers", arguments: {} });
+    assert.deepEqual(JSON.parse((r.content as Array<{ text: string }>)[0]!.text), { assets: [], removed: [] });
+    const noClips = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: mine, clipIds: [], rerender: false } });
+    assert.equal(noClips.isError, true);
+    const foreign = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: theirs, clipIds: [randomUUID()], intro: "none", rerender: false } });
+    assert.equal(foreign.isError, true);
+    assert.match((foreign.content as Array<{ text: string }>)[0]!.text, /NOT_FOUND/);
+    const got = await client.callTool({ name: "get_project", arguments: { id: mine } });
+    const p = JSON.parse((got.content as Array<{ text: string }>)[0]!.text) as { bumpers: { intro: { source: string } }; clips: Array<{ bumpers: unknown }> };
+    assert.equal(p.bumpers.intro.source, "none");
+    assert.ok(p.clips[0]!.bumpers);
   });
 
   it("authenticates tRPC and media routes with the key", async () => {

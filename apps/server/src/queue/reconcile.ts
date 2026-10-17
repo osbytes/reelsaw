@@ -1,6 +1,7 @@
 import { inArray, eq, desc } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { sweepRetention } from "../retention.js";
+import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { QUEUES, type QueueName } from "./boss.js";
@@ -73,10 +74,18 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
 }
 
 export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
+  let lastSweep = 0;
   const tick = () =>
     reconcile(svc)
       .then(() => detectStalls(svc, svc.config.STALL_MINUTES))
       .then(() => sweepRetention(svc))
+      .then(async () => {
+        // leftover files nothing points at: at most hourly (a safety net for crashes between commit and delete)
+        if (Date.now() - lastSweep < 60 * 60_000) return;
+        lastSweep = Date.now();
+        await sweepScratch(svc);
+        await purgeBumperAssets(svc);
+      })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();
   const timer = setInterval(tick, intervalMs);

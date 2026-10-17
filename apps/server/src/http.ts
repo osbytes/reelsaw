@@ -14,6 +14,7 @@ import { appRouter } from "./trpc/router.js";
 import { contextFactory } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { keys, contentTypeFor } from "./storage/index.js";
+import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { createExportZip } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { requireMcpAuth } from "@better-auth/mcp";
@@ -143,6 +144,37 @@ export function createApp(svc: Services) {
     } finally {
       await fsp.rm(dest, { force: true });
     }
+  });
+
+  // A user's own intro/outro, for the Settings preview. Owner only; soft-deleted assets stay readable by their owner.
+  app.get("/media/bumpers/:id", async (c) => {
+    const session = await activeRequester(auth, db, c.req.raw.headers);
+    if (!session) return c.text("unauthorized", 401);
+    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    if (!asset) return c.text("not found", 404);
+    const loc = await storage.resolve(asset.sourceKey);
+    if ("url" in loc) return c.redirect(loc.url, 302);
+    return sendFile(c.req.raw, loc.file);
+  });
+
+  // Picker thumbnail. Older assets get theirs on first request.
+  app.get("/media/bumpers/:id/thumb.jpg", async (c) => {
+    const session = await activeRequester(auth, db, c.req.raw.headers);
+    if (!session) return c.text("unauthorized", 401);
+    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    if (!asset) return c.text("not found", 404);
+    let key = asset.thumbnailKey ?? keys.bumperThumb(asset.id);
+    if (!asset.thumbnailKey || !(await storage.exists(key))) {
+      try {
+        key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage, dir: paths.tmp }, asset, undefined);
+        await db.update(schema.bumperAssets).set({ thumbnailKey: key }).where(eq(schema.bumperAssets.id, asset.id));
+      } catch {
+        return c.text("no thumbnail", 404);
+      }
+    }
+    const loc = await storage.resolve(key);
+    if ("url" in loc) return c.redirect(loc.url, 302);
+    return sendFile(c.req.raw, loc.file);
   });
 
   app.get("/media/clips/:projectId/:file", async (c) => {

@@ -1,4 +1,5 @@
-import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
+import { requestRender, startRun } from "./pipeline/lifecycle.js";
+import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
  * workers off), so it sees exactly the config, models and storage the pipeline uses.
@@ -23,13 +24,24 @@ import { requestRender, reopenProject } from "./pipeline/lifecycle.js";
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
  *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies) with status
+ *   storage [sweep [--dry-run]]            disk use: unique, scratch-only, duplicate-source, expired-but-present bytes;
+ *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
  *   logs    <id> [n=60]                     log lines mentioning a project/clip/job id from LOG_FILE (survives redeploys)
  *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
+ *   bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]
+ *                                           the intro/outro library. The user is --user, else the only account
+ *                                           on this install; otherwise pass --user
+ *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
+ *   clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
+ *                                           per project / per clip choice; acts as the project's owner;
+ *                                           --rerender re-renders only the affected clips
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  */
+import { projectBumperSummaries } from "./bumpers/service.js";
+import { describeCoverage } from "./bumpers/summary.js";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout } from "./pipeline/layout.js";
@@ -39,12 +51,16 @@ import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
 import { sweepRetention } from "./retention.js";
+import { sweepScratch, purgeBumperAssets } from "./storage/sweep.js";
+import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
 import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { formatTime } from "@reelsaw/shared";
+import { appRouter } from "./trpc/router.js";
+import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -129,6 +145,15 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         error: c.error ?? "",
       })),
     );
+    const bumpers = (await projectBumperSummaries(db, p.userId, [{ id, settings: p.settings, clips }])).get(id)!;
+    for (const slot of ["intro", "outro"] as const) {
+      const b = bumpers[slot];
+      if (b) console.log(`  ${describeCoverage(slot, b.name, b)}`);
+    }
+    const runs = await runsOfProject(db, id);
+    console.log("\nruns");
+    if (!runs.length) console.log("  (none recorded)");
+    for (const r of runs) console.log(`  ${describeRun(r)}`);
     const keys = [id, ...clips.map((c) => c.id)];
     const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; singleton_key: string; started_on: Date | null }>(
       `select name, state, retry_count, singleton_key, started_on from pgboss.job where singleton_key = any($1) and state in ('created','retry','active') order by created_on`,
@@ -281,8 +306,26 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const file = await svc.storage.ensureLocal(c.outputKey, `${svc.paths.tmp}/hear-${c.id}.mp4`);
     const start = Number(pos[1] ?? 0);
     const dur = Number(pos[2] ?? c.endSec - c.startSec);
-    const r = await words(svc, await ffmpegWav(svc, file, start, dur));
+    const r = await words(svc, await ffmpegWav(svc, file, start, dur)).finally(() => void import("node:fs/promises").then((f) => f.rm(file, { force: true })));
     console.log(`${r.model} hears (rendered ${start.toFixed(1)}s +${dur.toFixed(1)}s):\n${r.text}`);
+  },
+
+  async storage(svc) {
+    if (pos[0] === "sweep") {
+      const dry = args.includes("--dry-run");
+      const r = await sweepScratch(svc, { dryRun: dry });
+      table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
+      console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
+      const gone = await purgeBumperAssets(svc, { dryRun: dry });
+      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) removed over 30 days ago and used nowhere`);
+      return;
+    }
+    const r = await storageReport(svc);
+    console.log(`unique bytes under DATA_DIR (hardlinks counted once)  ${formatBytes(r.uniqueBytes)}`);
+    console.log(`scratch-only leftovers (sweep would remove)          ${formatBytes(r.scratchOrphanBytes)} in ${r.scratchOrphanFiles} file(s)`);
+    console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
+    console.log(`expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`);
+    if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");
   },
 
   async stuck(svc) {
@@ -322,7 +365,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
           await u.cancelLiveJobs(QUEUES.prepare, c.id);
           await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
           await u.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
-          await reopenProject(u, c.projectId);
+          await startRun(u, c.projectId, { reason: "retry", status: "rendering", stage: "render" });
         });
         return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
       }
@@ -374,6 +417,48 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     }
   },
 
+  /** Intro/outro library. Same tRPC procedures as the web app and the MCP tools, called as the resolved user. */
+  async bumpers(svc) {
+    const [sub, a, b] = bumperArgs().pos;
+    const { api, user } = await bumperApi(svc, undefined);
+    if (sub === "list") {
+      const lib = await libraryView(svc, api, user.id);
+      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy });
+      table(lib.assets.map(row));
+      if (lib.removed.length) {
+        console.log("\nremoved (restorable for 30 days)");
+        table(lib.removed.map(row));
+      }
+    } else if (sub === "usage" && a) {
+      const u = await api.bumpers.usage({ id: a });
+      if (!u.projects.length) console.log("(not used)");
+      for (const p of u.projects) {
+        console.log(`${p.title}  ${p.id}  project slots: ${p.slots.join(",") || "-"}`);
+        for (const c of p.clips) console.log(`  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.join(",")} via ${c.via}`);
+      }
+    } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
+      await api.bumpers.setDefault({ slot: a, assetId: b === "none" ? null : b });
+      console.log(b === "none" ? `cleared default ${a}` : `default ${a} is now ${b}`);
+    } else if ((sub === "remove" || sub === "restore") && a) {
+      await api.bumpers[sub === "remove" ? "delete" : "restore"]({ id: a });
+      console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
+    } else throw new Error("usage: reelsaw bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]");
+  },
+  async "project-bumpers"(svc) {
+    const { pos: p, rerender, ...o } = bumperArgs();
+    if (!p[0]) throw new Error("usage: reelsaw project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
+    const { api } = await bumperApi(svc, p[0]);
+    const r = await api.projects.setBumpers(projectBumpersCall({ projectId: p[0], intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
+    console.log(`updated; ${r.rerendered} clip(s) queued for re-render${rerender ? "" : " (pass --rerender to apply to finished clips now)"}`);
+  },
+  async "clip-bumpers"(svc) {
+    const { pos: p, rerender, ...o } = bumperArgs();
+    if (p.length < 2) throw new Error("usage: reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
+    const { api } = await bumperApi(svc, p[0]);
+    const r = await api.clips.setBumpersMany(clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
+    console.log(`updated ${r.updated} clip(s); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+  },
+
   async overlays(svc) {
     const id = pos[0]!;
     const db = svc.database.db;
@@ -406,6 +491,52 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 };
 
+/** Flags for the bumper commands (--rerender is boolean, so positional parsing must not treat the next word as its value). */
+function bumperArgs() {
+  const out = { pos: [] as string[], rerender: false, user: undefined as string | undefined, intro: undefined as string | undefined, outro: undefined as string | undefined, introSec: undefined as number | undefined, outroSec: undefined as number | undefined };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    const val = () => {
+      const v = args[++i];
+      if (v === undefined) throw new Error(`${a} needs a value`);
+      return v;
+    };
+    if (a === "--rerender") out.rerender = true;
+    else if (a === "--user") out.user = val();
+    else if (a === "--intro") out.intro = val();
+    else if (a === "--outro") out.outro = val();
+    else if (a === "--intro-sec") out.introSec = Number(val());
+    else if (a === "--outro-sec") out.outroSec = Number(val());
+    else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
+    else out.pos.push(a);
+  }
+  return out;
+}
+
+/**
+ * A tRPC caller acting as one user. Resolution: --user <email>; else the owner of `projectId`; else the only
+ * account on this install. Printed so the operator knows whose library they touched.
+ */
+async function bumperApi(svc: Services, projectId: string | undefined) {
+  const { user: email } = bumperArgs();
+  const db = svc.database.db;
+  let user;
+  if (email) user = await userByEmail(svc, email);
+  else if (projectId) {
+    const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
+    if (!p) throw new Error("project not found");
+    user = await db.query.user.findFirst({ where: eq(schema.user.id, p.userId) });
+  } else {
+    const all = await db.query.user.findMany({ limit: 2 });
+    if (all.length !== 1) throw new Error("this install has several accounts: pass --user <email>");
+    user = all[0];
+  }
+  if (!user) throw new Error("user not found");
+  console.error(`acting as ${user.email}`);
+  const req = new Request(svc.config.APP_URL);
+  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", session: null, blocked: null }, req }) };
+}
+
 async function userByEmail(svc: Services, email: string | undefined) {
   if (!email) throw new Error("usage: reelsaw <approve|make-admin> <email>");
   const u = await svc.database.db.query.user.findFirst({ where: eq(schema.user.email, email.toLowerCase()) });
@@ -416,7 +547,7 @@ async function userByEmail(svc: Services, email: string | undefined) {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

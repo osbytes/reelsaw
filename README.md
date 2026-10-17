@@ -36,14 +36,22 @@ Fully local, with Ollama for the language model and Speaches for speech-to-text.
 macOS install [Ollama](https://ollama.com/download) first:
 
 ```bash
-curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash
 ```
+
+On Windows (Docker Desktop), in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex
+```
+
+WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
 the model (`qwen2.5:14b`, ~9 GB; `REELSAW_LLM=qwen2.5:7b` for less RAM), starts everything and waits
 until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
-The script is [deploy/install.sh](deploy/install.sh); the gist mirrors it (update with
-`gh gist edit f49ef08b41d0bd1c160f789026c2f065 deploy/install.sh`).
+The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
+they are served from `main` (see [docs/RELEASING.md](docs/RELEASING.md)).
 
 ## Quick start (from source)
 
@@ -203,7 +211,11 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
 `get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
 `update_clip`, `create_clip`, `rerender_clip`, `retry_project`, `reanalyze_project`,
-`delete_project`. They call the same tRPC procedures as the web app, so ownership checks and
+`delete_project`. Intro/outro ("bumper") tools: `list_bumpers`, `add_bumper` (from a URL or an
+upload id), `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`,
+`set_project_bumpers`, `set_clip_bumpers` (one clip or many; `rerender: true` re-renders only those
+clips); `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
+They call the same tRPC procedures as the web app, so ownership checks and
 validation are identical (`apps/server/src/mcp.ts`). The same key also authenticates tRPC
 (`/api/trpc/*`), uploads and media downloads, so an agent can fetch the rendered clips. Keys are
 hashed at rest (`@better-auth/api-key`); revoke them from Settings.
@@ -279,7 +291,7 @@ pnpm --filter @reelsaw/server test
 
 ## Releases and distribution
 
-Users install from a published image; the source is not shipped. The runtime image contains only
+Users install from a published image. The runtime image contains only
 the minified server bundle (`apps/server/scripts/bundle.mjs`), the web build and production
 dependencies, which `scripts/check-image.sh <image>` verifies.
 

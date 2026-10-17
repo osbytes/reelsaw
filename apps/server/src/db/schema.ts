@@ -11,7 +11,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -212,6 +212,37 @@ export const uploads = pgTable("uploads", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * A user's intro/outro video. Immutable: replacing one is a new row, so a cache keyed by id is
+ * correct and a clip's diagnostics say exactly which version it used. Soft-deleted rows still
+ * resolve at render time so projects that snapshotted the id keep working.
+ */
+export const bumperAssets = pgTable(
+  "bumper_assets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"video" | "image">().notNull().default("video"),
+    name: text("name").notNull(),
+    durationSec: real("duration_sec").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    hasAudio: boolean("has_audio").notNull(),
+    sourceKey: text("source_key").notNull(),
+    /** 270x480 jpg for pickers and cards; null until generated (made lazily for older assets) */
+    thumbnailKey: text("thumbnail_key"),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** sha256 of the uploaded file, to refuse duplicates; null for assets added before it existed (no backfill) */
+    contentHash: text("content_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash)],
+);
+export type BumperAsset = typeof bumperAssets.$inferSelect;
+
 export const projects = pgTable(
   "projects",
   {
@@ -234,6 +265,12 @@ export const projects = pgTable(
     sourceExpiredAt: timestamp("source_expired_at", { withTimezone: true }),
     stage: text("stage"),
     stageProgress: real("stage_progress"),
+    /** explicit runs (see pipeline/lifecycle.ts startRun): how many have started, when and why the current/last one did */
+    runSeq: integer("run_seq").notNull().default(0),
+    runStartedAt: timestamp("run_started_at", { withTimezone: true }),
+    runReason: text("run_reason").$type<RunReason>(),
+    /** when the stage now running began; stage.completed / stage.failed durations come from it */
+    stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
     settings: jsonb("settings").$type<ProjectSettings>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -321,6 +358,8 @@ export const clips = pgTable(
     emphasis: jsonb("emphasis").$type<string[]>(),
     /** Per-clip caption/hook style override on top of the project settings. */
     style: jsonb("style").$type<StyleOverride>(),
+    /** user decision per slot: missing key = inherit the project, null = none, string = that library asset (survives pipeline re-runs) */
+    bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

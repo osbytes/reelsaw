@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
+import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
@@ -21,11 +22,12 @@ import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { resolveStyle, speakerCrop, cropX, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
+import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
 
 const OUT_W = 1080;
 const OUT_H = 1920;
 
-const FIT_CHAIN = (w: number, h: number) =>
+export const FIT_CHAIN = (w: number, h: number) =>
   `[0:v]split=2[bg][fg];` +
   `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2[bgb];` +
   `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs];` +
@@ -386,10 +388,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   );
 
   const tmpOut = `${outPath}.tmp.mp4`;
+  // intro/outro from the project's settings; an unusable one is skipped, never fatal
+  // the clip's own choice per slot, else the project's
+  const chosen = resolveClipBumpers(settings, clip);
+  const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, { intro: chosen.introSec, outro: chosen.outroSec }, clip.id, log);
+  const srcHasAudio = bumpers.intro || bumpers.outro ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
+  const buildGraph = (withBumpers: boolean): { graph: string; audioMap: string[] } => {
+  const vOut = withBumpers ? "[bodyraw]" : "[v]";
   let graph: string;
   let audioMap: string[];
-  if (segments.length > 1 || cuts.length) {
+  const hasCutBranch = segments.length > 1 || cuts.length > 0;
+  if (hasCutBranch) {
     // pieces = kept ranges (after cuts) split at layout boundaries; each piece gets its own framing
     const keep = cuts.length ? plan.keep : [{ start: 0, end: duration }];
     const layoutSegs = segments;
@@ -425,16 +435,31 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       }
       audio = audio.replace(/;$/, "");
     }
-    graph = `${src.prefix}${parts.join(";")};${vInputs}concat=n=${pieces.length}:v=1:a=0[cv];${audio};[cv]ass='${escapeFilterPath(assPath)}'[v]`;
+    graph = `${src.prefix}${parts.join(";")};${vInputs}concat=n=${pieces.length}:v=1:a=0[cv];${audio};[cv]ass='${escapeFilterPath(assPath)}'${vOut}`;
     audioMap = ["-map", "[ca]"];
   } else {
     const src = sourceVideo(overlays, srcW, srcH, 1);
-    graph = `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},ass='${escapeFilterPath(assPath)}'[v]`;
+    graph = `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},ass='${escapeFilterPath(assPath)}'${vOut}`;
     audioMap = ["-map", "0:a:0?"];
   }
+  if (withBumpers) {
+    // concat needs audio in every slot: the no-cuts branch has optional audio, so give it a guaranteed [ca]
+    if (!hasCutBranch) graph += `;${srcHasAudio ? "[0:a:0]anull[ca]" : `anullsrc=r=48000:cl=stereo,atrim=end=${duration.toFixed(3)}[ca]`}`;
+    // the burned-in captions are on the body's own timeline, so the intro never shifts them
+    graph += `;${bumperConcat({ introInput: bumpers.intro ? 1 : undefined, outroInput: bumpers.outro ? (bumpers.intro ? 2 : 1) : undefined, bodyVideo: "[bodyraw]", bodyAudio: "[ca]", bodySec: outDuration })}`;
+    audioMap = ["-map", "[a]"];
+  }
+  return { graph, audioMap };
+  };
+  const encode = async (withBumpers: boolean) => {
+  const { graph, audioMap } = buildGraph(withBumpers);
+  const introSec = withBumpers && bumpers.intro ? bumpers.intro.sec : 0;
+  const outroSec = withBumpers && bumpers.outro ? bumpers.outro.sec : 0;
   await svc.media.ffmpeg(
     [
       "-ss", clip.startSec.toFixed(3), "-t", duration.toFixed(3), "-i", sourcePath,
+      ...(withBumpers && bumpers.intro ? ["-i", bumpers.intro.path] : []),
+      ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
       "-filter_complex", graph,
       "-map", "[v]", ...audioMap,
       "-threads", String(svc.resources.ffmpegThreads()),
@@ -442,10 +467,27 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
       "-movflags", "+faststart", "-f", "mp4", tmpOut,
     ],
-    { signal: ctx.signal, onProgress: (sec) => void ctx.progress(sec / outDuration, `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}) },
+    // progress counts the bumper seconds too, or the bar would finish early
+    { signal: ctx.signal, onProgress: (sec) => void ctx.progress(sec / (introSec + outDuration + outroSec), `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}) },
   );
+  return { introSec, outroSec };
+  };
+  let attached: { introSec: number; outroSec: number };
+  let usedBumpers = !!(bumpers.intro || bumpers.outro);
+  try {
+    attached = await encode(usedBumpers);
+  } catch (err) {
+    if (ctx.signal.aborted || !usedBumpers) throw err;
+    // the bumpers are the only thing that differs: render the clip without them rather than failing it
+    log.warn({ err }, "render with intro/outro failed; rendering without");
+    bumpers.skipped.push("the render with the intro and outro failed");
+    await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot: "intro", reason: "the video could not be joined to the clip, so it was rendered without an intro or outro", error: String((err as Error).message).slice(0, 1500) }).catch(() => {});
+    usedBumpers = false;
+    attached = await encode(false);
+  }
   await fs.rename(tmpOut, outPath);
-  await svc.media.ffmpeg(["-ss", (outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath], { signal: ctx.signal });
+  // the thumbnail is a still of the clip itself, so it is taken after the intro
+  await svc.media.ffmpeg(["-ss", (attached.introSec + outDuration / 3).toFixed(2), "-i", outPath, "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", thumbPath], { signal: ctx.signal });
 
   const outputKey = keys.clip(projectId, clip.id, gen);
   const thumbnailKey = keys.thumb(projectId, clip.id, gen);
@@ -463,6 +505,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       skipped: cutResult.skipped.map((sk) => ({ start: Number((sk.range.start + clip.startSec).toFixed(3)), end: Number((sk.range.end + clip.startSec).toFixed(3)), reason: sk.reason.slice(0, 2000) })),
     },
     outDurationSec: Number(outDuration.toFixed(2)),
+    ...(chosen.introId || chosen.outroId || chosen.fromClip.length
+      ? {
+          bumpers: {
+            ...(usedBumpers && bumpers.intro ? { introId: bumpers.intro.id } : {}),
+            ...(usedBumpers && bumpers.outro ? { outroId: bumpers.outro.id } : {}),
+            introSec: Number(attached.introSec.toFixed(3)),
+            outroSec: Number(attached.outroSec.toFixed(3)),
+            ...(bumpers.skipped.length ? { skipped: bumpers.skipped } : {}),
+            ...(chosen.fromClip.length ? { fromClip: chosen.fromClip } : {}),
+          },
+        }
+      : {}),
     renderMs: Date.now() - renderStarted,
   };
   // commit only if this is still the clip's current generation; a newer request wins and our files go
@@ -473,14 +527,67 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     await u.emit(projectId, "clip.done", { clipId, index: clip.index });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
-    for (const k of [cur.outputKey, cur.thumbnailKey]) if (k && k !== outputKey && k !== thumbnailKey) u.afterCommit(() => svc.storage.delete(k));
+    for (const k of [cur.outputKey, cur.thumbnailKey]) {
+      if (!k || k === outputKey || k === thumbnailKey) continue;
+      u.afterCommit(async () => {
+        await svc.storage.delete(k);
+        await removeScratchClip(svc, projectId, k);
+      });
+    }
     return true;
   });
   if (!committed) {
     log.info({ gen }, "render finished for a superseded version; discarding its output");
     await svc.storage.delete(outputKey).catch(() => {});
     await svc.storage.delete(thumbnailKey).catch(() => {});
+    await fs.rm(outPath, { force: true }).catch(() => {});
+    await fs.rm(thumbPath, { force: true }).catch(() => {});
   }
+}
+
+interface LoadedBumper {
+  id: string;
+  path: string;
+  sec: number;
+}
+
+/**
+ * The project's intro/outro as normalised local files. Soft-deleted assets still resolve (projects
+ * that snapshotted the id keep working); a missing, foreign or unreadable one is skipped with a
+ * plain-language event so the clip renders without it instead of failing.
+ */
+async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, secs: { intro?: number; outro?: number }, clipId: string, log: Logger) {
+  const { svc, projectId, db } = ctx;
+  const out: { intro?: LoadedBumper; outro?: LoadedBumper; skipped: string[] } = { skipped: [] };
+  for (const slot of ["intro", "outro"] as const) {
+    const id = ids[slot];
+    if (!id) continue;
+    const skip = async (reason: string, error?: unknown) => {
+      out.skipped.push(`${slot}: ${reason}`);
+      log.warn({ slot, assetId: id, err: error }, "bumper skipped");
+      await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
+    };
+    const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, id) });
+    if (!asset || asset.userId !== userId) {
+      await skip(`the ${slot} file is no longer available`);
+      continue;
+    }
+    try {
+      // an image lasts as long as this clip or project says, else its own default; a video keeps its length
+      const used = asset.kind === "image" && secs[slot] ? { ...asset, durationSec: secs[slot]! } : asset;
+      const file = await ensureNormalised(
+        { ffmpeg: (args, o) => svc.media.ffmpeg(args, o), storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") },
+        used,
+        { width: OUT_W, height: OUT_H, fitChain: FIT_CHAIN(OUT_W, OUT_H) },
+        ctx.signal,
+      );
+      out[slot] = { id, path: file, sec: bumperFrames(used.durationSec) / BUMPER_FPS };
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      await skip(`the ${slot} file could not be read`, err);
+    }
+  }
+  return out;
 }
 
 export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number) {

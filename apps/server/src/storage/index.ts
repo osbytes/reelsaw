@@ -25,7 +25,7 @@ export interface Storage {
   deletePrefix(prefix: string): Promise<void>;
 }
 
-const MIME: Record<string, string> = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg" };
+const MIME: Record<string, string> = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg" };
 export function contentTypeFor(file: string) {
   return MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 }
@@ -220,5 +220,10 @@ export const keys = {
   // one file per render generation: a stale render can never overwrite a newer one's output
   clip: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.mp4`,
   thumb: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.jpg`,
+  /** a user's intro/outro as uploaded; assets are immutable, so the key never changes */
+  bumper: (id: string, ext: string) => `bumpers/${id}/source${ext}`,
+  bumperThumb: (id: string) => `bumpers/${id}/thumb.jpg`,
+  /** derived cache: the bumper normalised to the render canvas (`variant` names canvas + encode version) */
+  bumperNorm: (id: string, variant: string) => `bumpers/${id}/norm.${variant}.mp4`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };
