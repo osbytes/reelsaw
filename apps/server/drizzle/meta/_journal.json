@@ -99,6 +99,34 @@
       "when": 1792172860672,
       "tag": "0013_stage_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792186641341,
+      "tag": "0014_api_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792250642613,
+      "tag": "0015_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792251018745,
+      "tag": "0016_user_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792252579607,
+      "tag": "0017_hosted_usage_oauth",
+      "breakpoints": true
     }
   ]
 }

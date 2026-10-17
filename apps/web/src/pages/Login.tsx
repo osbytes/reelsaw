@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate, Navigate } from "react-router";
-import { signIn, signUp, useSession } from "../lib/auth";
+import { authClient, signIn, signUp, useSession } from "../lib/auth";
+import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
+import { useSystemStatus } from "../lib/account";
 
 export function LoginPage() {
   const { data } = useSession();
@@ -12,20 +14,38 @@ export function LoginPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const status = useSystemStatus();
+  const signupMode = status.data?.signupMode ?? "open";
+  const captcha = status.data?.captcha ?? null;
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const onToken = useCallback((t: string | null) => setCaptchaToken(t), []);
+  // arriving from an OAuth authorize redirect (MCP connector): after sign-in, hand the signed query back
+  const oauthQuery = /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
 
-  if (data) return <Navigate to="/" replace />;
+  if (data && !oauthQuery) return <Navigate to="/" replace />;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    const fetchOptions = captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined;
     const res =
       mode === "login"
-        ? await signIn.email({ email, password })
-        : await signUp.email({ email, password, name: name || email.split("@")[0]! });
+        ? await signIn.email({ email, password, fetchOptions })
+        : await signUp.email({ email, password, name: name || email.split("@")[0]!, fetchOptions });
+    if (res.error) {
+      setBusy(false);
+      setCaptchaToken(null);
+      return setError(res.error.message ?? "Something went wrong");
+    }
+    if (oauthQuery) {
+      const r = await authClient.$fetch<{ redirect_uri: string }>("/oauth2/continue", { method: "POST", body: { oauth_query: oauthQuery } });
+      if (r.data?.redirect_uri) return window.location.assign(r.data.redirect_uri);
+      setBusy(false);
+      return setError(r.error?.message ?? "Could not continue the authorization");
+    }
     setBusy(false);
-    if (res.error) setError(res.error.message ?? "Something went wrong");
-    else nav("/", { replace: true });
+    nav("/", { replace: true });
   }
 
   return (
@@ -51,13 +71,28 @@ export function LoginPage() {
           <label className="label">Password</label>
           <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
+        {mode === "signup" && signupMode === "approval" && <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>}
+        {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
+          <p className="text-xs leading-relaxed text-ink3">
+            By creating an account you accept the{" "}
+            {status.data.termsUrl && <a href={status.data.termsUrl} target="_blank" rel="noreferrer">terms</a>}
+            {status.data.termsUrl && status.data.privacyUrl && " and "}
+            {status.data.privacyUrl && <a href={status.data.privacyUrl} target="_blank" rel="noreferrer">privacy policy</a>}.
+          </p>
+        )}
+        {oauthQuery && <p className="text-xs leading-relaxed text-ink2">An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</p>}
+        {captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
         {error && <p className="rounded-[10px] bg-err-soft px-3 py-2 text-sm text-ink">{error}</p>}
-        <button className="btn-primary w-full py-2.5 text-sm" disabled={busy}>
+        <button className="btn-primary w-full py-2.5 text-sm" disabled={busy || (!!captcha && !captchaToken)}>
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
-        <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-          {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
-        </button>
+        {signupMode !== "closed" ? (
+          <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+            {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+          </button>
+        ) : (
+          <p className="min-h-4 text-center text-xs text-ink3">Sign-ups are closed on this instance.</p>
+        )}
       </form>
     </div>
   );

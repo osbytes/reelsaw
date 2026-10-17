@@ -12,6 +12,10 @@ import { ProjectsPage } from "./pages/Projects";
 import { NewProjectPage } from "./pages/NewProject";
 import { ProjectPage } from "./pages/Project";
 import { SettingsPage } from "./pages/Settings";
+import { PendingPage } from "./pages/Pending";
+import { AdminUsersPage } from "./pages/AdminUsers";
+import { ConsentPage } from "./pages/Consent";
+import { useMe, useSystemStatus } from "./lib/account";
 import { ClipEditorPage } from "./pages/ClipEditor";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
@@ -43,21 +47,12 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
 
 /** "Always-visible machine state": shows when heavy jobs are paused, and why. */
 function MachineChip() {
-  const trpc = useTRPC();
-  const q = useQuery({ ...trpc.settings.get.queryOptions(), refetchInterval: 10_000 });
-  const r = q.data?.resources;
-  if (!r) return null;
-  const why = !r.ok.memory
-    ? `memory ${Math.round(((r.memTotalMB - r.memAvailableMB) / Math.max(1, r.memTotalMB)) * 100)}%`
-    : !r.ok.cpu
-      ? `CPU ${r.cpuPercent}%`
-      : !r.ok.disk
-        ? "disk nearly full"
-        : null;
+  const status = useSystemStatus(10_000);
+  const why = status.data?.paused;
   if (!why) return null;
   return (
     <Link to="/settings" className="chip bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room">
-      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused ·</span> {why}
+      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused ·</span> {why === "disk" ? "disk nearly full" : `${why} busy`}
     </Link>
   );
 }
@@ -94,6 +89,21 @@ function Avatar() {
   );
 }
 
+/** Admins only: link to user management, with the number waiting for approval. */
+function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
+  const me = useMe();
+  const trpc = useTRPC();
+  const isAdmin = me.data?.role === "admin";
+  const pending = useQuery({ ...trpc.admin.users.pendingCount.queryOptions(), enabled: isAdmin, refetchInterval: 30_000 });
+  if (!isAdmin) return null;
+  return (
+    <NavLink to="/admin/users" className={nav}>
+      Users
+      {pending.data ? <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">{pending.data}</span> : null}
+    </NavLink>
+  );
+}
+
 function SearchButton() {
   const open = useCommandPalette();
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
@@ -120,6 +130,7 @@ export function TopBar() {
         <NavLink to="/settings" className={nav}>
           Settings
         </NavLink>
+        <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
       <SearchButton />
@@ -145,10 +156,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Protected({ children, bare }: { children: React.ReactNode; bare?: boolean }) {
+function Protected({ children, bare, admin }: { children: React.ReactNode; bare?: boolean; admin?: boolean }) {
   const { data, isPending } = useSession();
-  if (isPending) return <div className="p-10 text-center text-ink3">Loading…</div>;
+  const me = useMe(!!data);
+  if (isPending || (data && me.isPending)) return <div className="p-10 text-center text-ink3">Loading…</div>;
   if (!data) return <Navigate to="/login" replace />;
+  // waiting for approval or suspended: one page, nothing else (the server refuses everything anyway)
+  if (me.data?.blocked) return <PendingPage />;
+  if (admin && me.data?.role !== "admin") return <Navigate to="/" replace />;
   // the editor hides the global bar so the timeline gets the room
   if (bare)
     return (
@@ -165,9 +180,11 @@ export function App() {
     <CommandPaletteProvider>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/consent" element={<ConsentPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+      <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
       <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />

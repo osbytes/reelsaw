@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo } from "../lib/uploads";
 import { ChevronRight } from "lucide-react";
 import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
-import { defaultProjectSettings, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
+import { useMe, useSystemStatus } from "../lib/account";
+import { useToast } from "../lib/toast";
+import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 
 const LENGTHS = [
@@ -44,8 +46,12 @@ function useDebounced<T>(v: T, ms: number) {
 export function NewProjectPage() {
   const trpc = useTRPC();
   const nav = useNavigate();
-  const settingsQ = useQuery(trpc.settings.get.queryOptions());
+  const qc = useQueryClient();
+  const toast = useToast();
+  const status = useSystemStatus();
+  const me = useMe();
   const create = useMutation(trpc.projects.create.mutationOptions());
+  const saveDefaults = useMutation({ ...trpc.me.updateProjectDefaults.mutationOptions(), onSuccess: () => void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }) });
 
   // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
   const [search] = useSearchParams();
@@ -68,6 +74,14 @@ export function NewProjectPage() {
   }, [loc.key]);
   const [title, setTitle] = useState("");
   const [s, setS] = useState<ProjectSettings>(defaultProjectSettings);
+  // the user's saved defaults fill the form once, before they touch it
+  const [prefilledFor, setPrefilledFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (me.data && prefilledFor !== me.data.id) {
+      setS(projectSettingsSchema.parse({ ...defaultProjectSettings, ...me.data.projectDefaults }));
+      setPrefilledFor(me.data.id);
+    }
+  }, [me.data, prefilledFor]);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewAs, setPreviewAs] = useState<PreviewLayout>("face");
@@ -212,7 +226,7 @@ export function NewProjectPage() {
                     className="flex cursor-pointer flex-col items-center gap-1 rounded-[12px] border-2 border-dashed border-line2 px-4 py-6 text-center text-sm text-ink2 hover:border-acc"
                   >
                     <span className="font-semibold text-ink">{file ? file.name : "Choose or drop a video file"}</span>
-                    <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${settingsQ.data?.maxUploadMb ?? "—"} MB`}</span>
+                    <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${status.data?.maxUploadMb ?? "—"} MB`}</span>
                     <input className="hidden" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   </label>
                   {uploadPct !== null && <ProgressBar value={uploadPct} />}
@@ -395,6 +409,15 @@ export function NewProjectPage() {
       <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
           <span className="min-w-0 flex-1 truncate text-[13px] text-ink2">{error ? <span className="text-err">{error}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : summary}</span>
+          <button
+            type="button"
+            className="btn-quiet text-xs"
+            title="Keep these settings for every new project"
+            disabled={busy || saveDefaults.isPending}
+            onClick={() => saveDefaults.mutate(userProjectDefaultsSchema.parse(s), { onSuccess: () => toast("Saved as your defaults"), onError: (e) => toast(e.message) })}
+          >
+            Save as my defaults
+          </button>
           <Link to="/" className="btn-quiet no-underline">
             Cancel
           </Link>

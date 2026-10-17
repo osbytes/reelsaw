@@ -1,6 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
+import { ApiKeysSection } from "../components/ApiKeys";
+import { AccountSection } from "../components/AccountSection";
+import { ProjectDefaultsSection } from "../components/ProjectDefaults";
+import { useMe, useSystemStatus } from "../lib/account";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -8,8 +12,12 @@ function gb(mb: number) {
 
 export function SettingsPage() {
   const trpc = useTRPC();
-  const q = useQuery({ ...trpc.settings.get.queryOptions(), refetchInterval: 5000 });
+  const me = useMe();
+  const status = useSystemStatus();
+  const isAdmin = me.data?.role === "admin";
+  const q = useQuery({ ...trpc.admin.system.queryOptions(), refetchInterval: 5000, enabled: isAdmin });
   const s = q.data;
+  const mcpUrl = `${window.location.origin}/api/mcp`;
   const r = s?.resources;
   const L = s?.limits;
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
@@ -61,7 +69,9 @@ export function SettingsPage() {
             ["Storage", s.storage],
             ["Render concurrency", s.renderConcurrency.mode === "auto" ? `Automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}` : `${s.renderConcurrency.max} (fixed)`],
             ["Max upload", `${s.maxUploadMb} MB`],
-            ["Sign-ups", s.allowSignup ? "open" : "closed"],
+            ["Sign-ups", s.signupMode === "approval" ? "need approval" : s.signupMode],
+            ["Email", s.email],
+            ["Health details", s.healthDetails ? "public" : "admins only"],
             ["OpenTelemetry", s.otel ? "on" : "off"],
           ],
         },
@@ -74,13 +84,20 @@ export function SettingsPage() {
         <div>
           <div className="flex flex-wrap items-baseline gap-x-3">
             <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
-            <span className="min-h-5 font-mono text-xs text-ink3">{s ? `Reelsaw ${s.version.version} · ${s.version.commit}` : ""}</span>
+            <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
           </div>
-          <p className="mt-1 text-sm text-ink2">
-            Read from the server environment. Change them in <span className="font-mono text-[13px]">.env</span> and restart.
-          </p>
+          <p className="mt-1 min-h-5 text-sm text-ink2">{isAdmin ? "Your account and defaults, then this machine (read from the server environment; change .env and restart)." : "Your account, project defaults and API keys."}</p>
         </div>
-        {!s && <p className="text-ink3">Loading…</p>}
+        <AccountSection />
+        <ProjectDefaultsSection />
+        <ApiKeysSection mcpUrl={mcpUrl} />
+        {isAdmin && (
+          <div className="flex items-baseline gap-2 pt-2">
+            <h2 className="text-[18px] font-bold tracking-tight">System</h2>
+            <span className="min-h-5 font-mono text-xs text-ink3">{s ? `${s.version.version} · ${s.version.commit}` : ""}</span>
+          </div>
+        )}
+        {isAdmin && !s && <p className="text-ink3">Loading…</p>}
         {r && (
           <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
             <div className="flex items-baseline gap-2">

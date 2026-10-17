@@ -102,7 +102,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
   return {
     run,
     ffmpeg,
-    ytdlp: (args, opts) => run(config.YTDLP_PATH, args, opts),
+    ytdlp: (args, opts) => run(config.YTDLP_PATH, [...(config.YTDLP_PROXY ? ["--proxy", config.YTDLP_PROXY] : []), ...(config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : []), ...args], opts),
 
     async ffprobe(file) {
       const { stdout } = await run(config.FFPROBE_PATH, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file]);

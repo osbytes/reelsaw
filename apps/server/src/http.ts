@@ -15,6 +15,9 @@ import { contextFactory } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { createExportZip } from "./export.js";
+import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
+import { requireMcpAuth } from "@better-auth/mcp";
+import { handleMcp } from "./mcp.js";
 import { createReportZip, reportPreview } from "./report/bundle.js";
 import { reportRequestSchema } from "@reelsaw/shared";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
@@ -69,19 +72,56 @@ export function createApp(svc: Services) {
     cors({
       origin: [config.APP_URL, "http://localhost:5173"],
       credentials: true,
-      allowHeaders: ["Content-Type", "Authorization", "x-filename", "trpc-accept"],
+      allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version"],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     }),
   );
 
   const version = { version: svc.config.REELSAW_VERSION, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT };
-  app.get("/api/health", async (c) => c.json({ ok: true, ...version, resources: await svc.resources.snapshot() }));
+  // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
+  app.get("/api/health", async (c) => {
+    const who = config.HEALTH_DETAILS ? null : await activeRequester(auth, db, c.req.raw.headers);
+    const details = config.HEALTH_DETAILS || who?.user.role === "admin";
+    return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
+  });
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
+  // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
+  if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(c.req.raw));
   app.use("/api/trpc/*", trpcServer({ router: appRouter, endpoint: "/api/trpc", createContext: contextFactory(svc) }));
+
+  // MCP (agents): API key in the Authorization header; see README "MCP" and src/mcp.ts
+  const mcpUnauthorized = (c: Context) =>
+    c.json({ error: "unauthorized", hint: "Send an API key from Settings as `Authorization: Bearer rs_…`" }, 401, {
+      "WWW-Authenticate": config.MCP_OAUTH ? `Bearer realm="reelsaw", resource_metadata="${new URL("/.well-known/oauth-protected-resource/api/mcp", config.APP_URL)}"` : 'Bearer realm="reelsaw"',
+    });
+  app.all("/api/mcp", async (c) => {
+    const token = bearerToken(c.req.raw.headers);
+    // an OAuth access token (not one of our rs_ keys): the plugin verifies it and names the user in `sub`
+    if (config.MCP_OAUTH && token && !token.startsWith(API_KEY_PREFIX)) {
+      const guarded = requireMcpAuth(
+        auth,
+        async (_req, claims) => {
+        const user = claims.sub ? await db.query.user.findFirst({ where: eq(schema.user.id, claims.sub) }) : undefined;
+        if (!user) return c.json({ error: "unauthorized" }, 401);
+        const blocked = blockedReason(user);
+        if (blocked) return c.json({ error: "forbidden", message: blocked.reason }, 403);
+          return handleMcp(c, svc, user);
+        },
+        // the JWKS is served by this very process: fetch it over loopback, not through APP_URL (which may not resolve from inside a container)
+        { resource: mcpResource(config), jwksUrl: `http://127.0.0.1:${config.PORT}/api/auth/jwks` },
+      );
+      return guarded(c.req.raw);
+    }
+    const who = await requester(auth, db, c.req.raw.headers);
+    if (!who) return mcpUnauthorized(c);
+    if (who.blocked) return c.json({ error: "forbidden", message: who.blocked.reason }, 403);
+    return handleMcp(c, svc, who.user);
+  });
 
   // Raw upload: body is the file, original name in x-filename. Streams to disk, then into storage.
   app.post("/api/upload", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.json({ error: "unauthorized" }, 401);
     const filename = decodeURIComponent(c.req.header("x-filename") ?? "upload.mp4").replace(/[\\/]/g, "_").slice(0, 200);
     const length = Number(c.req.header("content-length") ?? 0);
@@ -106,7 +146,7 @@ export function createApp(svc: Services) {
   });
 
   app.get("/media/clips/:projectId/:file", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);
     const { projectId, file } = c.req.param();
     const clipId = file.replace(/\.(mp4|jpg)$/, "");
@@ -124,7 +164,7 @@ export function createApp(svc: Services) {
 
   // Bulk export: zip of all rendered clips + YouTube/TikTok metadata
   app.get("/api/projects/:projectId/export.zip", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);
     const projectId = c.req.param("projectId");
     const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id)) });
@@ -143,13 +183,13 @@ export function createApp(svc: Services) {
 
   // "Report an issue": zip of the project's (or account's) data for local reproduction; owner only
   app.get("/api/projects/:projectId/report/preview", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.json({ error: "unauthorized" }, 401);
     const info = await reportPreview(svc, session.user.id, c.req.param("projectId"));
     return info ? c.json(info) : c.json({ error: "not found" }, 404);
   });
   const sendReport = async (c: Context, projectId: string | null) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.json({ error: "unauthorized" }, 401);
     const parsed = reportRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid report" }, 400);
@@ -165,14 +205,14 @@ export function createApp(svc: Services) {
 
   // A/B preview of a disfluency cut (transcript popover): plan = which boundaries, audio = mp3 of the window
   app.get("/api/projects/:projectId/flags/:flagId/cut-plan", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);
     const { projectId, flagId } = c.req.param();
     const plan = await planCutPreview(svc, session.user.id, projectId, flagId, { exact: c.req.query("exact") === "1", signal: c.req.raw.signal });
     return plan ? c.json(plan) : c.text("not found", 404);
   });
   app.get("/api/projects/:projectId/flags/:flagId/preview.mp3", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);
     const { projectId, flagId } = c.req.param();
     const num = (k: string) => {
@@ -189,7 +229,7 @@ export function createApp(svc: Services) {
   });
 
   app.get("/media/source/:projectId", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);
     const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id)) });
     if (!project?.sourceKey) return c.text("not found", 404);

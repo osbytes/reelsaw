@@ -192,11 +192,48 @@ export const projectSettingsSchema = styleSchema.extend({
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});
 
+/**
+ * What a user can set once and have applied to every new project (Settings → Project defaults).
+ * A subset of ProjectSettings: the things that describe the user's content, not one video.
+ */
+export const userProjectDefaultsSchema = z
+  .object({
+    language: z.string().max(10),
+    vocabulary: z.string().max(1000),
+    instructions: z.string().max(2000),
+    focus: z.string().max(300),
+    pauses: z.enum(["off", "natural", "tight"]),
+    sourceText: z.enum(["hide", "keep", "always"]),
+    minClipSeconds: z.number().int().min(5).max(180),
+    maxClipSeconds: z.number().int().min(10).max(300),
+    maxClips: z.number().int().min(1).max(50),
+    highlightColor: hexColor,
+    wordsPerLine: z.number().int().min(1).max(8),
+    uppercase: z.boolean(),
+  })
+  .partial(); // no defaults here: an unset field means "use the built-in default"
+export type UserProjectDefaults = z.infer<typeof userProjectDefaultsSchema>;
+
+/**
+ * A partial ProjectSettings with the defaults stripped: zod's `.partial()` keeps `.default()`,
+ * so an unset field would come back as the built-in value and override the user's saved default.
+ */
+export type ProjectSettingsPatch = Partial<ProjectSettings>;
+function withoutDefaults(shape: z.ZodRawShape): z.ZodType<ProjectSettingsPatch, ProjectSettingsPatch> {
+  const out: Record<string, z.ZodType> = {};
+  for (const [k, v] of Object.entries(shape)) {
+    const def = (v as { def?: { type?: string; innerType?: z.ZodType } }).def;
+    out[k] = def?.type === "default" && def.innerType ? def.innerType : (v as z.ZodType);
+  }
+  return z.object(out).partial() as unknown as z.ZodType<ProjectSettingsPatch, ProjectSettingsPatch>;
+}
+export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.shape);
+
 export const createProjectInputSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   sourceUrl: z.url().optional(),
   uploadId: z.string().optional(),
-  settings: projectSettingsSchema.partial().optional(),
+  settings: projectSettingsPatchSchema.optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 
@@ -274,6 +311,9 @@ export const PROJECT_EVENT_TYPES = [
   "clip.retrying",
   /** no progress for a long time on a running clip/stage (watchdog) */
   "job.stalled",
+  /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
+  "source.expired",
+  "clips.expired",
   "project.done",
   "project.failed",
 ] as const;

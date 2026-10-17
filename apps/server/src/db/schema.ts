@@ -7,10 +7,14 @@ import {
   real,
   jsonb,
   bigserial,
+  bigint,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, SourceOverlay, TextProfile } from "@reelsaw/shared";
+
+export const USER_ROLES = ["user", "admin"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
 
 // ---------- Better Auth core tables ----------
 
@@ -20,6 +24,12 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
+  /** admin: sees system settings and manages users. The first account is admin. */
+  role: text("role").$type<UserRole>().default("user").notNull(),
+  /** null = waiting for an admin (SIGNUP_MODE=approval). */
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  banned: boolean("banned").default(false).notNull(),
+  banReason: text("ban_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 });
@@ -78,6 +88,90 @@ export const verification = pgTable(
 
 // ---------- App tables ----------
 
+/** Better Auth api-key plugin (@better-auth/api-key): bearer tokens for the MCP server and the HTTP API. */
+export const apikey = pgTable(
+  "apikey",
+  {
+    id: text("id").primaryKey(),
+    configId: text("config_id").notNull().default("default"),
+    name: text("name"),
+    start: text("start"),
+    prefix: text("prefix"),
+    key: text("key").notNull(),
+    referenceId: text("reference_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    refillInterval: integer("refill_interval"),
+    refillAmount: integer("refill_amount"),
+    lastRefillAt: timestamp("last_refill_at"),
+    enabled: boolean("enabled").default(true).notNull(),
+    rateLimitEnabled: boolean("rate_limit_enabled").default(true).notNull(),
+    rateLimitTimeWindow: integer("rate_limit_time_window"),
+    rateLimitMax: integer("rate_limit_max"),
+    requestCount: integer("request_count").default(0).notNull(),
+    remaining: integer("remaining"),
+    lastRequest: timestamp("last_request"),
+    expiresAt: timestamp("expires_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    permissions: text("permissions"),
+    metadata: text("metadata"),
+  },
+  (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
+);
+
+/** Account-level audit trail: sign-ups, approvals, role changes, bans (admin page, email). */
+export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed"] as const;
+export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
+export const adminEvents = pgTable(
+  "admin_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    type: text("type").$type<AdminEventType>().notNull(),
+    /** who did it; null = the system (sign-up, auto-approval) */
+    actorId: text("actor_id"),
+    /** the account it concerns; kept after the user row is deleted */
+    userId: text("user_id").notNull(),
+    email: text("email").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("admin_events_user_id_idx").on(t.userId, t.id)],
+);
+export type AdminEventRow = typeof adminEvents.$inferSelect;
+
+/** One row per language-model call, for usage per user (tokens, latency). Written by the LLM middleware. */
+export const llmUsage = pgTable(
+  "llm_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id"),
+    projectId: text("project_id"),
+    stage: text("stage"),
+    call: text("call"),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    ms: integer("ms").notNull().default(0),
+    ok: boolean("ok").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("llm_usage_user_id_idx").on(t.userId, t.createdAt)],
+);
+
+/** Per-user settings. One row per user, created on first write; absent = defaults. */
+export const userSettings = pgTable("user_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** applied under the built-in defaults and over-ridden by what the new-project form sends */
+  projectDefaults: jsonb("project_defaults").$type<UserProjectDefaults>().notNull().default({}),
+  /** admin-set overrides of the instance quotas (hosted); keys match the MAX_* settings */
+  limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type UserSettingsRow = typeof userSettings.$inferSelect;
+
 export const uploads = pgTable("uploads", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -105,6 +199,10 @@ export const projects = pgTable(
     width: integer("width"),
     height: integer("height"),
     status: text("status").$type<ProjectStatus>().notNull().default("queued"),
+    /** size of the stored source, for usage; null until ingested or after retention removed it */
+    sourceBytes: bigint("source_bytes", { mode: "number" }),
+    /** when retention deleted the stored source (row kept; Retry re-fetches) */
+    sourceExpiredAt: timestamp("source_expired_at", { withTimezone: true }),
     stage: text("stage"),
     stageProgress: real("stage_progress"),
     error: text("error"),
@@ -240,3 +338,5 @@ export const stageArtifacts = pgTable(
   },
   (t) => [index("stage_artifacts_project_id_idx").on(t.projectId, t.id)],
 );
+
+export * from "./oauth-schema.js";

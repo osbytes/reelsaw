@@ -3,9 +3,11 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { TRPCError, tracked } from "@trpc/server";
-import { router, protectedProcedure, publicProcedure } from "./context.js";
+import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
+import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
+import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, defaultProjectSettings, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -17,6 +19,8 @@ import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
+import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
+import { checkProjectQuota, limitsFor, LIMIT_KEYS } from "../quota.js";
 
 function publicClip(c: schema.Clip) {
   return {
@@ -64,7 +68,9 @@ function publicProject(p: schema.Project) {
     stageProgress: p.stageProgress,
     error: p.error,
     settings: p.settings,
-    sourceVideoUrl: p.sourceKey ? `/media/source/${p.id}` : null,
+    sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
+    /** retention removed the stored source; Retry downloads it again */
+    sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
@@ -214,8 +220,52 @@ async function peekUrlMeta(url: string): Promise<{ title?: string; thumbnail?: s
 export const appRouter = router({
   health: publicProcedure.query(() => ({ ok: true, time: new Date().toISOString() })),
 
-  settings: router({
-    get: protectedProcedure.query(async ({ ctx }) => ({
+  /** Public: what the sign-in page and the top bar need before/without an approved account. */
+  system: router({
+    status: publicProcedure.query(async ({ ctx }) => {
+      const r = await ctx.svc.resources.snapshot();
+      const paused = !r.ok.memory ? "memory" : !r.ok.cpu ? "CPU" : !r.ok.disk ? "disk" : null;
+      return {
+        version: ctx.svc.config.REELSAW_VERSION,
+        signupMode: ctx.svc.config.SIGNUP_MODE,
+        emailEnabled: ctx.svc.email.enabled,
+        termsUrl: ctx.svc.config.TERMS_URL ?? null,
+        privacyUrl: ctx.svc.config.PRIVACY_URL ?? null,
+        maxUploadMb: ctx.svc.config.MAX_UPLOAD_MB,
+        captcha: ctx.svc.config.CAPTCHA_PROVIDER ? { provider: ctx.svc.config.CAPTCHA_PROVIDER, siteKey: ctx.svc.config.CAPTCHA_SITE_KEY! } : null,
+        /** heavy jobs wait for the machine; the word says what is short, never the numbers */
+        paused,
+      };
+    }),
+  }),
+
+  /** The signed-in account, also while waiting for approval or suspended. */
+  me: router({
+    get: signedInProcedure.query(async ({ ctx }) => ({
+      id: ctx.user.id,
+      name: ctx.user.name,
+      email: ctx.user.email,
+      role: ctx.user.role,
+      approved: !!ctx.user.approvedAt,
+      blocked: ctx.who.blocked,
+      via: ctx.who.via,
+      projectDefaults: ctx.who.blocked ? {} : await userDefaults(ctx.svc.database.db, ctx.user.id),
+      builtInDefaults: defaultProjectSettings,
+    })),
+    /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
+    updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
+      const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== ""));
+      await ctx.svc.database.db
+        .insert(schema.userSettings)
+        .values({ userId: ctx.user.id, projectDefaults: clean })
+        .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: clean, updatedAt: new Date() } });
+      return { ok: true, projectDefaults: clean };
+    }),
+  }),
+
+  admin: router({
+    /** Machine-level configuration and live resources. Read from the environment; admins only. */
+    system: adminProcedure.query(async ({ ctx }) => ({
       version: { version: ctx.svc.config.REELSAW_VERSION, commit: ctx.svc.config.REELSAW_COMMIT, builtAt: ctx.svc.config.REELSAW_BUILT_AT },
       aiModel: ctx.svc.config.AI_MODEL,
       transcriptionModel: ctx.svc.config.TRANSCRIPTION_MODEL,
@@ -223,7 +273,10 @@ export const appRouter = router({
       compatBaseUrl: ctx.svc.config.OPENAI_COMPATIBLE_BASE_URL ?? null,
       storage: ctx.svc.storage.driver,
       faceDetection: !!ctx.svc.faces,
-      allowSignup: ctx.svc.config.ALLOW_SIGNUP,
+      signupMode: ctx.svc.config.SIGNUP_MODE,
+      email: ctx.svc.config.EMAIL_DRIVER,
+      healthDetails: ctx.svc.config.HEALTH_DETAILS,
+      mcpUrl: new URL("/api/mcp", ctx.svc.config.APP_URL).toString(),
       maxUploadMb: ctx.svc.config.MAX_UPLOAD_MB,
       renderConcurrency: { ...ctx.svc.resources.renders(), max: ctx.svc.resources.maxRenders() },
       otel: ctx.svc.otel.enabled,
@@ -231,6 +284,81 @@ export const appRouter = router({
       resources: await ctx.svc.resources.snapshot(),
       limits: { maxCpuPercent: ctx.svc.config.MAX_CPU_PERCENT, minFreeMemMB: ctx.svc.config.MIN_FREE_MEM_MB, minFreeDiskMB: ctx.svc.config.MIN_FREE_DISK_MB },
     })),
+    users: router({
+      list: adminProcedure.input(z.object({ search: z.string().max(200).optional() }).optional()).query(async ({ ctx, input }) => {
+        const db = ctx.svc.database.db;
+        const q = input?.search?.trim().toLowerCase();
+        const rows = await db
+          .select({
+            id: schema.user.id,
+            name: schema.user.name,
+            email: schema.user.email,
+            role: schema.user.role,
+            approvedAt: schema.user.approvedAt,
+            banned: schema.user.banned,
+            banReason: schema.user.banReason,
+            createdAt: schema.user.createdAt,
+            projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')})`,
+            lastActive: sql<Date | null>`(select max(s.updated_at) from session s where s.user_id = ${sql.raw('"user"."id"')})`,
+          })
+          .from(schema.user)
+          .where(q ? sql`lower(${schema.user.email}) like ${"%" + q + "%"} or lower(${schema.user.name}) like ${"%" + q + "%"}` : undefined)
+          .orderBy(sql`${schema.user.approvedAt} is not null, ${schema.user.createdAt} desc`)
+          .limit(500);
+        return rows.map((r) => ({
+          ...r,
+          status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
+          approvedAt: r.approvedAt?.toISOString() ?? null,
+          createdAt: r.createdAt.toISOString(),
+          lastActive: r.lastActive ? new Date(r.lastActive).toISOString() : null,
+        }));
+      }),
+      pendingCount: adminProcedure.query(async ({ ctx }) => {
+        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
+        return n;
+      }),
+      approve: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => approveUser(ctx.svc, ctx.user.id, input.id)),
+      setRole: adminProcedure.input(z.object({ id: z.string(), role: z.enum(USER_ROLES) })).mutation(({ ctx, input }) => setUserRole(ctx.svc, ctx.user.id, input.id, input.role)),
+      ban: adminProcedure.input(z.object({ id: z.string(), reason: z.string().max(300).optional() })).mutation(({ ctx, input }) => banUser(ctx.svc, ctx.user.id, input.id, input.reason?.trim() || null)),
+      unban: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => unbanUser(ctx.svc, ctx.user.id, input.id)),
+      remove: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => removeUser(ctx.svc, ctx.user.id, input.id)),
+      /** Per-user quota overrides; null = back to the instance setting. */
+      limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+        const row = await ctx.svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true } });
+        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.config[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.config, input.id) };
+      }),
+      setLimits: adminProcedure
+        .input(z.object({ id: z.string(), limits: z.partialRecord(z.enum(LIMIT_KEYS), z.number().int().min(0).nullable()) }))
+        .mutation(({ ctx, input }) => setUserLimits(ctx.svc, ctx.user.id, input.id, input.limits)),
+    }),
+    /** Usage per user over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
+    usage: adminProcedure.input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional()).query(async ({ ctx, input }) => {
+      const db = ctx.svc.database.db;
+      const days = input?.days ?? 30;
+      const since = sql`now() - make_interval(days => ${days}::int)`;
+      const rows = await db
+        .select({
+          id: schema.user.id,
+          name: schema.user.name,
+          email: schema.user.email,
+          projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')} and p.created_at >= ${since})`,
+          projectsTotal: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')})`,
+          sourceMinutes: sql<number>`(select coalesce(sum(p.duration_sec), 0) / 60.0 from projects p where p.user_id = ${sql.raw('"user"."id"')} and p.created_at >= ${since})`,
+          clipsRendered: sql<number>`(select count(*)::int from clips c join projects p on p.id = c.project_id where p.user_id = ${sql.raw('"user"."id"')} and c.status = 'done' and c.updated_at >= ${since})`,
+          storedBytes: sql<number>`(select coalesce(sum(p.source_bytes), 0) from projects p where p.user_id = ${sql.raw('"user"."id"')}) + (select coalesce(sum(u.size_bytes), 0) from uploads u where u.user_id = ${sql.raw('"user"."id"')})`,
+          llmCalls: sql<number>`(select count(*)::int from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
+          llmInputTokens: sql<number>`(select coalesce(sum(l.input_tokens), 0) from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
+          llmOutputTokens: sql<number>`(select coalesce(sum(l.output_tokens), 0) from llm_usage l where l.user_id = ${sql.raw('"user"."id"')} and l.created_at >= ${since})`,
+        })
+        .from(schema.user)
+        .orderBy(sql`3 desc`)
+        .limit(500);
+      return { days, users: rows.map((r) => ({ ...r, sourceMinutes: Math.round(Number(r.sourceMinutes)), storedBytes: Number(r.storedBytes), llmInputTokens: Number(r.llmInputTokens), llmOutputTokens: Number(r.llmOutputTokens) })) };
+    }),
+    events: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(500).default(100) }).optional()).query(async ({ ctx, input }) => {
+      const rows = await ctx.svc.database.db.query.adminEvents.findMany({ orderBy: desc(schema.adminEvents.id), limit: input?.limit ?? 100 });
+      return rows.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
+    }),
   }),
 
   /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
@@ -290,7 +418,8 @@ export const appRouter = router({
       const { svc } = ctx;
       const db = svc.database.db;
       if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a sourceUrl or an uploadId" });
-      const settings = projectSettingsSchema.parse({ ...defaultProjectSettings, ...(input.settings ?? {}) });
+      await checkProjectQuota(db, svc.config, ctx.user.id);
+      const settings = await resolveProjectSettings(db, ctx.user.id, input.settings);
       if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
 
       let sourceMeta: schema.Project["sourceMeta"] = null;
@@ -429,7 +558,7 @@ export const appRouter = router({
         return { ok: true, rerendered };
       }),
 
-    reanalyze: protectedProcedure.input(z.object({ id: z.string(), settings: projectSettingsSchema.partial().optional() })).mutation(async ({ ctx, input }) => {
+    reanalyze: protectedProcedure.input(z.object({ id: z.string(), settings: projectSettingsPatchSchema.optional() })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
       const db = svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
@@ -459,18 +588,7 @@ export const appRouter = router({
       const { svc } = ctx;
       const db = svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
-      await svc.tx(async (u) => {
-        for (const c of await listClips(u.db, p.id)) {
-          await u.cancelLiveJobs(QUEUES.render, c.id);
-          await u.cancelLiveJobs(QUEUES.prepare, c.id);
-        }
-        for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-        await u.db.delete(schema.projects).where(eq(schema.projects.id, p.id));
-        u.afterCommit(async () => {
-          await fs.rm(svc.paths.project(p.id), { recursive: true, force: true });
-          await svc.storage.deletePrefix(keys.projectPrefix(p.id));
-        });
-      });
+      await svc.tx((u) => deleteProject(svc, u, p.id));
       return { ok: true };
     }),
 

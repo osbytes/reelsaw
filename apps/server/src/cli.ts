@@ -37,6 +37,8 @@ import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
+import { approveUser, setUserRole } from "./accounts.js";
+import { sweepRetention } from "./retention.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
@@ -82,6 +84,27 @@ async function sourcePath(svc: Services, projectId: string) {
 }
 
 const commands: Record<string, (svc: Services) => Promise<void>> = {
+  /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
+  async users(svc) {
+    const rows = await svc.database.db.query.user.findMany({ orderBy: schema.user.createdAt });
+    table(rows.map((u) => ({ email: u.email, name: u.name, role: u.role, status: u.banned ? "suspended" : u.approvedAt ? "active" : "pending", created: u.createdAt.toISOString().slice(0, 10) })));
+  },
+  async approve(svc) {
+    const u = await userByEmail(svc, pos[0]);
+    const r = await approveUser(svc, null, u.id);
+    console.log(r.changed ? `approved ${u.email}` : `${u.email} was already approved`);
+  },
+  /** Run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS). */
+  async retention(svc) {
+    const r = await sweepRetention(svc);
+    console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${svc.config.CLIP_RETENTION_DAYS})`);
+  },
+  "make-admin": async (svc) => {
+    const u = await userByEmail(svc, pos[0]);
+    if (!u.approvedAt) await approveUser(svc, null, u.id);
+    const r = await setUserRole(svc, null, u.id, "admin");
+    console.log(r.changed ? `${u.email} is now an admin` : `${u.email} was already an admin`);
+  },
   async status(svc) {
     const db = svc.database.db;
     const id = pos[0]!;
@@ -383,10 +406,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 };
 
+async function userByEmail(svc: Services, email: string | undefined) {
+  if (!email) throw new Error("usage: reelsaw <approve|make-admin> <email>");
+  const u = await svc.database.db.query.user.findFirst({ where: eq(schema.user.email, email.toLowerCase()) });
+  if (!u) throw new Error(`no account with email ${email}`);
+  return u;
+}
+
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <status|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|status|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

@@ -12,6 +12,9 @@ import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
 import { createAuth, type Auth } from "./auth.js";
+import { createEmail, type Email } from "./email.js";
+import { sql } from "drizzle-orm";
+import { schema } from "./db/index.js";
 import { createResourceGovernor, type ResourceGovernor } from "./resources.js";
 import { loadFaceDetector, type FaceDetector } from "./vision/faces.js";
 import { loadTextDetector, type TextDetector } from "./vision/text.js";
@@ -39,6 +42,7 @@ export interface Services {
   /** run a unit of work: state change + events + job enqueues in one transaction (uow.ts) */
   tx: RunInTx;
   auth: Auth;
+  email: Email;
   resources: ResourceGovernor;
   /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
   aligner: Aligner | null;
@@ -179,6 +183,25 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return d;
   });
 
+  // usage accounting: one row per model call, attributed to the project's owner
+  llmTrace.onUsage = (u) => {
+    const db = database.db;
+    void db
+      .insert(schema.llmUsage)
+      .values({
+        userId: u.ctx.projectId ? sql`(select user_id from projects where id = ${u.ctx.projectId})` : null,
+        projectId: u.ctx.projectId ?? null,
+        stage: u.ctx.stage ?? null,
+        call: u.ctx.call ?? null,
+        model: u.model,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        ms: u.ms,
+        ok: u.ok,
+      })
+      .catch((err) => log.warn({ module: "llm", err }, "usage row failed"));
+  };
+
   const events = await step("event bus", async () => {
     const e = createEventBus(config, database.db, database.pool, log.child({ module: "events" }));
     if (config.RUN_HTTP) await e.start();
@@ -191,10 +214,16 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return q;
   });
 
-  const auth = await step("auth", () => createAuth(config, database.db));
+  const email = await step(config.EMAIL_DRIVER === "none" ? "email (disabled)" : `email (${config.EMAIL_DRIVER})`, async () => {
+    const e = createEmail(config, log.child({ module: "email" }));
+    if (env.REELSAW_CLI !== "1") await e.check();
+    return e;
+  });
+
+  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
   const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
-  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, tx, auth, resources, faces, text, vad, aligner };
+  return { log, config, paths, otel, database, storage, ai, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {

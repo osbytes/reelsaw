@@ -1,5 +1,6 @@
 import { inArray, eq, desc } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
+import { sweepRetention } from "../retention.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { QUEUES, type QueueName } from "./boss.js";
@@ -75,6 +76,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
   const tick = () =>
     reconcile(svc)
       .then(() => detectStalls(svc, svc.config.STALL_MINUTES))
+      .then(() => sweepRetention(svc))
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();
   const timer = setInterval(tick, intervalMs);

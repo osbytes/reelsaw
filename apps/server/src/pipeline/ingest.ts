@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import { sourceMinutesExceeded } from "../quota.js";
 import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
@@ -21,6 +22,7 @@ export async function ingest(ctx: StageContext) {
     sourcePath = await svc.storage.ensureLocal(sourceKey, path.join(dir, path.posix.basename(sourceKey)));
   } else {
     if (project.sourceType === "url") {
+      let stderrTail = "";
       const { stdout } = await svc.media.ytdlp(
         [
           "--no-playlist",
@@ -39,11 +41,14 @@ export async function ingest(ctx: StageContext) {
         {
           signal: ctx.signal,
           onStderr: (line) => {
+            stderrTail = (stderrTail + "\n" + line).slice(-4000);
             const m = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
             if (m) void ctx.progress((Number(m[1]) / 100) * 0.6, "Downloading").catch(() => {});
           },
         },
-      );
+      ).catch((err: Error) => {
+        throw new Error(describeDownloadFailure(err, stderrTail));
+      });
       const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
       if (jsonLine) {
         const info = JSON.parse(jsonLine) as Record<string, unknown>;
@@ -81,15 +86,32 @@ export async function ingest(ctx: StageContext) {
   await ctx.progress(0.9, "Probing media");
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
+  const sourceBytes = (await fs.stat(sourcePath)).size;
+  const over = await sourceMinutesExceeded(ctx.db, svc.config, project.userId, projectId, probe.durationSec);
+  if (over) throw new Error(over);
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
   await ctx.complete({ durationSec: probe.durationSec, title }, async (u) => {
     await u.db
       .update(schema.projects)
-      .set({ sourceKey, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
+      .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;
+}
+
+/**
+ * yt-dlp failures in plain words. Datacentre IPs are often refused by YouTube ("Sign in to confirm
+ * you're not a bot", 403): say so and point at the way out, instead of a wall of stderr.
+ */
+export function describeDownloadFailure(err: Error, stderr: string): string {
+  const text = `${err.message}\n${stderr}`;
+  if (/sign in to confirm|not a bot|HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
+    const why = /private/i.test(text) ? "the video is private" : /unavailable/i.test(text) ? "the video is unavailable" : /age/i.test(text) ? "the video is age-restricted" : "the site refused the download from this server (bot check)";
+    return `Could not download: ${why}. Upload the file instead (New project → Upload), or set YTDLP_PROXY / YTDLP_COOKIES_FILE on the server.`;
+  }
+  const last = stderr.split("\n").map((l) => l.trim()).filter((l) => /^ERROR/i.test(l)).at(-1);
+  return last ? `Download failed: ${last.replace(/^ERROR:\s*/i, "").slice(0, 300)}` : err.message;
 }

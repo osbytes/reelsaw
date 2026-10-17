@@ -26,7 +26,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 ## Contributing
 
-Roadmap for learning from user decisions: [docs/SELF-IMPROVEMENT.md](docs/SELF-IMPROVEMENT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (principles, tests, sign-off). Roadmap for learning from user decisions: [docs/SELF-IMPROVEMENT.md](docs/SELF-IMPROVEMENT.md).
 
 Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrency and UI rules every change follows. Agent instructions live in `AGENTS.md` / `CLAUDE.md`.
 
@@ -54,7 +54,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Open http://localhost:3000, create an account, start a project. Set `ALLOW_SIGNUP=false` afterwards if the instance is public.
+Open http://localhost:3000, create an account (it becomes the admin), start a project. Set `SIGNUP_MODE=closed` or `approval` afterwards if the instance is public.
 
 Scale workers:
 
@@ -102,6 +102,78 @@ OPENAI_API_KEY=local
 ```
 
 Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; llama3.1 8b, qwen2.5 14b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
+
+## Accounts and roles
+
+The first account created on an instance is the **admin**; everyone else is a **user**. Admins see
+the system settings (models, storage, resource meters) and the **Users** page; users see their own
+projects and settings only. `SIGNUP_MODE` decides who gets in:
+
+| `SIGNUP_MODE` | Behaviour |
+| --- | --- |
+| `open` (default) | Anyone can sign up and use the app at once. Right for a single-user box. |
+| `approval` | New accounts wait on a "Waiting for approval" page until an admin approves them (Users page, or `reelsaw approve <email>`). Admins get an email when `EMAIL_DRIVER` is set. |
+| `closed` | No sign-ups. `ALLOW_SIGNUP=false` still works as an alias. |
+
+Every user has **Settings → Project defaults** (vocabulary, instructions, language, clip length,
+pauses, caption style…) applied to each new project they or their agents start; the new-project
+form starts from them and can save its current values back. Admins also see the **System** section
+(models, storage, resource meters) and `/api/health` includes machine numbers only for them (or
+with `HEALTH_DETAILS=true`).
+
+Suspending an account (Users page) ends its sessions and refuses its API keys at the next request;
+removing one deletes its projects, clips and files. Locked out? `docker compose exec app reelsaw
+make-admin you@example.com` promotes an account from the shell.
+
+Email (`EMAIL_DRIVER=smtp|resend`, `EMAIL_FROM`, `SMTP_URL` or `RESEND_API_KEY`) turns on approval
+notices, password reset and, with `REQUIRE_EMAIL_VERIFICATION=true`, verification before the
+first sign-in. Without it everything else works; approvals are handled on the Users page.
+
+## Hosting for many people
+
+Everything below is off by default and switched on by environment (`deploy/.env.example` lists
+them), so a single-user box stays as it is:
+
+- **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_NEW_PROJECTS_PER_HOUR`
+  (0 = unlimited), with per-user overrides on the Users page. A refusal is a sentence that says
+  what to do ("Daily limit of 120 minutes reached; resets at 00:00 UTC"). Length is checked once
+  the video is probed, so an over-long download fails the project with that reason.
+- **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
+  (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
+- **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
+  projects; rows and history stay, the project page offers "fetch again" and clips re-render.
+  `reelsaw retention` runs a sweep by hand.
+- **Bot protection**: `CAPTCHA_PROVIDER` (Cloudflare Turnstile, reCAPTCHA, hCaptcha) with site and
+  secret keys puts a widget on sign-up and sign-in.
+- **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` and
+  `YTDLP_COOKIES_FILE` help; a blocked download fails with "upload the file instead".
+- **Legal**: `TERMS_URL` / `PRIVACY_URL` appear on the sign-up form.
+- **MCP over OAuth** (`MCP_OAUTH=true`): Reelsaw becomes an OAuth 2.1 authorization server for
+  MCP connectors (claude.ai, Claude Desktop): dynamic client registration, sign-in and a consent
+  page in the browser, discovery at `/.well-known/oauth-protected-resource/api/mcp` (which names
+  the issuer, `<APP_URL>/api/auth`, whose metadata is at
+  `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs.
+
+## MCP: drive Reelsaw from an agent
+
+Reelsaw is an MCP server (Model Context Protocol, Streamable HTTP) at `/api/mcp`. Create an API key
+in **Settings → API keys and MCP** (shown once) and point a client at it:
+
+```bash
+claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Authorization: Bearer rs_…"
+```
+
+```json
+{ "mcpServers": { "reelsaw": { "type": "http", "url": "https://your-host/api/mcp", "headers": { "Authorization": "Bearer rs_…" } } } }
+```
+
+Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
+`get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
+`update_clip`, `create_clip`, `rerender_clip`, `retry_project`, `reanalyze_project`,
+`delete_project`. They call the same tRPC procedures as the web app, so ownership checks and
+validation are identical (`apps/server/src/mcp.ts`). The same key also authenticates tRPC
+(`/api/trpc/*`), uploads and media downloads, so an agent can fetch the rendered clips. Keys are
+hashed at rest (`@better-auth/api-key`); revoke them from Settings.
 
 ## Architecture
 
@@ -184,6 +256,9 @@ dependencies, which `scripts/check-image.sh <image>` verifies.
   release.
 - Before tagging: build locally, run `scripts/check-image.sh reelsaw:latest`, and boot `deploy/`
   in a scratch directory with only a `.env` (see the spec's verification section).
+- Versions and changelogs come from [changesets](https://github.com/changesets/changesets):
+  every PR adds one (`pnpm changeset`), a "Release" PR bumps the version, merging it pushes the
+  tag. Full flow, versioning policy, pre-releases and hotfixes: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Issue reports
 
@@ -271,3 +346,15 @@ See [docs/RESEARCH.md](docs/RESEARCH.md) for the competitor audit and research r
 - Active speaker: more labelled two-way conversation cases; a learned audio-visual model (Light-ASD ONNX) if the synchrony heuristic plateaus. Saliency fallback when no face is visible.
 - SRT/VTT export.
 - Direct publishing to YouTube Shorts / TikTok / Instagram.
+- Hosted edition (admin approval, per-user settings, usage): [docs/specs/hosted.md](docs/specs/hosted.md).
+- MCP over OAuth, so claude.ai / Claude Desktop connectors can sign in with the browser instead of a key.
+
+## License
+
+Reelsaw is free software under the [GNU Affero General Public License v3.0](LICENSE). You can run
+it, change it and host it; if you offer a modified version as a network service you must make
+your modifications available under the same licence. Hosted-only additions (billing, for example)
+will live under `ee/` with their own licence; nothing in the repository is there yet. Contributions
+need a DCO sign-off (`git commit -s`), see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Copyright (C) 2026 osbytes

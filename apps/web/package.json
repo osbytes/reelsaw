@@ -2,6 +2,7 @@
   "name": "@reelsaw/web",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@better-auth/api-key": "1.7.10",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.81.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.223.0",
@@ -27,7 +29,7 @@
     "@trpc/client": "11.19.0",
     "@trpc/server": "11.19.0",
     "@trpc/tanstack-react-query": "11.19.0",
-    "better-auth": "^1.7.7",
+    "better-auth": "^1.7.10",
     "cmdk": "1.1.1",
     "fuse.js": "7.1.0",
     "lucide-react": "^1.57.0",

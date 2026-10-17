@@ -1,0 +1,69 @@
+/**
+ * Quotas: instance-wide numbers from the environment (0 = unlimited), overridable per user by an
+ * admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
+ * number is known: project count and rate at creation, source minutes once ffprobe has run.
+ */
+import { and, eq, gte, sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { schema, type Db } from "./db/index.js";
+import type { Config } from "./config.js";
+
+export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_NEW_PROJECTS_PER_HOUR"] as const;
+export type LimitKey = (typeof LIMIT_KEYS)[number];
+export type Limits = Record<LimitKey, number>;
+
+export async function limitsFor(db: Db, config: Config, userId: string): Promise<Limits> {
+  const row = await db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { limits: true } });
+  const out = {} as Limits;
+  for (const k of LIMIT_KEYS) {
+    const o = row?.limits?.[k];
+    out[k] = typeof o === "number" && o >= 0 ? o : config[k];
+  }
+  return out;
+}
+
+export class QuotaError extends TRPCError {
+  constructor(message: string) {
+    super({ code: "TOO_MANY_REQUESTS", message });
+  }
+}
+
+const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
+const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
+
+/** Before creating a project. */
+export async function checkProjectQuota(db: Db, config: Config, userId: string) {
+  const l = await limitsFor(db, config, userId);
+  if (l.MAX_PROJECTS_PER_USER > 0) {
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
+    if (n >= l.MAX_PROJECTS_PER_USER) throw new QuotaError(`You have ${n} projects, the most this account may keep (${l.MAX_PROJECTS_PER_USER}). Delete one to start another.`);
+  }
+  if (l.MAX_NEW_PROJECTS_PER_HOUR > 0) {
+    const since = new Date(Date.now() - 3_600_000);
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, since)));
+    if (n >= l.MAX_NEW_PROJECTS_PER_HOUR) throw new QuotaError(`${n} projects started in the last hour, the most allowed (${l.MAX_NEW_PROJECTS_PER_HOUR}). Try again in a while.`);
+  }
+  if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
+    const used = await minutesToday(db, userId);
+    if (used >= l.MAX_SOURCE_MINUTES_PER_DAY) throw new QuotaError(`Daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes of video reached (${Math.round(used)} used); resets at ${hhmm(nextMidnightUtc())}.`);
+  }
+}
+
+/** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
+export async function sourceMinutesExceeded(db: Db, config: Config, userId: string, projectId: string, durationSec: number): Promise<string | null> {
+  const l = await limitsFor(db, config, userId);
+  if (l.MAX_SOURCE_MINUTES_PER_DAY <= 0) return null;
+  const used = await minutesToday(db, userId, projectId);
+  const total = used + durationSec / 60;
+  if (total <= l.MAX_SOURCE_MINUTES_PER_DAY) return null;
+  return `This video is ${Math.round(durationSec / 60)} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.`;
+}
+
+async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
+  const start = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+  const [{ m }] = await db
+    .select({ m: sql<number>`coalesce(sum(${schema.projects.durationSec}), 0) / 60.0` })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, start), exceptProjectId ? sql`${schema.projects.id} <> ${exceptProjectId}` : undefined));
+  return Number(m);
+}

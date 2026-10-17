@@ -27,7 +27,7 @@ the script for the other options.
 ```bash
 cp .env.example .env          # set BETTER_AUTH_SECRET, POSTGRES_PASSWORD and an AI provider
 docker compose up -d
-open http://localhost:3000    # create your account, then set ALLOW_SIGNUP=false
+open http://localhost:3000    # the first account is the admin; then set SIGNUP_MODE=closed or approval
 ```
 
 ### AI providers
@@ -38,6 +38,19 @@ open http://localhost:3000    # create your account, then set ALLOW_SIGNUP=false
 
 The app checks every provider at startup and exits with a message naming what's wrong. See it with
 `docker compose logs app`.
+
+## Accounts
+
+The first account is the admin. `SIGNUP_MODE=open|approval|closed` in `.env` controls sign-ups;
+with `approval`, new people wait until you approve them on the **Users** page (or
+`docker compose exec app reelsaw approve them@example.com`). Set `EMAIL_DRIVER` to get an email
+when someone is waiting. Locked out: `docker compose exec app reelsaw make-admin you@example.com`.
+
+## Agents (MCP)
+
+Settings → *API keys and MCP* creates a key for Claude Code, Claude Desktop, Cursor or scripts;
+the page shows the exact client config. The MCP endpoint is `<APP_URL>/api/mcp`, so `APP_URL`
+must be the address agents can reach.
 
 ## Upgrade
 

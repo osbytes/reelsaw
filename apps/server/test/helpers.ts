@@ -31,11 +31,18 @@ export function db(): pg.Pool {
 
 export async function signUp(): Promise<{ email: string; cookie: string; userId: string }> {
   const email = `test-${randomUUID().slice(0, 8)}@example.test`;
-  const res = await fetch(`${BASE}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: BASE },
-    body: JSON.stringify({ email, password: `pw-${randomUUID()}`, name: "Test" }),
-  });
+  let res!: Response;
+  // Better Auth allows 3 sign-ups per 10 s; suites run in parallel and each makes a few users
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(`${BASE}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({ email, password: `pw-${randomUUID()}`, name: "Test" }),
+    });
+    if (res.status !== 429 || attempt >= 12) break;
+    await res.text();
+    await new Promise((r) => setTimeout(r, 2500 + Math.random() * 1500));
+  }
   if (!res.ok) throw new Error(`sign-up failed: ${res.status} ${await res.text()}`);
   const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
   const body = (await res.json()) as { user: { id: string } };

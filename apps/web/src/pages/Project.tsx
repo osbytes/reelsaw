@@ -436,7 +436,17 @@ export function ProjectPage() {
             </button>
           )
         ) : (
-          <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-[#b9b9c0]">{active ? "downloading…" : "no source video"}</span>
+          <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-[#b9b9c0]">
+            {active ? (
+              "downloading…"
+            ) : p.sourceExpiredAt ? (
+              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
+                Source removed · fetch again
+              </button>
+            ) : (
+              "no source video"
+            )}
+          </span>
         )}
       </div>
       <div className={`flex min-w-0 flex-col justify-center ${compact ? "flex-1 gap-1.5" : "flex-[1_1_240px] gap-2.5"}`}>

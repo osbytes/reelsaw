@@ -32,9 +32,19 @@ export const llmContext = () => als.getStore() ?? {};
 
 export type TraceSink = "logs" | "langfuse";
 
+export interface LlmUsage {
+  ctx: LlmContext;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  ms: number;
+  ok: boolean;
+}
 export interface LlmTracer {
   sinks: TraceSink[];
   middleware: LanguageModelMiddleware | null;
+  /** Called after every call (usage accounting), independent of LLM_TRACE. Set once the database is up. */
+  onUsage: ((u: LlmUsage) => void) | null;
   check(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -60,7 +70,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
   const sinks = config.LLM_TRACE.split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s): s is TraceSink => s === "logs" || s === "langfuse");
-  if (!sinks.length) return { sinks: [], middleware: null, check: async () => {}, shutdown: async () => {} };
+  const tracer: LlmTracer = { sinks, middleware: null, onUsage: null, check: async () => {}, shutdown: async () => {} };
 
   let langfuse: import("langfuse").Langfuse | undefined;
   const traces = new Map<string, ReturnType<import("langfuse").Langfuse["trace"]>>();
@@ -94,6 +104,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
         const output = res.content.map((p) => (p.type === "text" ? p.text : `[${p.type}]`)).join("");
         const usage = { input: res.usage.inputTokens.total ?? 0, output: res.usage.outputTokens.total ?? 0 };
         const ms = Date.now() - startTime.getTime();
+        tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: usage.input, outputTokens: usage.output, ms, ok: true });
         if (sinks.includes("logs")) {
           traceLog.info(
             { ...ctx, model: model.modelId, provider: model.provider, ms, usage, settings, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })), response: clip(output, config.LLM_TRACE_MAX_CHARS) },
@@ -106,6 +117,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
         return res;
       } catch (err) {
         const ms = Date.now() - startTime.getTime();
+        tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: 0, outputTokens: 0, ms, ok: false });
         if (sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, ms, err, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })) }, "llm call failed");
         if (langfuse) traceFor(ctx).generation({ name: ctx.call ?? ctx.stage ?? "generate", model: model.modelId, input, startTime, endTime: new Date(), level: "ERROR", statusMessage: (err as Error).message?.slice(0, 1000), metadata: ctx });
         throw err;
@@ -113,10 +125,8 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
     },
   };
 
-  return {
-    sinks,
-    middleware,
-    async check() {
+  tracer.middleware = middleware;
+  tracer.check = async () => {
       if (!langfuse) return;
       // fail fast on wrong keys/URL instead of silently dropping traces
       const res = await fetch(`${config.LANGFUSE_BASE_URL.replace(/\/$/, "")}/api/public/projects`, {
@@ -127,9 +137,9 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
       });
       if (res.status === 401 || res.status === 403) throw new Error(`Langfuse rejected the keys (HTTP ${res.status}); check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY`);
       if (!res.ok) throw new Error(`Langfuse check failed: HTTP ${res.status}`);
-    },
-    shutdown: async () => {
-      await langfuse?.shutdownAsync().catch(() => {});
-    },
   };
+  tracer.shutdown = async () => {
+    await langfuse?.shutdownAsync().catch(() => {});
+  };
+  return tracer;
 }

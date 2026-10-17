@@ -28,7 +28,23 @@ export const envSchema = z.object({
 
   RUN_WORKERS: boolTrue,
   RUN_HTTP: boolTrue,
-  ALLOW_SIGNUP: boolTrue,
+  /**
+   * open: anyone may sign up (single-user box, default). approval: sign-ups wait for an admin.
+   * closed: no sign-ups. The first account is always the admin. ALLOW_SIGNUP=false is an alias for closed.
+   */
+  SIGNUP_MODE: z.enum(["open", "approval", "closed"]).optional(),
+  /** @deprecated use SIGNUP_MODE */
+  ALLOW_SIGNUP: z.string().optional(),
+  /** Outgoing mail for approvals, password resets and verification. none = those features stay off. */
+  EMAIL_DRIVER: z.enum(["none", "smtp", "resend"]).default("none"),
+  EMAIL_FROM: z.string().optional(), // "Reelsaw <no-reply@example.com>"
+  SMTP_URL: z.string().optional(), // smtps://user:pass@smtp.example.com:465
+  RESEND_API_KEY: z.string().optional(),
+  /** With an email driver: users must click the verification link before they can sign in. */
+  REQUIRE_EMAIL_VERIFICATION: boolFalse,
+  /** Shown on the sign-up form when set (hosted instances). */
+  TERMS_URL: z.string().url().optional(),
+  PRIVACY_URL: z.string().url().optional(),
   // "auto" (default): renders start while CPU and memory allow (see resources.ts); a number pins it
   RENDER_CONCURRENCY: z.union([z.literal("auto"), z.coerce.number().int().min(1)]).default("auto"),
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
@@ -85,6 +101,21 @@ export const envSchema = z.object({
   CLEANUP_WORKDIR: boolTrue,
 
   OTEL_ENABLED: boolFalse,
+  // quotas (0 = unlimited); admins can override per user in Users → Limits
+  MAX_PROJECTS_PER_USER: z.coerce.number().int().min(0).default(0),
+  MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),
+  MAX_NEW_PROJECTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
+  // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
+  SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  // bot protection on sign-up / sign-in (Better Auth captcha plugin)
+  CAPTCHA_PROVIDER: z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).optional(),
+  CAPTCHA_SITE_KEY: z.string().optional(),
+  CAPTCHA_SECRET_KEY: z.string().optional(),
+  // MCP over OAuth 2.1 (claude.ai / Claude Desktop connectors sign in with the browser); API keys always work
+  MCP_OAUTH: boolFalse,
+  /** Include machine resources in GET /api/health for anonymous callers (load balancers on a private network). Admins always get them. */
+  HEALTH_DETAILS: boolFalse,
 
   // resource governor (see resources.ts)
   // a running job with no progress event for this long is reported (log + UI) as stalled
@@ -124,10 +155,13 @@ export const envSchema = z.object({
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
   YTDLP_PATH: z.string().default("yt-dlp"),
+  /** Datacentre IPs get blocked by YouTube: route yt-dlp through a proxy and/or a cookies file (Netscape format) */
+  YTDLP_PROXY: z.string().optional(),
+  YTDLP_COOKIES_FILE: z.string().optional(),
   CAPTION_FONT: z.string().default("DejaVu Sans"),
 });
 
-export type Config = z.infer<typeof envSchema>;
+export type Config = Omit<z.infer<typeof envSchema>, "SIGNUP_MODE" | "ALLOW_SIGNUP"> & { SIGNUP_MODE: "open" | "approval" | "closed" };
 
 export interface Paths {
   root: string;
@@ -161,7 +195,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   for (const [k, v] of Object.entries(env)) if (v === "") delete env[k];
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) throw new ConfigError("Invalid environment:\n" + z.prettifyError(parsed.error));
-  const c = parsed.data;
+  const { ALLOW_SIGNUP, ...rest } = parsed.data;
+  const c: Config = { ...rest, SIGNUP_MODE: rest.SIGNUP_MODE ?? (ALLOW_SIGNUP !== undefined && !["1", "true", "yes", "on"].includes(ALLOW_SIGNUP.toLowerCase()) ? "closed" : "open") };
+  if (c.EMAIL_DRIVER !== "none" && !c.EMAIL_FROM) throw new ConfigError(`EMAIL_DRIVER=${c.EMAIL_DRIVER} requires EMAIL_FROM`);
+  if (c.EMAIL_DRIVER === "smtp" && !c.SMTP_URL) throw new ConfigError("EMAIL_DRIVER=smtp requires SMTP_URL");
+  if (c.EMAIL_DRIVER === "resend" && !c.RESEND_API_KEY) throw new ConfigError("EMAIL_DRIVER=resend requires RESEND_API_KEY");
+  if (c.REQUIRE_EMAIL_VERIFICATION && c.EMAIL_DRIVER === "none") throw new ConfigError("REQUIRE_EMAIL_VERIFICATION needs an EMAIL_DRIVER");
+  if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY)) throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
   if (c.STORAGE_DRIVER === "s3" && !c.S3_BUCKET) throw new ConfigError("STORAGE_DRIVER=s3 requires S3_BUCKET");
   // the operator CLI (src/cli.ts) runs with both off on purpose
   if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
