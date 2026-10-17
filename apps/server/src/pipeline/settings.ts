@@ -3,6 +3,7 @@
  * form (or an agent) sent. One function so the web form, MCP and re-analyze agree.
  */
 import { and, eq, isNull } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { projectSettingsSchema, defaultProjectSettings, userProjectDefaultsSchema, type ProjectSettings, type UserProjectDefaults } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 
@@ -22,7 +23,10 @@ export async function resolveProjectSettings(db: Db, userId: string, input: Part
     const id = merged[k];
     if (!id) continue;
     const row = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, id), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)), columns: { id: true } });
-    if (!row) delete merged[k];
+    if (row) continue;
+    // an id the caller named that is not theirs is an error; a stale saved default is just dropped
+    if (given[k] === id) throw new TRPCError({ code: "NOT_FOUND", message: `That ${k === "introAssetId" ? "intro" : "outro"} is not in your library` });
+    delete merged[k];
   }
   return projectSettingsSchema.parse(merged);
 }

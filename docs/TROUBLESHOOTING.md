@@ -43,6 +43,10 @@ is that line, not the gap between events. A run still `running` with no live job
   `clip`, `rerender`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
   and context audio; `--fixture` exports a regression case), `align` (raw word timestamps for any source window),
   `hear` (transcribe a range of the *rendered* clip: what viewers actually hear), `flags`.
+  Intro/outro: `bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]`,
+  `project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--rerender]`, `clip-bumpers <projectId>
+  <clipId…> [--intro inherit|none|<id>] [--outro …] [--rerender]`. They run the same tRPC procedures as the web app
+  and the MCP tools, as the project's owner (`--user` for library commands when the install has several accounts).
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
   output length and render time.
 - **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `stage`, `projectId`, `clipId`,
