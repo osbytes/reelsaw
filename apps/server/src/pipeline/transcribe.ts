@@ -57,16 +57,18 @@ export async function transcribe(ctx: StageContext) {
   const done = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), columns: { index: true } });
   const doneIdx = new Set(done.map((c) => c.index));
 
-  await svc.ai.transcriptionModel(); // fail fast if the model id is wrong
+  // the model in force when this stage starts; every chunk of this run uses it even if an admin switches meanwhile
+  const transcriptionModel = svc.models.get().transcription;
+  await svc.ai.transcriptionModel(transcriptionModel); // fail fast if the model id is wrong
   const entities = extractEntities(project.sourceMeta, project.settings.vocabulary);
-  const provider = underlyingProvider(svc.config.TRANSCRIPTION_MODEL);
-  const providerOptions = svc.ai.transcriptionOptions() as Record<string, JSONObject>;
+  const provider = underlyingProvider(transcriptionModel);
+  const providerOptions = svc.ai.transcriptionOptions(transcriptionModel) as Record<string, JSONObject>;
   if (svc.config.TRANSCRIPT_BIAS && entities.length) {
     providerOptions[provider] = { ...(providerOptions[provider] ?? {}), ...(biasProviderOptions(provider, entities) as JSONObject) };
     ctx.log.info({ count: entities.length, hints: entities.slice(0, 12) }, "vocabulary hints");
   }
 
-  const selfHosted = provider === "openai" && !!svc.config.OPENAI_BASE_URL;
+  const selfHosted = provider === "openai" && !!svc.providers.get("openai").baseUrl;
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
   const pending = chunkFiles.map((_, i) => i).filter((i) => !doneIdx.has(i));
   let completed = chunkFiles.length - pending.length;
@@ -76,7 +78,7 @@ export async function transcribe(ctx: StageContext) {
       if (i === undefined) return;
       ctx.throwIfAborted();
       const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-      const result = await svc.asr.transcribe(audio, { modelId: svc.config.TRANSCRIPTION_MODEL, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
+      const result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
       await ctx.db
         .insert(schema.transcriptChunks)
         .values({
@@ -111,7 +113,7 @@ export async function transcribe(ctx: StageContext) {
 
   await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length }, async (u) => {
   // which STT ran, so later expected-time estimates compare like with like (see pipeline/estimates.ts)
-  await u.artifact(projectId, "transcribe", "models", { chunks: chunkFiles.length, words: words.length }, modelsUsed(svc, "transcription", "align"));
+  await u.artifact(projectId, "transcribe", "models", { chunks: chunkFiles.length, words: words.length }, { ...modelsUsed(svc, "transcription", "align"), transcription: transcriptionModel });
   await u.db
     .insert(schema.transcripts)
     .values({

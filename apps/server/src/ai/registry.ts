@@ -18,6 +18,39 @@ export interface AiService {
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
   /** Static validation of configured models + required keys. No network calls. */
   check(): Promise<void>;
+  /**
+   * Can `id` run here? Resolves it against the configured providers, checks the vendor's key is set
+   * and, for a self-hosted server, that it is reachable and has the model installed (Speaches pulls
+   * missing whisper models itself). Throws a sentence that says what to do.
+   */
+  verify(kind: "language" | "transcription", id: string): Promise<void>;
+}
+
+/** Transcription models known to return word timestamps, which the pipeline needs; others fail at "no words". */
+export function supportsWordTimestamps(id: string): boolean {
+  const vendor = underlyingProvider(id);
+  const model = id.slice(providerOf(id).length + 1).replace(/^[^/]+\//, "");
+  if (vendor === "openai") return /whisper/i.test(model); // whisper-1 and Speaches' faster-whisper-*; gpt-4o-transcribe gives segments only
+  return ["groq", "deepgram", "assemblyai"].includes(vendor);
+}
+
+/** Keys and base URLs in force, and a version that changes when they do (ai/providers.ts). */
+export interface CredentialSource {
+  get(provider: string): { apiKey?: string; baseUrl?: string };
+  version(): number;
+}
+
+/** The environment only: what the eval runner and tests use. */
+export function envCredentialSource(config: Config): CredentialSource {
+  return {
+    get(provider) {
+      const compat = provider === config.OPENAI_COMPATIBLE_NAME;
+      const apiKey = compat ? config.OPENAI_COMPATIBLE_API_KEY : (providerKeyEnv[provider] ?? []).map((k) => (config as unknown as Record<string, string | undefined>)[k] ?? process.env[k]).find(Boolean);
+      const baseUrl = provider === "openai" ? config.OPENAI_BASE_URL : compat ? config.OPENAI_COMPATIBLE_BASE_URL : undefined;
+      return { ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) };
+    },
+    version: () => 0,
+  };
 }
 
 /** Env var(s) that must be present for each built-in provider (compat/custom providers need none). */
@@ -65,13 +98,23 @@ const lenientJsonSchema: LanguageModelMiddleware = {
   transformParams: async ({ params }) => ({ ...params, providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } } }),
 };
 
-export function createAi(config: Config, log: Logger, middleware?: LanguageModelMiddleware | null): AiService {
+export function createAi(
+  config: Config,
+  log: Logger,
+  middleware?: LanguageModelMiddleware | null,
+  /** the models in force now (ai/models.ts); the environment when not given */
+  current: () => { language: string; transcription: string } = () => ({ language: config.AI_MODEL, transcription: config.TRANSCRIPTION_MODEL }),
+  /** where keys and base URLs come from (ai/providers.ts); the environment when not given */
+  credentials: CredentialSource = envCredentialSource(config),
+): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
-  let registry: Promise<Registry> | undefined;
+  let registry: { version: number; value: Promise<Registry> } | undefined;
+  const compat = config.OPENAI_COMPATIBLE_NAME;
 
-  // Provider packages are imported lazily: their default instances read env at import time.
+  // Provider packages are imported lazily: their default instances read env at import time. Instances
+  // are built from the credentials in force and rebuilt when those change (an admin saved a key).
   async function build(): Promise<Registry> {
-    const [{ createOpenAI }, { anthropic }, { google }, { groq }, { deepgram }, { assemblyai }, { gateway }] = await Promise.all([
+    const [{ createOpenAI }, { createAnthropic }, { createGoogle }, { createGroq }, { createDeepgram }, { createAssemblyAI }, { createGateway }] = await Promise.all([
       import("@ai-sdk/openai"),
       import("@ai-sdk/anthropic"),
       import("@ai-sdk/google"),
@@ -80,13 +123,13 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
       import("@ai-sdk/assemblyai"),
       import("@ai-sdk/gateway"),
     ]);
-    const openai = createOpenAI({
-      ...(config.OPENAI_API_KEY ? { apiKey: config.OPENAI_API_KEY } : {}),
-      ...(config.OPENAI_BASE_URL ? { baseURL: config.OPENAI_BASE_URL } : {}),
-    });
+    const c = (p: string) => credentials.get(p);
+    const key = (p: string) => (c(p).apiKey ? { apiKey: c(p).apiKey } : {});
+    const openaiCreds = c("openai");
+    const openai = createOpenAI({ ...key("openai"), ...(openaiCreds.baseUrl ? { baseURL: openaiCreds.baseUrl } : {}) });
     // OpenAI itself prefers the Responses API; OpenAI-compatible servers (Ollama, vLLM, LM Studio,
     // Speaches…) usually only implement Chat Completions, so default to chat when a base URL is set.
-    const mode = config.OPENAI_API_MODE ?? (config.OPENAI_BASE_URL ? "chat" : "responses");
+    const mode = config.OPENAI_API_MODE ?? (openaiCreds.baseUrl ? "chat" : "responses");
     const openaiProvider =
       mode === "chat"
         ? customProvider({
@@ -95,13 +138,22 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
             languageModels: new Proxy({} as Record<string, LanguageModel>, { has: () => true, get: (_t, id: string) => openai.chat(id) }),
           })
         : openai;
-    const providers: Record<string, any> = { openai: openaiProvider, anthropic, google, groq, deepgram, assemblyai, gateway };
-    if (config.OPENAI_COMPATIBLE_BASE_URL) {
+    const providers: Record<string, any> = {
+      openai: openaiProvider,
+      anthropic: createAnthropic(key("anthropic")),
+      google: createGoogle(key("google")),
+      groq: createGroq(key("groq")),
+      deepgram: createDeepgram(key("deepgram")),
+      assemblyai: createAssemblyAI(key("assemblyai")),
+      gateway: createGateway(key("gateway")),
+    };
+    const compatCreds = c(compat);
+    if (compatCreds.baseUrl) {
       const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
-      providers[config.OPENAI_COMPATIBLE_NAME] = createOpenAICompatible({
-        name: config.OPENAI_COMPATIBLE_NAME,
-        baseURL: config.OPENAI_COMPATIBLE_BASE_URL,
-        apiKey: config.OPENAI_COMPATIBLE_API_KEY ?? "none",
+      providers[compat] = createOpenAICompatible({
+        name: compat,
+        baseURL: compatCreds.baseUrl,
+        apiKey: compatCreds.apiKey ?? "none",
         // send response_format json_schema (Ollama, vLLM, LM Studio all support it); without this the
         // schema is silently dropped and small models answer in whatever shape they like
         supportsStructuredOutputs: config.OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS,
@@ -109,7 +161,11 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
     }
     return createProviderRegistry(providers);
   }
-  const reg = () => (registry ??= build());
+  const reg = () => {
+    const version = credentials.version();
+    if (!registry || registry.version !== version) registry = { version, value: build() };
+    return registry.value;
+  };
 
   async function resolve(kind: "language" | "transcription", id: string) {
     const provider = providerOf(id);
@@ -120,8 +176,11 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
       return kind === "language" ? r.languageModel(id as `${string}:${string}`) : r.transcriptionModel(id as `${string}:${string}`);
     } catch (err) {
       const msg = (err as Error).message ?? String(err);
-      const known = Object.keys(providerKeyEnv).concat(config.OPENAI_COMPATIBLE_BASE_URL ? [config.OPENAI_COMPATIBLE_NAME] : []);
-      if (/No such provider/i.test(msg)) throw new Error(`unknown provider "${provider}" in "${id}". Known providers: ${known.join(", ")}`);
+      const known = Object.keys(providerKeyEnv).concat(credentials.get(compat).baseUrl ? [compat] : []);
+      if (/No such provider/i.test(msg)) {
+        if (provider === compat) throw new Error(`"${id}" needs a base URL for the ${compat} server (OPENAI_COMPATIBLE_BASE_URL, or enter it under Settings → Models)`);
+        throw new Error(`unknown provider "${provider}" in "${id}". Known providers: ${known.join(", ")}`);
+      }
       if (kind === "transcription")
         throw new Error(`provider "${provider}" has no transcription models ("${id}"). Use e.g. openai:whisper-1, deepgram:nova-3, assemblyai:best, groq:whisper-large-v3-turbo. (${msg})`);
       throw new Error(`cannot resolve ${kind} model "${id}": ${msg}`);
@@ -129,8 +188,11 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
   }
 
   function requireKeys(id: string) {
-    const keys = providerKeyEnv[providerOf(id)];
-    if (keys && !keys.some((k) => process.env[k])) throw new Error(`"${id}" needs ${keys.join(" or ")} to be set`);
+    const provider = providerOf(id);
+    const keys = providerKeyEnv[provider];
+    // a self-hosted OpenAI-compatible server needs no key
+    if (provider === "openai" && credentials.get("openai").baseUrl) return;
+    if (keys && !credentials.get(provider).apiKey) throw new Error(`"${id}" needs an API key for ${provider}: enter one under Settings → Models, or set ${keys.join(" or ")}`);
   }
 
   /**
@@ -142,10 +204,10 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
   async function checkSelfHosted(id: string) {
     const provider = providerOf(id);
     const modelId = id.slice(provider.length + 1);
-    const baseURL = provider === "openai" ? config.OPENAI_BASE_URL : provider === config.OPENAI_COMPATIBLE_NAME ? config.OPENAI_COMPATIBLE_BASE_URL : undefined;
+    if (provider !== "openai" && provider !== compat) return;
+    const { baseUrl: baseURL, apiKey } = credentials.get(provider);
     if (!baseURL) return;
     const base = baseURL.replace(/\/+$/, "");
-    const apiKey = provider === "openai" ? config.OPENAI_API_KEY : config.OPENAI_COMPATIBLE_API_KEY;
     const headers = apiKey ? { authorization: `Bearer ${apiKey}` } : undefined;
     const get = async (path: string) => {
       try {
@@ -174,17 +236,25 @@ export function createAi(config: Config, log: Logger, middleware?: LanguageModel
     throw new Error(`model "${modelId}" is not installed on ${base}. Installed: ${installed.join(", ") || "(none)"}.${hint}`);
   }
 
+  async function verify(kind: "language" | "transcription", id: string) {
+    await resolve(kind, id);
+    requireKeys(id);
+    if (kind === "transcription" && !supportsWordTimestamps(id)) throw new Error(`"${id}" does not return word timestamps, which cuts and captions need. Use whisper-1 (also through the gateway), a Speaches faster-whisper model, deepgram:nova-3, assemblyai:best or groq:whisper-large-v3-turbo.`);
+    await checkSelfHosted(id);
+  }
+
   return {
-    languageModel: async (id = config.AI_MODEL) => {
+    languageModel: async (id = current().language) => {
       const model = (await resolve("language", id)) as Exclude<LanguageModel, string>;
       // every model handed out: lenient OpenAI schemas, then LLM_TRACE capture (logs / Langfuse) when on
       return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: middleware ? [lenientJsonSchema, middleware] : lenientJsonSchema }) as LanguageModel;
     },
-    transcriptionModel: async (id = config.TRANSCRIPTION_MODEL) => (await resolve("transcription", id)) as TranscriptionModel,
-    transcriptionOptions: (id = config.TRANSCRIPTION_MODEL) => {
+    transcriptionModel: async (id = current().transcription) => (await resolve("transcription", id)) as TranscriptionModel,
+    transcriptionOptions: (id = current().transcription) => {
       const p = underlyingProvider(id);
       return { [p]: wordTimestampOptions[p] ?? {} };
     },
+    verify,
     async check() {
       const errors: string[] = [];
       for (const [label, kind, id] of [

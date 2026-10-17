@@ -12,8 +12,8 @@ async function main() {
   const log = svc.log.child({ module: "boot" });
   log.info(
     {
-      aiModel: config.AI_MODEL,
-      transcriptionModel: config.TRANSCRIPTION_MODEL,
+      aiModel: svc.models.get().language,
+      transcriptionModel: svc.models.get().transcription,
       openaiBaseUrl: config.OPENAI_BASE_URL ?? null,
       storage: config.STORAGE_DRIVER + (config.S3_BUCKET ? `:${config.S3_BUCKET}` : ""),
       dataDir: config.DATA_DIR,

@@ -144,17 +144,18 @@ export function modelsUsed(svc: Services, ...which: Array<"language" | "transcri
   const out: Record<string, string> = {};
   const host = (model: string) => {
     const provider = model.split(":")[0];
-    return provider === "compat" ? endpointHost(c.OPENAI_COMPATIBLE_BASE_URL) : provider === "openai" ? endpointHost(c.OPENAI_BASE_URL) : undefined;
+    return provider === c.OPENAI_COMPATIBLE_NAME || provider === "openai" ? endpointHost(svc.providers.get(provider).baseUrl) : undefined;
   };
   const add = (key: string, model: string) => {
     out[key] = model;
     const h = host(model);
     if (h) out[`${key}Endpoint`] = h;
   };
+  const m = svc.models.get();
   for (const w of which) {
-    if (w === "language") add("language", c.AI_MODEL);
-    if (w === "transcription") add("transcription", c.TRANSCRIPTION_MODEL);
-    if (w === "align") add("align", c.TRANSCRIPT_ALIGN_MODEL ?? c.TRANSCRIPTION_MODEL);
+    if (w === "language") add("language", m.language);
+    if (w === "transcription") add("transcription", m.transcription);
+    if (w === "align") add("align", m.align);
     if (w === "aligner" && svc.aligner) out.aligner = path.basename(c.ALIGN_MODEL_DIR ?? "wav2vec2");
   }
   return out;

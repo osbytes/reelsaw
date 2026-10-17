@@ -120,8 +120,8 @@ export const apikey = pgTable(
   (t) => [index("apikey_reference_id_idx").on(t.referenceId), index("apikey_key_idx").on(t.key)],
 );
 
-/** Account-level audit trail: sign-ups, approvals, role changes, bans (admin page, email). */
-export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed"] as const;
+/** Account-level audit trail: sign-ups, approvals, role changes, bans, model changes (admin page, email). */
+export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed", "models.changed", "provider.changed"] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
   "admin_events",
@@ -158,6 +158,35 @@ export const llmUsage = pgTable(
   },
   (t) => [index("llm_usage_user_id_idx").on(t.userId, t.createdAt)],
 );
+
+/**
+ * Instance-wide settings an admin changes at runtime, one row per key; absent = the environment.
+ * `models`: `{ language?, transcription?, align? }` model ids that override AI_MODEL,
+ * TRANSCRIPTION_MODEL and TRANSCRIPT_ALIGN_MODEL (see ai/models.ts). Keys never live here.
+ */
+export const instanceSettings = pgTable("instance_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<Record<string, unknown>>().notNull().default({}),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type InstanceSettingsRow = typeof instanceSettings.$inferSelect;
+
+/**
+ * Provider credentials an admin entered in Settings (ai/providers.ts). The key is encrypted with a
+ * key derived from BETTER_AUTH_SECRET (ai/crypto.ts) and never leaves the server; the UI only sees
+ * its last characters. A row overrides the environment for that provider; absent = the environment.
+ */
+export const providerSettings = pgTable("provider_settings", {
+  provider: text("provider").primaryKey(),
+  apiKeyEnc: text("api_key_enc"),
+  /** last 4 characters, for the UI */
+  apiKeyHint: text("api_key_hint"),
+  baseUrl: text("base_url"),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type ProviderSettingsRow = typeof providerSettings.$inferSelect;
 
 /** Per-user settings. One row per user, created on first write; absent = defaults. */
 export const userSettings = pgTable("user_settings", {

@@ -25,13 +25,13 @@ export interface Asr {
   prune(maxAgeDays: number): Promise<number>;
 }
 
-export function createAsr(ai: AiService, defaultModel: string, dir: string, log: Logger): Asr {
+export function createAsr(ai: AiService, defaultModel: () => string, dir: string, log: Logger): Asr {
   let hits = 0;
   let misses = 0;
   const fileFor = (key: string) => path.join(dir, key.slice(0, 2), `${key}.json`);
   return {
     async transcribe(audio, opts = {}) {
-      const modelId = opts.modelId ?? defaultModel;
+      const modelId = opts.modelId ?? defaultModel();
       const providerOptions = opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>);
       const key = createHash("sha256").update(modelId).update("\0").update(JSON.stringify(providerOptions)).update("\0").update(audio).digest("hex");
       const file = fileFor(key);
