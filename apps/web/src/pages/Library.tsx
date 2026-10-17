@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { linkWith, useHashParams } from "../lib/hash";
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
-import { AssetCard, AssetLightbox, RemoveDialog, UploadCard, useBumperActions, useBumperLibrary, type LibraryAsset } from "../components/BumperField";
+import { Skeleton, SkeletonRegion } from "../components/ui";
+import { AssetCard, AssetCardSkeleton, AssetLightbox, RemoveDialog, UploadCard, useBumperActions, useBumperLibrary, type LibraryAsset } from "../components/BumperField";
 
 /**
  * Your intro and outro library. Deep links: `#asset=<id>` highlights a card, `?upload=1` opens the file picker.
@@ -72,7 +73,7 @@ export function LibraryPage() {
             <h1 className="text-[28px] font-bold tracking-tight">Library</h1>
             <p className="mt-1 min-h-5 text-sm text-ink2">Intros and outros you can attach to clips</p>
           </div>
-          <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isLoading ? "" : `${assets.length} item${assets.length === 1 ? "" : "s"}`}</span>
+          <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isPending ? <Skeleton className="ml-auto h-3.5 w-12" /> : `${assets.length} item${assets.length === 1 ? "" : "s"}`}</span>
           <button
             type="button"
             className="btn-ghost min-w-[7.5rem]"
@@ -84,11 +85,17 @@ export function LibraryPage() {
           </button>
         </div>
         <UploadCard inputRef={input} actions={actions} />
-        {/* the grid area keeps one row's height while loading or empty */}
+        {list.isPending ? (
+          <SkeletonRegion label="Loading library…" className="grid grid-cols-2 content-start gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {Array.from({ length: 5 }, (_, i) => (
+              <AssetCardSkeleton key={i} i={i} />
+            ))}
+          </SkeletonRegion>
+        ) : (
         <div className="grid grid-cols-2 content-start gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {assets.length === 0 && (
             <div className="col-span-full grid h-[26rem] place-items-center rounded-[16px] border border-line bg-panel px-6 text-center text-sm text-ink3 sm:h-[30rem]">
-              {list.isLoading ? "Loading…" : "Nothing here yet. Drop a video or an image above to add your first intro or outro."}
+              Nothing here yet. Drop a video or an image above to add your first intro or outro.
             </div>
           )}
           {assets.map((a) => (
@@ -109,6 +116,7 @@ export function LibraryPage() {
             />
           ))}
         </div>
+        )}
         <AssetLightbox
           asset={viewing}
           introId={defaults?.introAssetId}

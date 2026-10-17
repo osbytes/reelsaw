@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import type { ReportInclude } from "@reelsaw/shared";
-import { Modal } from "./ui";
+import { Modal, Skeleton } from "./ui";
 import { MultiCombobox } from "./MultiCombobox";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
@@ -97,12 +97,12 @@ export function ReportDialog() {
     }
   }
 
-  const row = (key: keyof ReportInclude, label: string, hint: string, disabled = false) => (
+  const row = (key: keyof ReportInclude, label: string, hint: ReactNode, disabled = false) => (
     <label className={`flex items-start gap-2.5 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
       <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--acc)]" checked={inc[key]} disabled={disabled} onChange={(e) => setInc((x) => ({ ...x, [key]: e.target.checked }))} />
       <span className="min-w-0">
         <span className="block text-sm">{label}</span>
-        <span className="block text-xs text-ink3">{hint}</span>
+        <span className="block min-h-4 text-xs text-ink3">{hint}</span>
       </span>
     </label>
   );
@@ -130,6 +130,13 @@ export function ReportDialog() {
         />
       </label>
 
+      {projectId && project.isPending && (
+        <div className="flex flex-col gap-1.5" role="status">
+          <span className="sr-only">Loading clips…</span>
+          <span className="text-sm font-semibold">Clips</span>
+          <Skeleton className="h-[38px] w-full rounded-[10px]" />
+        </div>
+      )}
       {projectId && clips.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-semibold">Clips</span>
@@ -153,8 +160,8 @@ export function ReportDialog() {
         {row("system", "System info and recent errors", "Versions, CPU/memory/disk, job queue, usage, and this instance's error log from the last week")}
         {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn't keep a log file" : "Pipeline log lines, including model calls when they're recorded", !!preview && !preview.logs)}
         {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
-        {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : "…")}
-        {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : "…")}
+        {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}
+        {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : <Skeleton className="mt-0.5 inline-block h-3 w-40" />)}
       </fieldset>
 
       {/* one reserved line for notes and errors, so the buttons never move */}

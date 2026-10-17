@@ -112,7 +112,12 @@ project already hit the problem it prevents.
   utilities can override them.
 - **Primitives:** Radix and shadcn-style components. Scrolling regions use the `ScrollArea`
   component, never native `overflow-auto`. To cap a ScrollArea's height, give the ScrollArea
-  itself a max height.
+  itself a max height. For any UI control (select, menu, tooltip, tabs, date picker, toggle…)
+  look first in `components/ui.tsx` and `components/`, then at what shadcn/ui or Radix already
+  ships for it (add the Radix package, wrap it once in `ui.tsx`, style it with our tokens), then
+  at a maintained library. Browser-native widgets with their own OS chrome (`<select>`,
+  `<input type="date">`) are not used where a themed primitive exists. See "Don't rebuild what
+  exists".
 - **No layout shift.**
   - Nothing appears *above* what the user is interacting with and pushes it down.
   - Follow-up actions go into space reserved for them (a label row, a status line that's always
@@ -120,6 +125,34 @@ project already hit the problem it prevents.
   - Transient warnings are overlays.
   - Buttons whose label changes get a minimum width.
   - Remember that popovers anchored above their trigger grow upward.
+- **Loading is not empty.** A region backed by a query has three states and renders each one
+  distinctly: loading (a skeleton with the approximate size and shape of the content: same row
+  count, line widths, thumbnail boxes), empty (the "nothing here yet" message, only once the query
+  has resolved with no data), and data.
+  - Never show the empty-state text while `isPending`/`isLoading`; never collapse a region's height
+    while it loads.
+  - Refetches and background updates keep the current content (`placeholderData: keepPreviousData`
+    or the query's previous data); they do not flash a skeleton.
+  - Skeletons use the `Skeleton` primitive in `components/ui.tsx` (wrap a region in
+    `SkeletonRegion` for the screen-reader "Loading…") and the same layout classes as the real rows,
+    so the swap is a content change, not a layout change.
+- **Lists align.**
+  - Rows of one list share one column grid (a `<table>` with fixed layout, or CSS grid with fixed
+    tracks), never per-row flex that wraps differently. Every column has a fixed or minimum width
+    and an explicit alignment: text left, numbers right with `tabular-nums`, status glyph plus word
+    left, actions right. Headers take the alignment of their data.
+  - Conditional cells keep their slot. An action that does not apply renders disabled (with a title
+    saying why) or as an invisible placeholder of the same width, so buttons line up down the list.
+    Badges ("admin", "you") live inside the name cell and never move another column.
+  - One row height per list. Secondary text goes on a second line inside the cell, not into extra
+    height for some rows.
+  - Actions: up to three primary inline, the rest in a ⋯ menu. Never hover-only: touch and keyboard
+    users cannot find them.
+  - Responsive: columns collapse in a defined order. Hide the least important first, then fold them
+    into a second line inside the row, then scroll the row. The actions column stays reachable.
+  - Semantics: a real `<table>` when the data is tabular and column headers help (add `scope`,
+    `aria-sort` and a caption); `role="grid"` only for a keyboard-navigable widget. Headers are
+    sticky inside the list's `ScrollArea`.
 - **One source of truth.** State shared by several components lives in one store (for example
   the theme in `lib/theme.ts`), not in separate copies of local state that can drift apart.
 - **The URL is state.** Anything worth linking to (a fix, a selection, a clip, a time, an editor

@@ -1,5 +1,7 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import * as RadixSelect from "@radix-ui/react-select";
+import { Check, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react";
 import type { ProjectStatus, ClipStatus } from "@reelsaw/shared";
 
 type Tone = "ok" | "acc" | "warn" | "err" | "idle";
@@ -54,6 +56,21 @@ export function Notice({ tone, glyph, children, className = "" }: { tone: Tone; 
 
 export function Spinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line2 border-t-acc" />;
+}
+
+/** Placeholder block for content that is still loading. Size it with the same classes as the real thing. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`block animate-pulse rounded bg-sunk motion-reduce:animate-none ${className}`} />;
+}
+
+/** Wraps a skeleton region so assistive tech hears one "Loading…" instead of nothing. */
+export function SkeletonRegion({ children, label = "Loading…", className = "" }: { children: ReactNode; label?: string; className?: string }) {
+  return (
+    <div role="status" aria-busy="true" className={className}>
+      <span className="sr-only">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 export function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
@@ -127,3 +144,63 @@ export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger
     </Modal>
   );
 }
+
+/** Radix Select never accepts "" as an item value, so "no choice" travels as this. */
+const NONE = "__none__";
+
+export type SelectOption = { value: string; label: ReactNode; hint?: string; disabled?: boolean };
+
+/**
+ * The one dropdown for choosing a value (never a native `<select>`). The trigger matches `.input`
+ * (md) or a compact button (sm); give it a width via `className` so a longer label never shifts layout.
+ * An option with value "" is allowed (it means "unset").
+ */
+export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void }) {
+  const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
+  return (
+    <RadixSelect.Root value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
+      <RadixSelect.Trigger
+        aria-label={ariaLabel}
+        onClick={onClick}
+        className={`flex w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[placeholder]:text-ink3 data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}
+      >
+        <span className="min-w-0 truncate">
+          <RadixSelect.Value placeholder={placeholder} />
+        </span>
+        <RadixSelect.Icon asChild>
+          <ChevronDown className="h-4 w-4 shrink-0 text-ink3" />
+        </RadixSelect.Icon>
+      </RadixSelect.Trigger>
+      <RadixSelect.Portal>
+        <RadixSelect.Content position="popper" sideOffset={6} collisionPadding={12} className="menu max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0">
+          <RadixSelect.ScrollUpButton className="flex h-6 items-center justify-center text-ink3">
+            <ChevronUp className="h-4 w-4" />
+          </RadixSelect.ScrollUpButton>
+          <RadixSelect.Viewport className="p-1.5">
+            {options.map((o) => (
+              <RadixSelect.Item key={o.value || NONE} value={o.value === "" ? NONE : o.value} disabled={o.disabled} className="menu-item pr-8 data-[state=checked]:font-semibold relative">
+                <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
+                {o.hint && <span className="menu-hint">{o.hint}</span>}
+                <RadixSelect.ItemIndicator className="absolute right-2.5 inline-flex">
+                  <Check className="h-4 w-4" />
+                </RadixSelect.ItemIndicator>
+              </RadixSelect.Item>
+            ))}
+          </RadixSelect.Viewport>
+          <RadixSelect.ScrollDownButton className="flex h-6 items-center justify-center text-ink3">
+            <ChevronDown className="h-4 w-4" />
+          </RadixSelect.ScrollDownButton>
+        </RadixSelect.Content>
+      </RadixSelect.Portal>
+    </RadixSelect.Root>
+  );
+}
+
+/** The ⋯ button that opens a row's or page's action menu (use as `DropdownMenu.Trigger asChild`). `sm` is the height of a `btn-ghost text-xs` row button (2rem), `md` of a header button (2.25rem); square. */
+export const MoreButton = forwardRef<HTMLButtonElement, Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> & { "aria-label": string; size?: "sm" | "md" }>(function MoreButton({ className = "", size = "sm", ...props }, ref) {
+  return (
+    <button ref={ref} type="button" title="More actions" {...props} className={`btn-ghost shrink-0 px-0 ${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${className}`}>
+      <MoreHorizontal className="h-4 w-4" />
+    </button>
+  );
+});

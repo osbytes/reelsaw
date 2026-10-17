@@ -67,3 +67,34 @@ async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
     .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, start), exceptProjectId ? sql`${schema.projects.id} <> ${exceptProjectId}` : undefined));
   return Number(m);
 }
+
+/** What each limit counts right now, for the admin Limits dialog: kept projects, minutes since 00:00 UTC, projects in the last hour. */
+export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKey, number>> {
+  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
+  const [{ hour }] = await db
+    .select({ hour: sql<number>`count(*)::int` })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, new Date(Date.now() - 3_600_000))));
+  return { MAX_PROJECTS_PER_USER: total, MAX_SOURCE_MINUTES_PER_DAY: Math.round(await minutesToday(db, userId)), MAX_NEW_PROJECTS_PER_HOUR: hour };
+}
+
+/** Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
+export async function usageByUser(db: Db, days: number) {
+  const since = sql`now() - make_interval(days => ${days}::int)`;
+  const uid = sql.raw('"user"."id"');
+  const rows = await db
+    .select({
+      id: schema.user.id,
+      projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${uid} and p.created_at >= ${since})`,
+      projectsTotal: sql<number>`(select count(*)::int from projects p where p.user_id = ${uid})`,
+      sourceMinutes: sql<number>`(select coalesce(sum(p.duration_sec), 0) / 60.0 from projects p where p.user_id = ${uid} and p.created_at >= ${since})`,
+      clipsRendered: sql<number>`(select count(*)::int from clips c join projects p on p.id = c.project_id where p.user_id = ${uid} and c.status = 'done' and c.updated_at >= ${since})`,
+      storedBytes: sql<number>`(select coalesce(sum(p.source_bytes), 0) from projects p where p.user_id = ${uid}) + (select coalesce(sum(u.size_bytes), 0) from uploads u where u.user_id = ${uid})`,
+      llmCalls: sql<number>`(select count(*)::int from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
+      llmInputTokens: sql<number>`(select coalesce(sum(l.input_tokens), 0) from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
+      llmOutputTokens: sql<number>`(select coalesce(sum(l.output_tokens), 0) from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
+    })
+    .from(schema.user)
+    .limit(500);
+  return rows.map((r) => ({ ...r, sourceMinutes: Math.round(Number(r.sourceMinutes)), storedBytes: Number(r.storedBytes), llmInputTokens: Number(r.llmInputTokens), llmOutputTokens: Number(r.llmOutputTokens) }));
+}

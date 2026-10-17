@@ -15,6 +15,7 @@ import { LibraryPage } from "./pages/Library";
 import { SettingsPage } from "./pages/Settings";
 import { PendingPage } from "./pages/Pending";
 import { AdminUsersPage } from "./pages/AdminUsers";
+import { Skeleton, SkeletonRegion } from "./components/ui";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 import { ClipEditorPage } from "./pages/ClipEditor";
@@ -162,10 +163,30 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** What shows while the session and account load: a bar and a few content blocks, no "Loading…" text. */
+function AppSkeleton() {
+  return (
+    <SkeletonRegion label="Loading…" className="flex h-screen flex-col overflow-hidden">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-6">
+        <Skeleton className="h-6 w-28" />
+        <Skeleton className="ml-auto h-8 w-8 rounded-full" />
+      </div>
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="aspect-video rounded-[16px]" />
+          ))}
+        </div>
+      </div>
+    </SkeletonRegion>
+  );
+}
+
 function Protected({ children, bare, admin }: { children: React.ReactNode; bare?: boolean; admin?: boolean }) {
   const { data, isPending } = useSession();
   const me = useMe(!!data);
-  if (isPending || (data && me.isPending)) return <div className="p-10 text-center text-ink3">Loading…</div>;
+  if (isPending || (data && me.isPending)) return <AppSkeleton />;
   if (!data) return <Navigate to="/login" replace />;
   // waiting for approval or suspended: one page, nothing else (the server refuses everything anyway)
   if (me.data?.blocked) return <PendingPage />;

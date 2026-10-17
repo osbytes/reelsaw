@@ -3,6 +3,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronRight, ChevronsUpDown, Download, ExternalLink, KeyRound, Server } from "lucide-react";
 import { ScrollArea } from "./scroll-area";
 import { createFuzzy } from "../lib/fuzzy";
+import { Skeleton } from "./ui";
 
 export interface PickerModel {
   id: string;
@@ -33,6 +34,17 @@ export interface PickerProviderState {
   baseUrl: string | null;
   baseUrlSource: "env" | "db" | null;
   unreadable: boolean;
+}
+
+function PickerSkeleton() {
+  return (
+    <div role="status" className="flex flex-col gap-2 text-left">
+      <span className="sr-only">Asking providers…</span>
+      {["w-2/3", "w-1/2", "w-3/5"].map((w) => (
+        <Skeleton key={w} className={`h-4 ${w}`} />
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -189,7 +201,7 @@ export function ModelPicker({
                   </button>
                 )}
                 {hits.map(({ m, p }) => modelRow(m, p, true))}
-                {!canUseTyped && !hits.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? "Asking providers…" : "No matches"}</div>}
+                {!canUseTyped && !hits.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No matches"}</div>}
               </div>
             </ScrollArea>
           ) : (
@@ -215,7 +227,7 @@ export function ModelPicker({
                       </button>
                     );
                   })}
-                  {!providers.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? "Asking providers…" : "No providers"}</div>}
+                  {!providers.length && <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No providers"}</div>}
                 </div>
               </ScrollArea>
               <ScrollArea className="max-h-[min(400px,calc(var(--radix-popover-content-available-height)-60px))]">
@@ -225,7 +237,7 @@ export function ModelPicker({
                   ) : selected ? (
                     <>
                       {selectedState && <ProviderSummary state={selectedState} catalog={selected} onClear={onClearCredentials} saving={saving} onSave={onSaveCredentials} />}
-                      {selected.models.length ? selected.models.map((m) => modelRow(m, selected, false)) : <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? "Asking…" : "No models of this kind here"}</div>}
+                      {selected.models.length ? selected.models.map((m) => modelRow(m, selected, false)) : <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No models of this kind here"}</div>}
                     </>
                   ) : (
                     <div className="px-3 py-6 text-center text-sm text-ink3">Pick a provider</div>

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { ModelPicker, type PickerProvider } from "./ModelPicker";
-import { ProgressBar } from "./ui";
+import { ProgressBar, Skeleton } from "./ui";
 
 type Kind = "language" | "transcription" | "align";
 const KINDS: Array<{ kind: Kind; title: string; help: string; catalog: "language" | "transcription" }> = [
@@ -109,6 +109,17 @@ export function ModelsSection() {
       )}
       <div className="grid gap-4 md:grid-cols-3">
         {KINDS.map(({ kind, title, help, catalog }) => {
+          if (!s)
+            return (
+              <div key={kind} role="status" className="flex min-w-0 flex-col gap-1.5">
+                <span className="sr-only">Loading {title}…</span>
+                <div className="flex h-[18px] items-center justify-between gap-2">
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-3 w-14" />
+                </div>
+                <Skeleton className="h-[38px] w-full rounded-[10px]" />
+              </div>
+            );
           const providerList = (catalogs[catalog].data ?? []) as PickerProvider[];
           const value = shown(kind);
           const changed = draft[kind] !== undefined && draft[kind] !== s?.current[kind];

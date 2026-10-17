@@ -6,7 +6,7 @@ import { Ban, ChevronRight, Star } from "lucide-react";
 import { SlotRow, useBumperLibrary } from "../components/BumperField";
 import type { FixedOption } from "../components/BumperCombobox";
 import { ScrollArea } from "../components/scroll-area";
-import { ProgressBar, Segmented } from "../components/ui";
+import { ProgressBar, Segmented, Skeleton } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
@@ -371,6 +371,16 @@ export function NewProjectPage() {
                       Library
                     </Link>
                   </p>
+                ) : library.isPending ? (
+                  <>
+                    {["Intro", "Outro"].map((l) => (
+                      <div key={l} className="contents" aria-hidden>
+                        <Skeleton className="h-3.5 w-10" />
+                        <Skeleton className="h-[38px] w-full rounded-[10px]" />
+                      </div>
+                    ))}
+                    <span className="sr-only" role="status">Loading intros and outros…</span>
+                  </>
                 ) : null}
               </div>
             </section>

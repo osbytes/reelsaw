@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { Select, Skeleton } from "./ui";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { UserProjectDefaults } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
@@ -72,6 +73,7 @@ export function ProjectDefaultsSection() {
     onError: (e) => toast.error(e.message),
   });
   const b = me.data?.builtInDefaults;
+  const pick = (k: keyof Form) => (v: string) => setF((p) => ({ ...p, [k]: v }));
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
   const dirty = me.data ? JSON.stringify(toSaved(f)) !== JSON.stringify(toSaved(fromSaved(me.data.projectDefaults))) : false;
 
@@ -106,21 +108,11 @@ export function ProjectDefaultsSection() {
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Pauses
-          <select className="input" value={f.pauses} onChange={set("pauses")}>
-            <option value="">{`built-in (${b?.pauses ?? "natural"})`}</option>
-            <option value="natural">natural</option>
-            <option value="tight">tight</option>
-            <option value="off">keep as recorded</option>
-          </select>
+          <Select ariaLabel="Pauses" value={f.pauses} onValueChange={pick("pauses")} options={[{ value: "", label: `built-in (${b?.pauses ?? "natural"})` }, { value: "natural", label: "natural" }, { value: "tight", label: "tight" }, { value: "off", label: "keep as recorded" }]} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Text already in the video
-          <select className="input" value={f.sourceText} onChange={set("sourceText")}>
-            <option value="">{`built-in (${b?.sourceText ?? "hide"})`}</option>
-            <option value="hide">hide, except in presentations</option>
-            <option value="always">always hide</option>
-            <option value="keep">keep</option>
-          </select>
+          <Select ariaLabel="Text already in the video" value={f.sourceText} onValueChange={pick("sourceText")} options={[{ value: "", label: `built-in (${b?.sourceText ?? "hide"})` }, { value: "hide", label: "hide, except in presentations" }, { value: "always", label: "always hide" }, { value: "keep", label: "keep" }]} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Shortest clip (s)
@@ -144,11 +136,7 @@ export function ProjectDefaultsSection() {
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Uppercase captions
-          <select className="input" value={f.uppercase} onChange={set("uppercase")}>
-            <option value="">{`built-in (${b?.uppercase ? "yes" : "no"})`}</option>
-            <option value="yes">yes</option>
-            <option value="no">no</option>
-          </select>
+          <Select ariaLabel="Uppercase captions" value={f.uppercase} onValueChange={pick("uppercase")} options={[{ value: "", label: `built-in (${b?.uppercase ? "yes" : "no"})` }, { value: "yes", label: "yes" }, { value: "no", label: "no" }]} />
         </label>
         <div className="flex items-center gap-2 sm:col-span-2">
           <button className="btn-ink min-w-[8rem]" type="submit" disabled={!dirty || save.isPending}>
@@ -168,7 +156,8 @@ export function ProjectDefaultsSection() {
 /** Settings keeps only a summary; the library itself lives on /library. */
 function BumperDefaultsRow({ introId, outroId }: { introId?: string; outroId?: string }) {
   const lib = useBumperLibrary();
-  const name = (id?: string) => (id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isLoading ? "…" : "removed")) : "none");
+  const name = (id?: string): ReactNode =>
+    id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "removed")) : "none";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-4">
       <div className="min-w-0 flex-1">
