@@ -469,7 +469,8 @@ export function ClipEditor(props: Props) {
   const tagsChanged = JSON.stringify(hashtags) !== JSON.stringify(clip.hashtags);
   const boundsChanged = range[0] !== clip.startSec || range[1] !== clip.endSec;
   const hookChanged = hook !== clip.hook;
-  const bumperKey = (b: ClipBumpers | null | undefined) => JSON.stringify({ intro: b?.intro, outro: b?.outro });
+  // the seconds count too: a changed intro/outro length needs a re-render like a changed asset
+  const bumperKey = (b: ClipBumpers | null | undefined) => JSON.stringify({ intro: b?.intro, outro: b?.outro, introSec: b?.introSec ?? null, outroSec: b?.outroSec ?? null });
   const bumpersChanged = bumperKey(bumpers) !== bumperKey(clip.bumpers);
   const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged].filter(Boolean).length;
   const changed = dirtyCount > 0;
