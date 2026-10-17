@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { UserProjectDefaults } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { useMe } from "../lib/account";
 import { Link } from "react-router";
 import { useBumperLibrary } from "./BumperField";
@@ -54,7 +54,6 @@ function toSaved(f: Form): UserProjectDefaults {
 export function ProjectDefaultsSection() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const me = useMe();
   const [f, setF] = useState<Form>(EMPTY);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -70,7 +69,7 @@ export function ProjectDefaultsSection() {
       toast("Defaults saved");
       void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
     },
-    onError: (e) => toast(e.message),
+    onError: (e) => toast.error(e.message),
   });
   const b = me.data?.builtInDefaults;
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));

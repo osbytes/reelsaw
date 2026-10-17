@@ -7,7 +7,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
 import { useMe, useSystemStatus } from "../lib/account";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { youtubeId } from "../lib/links";
@@ -36,7 +36,6 @@ export function NewProjectPage() {
   const trpc = useTRPC();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const toast = useToast();
   const status = useSystemStatus();
   const me = useMe();
   const create = useMutation(trpc.projects.create.mutationOptions());
@@ -403,7 +402,7 @@ export function NewProjectPage() {
             className="btn-quiet text-xs"
             title="Keep these settings for every new project"
             disabled={busy || saveDefaults.isPending}
-            onClick={() => saveDefaults.mutate(userProjectDefaultsSchema.parse(s), { onSuccess: () => toast("Saved as your defaults"), onError: (e) => toast(e.message) })}
+            onClick={() => saveDefaults.mutate(userProjectDefaultsSchema.parse(s), { onSuccess: () => toast("Saved as your defaults"), onError: (e) => toast.error(e.message) })}
           >
             Save as my defaults
           </button>

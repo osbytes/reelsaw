@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
 import { ProgressBar, StatusText } from "./ui";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { ClipBumpersPopover } from "./BumperField";
 import { MODE_LABEL } from "./Timeline";
@@ -108,7 +108,6 @@ export function ClipCard({
   onSeek: () => void;
   onPlay: () => void;
 }) {
-  const toast = useToast();
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
   const [whyOpen, setWhy] = useState(false);
@@ -120,7 +119,7 @@ export function ClipCard({
     navigator.clipboard
       .writeText([clip.title, clip.caption, tags].filter(Boolean).join("\n\n"))
       .then(() => toast("Caption + hashtags copied"))
-      .catch(() => toast("Couldn’t copy"));
+      .catch(() => toast.error("Couldn’t copy"));
   const skipped = clip.diagnostics?.cuts.skipped ?? [];
   const bumpers = bumpersNote(clip.diagnostics);
   const detail =

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Link2 } from "lucide-react";
 import { useMe } from "../lib/account";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { linkWith, useHashParams } from "../lib/hash";
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
@@ -14,10 +14,15 @@ import { AssetCard, RemovedList, RemoveDialog, UploadBar, UploadJobs, useBumperA
 export function LibraryPage() {
   const nav = useNavigate();
   const loc = useLocation();
-  const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [imageSec, setImageSec] = useState("3");
   const [removing, setRemoving] = useState<LibraryAsset | null>(null);
+  // a card being removed fades out first, then the list refetches without it
+  const [leaving, setLeaving] = useState<Set<string>>(new Set());
+  const fadeOut = (a: LibraryAsset) => {
+    setLeaving((s) => new Set(s).add(a.id));
+    window.setTimeout(() => void actions.remove(a).then(() => setLeaving((s) => (s.delete(a.id), new Set(s)))), 160);
+  };
   const list = useBumperLibrary();
   const actions = useBumperActions();
   const defaults = useMe().data?.projectDefaults;
@@ -93,15 +98,16 @@ export function LibraryPage() {
               busy={actions.busy}
               highlighted={selected === a.id}
               applied={applied.has(a.id)}
+              leaving={leaving.has(a.id)}
               onSeconds={(sec) => void actions.setSeconds(a, sec).then((ok) => ok && setApplied((s) => new Set(s).add(a.id)))}
               onSelect={() => select(a)}
               onUse={(slot) => actions.setDefault(slot, a, slot === "intro" ? defaults?.introAssetId : defaults?.outroAssetId)}
-              onRemove={() => (a.usedBy ? setRemoving(a) : actions.remove(a))}
+              onRemove={() => (a.usedBy ? setRemoving(a) : fadeOut(a))}
             />
           ))}
         </div>
         <RemovedList deleted={deleted} busy={actions.busy} onRestore={actions.restore} />
-        <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={actions.remove} />
+        <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={fadeOut} />
       </main>
     </ScrollArea>
   );

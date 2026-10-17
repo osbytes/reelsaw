@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
 import { ConfirmDialog, Modal, Segmented } from "../components/ui";
 
@@ -26,7 +26,6 @@ function ago(iso: string | null) {
 export function AdminUsersPage() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const me = useMe();
   const [search, setSearch] = useState("");
   const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
@@ -39,7 +38,7 @@ export function AdminUsersPage() {
     toast(msg);
     void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
   };
-  const fail = (e: { message: string }) => toast(e.message);
+  const fail = (e: { message: string }) => toast.error(e.message);
   const approve = useMutation({ ...trpc.admin.users.approve.mutationOptions(), onSuccess: done("Approved"), onError: fail });
   const setRole = useMutation({ ...trpc.admin.users.setRole.mutationOptions(), onSuccess: done("Role changed"), onError: fail });
   const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
@@ -203,7 +202,6 @@ const LIMIT_LABELS: Record<string, string> = { MAX_PROJECTS_PER_USER: "Projects 
 function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const q = useQuery(trpc.admin.users.limits.queryOptions({ id: row.id }));
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const values = draft ?? Object.fromEntries(Object.entries(q.data?.overrides ?? {}).map(([k, v]) => [k, String(v)]));
@@ -214,7 +212,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
       void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
       onClose();
     },
-    onError: (e) => toast(e.message),
+    onError: (e) => toast.error(e.message),
   });
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={`Limits for ${row.email}`} width={440}>

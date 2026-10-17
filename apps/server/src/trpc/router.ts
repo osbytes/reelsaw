@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -326,6 +326,53 @@ export const appRouter = router({
         assets: rows.filter((r) => !r.deletedAt).map(pub),
         deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
       };
+    }),
+    /**
+     * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
+     * choice. Two queries (projects whose settings name it, clips that name it or sit in such a project).
+     */
+    usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+      const db = ctx.svc.database.db;
+      const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)));
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+      const slots = ["intro", "outro"] as const;
+      const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
+      const projectRows = await db
+        .select({ id: schema.projects.id, title: schema.projects.title, settings: schema.projects.settings })
+        .from(schema.projects)
+        .where(and(eq(schema.projects.userId, ctx.user.id), or(sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`, sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`)))
+        .limit(500);
+      const clipRows = await db
+        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
+        .from(schema.clips)
+        .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
+        .where(
+          and(
+            eq(schema.projects.userId, ctx.user.id),
+            or(
+              sql`${schema.clips.bumpers} ->> 'intro' = ${input.id}`,
+              sql`${schema.clips.bumpers} ->> 'outro' = ${input.id}`,
+              sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`,
+              sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`,
+            ),
+          ),
+        )
+        .orderBy(schema.clips.index)
+        .limit(2000);
+      type Clip = { id: string; index: number; title: string; slots: Array<"intro" | "outro">; via: "clip" | "project" };
+      const out = new Map<string, { id: string; title: string; slots: Array<"intro" | "outro">; via: "project"; clips: Clip[] }>();
+      for (const p of projectRows) out.set(p.id, { id: p.id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === input.id), clips: [] });
+      for (const c of clipRows) {
+        const own = c.bumpers ?? {};
+        const mine = slots.filter((s) => own[s] === input.id);
+        // a slot the clip leaves alone follows the project
+        const inherited = slots.filter((s) => own[s] === undefined && c.settings[key[s]] === input.id);
+        if (!mine.length && !inherited.length) continue;
+        const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
+        out.set(p.id, p);
+        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: slots.filter((s) => mine.includes(s) || inherited.includes(s)), via: mine.length ? "clip" : "project" });
+      }
+      return { projects: [...out.values()] };
     }),
     /**
      * Change how long an image lasts. Assets are otherwise immutable; the normalised file is named by its

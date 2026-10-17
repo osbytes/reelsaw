@@ -2,13 +2,12 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { useMe } from "../lib/account";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 
 /** Settings → Account: name, email (read-only), password. */
 export function AccountSection() {
   const me = useMe();
-  const toast = useToast();
   const qc = useQueryClient();
   const trpc = useTRPC();
   const [name, setName] = useState<string | null>(null);

@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Equal, Loader2, Star, Trash2, Upload, Undo2, X } from "lucide-react";
+import { Link } from "react-router";
+import { Ban, ChevronRight, Equal, Loader2, Star, Trash2, Upload, Undo2, X } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
-import { ConfirmDialog, Modal } from "./ui";
+import { Modal } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, Thumb, type FixedOption } from "./BumperCombobox";
 import * as Popover from "@radix-ui/react-popover";
@@ -67,7 +68,6 @@ export interface UploadJob {
 export function useBumperActions() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [error, setError] = useState("");
   const queue = useRef<Array<{ key: string; file: File; seconds: number }>>([]);
@@ -90,6 +90,7 @@ export function useBumperActions() {
   const work = async () => {
     running.current++;
     for (let next = queue.current.shift(); next; next = queue.current.shift()) {
+      toast.loading(`Adding ${queue.current.length + 1} file${queue.current.length ? "s" : ""} to your library…`, { id: "bumper-batch" });
       const { key, file, seconds } = next;
       try {
         patch(key, { state: "uploading" });
@@ -107,7 +108,8 @@ export function useBumperActions() {
     if (--running.current === 0) {
       const { ok, failed } = finished.current;
       finished.current = { ok: 0, failed: 0 };
-      toast(failed ? `Added ${ok} to your library · ${failed} failed` : ok === 1 ? "Added to your library" : `Added ${ok} to your library`);
+      if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
+      else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
     }
   };
   /** Checks sizes, then uploads and adds each file to the library, two at a time. */
@@ -137,8 +139,16 @@ export function useBumperActions() {
     setError("");
     setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
   };
-  const remove = (a: LibraryAsset) => removeM.mutate({ id: a.id }, { onSuccess: () => (refresh(), toast("Removed. You can restore it below.")), onError: fail });
-  const restore = (a: LibraryAsset) => restoreM.mutate({ id: a.id }, { onSuccess: () => (refresh(), toast("Restored")), onError: fail });
+  const remove = (a: LibraryAsset) =>
+    removeM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast("Removed. You can restore it below."), true),
+      (e) => (fail(e), false),
+    );
+  const restore = (a: LibraryAsset) =>
+    restoreM.mutateAsync({ id: a.id }).then(
+      () => (refresh(), toast("Restored"), true),
+      (e) => (fail(e), false),
+    );
   /** Image length; resolves true when saved. */
   const setSeconds = (a: LibraryAsset, sec: number) =>
     updateM.mutateAsync({ id: a.id, imageSeconds: clampSec(sec) }).then(
@@ -286,7 +296,7 @@ function SlotRow({
 }
 
 /** One library card: preview, facts, image length, default toggles and remove. */
-export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, onUse, onRemove, onSelect, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onSeconds: (sec: number) => void }) {
+export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onSeconds: (sec: number) => void }) {
   const isIntro = introId === a.id;
   const isOutro = outroId === a.id;
   const [secs, setSecs] = useState<string | null>(null);
@@ -297,9 +307,9 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
     if (secs !== null && Number.isFinite(n) && secs !== "" && clampSec(n) !== a.durationSec) onSeconds(n);
   };
   return (
-    <div id={`asset-${a.id}`} className={`flex flex-col gap-1.5 rounded-[12px] border p-2 ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
+    <div id={`asset-${a.id}`} className={`flex flex-col gap-1.5 rounded-[12px] border p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <Preview asset={a} className="w-full" />
-      <div className="flex min-h-[3.25rem] items-start gap-1 text-xs text-ink2">
+      <div className="flex min-h-[2.5rem] items-start gap-1 text-xs text-ink2">
         <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect} title="Link to this item">
           <div className="truncate font-semibold text-ink" title={a.name}>
             {a.name}
@@ -309,12 +319,12 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
             {a.width}×{a.height}
             {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
           </div>
-          <div className="text-ink3">{a.usedBy ? `Used by ${a.usedBy} project${a.usedBy === 1 ? "" : "s"}${applied ? ", re-render to apply" : ""}` : applied ? "Saved" : "Not used yet"}</div>
         </button>
         <button type="button" className="btn-quiet shrink-0 px-1.5 py-1" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+      <UsageButton asset={a} applied={applied} />
       {/* the length row is on every card so image and video cards stay the same height */}
       <div className="flex h-7 items-center gap-1.5 text-xs text-ink2">
         {a.kind === "image" ? (
@@ -355,41 +365,131 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
   );
 }
 
-/** Removed assets with a Restore button each. */
-export function RemovedList({ deleted, busy, onRestore }: { deleted: LibraryAsset[]; busy: boolean; onRestore: (a: LibraryAsset) => void }) {
-  if (!deleted.length) return null;
+/** "Used by N projects" as a control: opens the list of projects and clips that use an asset. */
+function UsageButton({ asset: a, applied }: { asset: LibraryAsset; applied: boolean }) {
+  const label = a.usedBy ? `Used by ${a.usedBy} project${a.usedBy === 1 ? "" : "s"}${applied ? ", re-render to apply" : ""}` : applied ? "Saved" : "Not used yet";
   return (
-    <details className="text-xs text-ink2">
-      <summary className="cursor-pointer select-none font-semibold">Recently removed ({deleted.length})</summary>
-      <ul className="mt-2 flex flex-col gap-1.5">
-        {deleted.map((a) => (
-          <li key={a.id} className="flex items-center gap-2">
-            <Thumb asset={a} className="h-7 w-4" />
-            <span className="min-w-0 flex-1 truncate">
-              {a.name} <span className="font-mono text-ink3">· {a.kind} · {lengthText(a)}</span>
-            </span>
-            <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={busy} aria-label={`Restore ${a.name}`} onClick={() => onRestore(a)}>
-              <Undo2 className="h-3.5 w-3.5" /> Restore
+    <div className="flex h-5 items-center text-xs">
+      {a.usedBy ? (
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
+              {label}
             </button>
-          </li>
-        ))}
-      </ul>
-    </details>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+              <b className="text-[13px]">Where “{a.name}” is used</b>
+              <UsageList id={a.id} className="mt-2 max-h-[min(280px,50vh)]" />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      ) : (
+        <span className="text-ink3">{label}</span>
+      )}
+    </div>
   );
 }
 
-/** Confirm before removing an asset that is still in use (or always, from the palette). */
+/** Projects that use an asset (default or override) with the clips under each, and where each use comes from. */
+export function UsageList({ id, className = "" }: { id: string; className?: string }) {
+  const trpc = useTRPC();
+  const q = useQuery(trpc.bumpers.usage.queryOptions({ id }));
+  const projects = q.data?.projects ?? [];
+  return (
+    <ScrollArea className={className}>
+      <div className="flex min-h-[3rem] flex-col gap-2.5 pr-2 text-xs">
+        {q.isLoading && <span className="text-ink3">Loading…</span>}
+        {q.error && <span className="text-err">{q.error.message}</span>}
+        {q.data && projects.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
+        {projects.map((p) => (
+          <div key={p.id} className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-2">
+              <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
+                {p.title}
+              </Link>
+              {p.slots.length > 0 && <span className="shrink-0 text-ink3">{p.slots.join(" + ")} · project</span>}
+            </div>
+            {p.clips.map((c) => (
+              <div key={c.id} className="flex items-baseline gap-2 pl-3">
+                <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
+                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled moment"}
+                </Link>
+                <span className="shrink-0 text-ink3">
+                  {c.slots.join(" + ")} · {c.via === "clip" ? "clip’s own choice" : "from project"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  );
+}
+
+/**
+ * Removed assets, always below the grid. The header row has a fixed height whether the list is empty, closed or open,
+ * and the open list scrolls inside its own ScrollArea, so restoring never moves anything around it.
+ */
+export function RemovedList({ deleted, busy, onRestore }: { deleted: LibraryAsset[]; busy: boolean; onRestore: (a: LibraryAsset) => void }) {
+  const [open, setOpen] = useState(false);
+  const shown = open && deleted.length > 0;
+  return (
+    <div className="text-xs text-ink2">
+      <button type="button" className="flex h-9 w-full items-center gap-1.5 rounded-[8px] px-1 text-left font-semibold enabled:hover:text-ink disabled:cursor-default disabled:text-ink3" disabled={deleted.length === 0} aria-expanded={shown} onClick={() => setOpen((o) => !o)}>
+        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${shown ? "rotate-90" : ""}`} />
+        Recently removed ({deleted.length})
+      </button>
+      {shown && (
+        <ScrollArea className="max-h-[12rem]">
+          <ul className="flex flex-col gap-1.5 pr-2">
+            {deleted.map((a) => (
+              <li key={a.id} className="flex h-9 items-center gap-2">
+                <Thumb asset={a} className="h-7 w-4" />
+                <span className="min-w-0 flex-1 truncate">
+                  {a.name} <span className="font-mono text-ink3">· {a.kind} · {lengthText(a)}</span>
+                </span>
+                <button type="button" className="btn-ghost shrink-0 px-2 py-1 text-xs" disabled={busy} aria-label={`Restore ${a.name}`} onClick={() => onRestore(a)}>
+                  <Undo2 className="h-3.5 w-3.5" /> Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        </ScrollArea>
+      )}
+    </div>
+  );
+}
+
+/** Confirm before removing an asset; lists what still uses it. */
 export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsset | null; onClose: () => void; onConfirm: (a: LibraryAsset) => void }) {
   return (
-    <ConfirmDialog
-      open={!!asset}
-      onOpenChange={(o) => !o && onClose()}
-      title="Remove from your library?"
-      body={asset ? (asset.usedBy ? `“${asset.name}” is used by ${asset.usedBy} project${asset.usedBy === 1 ? "" : "s"}. Those projects keep rendering with it; you just can’t pick it for new ones. You can restore it for 30 days.` : `“${asset.name}” will be removed. You can restore it for 30 days.`) : ""}
-      confirm="Remove"
-      danger
-      onConfirm={() => asset && onConfirm(asset)}
-    />
+    <Modal open={!!asset} onOpenChange={(o) => !o && onClose()} title="Remove from your library?" width={460}>
+      {asset && (
+        <>
+          <p className="text-sm leading-relaxed text-ink2">
+            {asset.usedBy
+              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
+              : `“${asset.name}” will be removed. You can restore it for 30 days.`}
+          </p>
+          {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35vh)]" />}
+          <div className="mt-1 flex justify-end gap-2">
+            <button className="btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="btn bg-err font-semibold text-white hover:brightness-110"
+              onClick={() => {
+                onConfirm(asset);
+                onClose();
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -454,7 +554,6 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
 export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId, className }: { clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null; className: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
   const update = useMutation(trpc.clips.update.mutationOptions());
@@ -468,7 +567,7 @@ export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, proje
           toast(rerender ? "Saved · re-rendering this clip" : "Saved for this clip");
           setOpen(false);
         },
-        onError: (e) => toast(e.message),
+        onError: (e) => toast.error(e.message),
       },
     );
   return (
@@ -500,7 +599,6 @@ export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, proje
 export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const [v, setV] = useState<SlotChoices>({ intro: "keep", outro: "keep" });
   const many = useMutation(trpc.clips.setBumpersMany.mutationOptions());
   const nothing = v.intro === "keep" && v.outro === "keep";
@@ -523,7 +621,7 @@ export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroI
           setV({ intro: "keep", outro: "keep" });
           onDone();
         },
-        onError: (e) => toast(e.message),
+        onError: (e) => toast.error(e.message),
       },
     );
   return (
@@ -571,7 +669,6 @@ export function ProjectBumpersModal({
 }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   const save = useMutation(trpc.projects.setBumpers.mutationOptions());
@@ -617,7 +714,7 @@ export function ProjectBumpersModal({
           setPick({});
           onOpenChange(false);
         },
-        onError: (e) => toast(e.message),
+        onError: (e) => toast.error(e.message),
       },
     );
   return (

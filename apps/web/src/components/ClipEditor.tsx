@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
-import { useToast } from "../lib/toast";
+import { toast } from "sonner";
 import { readHash, writeHash, linkWith, fmtSec } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
@@ -229,7 +229,6 @@ export function ClipEditor(props: Props) {
   const { projectId, projectTitle, clipCount, sourceVideoUrl, durationSec, srcW, srcH, settings, words, rawWords, segments, flags, sceneCuts, overlays, clip, renderProgress, onExit } = props;
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const toast = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const projectStyle = useMemo(() => resolveStyle(settings), [settings]);
@@ -496,7 +495,7 @@ export function ClipEditor(props: Props) {
       toast(rerender && needsRender ? (styleScope === "all" && styleChanged ? "Saved · re-rendering every clip" : "Saved · re-rendering") : "Saved");
       return true;
     } catch (err) {
-      toast((err as Error).message);
+      toast.error((err as Error).message);
       return false;
     }
   }
@@ -1087,7 +1086,7 @@ export function ClipEditor(props: Props) {
                 setSourceText
                   .mutateAsync({ id: projectId, sourceText: "keep" })
                   .then((r) => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) }).then(() => toast(`Source text kept · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}`)))
-                  .catch((err) => toast((err as Error).message))
+                  .catch((err) => toast.error((err as Error).message))
               }
               title="Show the source's own text in every clip of this project (re-renders them)"
             >
@@ -1234,7 +1233,7 @@ export function ClipEditor(props: Props) {
           navigator.clipboard
             .writeText(linkWith({ ...(tab !== "captions" ? { tab } : {}), ...(current > range[0] + 0.05 ? { t: fmtSec(current - range[0]) } : {}) }))
             .then(() => toast("Link copied"))
-            .catch(() => toast("Couldn’t copy the link"))
+            .catch(() => toast.error("Couldn’t copy the link"))
         }
         title="Copy a link to this clip at the playhead"
         aria-label="Copy link"
