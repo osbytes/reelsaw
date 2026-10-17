@@ -135,6 +135,24 @@ project already hit the problem it prevents.
 - **Keyboard first in editors.** Shortcuts are consistent across views and listed in the UI
   (`?`). Typing in an input never triggers a shortcut.
 
+## Surfaces: UI, MCP, CLI
+
+- **MCP is the UI for agents, and the glue for integrations.** Anything a person can do in the app
+  (create a project, pick moments, assign an intro, re-render, export) exists as an MCP tool with
+  the same semantics, and the CLI mirrors it for operators. A feature is not finished until its MCP
+  surface exists. Ship the tool in the same change as the screen, not as a follow-up.
+- **One implementation behind every surface.** tRPC procedures, MCP tools and CLI commands call the
+  same service functions (`pipeline/lifecycle.ts`, `*/service.ts`); none of them re-implements
+  validation, ownership checks, transitions or re-render rules. If a tool needs logic the route has
+  inline, move the logic into a service function and call it from both.
+- **Tools describe state before changing it.** Read tools return the effective state an agent
+  needs to decide (for example the intro/outro a clip will actually render with and where it came
+  from), and write tools say what they changed and what still needs a re-render, in the same plain
+  language the UI uses. Inputs are zod schemas; results are structured.
+- **Integrations go through MCP, not around it.** Automations, other apps and scripts use the MCP
+  endpoint (or the CLI on the box), never the database or internal routes, so every path gets the
+  same guards, events and runs.
+
 ## Process
 
 - Typecheck both apps, build, deploy (`docker compose --profile local-ai up -d --build app`) and
