@@ -1,0 +1,32 @@
+# CI on every pull request and on main: typecheck, build the web bundle and the server bundle,
+# run the tests that need no running stack, and make sure the PR carries a changeset.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # changeset status compares against main
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @reelsaw/web build
+      - run: pnpm --filter @reelsaw/server bundle
+      - run: pnpm --filter @reelsaw/server exec node --import tsx --test test/resources.test.ts
+      # a PR that changes the app must say what changed (pnpm changeset); docs-only PRs add an empty one
+      - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+        run: pnpm exec changeset status --since=origin/main

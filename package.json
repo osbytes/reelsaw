@@ -1,6 +1,7 @@
 {
   "name": "reelsaw",
   "private": true,
+  "license": "AGPL-3.0-only",
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "predev": "pnpm --filter @reelsaw/shared build",
@@ -11,9 +12,14 @@
     "start": "pnpm --filter @reelsaw/server start",
     "mock-ai": "node scripts/mock-ai.mjs",
     "eval": "pnpm --filter @reelsaw/server eval",
-    "models:download": "sh scripts/download-models.sh apps/server/models"
+    "models:download": "sh scripts/download-models.sh apps/server/models",
+    "changeset": "changeset",
+    "release:tag": "sh scripts/release-tag.sh",
+    "release:version": "changeset version && pnpm install --lockfile-only"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "typescript": "5.9.3"
   }
 }
