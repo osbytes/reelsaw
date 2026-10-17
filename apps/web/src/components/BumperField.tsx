@@ -274,7 +274,7 @@ function SecField({ value, onChange, placeholder, label }: { value: number | und
 }
 
 /** One labelled row: the combobox, plus a seconds field when the chosen item is an image. */
-function SlotRow({
+export function SlotRow({
   slot,
   label,
   choice,
@@ -455,6 +455,16 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
+              <p className="text-center text-xs text-ink3">
+                New project with it as the{" "}
+                <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
+                  intro
+                </Link>{" "}
+                ·{" "}
+                <Link to={`/new?outro=${a.id}`} className="text-ink2 hover:text-ink">
+                  outro
+                </Link>
+              </p>
             </>
           )}
         </Dialog.Content>

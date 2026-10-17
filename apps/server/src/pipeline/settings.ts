@@ -21,12 +21,17 @@ export async function resolveProjectSettings(db: Db, userId: string, input: Part
   // intro/outro ids ride along from the defaults or the caller: keep only the user's own, live assets
   for (const k of ["introAssetId", "outroAssetId"] as const) {
     const id = merged[k];
-    if (!id) continue;
+    if (!id) {
+      // an explicit null means "none, although my default has one"; seconds only travel with an asset
+      delete merged[k === "introAssetId" ? "introSec" : "outroSec"];
+      continue;
+    }
     const row = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, id), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)), columns: { id: true } });
     if (row) continue;
-    // an id the caller named that is not theirs is an error; a stale saved default is just dropped
+    // an id the caller named that is not theirs is an error; a stale saved default is just dropped, with its seconds
     if (given[k] === id) throw new TRPCError({ code: "NOT_FOUND", message: `That ${k === "introAssetId" ? "intro" : "outro"} is not in your library` });
     delete merged[k];
+    delete merged[k === "introAssetId" ? "introSec" : "outroSec"];
   }
   return projectSettingsSchema.parse(merged);
 }

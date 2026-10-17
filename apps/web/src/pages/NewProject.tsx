@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo } from "../lib/uploads";
-import { ChevronRight } from "lucide-react";
+import { Ban, ChevronRight, Star } from "lucide-react";
+import { SlotRow, useBumperLibrary } from "../components/BumperField";
+import type { FixedOption } from "../components/BumperCombobox";
 import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
@@ -66,10 +68,15 @@ export function NewProjectPage() {
   const [prefilledFor, setPrefilledFor] = useState<string | null>(null);
   useEffect(() => {
     if (me.data && prefilledFor !== me.data.id) {
-      setS(projectSettingsSchema.parse({ ...defaultProjectSettings, ...me.data.projectDefaults }));
+      // intro/outro are chosen in their own section: "default" there means the keys stay absent
+      const { introAssetId: _i, outroAssetId: _o, ...mine } = me.data.projectDefaults;
+      setS(projectSettingsSchema.parse({ ...defaultProjectSettings, ...mine }));
       setPrefilledFor(me.data.id);
     }
   }, [me.data, prefilledFor]);
+  // intro / outro: "default" (the user's own, snapshotted by the server), "none", or a library asset id
+  const library = useBumperLibrary();
+  const [bump, setBump] = useState<{ intro: string; outro: string; introSec?: number; outroSec?: number }>(() => ({ intro: search.get("intro") || "default", outro: search.get("outro") || "default" }));
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewAs, setPreviewAs] = useState<PreviewLayout>("face");
@@ -141,13 +148,31 @@ export function NewProjectPage() {
         if (!file) throw new Error("Pick a video file");
         uploadId = await uploadFile(file);
       }
-      const p = await create.mutateAsync({ title: title || undefined, sourceUrl: mode === "url" ? url : undefined, uploadId, settings: s });
+      const p = await create.mutateAsync({ title: title || undefined, sourceUrl: mode === "url" ? url : undefined, uploadId, settings: { ...s, ...bumperSettings } });
       nav(`/p/${p.id}`);
     } catch (err) {
       setError((err as Error).message);
       setUploadPct(null);
     }
   }
+
+  // only what differs from the user's default travels; "None" is an explicit null
+  const libAssets = library.data?.assets ?? [];
+  const known = (c: string) => c === "default" || c === "none" || libAssets.some((a) => a.id === c);
+  const chosen = { intro: known(bump.intro) ? bump.intro : "default", outro: known(bump.outro) ? bump.outro : "default" };
+  const bumperSettings: Partial<ProjectSettings> = {};
+  for (const slot of ["intro", "outro"] as const) {
+    const c = chosen[slot];
+    if (c === "default") continue;
+    bumperSettings[`${slot}AssetId`] = c === "none" ? null : c;
+    const sec = bump[`${slot}Sec`];
+    if (c !== "none" && sec && libAssets.find((a) => a.id === c)?.kind === "image") bumperSettings[`${slot}Sec`] = Math.min(10, Math.max(1, sec));
+  }
+  const defaultName = (id: string | undefined) => (id ? ([...libAssets, ...(library.data?.deleted ?? [])].find((a) => a.id === id)?.name ?? "removed") : "none");
+  const fixed = (id: string | undefined): FixedOption[] => [
+    { value: "default", label: `Your default (${defaultName(id)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
+    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+  ];
 
   const busy = create.isPending || uploadPct !== null;
   const lengthId = LENGTHS.find((l) => l.min === s.minClipSeconds && l.max === s.maxClipSeconds)?.id ?? "custom";
@@ -310,6 +335,44 @@ export function NewProjectPage() {
                 </label>
               </div>
               <span className="text-xs text-ink3">This is the project default. Fine-tune size, words on screen and key words per clip in the editor.</span>
+            </section>
+
+            <section className={sec}>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className={h2}>Intro and outro</h2>
+                <Link to="/library" className="text-xs text-ink3 no-underline hover:text-ink">
+                  Manage library →
+                </Link>
+              </div>
+              {/* same height whether it is loading, empty or showing the pickers */}
+              <div className="grid min-h-[84px] grid-cols-[4.5rem_minmax(0,1fr)] content-start items-center gap-x-3 gap-y-2">
+                {library.data && libAssets.length > 0 ? (
+                  (["intro", "outro"] as const).map((slot) => {
+                    const dflt = me.data?.projectDefaults[`${slot}AssetId`];
+                    return (
+                      <SlotRow
+                        key={slot}
+                        slot={slot}
+                        label={slot === "intro" ? "Intro" : "Outro"}
+                        choice={chosen[slot]}
+                        sec={bump[`${slot}Sec`]}
+                        onChange={(c, v) => setBump((b) => ({ ...b, [slot]: c, [`${slot}Sec`]: v }))}
+                        fixed={fixed(dflt)}
+                        assets={libAssets}
+                        known={[...libAssets, ...(library.data?.deleted ?? [])]}
+                        defaultId={dflt}
+                      />
+                    );
+                  })
+                ) : library.data ? (
+                  <p className="col-span-2 text-[13px] text-ink3">
+                    No intros or outros yet · Add one in the{" "}
+                    <Link to="/library" className="text-ink2 hover:text-ink">
+                      Library
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
             </section>
 
             <section className={sec}>

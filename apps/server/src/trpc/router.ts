@@ -736,9 +736,6 @@ export const appRouter = router({
       const db = svc.database.db;
       if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a sourceUrl or an uploadId" });
       await checkProjectQuota(db, svc.config, ctx.user.id);
-      const settings = await resolveProjectSettings(db, ctx.user.id, input.settings);
-      if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
-
       let sourceMeta: schema.Project["sourceMeta"] = null;
       let title = input.title?.trim() || "";
       if (input.uploadId) {
@@ -755,6 +752,9 @@ export const appRouter = router({
       const id = randomUUID();
       // row, event and first job together: never a "queued" project with no job behind it
       const p = await svc.tx(async (u) => {
+        // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
+        const settings = await resolveProjectSettings(u.db, ctx.user.id, input.settings);
+        if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
         const [row] = await u.db
           .insert(schema.projects)
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
