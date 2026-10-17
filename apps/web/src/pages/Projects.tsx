@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -7,7 +7,7 @@ import { useCommandPalette } from "../components/CommandPalette";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
 import { PosterBumperCards } from "../components/PosterBumperCards";
-import { StatusText } from "../components/ui";
+import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
 import { ago } from "../lib/time";
@@ -88,6 +88,7 @@ export function ProjectsPage() {
   const trpc = useTRPC();
   const q = useQuery({
     ...trpc.projects.list.queryOptions(),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => (query.state.data?.some((p) => ACTIVE.has(p.status)) ? 3000 : false),
   });
   const projects = q.data ?? [];
@@ -101,7 +102,11 @@ export function ProjectsPage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-bold tracking-tight">Projects</h1>
             {/* height reserved so the grid doesn't jump when the list arrives */}
-            {projects.length > 0 ? (
+            {q.isPending ? (
+              <div className="mt-1 flex h-5 items-center">
+                <Skeleton className="h-3.5 w-52" />
+              </div>
+            ) : projects.length > 0 ? (
               <p className="mt-1 min-h-5 text-sm text-ink2">
                 {projects.length} project{projects.length === 1 ? "" : "s"}
                 {running ? ` · ${running} processing` : ""} · {clips} clip{clips === 1 ? "" : "s"} ready
@@ -113,10 +118,9 @@ export function ProjectsPage() {
           <NewProjectMenu />
         </div>
 
-        {q.isLoading && <p className="text-ink3">Loading projects…</p>}
         {q.error && <p className="text-err">{q.error.message}</p>}
 
-        {!q.isLoading && !projects.length && (
+        {!q.isPending && !projects.length && !q.error && (
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
             <span className="film h-[72px] w-[42px] rounded-[8px]" />
             <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
@@ -125,6 +129,21 @@ export function ProjectsPage() {
               <Plus className="h-4 w-4" /> New project
             </Link>
           </div>
+        )}
+
+        {q.isPending && !q.error && (
+          <SkeletonRegion label="Loading projects…" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel">
+                <Skeleton className="aspect-video rounded-none" />
+                <div className="flex flex-col gap-1.5 p-3.5">
+                  <Skeleton className={`h-[1.1rem] ${["w-4/5", "w-2/3", "w-full"][i % 3]}`} />
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className={`h-3.5 ${["w-3/5", "w-1/2", "w-2/3"][i % 3]}`} />
+                </div>
+              </div>
+            ))}
+          </SkeletonRegion>
         )}
 
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">

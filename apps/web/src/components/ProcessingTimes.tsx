@@ -5,6 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { formatTime } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
+import { Skeleton, SkeletonRegion } from "./ui";
 
 const STAGE: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 const TEN_MIN = 600;
@@ -13,7 +14,23 @@ export function ProcessingTimes() {
   const trpc = useTRPC();
   const q = useQuery(trpc.admin.processingTimes.queryOptions());
   const d = q.data;
-  if (!d) return <div className="h-5 text-xs text-ink3">{q.error ? q.error.message : "Loading processing times…"}</div>;
+  if (q.error && !d) return <div className="h-5 text-xs text-ink3">{q.error.message}</div>;
+  if (!d)
+    return (
+      <SkeletonRegion label="Loading processing times…" className="flex flex-col gap-3 border-t border-line pt-4">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-4 w-full" />
+        {Array.from({ length: 5 }, (_, i) => (
+          <div key={i} className="flex h-8 items-center gap-4 border-t border-line/60">
+            <Skeleton className="h-3.5 w-24" />
+            <Skeleton className="ml-auto h-3.5 w-14" />
+            <Skeleton className="h-3.5 w-14" />
+            <Skeleton className="h-3.5 w-14" />
+            <Skeleton className="h-3.5 w-16" />
+          </div>
+        ))}
+      </SkeletonRegion>
+    );
   const learned = d.stages.filter((s) => s.source === "history").length;
   const total = d.stages.reduce((a, s) => a + s.factor, 0);
   return (

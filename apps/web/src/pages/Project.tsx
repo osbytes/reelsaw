@@ -10,7 +10,8 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
-import { ConfirmDialog, ProgressBar } from "../components/ui";
+import { ProjectPageSkeleton } from "../components/PageSkeletons";
+import { ConfirmDialog, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
@@ -72,7 +73,7 @@ export function ProjectPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id }) });
 
-  useSubscription(
+  const sub = useSubscription(
     trpc.projects.events.subscriptionOptions(
       { id },
       {
@@ -91,6 +92,18 @@ export function ProjectPage() {
       },
     ),
   );
+
+  // The event stream replays history right after it connects and has no "caught up" marker, so the log
+  // counts as loaded at the first event, or shortly after the stream is connected with nothing to replay.
+  const [logSettled, setLogSettled] = useState(false);
+  useEffect(() => setLogSettled(false), [id]);
+  useEffect(() => {
+    if (logSettled) return;
+    if (log.length > 0) return setLogSettled(true);
+    if (sub.status !== "pending") return;
+    const t = window.setTimeout(() => setLogSettled(true), 700);
+    return () => window.clearTimeout(t);
+  }, [log.length, sub.status, logSettled]);
 
   useEffect(() => {
     setLog([]);
@@ -240,7 +253,7 @@ export function ProjectPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay]);
 
-  if (q.isLoading) return <p className="p-6 text-ink3">Loading…</p>;
+  if (q.isLoading) return <ProjectPageSkeleton compact={compact} width={width} />;
   if (q.error || !p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
 
   const overlays = p.transcript?.overlays ?? [];
@@ -254,13 +267,30 @@ export function ProjectPage() {
       return null;
     }
   })();
+  const activityLoading = !logSettled && activity.length === 0;
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
 
   const fmtRun = (sec: number) => (sec < 60 ? `${Math.round(sec)} s` : formatTime(sec));
   const activityList = (
     <div className="flex flex-col gap-1 text-[13px]">
-      {runGroups.length === 0 && <p className="text-ink3">Nothing yet.</p>}
+      {activityLoading && (
+        <SkeletonRegion label="Loading activity…" className="flex flex-col gap-1.5">
+          <div className="flex h-6 items-center gap-2">
+            <Skeleton className="h-3.5 w-3.5" />
+            <Skeleton className="h-3.5 w-14 rounded-full" />
+            <Skeleton className="h-3.5 w-2/3" />
+          </div>
+          {["w-4/5", "w-3/5", "w-2/3", "w-1/2", "w-3/4"].map((w, i) => (
+            <div key={i} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2">
+              <Skeleton className="ml-auto h-3 w-11" />
+              <Skeleton className="h-3 w-3 rounded-full" />
+              <Skeleton className={`h-3.5 ${w}`} />
+            </div>
+          ))}
+        </SkeletonRegion>
+      )}
+      {!activityLoading && runGroups.length === 0 && <p className="text-ink3">Nothing yet.</p>}
       {runGroups.map((g, i) => {
         const open = openRuns[g.seq] ?? i === 0;
         const dur = g.outcome === "running" ? `running ${formatTime(Math.max(0, (now - g.startedAt) / 1000))}` : g.runSec !== null ? `${g.outcome === "failed" ? "failed after" : "done in"} ${fmtRun(g.runSec)}` : g.outcome;
@@ -328,8 +358,18 @@ export function ProjectPage() {
           className={`inline-flex min-w-0 max-w-[420px] items-center gap-2 rounded-[6px] text-left hover:text-ink ${live.tone === "err" ? "text-err" : live.tone === "warn" ? "text-warn" : live.tone === "ok" && !active ? "font-semibold text-ok" : "text-ink2"}`}
           title="Activity"
         >
-          <ToneGlyph tone={live.tone} />
-          <span className="min-w-0 truncate leading-5">{live.text}</span>
+          {activityLoading ? (
+            <span className="flex h-5 items-center gap-2" role="status">
+              <span className="sr-only">Loading activity…</span>
+              <Skeleton className="h-3 w-3 rounded-full" />
+              <Skeleton className="h-3.5 w-40" />
+            </span>
+          ) : (
+            <>
+              <ToneGlyph tone={live.tone} />
+              <span className="min-w-0 truncate leading-5">{live.text}</span>
+            </>
+          )}
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink3" />
         </button>
       </Popover.Trigger>

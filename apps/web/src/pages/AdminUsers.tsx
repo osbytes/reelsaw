@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, Segmented } from "../components/ui";
+import { ConfirmDialog, Modal, Segmented, Skeleton, SkeletonRegion } from "../components/ui";
 
 type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null };
 
@@ -33,7 +33,7 @@ export function AdminUsersPage() {
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const usage = useQuery({ ...trpc.admin.usage.queryOptions({ days: 30 }), enabled: tab === "usage" });
   const [banReason, setBanReason] = useState("");
-  const list = useQuery({ ...trpc.admin.users.list.queryOptions({ search: search || undefined }), refetchInterval: 15_000 });
+  const list = useQuery({ ...trpc.admin.users.list.queryOptions({ search: search || undefined }), refetchInterval: 15_000, placeholderData: keepPreviousData });
   const done = (msg: string) => () => {
     toast(msg);
     void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
@@ -64,7 +64,21 @@ export function AdminUsersPage() {
 
         {tab === "usage" && (
           <div className="min-h-10 overflow-x-auto rounded-[16px] border border-line bg-panel">
-            {usage.isLoading && <p className="p-4 text-[13px] text-ink3">Loading…</p>}
+            {usage.isLoading && (
+              <SkeletonRegion label="Loading usage…" className="flex flex-col divide-y divide-line">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <div key={i} className="flex items-center gap-4 px-4 py-2">
+                    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <Skeleton className={`h-4 ${["w-1/3", "w-2/5", "w-1/4", "w-1/3"][i]}`} />
+                      <Skeleton className="h-3 w-1/4" />
+                    </span>
+                    {[0, 1, 2, 3, 4, 5].map((j) => (
+                      <Skeleton key={j} className="hidden h-3.5 w-12 sm:block" />
+                    ))}
+                  </div>
+                ))}
+              </SkeletonRegion>
+            )}
             {usage.data && (
               <table className="w-full text-[13px]">
                 <thead className="text-left text-xs text-ink3">
@@ -100,7 +114,22 @@ export function AdminUsersPage() {
         )}
 
         <div className={`min-h-10 text-[13px] ${tab === "usage" ? "hidden" : ""}`}>
-          {list.isLoading && <span className="text-ink3">Loading…</span>}
+          {list.isPending && !list.error && (
+            <SkeletonRegion label="Loading accounts…" className="divide-y divide-line rounded-[16px] border border-line bg-panel">
+              {Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                  <div className="flex min-w-0 flex-1 basis-[220px] flex-col gap-1.5">
+                    <Skeleton className={`h-4 ${["w-1/3", "w-2/5", "w-1/4", "w-1/2", "w-1/3"][i]}`} />
+                    <Skeleton className="h-3 w-2/5" />
+                  </div>
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-3.5 w-28" />
+                  <Skeleton className="h-3.5 w-28" />
+                  <Skeleton className="h-8 w-20 rounded-[8px]" />
+                </div>
+              ))}
+            </SkeletonRegion>
+          )}
           {list.error && <span className="text-err">✕ {list.error.message}</span>}
           {list.data && rows.length === 0 && <span className="text-ink3">No accounts match.</span>}
           {rows.length > 0 && (
@@ -227,6 +256,9 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
         {Object.entries(LIMIT_LABELS).map(([k, label]) => (
           <label key={k} className="flex flex-col gap-1 text-xs text-ink2">
             {label}
+            {q.isPending ? (
+              <Skeleton className="h-[38px] w-full rounded-[10px]" />
+            ) : (
             <input
               className="input"
               type="number"
@@ -235,6 +267,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               placeholder={q.data ? `instance: ${q.data.instance[k] === 0 ? "unlimited" : q.data.instance[k]}` : ""}
               onChange={(e) => setDraft({ ...values, [k]: e.target.value })}
             />
+            )}
           </label>
         ))}
         <p className="text-xs text-ink3">0 = unlimited. Empty = use the instance setting.</p>

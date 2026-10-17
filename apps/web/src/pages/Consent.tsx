@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton, SkeletonRegion } from "../components/ui";
 import { Navigate, useLocation } from "react-router";
 import { Logo, ThemeToggle } from "../App";
 import { authClient, useSession } from "../lib/auth";
@@ -21,7 +22,15 @@ export function ConsentPage() {
     void authClient.$fetch<Client>("/oauth2/public-client", { query: { client_id: clientId } }).then((r) => setClient(r.data ?? { client_id: clientId }));
   }, [clientId]);
 
-  if (isPending) return <div className="p-10 text-center text-ink3">Loading…</div>;
+  if (isPending)
+    return (
+      <SkeletonRegion className="mx-auto flex max-w-md flex-col gap-3 px-6 py-16">
+        <Skeleton className="h-7 w-2/3" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-4/5" />
+        <Skeleton className="mt-2 h-10 w-full rounded-[10px]" />
+      </SkeletonRegion>
+    );
   if (!data) return <Navigate to={`/login${loc.search}`} replace />;
 
   const decide = async (accept: boolean) => {

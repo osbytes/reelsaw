@@ -120,6 +120,17 @@ project already hit the problem it prevents.
   - Transient warnings are overlays.
   - Buttons whose label changes get a minimum width.
   - Remember that popovers anchored above their trigger grow upward.
+- **Loading is not empty.** A region backed by a query has three states and renders each one
+  distinctly: loading (a skeleton with the approximate size and shape of the content: same row
+  count, line widths, thumbnail boxes), empty (the "nothing here yet" message, only once the query
+  has resolved with no data), and data.
+  - Never show the empty-state text while `isPending`/`isLoading`; never collapse a region's height
+    while it loads.
+  - Refetches and background updates keep the current content (`placeholderData: keepPreviousData`
+    or the query's previous data); they do not flash a skeleton.
+  - Skeletons use the `Skeleton` primitive in `components/ui.tsx` (wrap a region in
+    `SkeletonRegion` for the screen-reader "Loading…") and the same layout classes as the real rows,
+    so the swap is a content change, not a layout change.
 - **One source of truth.** State shared by several components lives in one store (for example
   the theme in `lib/theme.ts`), not in separate copies of local state that can drift apart.
 - **The URL is state.** Anything worth linking to (a fix, a selection, a clip, a time, an editor

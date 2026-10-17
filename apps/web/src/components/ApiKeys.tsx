@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { toast } from "sonner";
-import { ConfirmDialog } from "./ui";
+import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
 
 type Key = { id: string; name: string | null; start: string | null; createdAt: Date | string; lastRequest: Date | string | null };
 
@@ -126,7 +126,17 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
       )}
 
       <div className="min-h-6 text-[13px]">
-        {list.isLoading && <span className="text-ink3">Loading…</span>}
+        {list.isPending && !list.error && (
+          <SkeletonRegion label="Loading keys…" className="divide-y divide-line">
+            {["w-1/3", "w-1/4"].map((w, i) => (
+              <div key={i} className="flex items-center gap-3 py-2">
+                <Skeleton className={`h-4 ${w}`} />
+                <Skeleton className="ml-auto h-3.5 w-28" />
+                <Skeleton className="h-7 w-16 rounded-[8px]" />
+              </div>
+            ))}
+          </SkeletonRegion>
+        )}
         {list.error && <span className="text-err">✕ {list.error.message}</span>}
         {list.data && keys.length === 0 && <span className="text-ink3">No keys yet.</span>}
         {keys.length > 0 && (

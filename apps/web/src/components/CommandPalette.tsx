@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { extractUrls, isOnlyUrls, linkKey } from "../lib/links";
 import { ago } from "../lib/time";
 import { ScrollArea } from "./scroll-area";
-import { ConfirmDialog, StatusText } from "./ui";
+import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { formatTime } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -549,7 +549,24 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
             </div>
             <ScrollArea className="max-h-[min(460px,60vh)]">
               <div ref={listRef} className="flex flex-col p-1.5">
-                {items.length === 0 && <div className="px-3 py-8 text-center text-sm text-ink3">{indexQ.isLoading ? "Loading…" : "Nothing found"}</div>}
+                {items.length === 0 && (target?.kind === "pick" ? libQ.isLoading : indexQ.isLoading) && (
+                  <SkeletonRegion label="Loading…" className="flex flex-col">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex items-center gap-3 px-2.5 py-2">
+                        <Skeleton className="h-8 w-8 shrink-0 rounded-[8px]" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex h-5 items-center">
+                            <Skeleton className={`h-3 ${["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5"][i]}`} />
+                          </span>
+                          <span className="flex h-4 items-center">
+                            <Skeleton className={`h-2.5 ${["w-1/4", "w-1/3", "w-1/5", "w-2/5", "w-1/4"][i]}`} />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </SkeletonRegion>
+                )}
+                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : indexQ.isLoading) && <div className="px-3 py-8 text-center text-sm text-ink3">Nothing found</div>}
                 {items.map((it, i) => {
                   const head = it.group !== lastGroup ? it.group : null;
                   lastGroup = it.group;

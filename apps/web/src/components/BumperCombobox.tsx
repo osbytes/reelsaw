@@ -4,6 +4,7 @@ import { Command } from "cmdk";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { ScrollArea } from "./scroll-area";
+import { Skeleton } from "./ui";
 
 /** What the combobox needs to know about a library asset (a subset of the `bumpers.list` row). */
 export interface PickerAsset {
@@ -70,7 +71,9 @@ export function BumperCombobox({
   slot,
   label,
   className = "",
+  loading = false,
 }: {
+  loading?: boolean;
   value: string;
   onChange: (v: string) => void;
   fixed: FixedOption[];
@@ -113,7 +116,7 @@ export function BumperCombobox({
             <span className="h-7 w-4 shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate">
-            {pickedFixed ? pickedFixed.label : pickedAsset ? `${pickedAsset.name}${removed ? " (removed)" : ""}` : <span className="text-ink3">Choose…</span>}
+            {pickedFixed ? pickedFixed.label : pickedAsset ? `${pickedAsset.name}${removed ? " (removed)" : ""}` : loading ? <Skeleton className="h-3.5 w-28" /> : <span className="text-ink3">Choose…</span>}
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
         </button>
@@ -130,7 +133,7 @@ export function BumperCombobox({
             <Command.Input value={q} onValueChange={setQ} placeholder={`Search ${slot}s…`} className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
             <ScrollArea className="max-h-[min(320px,calc(var(--radix-popover-content-available-height)-60px))]">
               <Command.List className="p-1">
-                <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">No matches</Command.Empty>
+                {!loading && <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">No matches</Command.Empty>}
                 {shownFixed.map((f) => (
                   <Command.Item key={`f-${f.value}`} value={`f-${f.value}`} onSelect={() => pick(f.value)} className={row}>
                     <span className="grid h-9 w-5 shrink-0 place-items-center text-ink2">{f.icon}</span>
@@ -154,6 +157,24 @@ export function BumperCombobox({
                     {a.id === value && <Check className="h-4 w-4 shrink-0 text-acc-text" />}
                   </Command.Item>
                 ))}
+                {loading && (
+                  <div role="status" aria-busy="true">
+                    <span className="sr-only">Loading library…</span>
+                    {["w-2/3", "w-1/2", "w-3/5"].map((w, i) => (
+                      <div key={i} className="flex items-center gap-2 px-2 py-1.5">
+                        <Skeleton className="h-9 w-5 shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex h-5 items-center">
+                            <Skeleton className={`h-3.5 ${w}`} />
+                          </span>
+                          <span className="flex h-4 items-center">
+                            <Skeleton className="h-2.5 w-1/3" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Command.List>
             </ScrollArea>
           </Command>

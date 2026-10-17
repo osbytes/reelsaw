@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ClipEditor, type EditorClip } from "../components/ClipEditor";
 import { NotFound } from "../components/NotFound";
+import { ClipEditorSkeleton } from "../components/PageSkeletons";
 import { masksSourceText } from "@reelsaw/shared";
 
 /** Full-screen editor route: /p/:id/clips/:clipId. Live render progress comes from the project's event stream. */
@@ -34,7 +35,7 @@ export function ClipEditorPage() {
 
   const p = q.data;
   const clip = p?.clips.find((c) => c.id === clipId);
-  if (q.isLoading) return <p className="p-6 text-ink3">Loading…</p>;
+  if (q.isLoading) return <ClipEditorSkeleton />;
   if (!p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
   if (!clip)
     return (

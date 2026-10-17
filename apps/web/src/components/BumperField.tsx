@@ -6,7 +6,7 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
-import { Modal } from "./ui";
+import { Modal, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -287,7 +287,9 @@ export function SlotRow({
   defaultId,
   inheritedId,
   secOnInherit,
+  loading = false,
 }: {
+  loading?: boolean;
   slot: "intro" | "outro";
   label: string;
   choice: string;
@@ -308,7 +310,7 @@ export function SlotRow({
     <>
       <span className="text-xs text-ink2">{label}</span>
       <div className="flex min-w-0 items-center gap-2">
-        <BumperCombobox className="min-w-0 flex-1" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} />
+        <BumperCombobox className="min-w-0 flex-1" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
         {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
       </div>
     </>
@@ -401,6 +403,31 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
   );
 }
 
+/** Same box as AssetCard (thumb, name, meta, status, three buttons) for while the library loads. */
+export function AssetCardSkeleton({ i = 0 }: { i?: number }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2 rounded-[14px] border border-line bg-panel p-2">
+      <Skeleton className="aspect-[9/16] w-full rounded-[10px]" />
+      <div className="min-w-0 text-xs">
+        <div className="flex h-4 items-center">
+          <Skeleton className={`h-3 ${["w-3/4", "w-1/2", "w-2/3"][i % 3]}`} />
+        </div>
+        <div className="flex h-4 items-center">
+          <Skeleton className="h-2.5 w-1/3" />
+        </div>
+      </div>
+      <div className="flex h-5 items-center">
+        <Skeleton className="h-2.5 w-2/5" />
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        <Skeleton className="h-7 rounded-[8px]" />
+        <Skeleton className="h-7 rounded-[8px]" />
+        <Skeleton className="h-7 rounded-[8px]" />
+      </div>
+    </div>
+  );
+}
+
 /** Always one line: default intro / outro, and where it is used (a popover with the projects), or "Empty". */
 function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
@@ -483,7 +510,16 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
   return (
     <ScrollArea className={className}>
       <div className="flex min-h-[3rem] flex-col gap-2.5 pr-2 text-xs">
-        {q.isLoading && <span className="text-ink3">Loading…</span>}
+        {q.isPending && !q.error && (
+          <SkeletonRegion label="Loading usage…" className="flex flex-col gap-2.5">
+            {["w-2/3", "w-1/2", "w-3/5"].map((w, i) => (
+              <div key={i} className="flex flex-col gap-1">
+                <Skeleton className={`h-4 ${w}`} />
+                <Skeleton className="h-3 w-4/5" />
+              </div>
+            ))}
+          </SkeletonRegion>
+        )}
         {q.error && <span className="text-err">{q.error.message}</span>}
         {q.data && projects.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
         {projects.map((p) => (
@@ -573,7 +609,7 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
   const defaults = useMe().data?.projectDefaults;
   const assets = library.data?.assets ?? [];
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
   const fixed = (projectId: string | null | undefined): FixedOption[] => [
     ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
     { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
@@ -590,6 +626,7 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
       assets={assets}
       known={known}
       defaultId={defaultId}
+      loading={library.isPending}
     />
   );
   return (
@@ -732,7 +769,7 @@ export function ProjectBumpersModal({
   const iSec = pick.introSec === undefined ? introSec : (pick.introSec ?? undefined);
   const oSec = pick.outroSec === undefined ? outroSec : (pick.outroSec ?? undefined);
   const dirty = intro !== initial.intro || outro !== initial.outro || iSec !== introSec || oSec !== outroSec;
-  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
   const fixed = (slotDefault: string | undefined): FixedOption[] => [
     { value: "default", label: `Default (${name(slotDefault)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
@@ -751,6 +788,7 @@ export function ProjectBumpersModal({
       defaultId={slotDefault}
       inheritedId={slotDefault}
       secOnInherit
+      loading={library.isPending}
     />
   );
   const apply = (rerender: boolean) =>

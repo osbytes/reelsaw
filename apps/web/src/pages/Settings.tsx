@@ -7,6 +7,7 @@ import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
 import { ModelsSection } from "../components/ModelsSection";
+import { Skeleton, SkeletonRegion } from "../components/ui";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -97,7 +98,38 @@ export function SettingsPage() {
             <span className="min-h-5 font-mono text-xs text-ink3">{s ? `${s.version.version} · ${s.version.commit}` : ""}</span>
           </div>
         )}
-        {isAdmin && !s && <p className="text-ink3">Loading…</p>}
+        {isAdmin && !s && (
+          <SkeletonRegion label="Loading system status…" className="flex flex-col gap-6">
+            <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
+              <Skeleton className="h-5 w-24" />
+              <div className="grid gap-4 sm:grid-cols-3">
+                {["w-4/5", "w-3/5", "w-2/3"].map((w, i) => (
+                  <div key={i} className="flex flex-col gap-2">
+                    <div className="flex items-baseline justify-between">
+                      <Skeleton className="h-4 w-14" />
+                      <Skeleton className="h-4 w-9" />
+                    </div>
+                    <Skeleton className="h-2 w-full rounded-full" />
+                    <Skeleton className={`h-3.5 ${w}`} />
+                  </div>
+                ))}
+              </div>
+            </section>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[3, 7].map((n) => (
+                <section key={n} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">
+                  <Skeleton className="h-5 w-28" />
+                  {Array.from({ length: n }, (_, i) => (
+                    <div key={i} className="flex h-5 items-center justify-between gap-4">
+                      <Skeleton className="h-3.5 w-24" />
+                      <Skeleton className={`h-3.5 ${["w-20", "w-28", "w-16"][i % 3]}`} />
+                    </div>
+                  ))}
+                </section>
+              ))}
+            </div>
+          </SkeletonRegion>
+        )}
         {r && (
           <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
             <div className="flex items-baseline gap-2">

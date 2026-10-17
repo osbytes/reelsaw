@@ -56,6 +56,21 @@ export function Spinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line2 border-t-acc" />;
 }
 
+/** Placeholder block for content that is still loading. Size it with the same classes as the real thing. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`block animate-pulse rounded bg-sunk motion-reduce:animate-none ${className}`} />;
+}
+
+/** Wraps a skeleton region so assistive tech hears one "Loading…" instead of nothing. */
+export function SkeletonRegion({ children, label = "Loading…", className = "" }: { children: ReactNode; label?: string; className?: string }) {
+  return (
+    <div role="status" aria-busy="true" className={className}>
+      <span className="sr-only">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 export function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
   return (
     <div className={`h-1 w-full overflow-hidden rounded-full bg-sunk ${className}`}>
