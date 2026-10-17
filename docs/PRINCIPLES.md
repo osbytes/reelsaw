@@ -112,7 +112,7 @@ project already hit the problem it prevents.
   utilities can override them.
 - **Primitives:** Radix and shadcn-style components. Scrolling regions use the `ScrollArea`
   component, never native `overflow-auto`. To cap a ScrollArea's height, give the ScrollArea
-  itself a max height.
+  itself a max height. Selects are the `Select` primitive, never a native `<select>`.
 - **No layout shift.**
   - Nothing appears *above* what the user is interacting with and pushes it down.
   - Follow-up actions go into space reserved for them (a label row, a status line that's always

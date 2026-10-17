@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, Skeleton } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Select, Skeleton } from "../components/ui";
 
 type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null };
 type Usage = { id: string; projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
@@ -37,7 +36,7 @@ function ago(iso: string | null) {
  * fold into one line under the name and every action lives in the menu, in a 3.5rem slot.
  */
 const FULL = "hidden min-[900px]:table-cell";
-const TH = "sticky top-0 z-10 h-9 border-b border-line bg-panel px-3 text-xs font-medium text-ink3";
+const TH = "sticky top-0 z-10 h-9 border-b border-line bg-panel px-3 align-middle text-xs font-medium leading-4 text-ink3";
 const COL = "hidden min-[900px]:table-column";
 
 /** Admin: who may use this instance. Pending accounts first; every action is one click plus a confirm for the destructive ones. */
@@ -85,11 +84,11 @@ export function AdminUsersPage() {
     <th scope="col" className={`${TH} ${opts.right ? "text-right" : "text-left"} ${opts.className ?? ""}`} aria-sort={sort?.key === k ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
       <button
         type="button"
-        className={`inline-flex items-center gap-1 whitespace-nowrap hover:text-ink ${opts.right ? "flex-row-reverse" : ""}`}
+        className={`inline-flex h-4 items-center gap-1 whitespace-nowrap align-middle leading-4 hover:text-ink ${opts.right ? "flex-row-reverse" : ""}`}
         onClick={() => setSort(sort?.key === k && sort.dir === -1 ? null : { key: k, dir: sort?.key === k ? -1 : k === "name" || k === "status" ? 1 : -1 })}
       >
         {label}
-        <span aria-hidden className="inline-block w-2 text-[10px]">{sort?.key === k ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
+        <span aria-hidden className="inline-block w-2 text-[10px] leading-none">{sort?.key === k ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
       </button>
     </th>
   );
@@ -105,13 +104,7 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <select className="input w-[7.5rem]" value={days} onChange={(e) => setDays(Number(e.target.value) as (typeof WINDOWS)[number])} aria-label="Usage window">
-              {WINDOWS.map((d) => (
-                <option key={d} value={d}>
-                  {d === 365 ? "1 year" : `${d} days`}
-                </option>
-              ))}
-            </select>
+            <Select className="w-[7.5rem]" ariaLabel="Usage window" value={String(days)} onValueChange={(v) => setDays(Number(v) as (typeof WINDOWS)[number])} options={WINDOWS.map((d) => ({ value: String(d), label: d === 365 ? "1 year" : `${d} days` }))} />
             <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
           </div>
         </div>
@@ -212,17 +205,15 @@ export function AdminUsersPage() {
                         <td className={`${cell} ${FULL} text-xs text-ink3`}>{ago(r.lastActive)}</td>
                         <td className={`${cell} text-right`}>
                           <div className="flex items-center justify-end gap-1.5">
-                            <button className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} hidden w-[5.5rem] text-xs min-[900px]:inline-flex`} disabled={stateOff} title={stateWhy} onClick={stateRun}>
+                            <button className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} hidden h-8 w-[5.5rem] text-xs min-[900px]:inline-flex`} disabled={stateOff} title={stateWhy} onClick={stateRun}>
                               {stateLabel}
                             </button>
-                            <button className="btn-ghost hidden w-[4.25rem] text-xs min-[900px]:inline-flex" onClick={() => setLimitsFor(r)}>
+                            <button className="btn-ghost hidden h-8 w-[4.25rem] text-xs min-[900px]:inline-flex" onClick={() => setLimitsFor(r)}>
                               Limits
                             </button>
                             <DropdownMenu.Root>
                               <DropdownMenu.Trigger asChild>
-                                <button type="button" className="btn-ghost w-9 px-0" aria-label={`More actions for ${r.email}`} title="More actions">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </button>
+                                <MoreButton aria-label={`More actions for ${r.email}`} />
                               </DropdownMenu.Trigger>
                               <DropdownMenu.Portal>
                                 <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[230px]">

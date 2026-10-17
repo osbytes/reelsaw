@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ProjectPageSkeleton } from "../components/PageSkeletons";
-import { ConfirmDialog, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
+import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
@@ -445,9 +445,7 @@ export function ProjectPage() {
         )}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className="btn-ghost px-3 py-2 font-bold" aria-label="Project actions">
-              ⋯
-            </button>
+            <MoreButton size="md" aria-label="Project actions" />
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">

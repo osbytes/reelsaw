@@ -8,7 +8,7 @@ import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
 import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
-import { Segmented, Modal, Kbd } from "./ui";
+import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, effectiveAsset, effectiveSeconds, useBumperLibrary } from "./BumperField";
 import { ThemeToggle } from "../App";
 import { useHistory } from "../lib/history";
@@ -856,18 +856,7 @@ export function ClipEditor(props: Props) {
               <span className="font-mono text-xs text-ink2">
                 {fmtPrecise(s.start - range[0])}–{fmtPrecise(s.end - range[0])}
               </span>
-              <select
-                className="ml-auto rounded-[8px] border border-line bg-panel px-2 py-1 text-[13px] text-ink"
-                value={s.mode}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => setMode(i, e.target.value as SectionMode)}
-              >
-                {MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {MODE_LABEL[m]}
-                  </option>
-                ))}
-              </select>
+              <Select size="sm" className="ml-auto w-[9.5rem]" ariaLabel="Section mode" value={s.mode} onClick={(e) => e.stopPropagation()} onValueChange={(v) => setMode(i, v as SectionMode)} options={MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))} />
             </div>
             <p className="text-xs leading-snug text-ink2">{explain}</p>
             {s.offsetX ? (
@@ -1070,13 +1059,7 @@ export function ClipEditor(props: Props) {
         <label className="flex cursor-pointer items-center gap-1.5">
           <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" /> Safe zones
         </label>
-        <select className="rounded-[8px] border border-line bg-panel px-2 py-1 text-xs text-ink" value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} aria-label="Platform">
-          {(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => (
-            <option key={k} value={k}>
-              {PLATFORM_NAME[k]}
-            </option>
-          ))}
-        </select>
+        <Select size="sm" className="w-[8.5rem]" ariaLabel="Platform" value={platform} onValueChange={(v) => setPlatform(v as Platform)} options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))} />
         {overlays.length > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-acc-soft px-2.5 py-1 text-ink" title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours">
             <span className="font-mono text-[10px]">CC</span> Burned-in text blurred
