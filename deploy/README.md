@@ -9,14 +9,25 @@ Requires Docker with Compose (Docker Desktop on macOS/Windows), 8 GB RAM and ~10
 
 ### Fully local in one command (Ollama + Speaches)
 
-On macOS install [Ollama](https://ollama.com/download) first; on Linux the script runs it in a
-container if it isn't already installed.
+On macOS install [Ollama](https://ollama.com/download) first; on Linux and Windows the script uses
+a host Ollama if there is one and otherwise runs it in a container.
 
 ```bash
-curl -fsSL https://gist.githubusercontent.com/dillonstreator/f49ef08b41d0bd1c160f789026c2f065/raw/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash
 ```
 
 (or `bash install.sh` from this folder; same script)
+
+On Windows, in PowerShell with Docker Desktop running:
+
+```powershell
+irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex
+```
+
+(or `.\install.ps1` from this folder; same script. If script execution is blocked, run
+`powershell -ExecutionPolicy Bypass -File .\install.ps1`.) WSL2 users can use the bash one-liner
+above as is. `~/reelsaw` is `$HOME\reelsaw` on Windows; the same `REELSAW_*` options apply, set
+as `$env:REELSAW_LLM = "qwen2.5:7b"` before running.
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls `qwen2.5:14b`, starts
 everything and waits until the app answers. `REELSAW_LLM=qwen2.5:7b` for less RAM; see the top of

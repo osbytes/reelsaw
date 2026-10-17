@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: install.sh and install.ps1 write the same compose file
+        run: |
+          sh_yaml=$(sed -n "/^cat > docker-compose.yml <<'YAML'\$/,/^YAML\$/p" deploy/install.sh | sed '1d;$d')
+          ps_yaml=$(sed -n "/^\\\$composeYaml = @'\$/,/^'@\$/p" deploy/install.ps1 | sed '1d;$d')
+          [ -n "$sh_yaml" ] && [ "$sh_yaml" = "$ps_yaml" ] || { echo "compose templates differ"; diff <(echo "$sh_yaml") <(echo "$ps_yaml"); exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm --filter @reelsaw/web build
