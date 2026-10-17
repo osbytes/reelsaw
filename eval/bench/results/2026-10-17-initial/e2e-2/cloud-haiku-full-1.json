@@ -1,0 +1,87 @@
+{
+  "profile": "cloud-haiku",
+  "env": {
+    "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "22516880-1050-41ee-97a0-ac57f655be4b",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T17:21:41.043Z",
+  "finishedAt": "2026-10-17T17:25:09.355Z",
+  "stages": {
+    "ingest": 12.7,
+    "transcribe": 77.4,
+    "refine": 31.2,
+    "analyze": 24,
+    "render": 56.2
+  },
+  "totalSec": 205.7,
+  "models": {
+    "language": "gateway:anthropic/claude-haiku-4.5"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Everything Worth Doing Is Hard—That's How You Know It's Worth It",
+      "hook": "If it's hard, good. No one else will do it.",
+      "startSec": 604.5,
+      "endSec": 633.6,
+      "score": 88,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 1,
+      "title": "The lonely chapter explained",
+      "hook": "Growing means losing your old friends",
+      "startSec": 120.2,
+      "endSec": 163.8,
+      "score": 83,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 2,
+      "title": "Extend Your Time Horizon to Access Opportunity",
+      "hook": "Just extend the time horizon",
+      "startSec": 950.5,
+      "endSec": 1008.1,
+      "score": 81,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 53,
+    "failed": 0,
+    "totalSec": 111,
+    "p50Ms": 1281,
+    "inputTokens": 48413,
+    "outputTokens": 9642,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 3.4
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 42.7
+      },
+      "analyze": {
+        "calls": 17,
+        "totalSec": 64.6
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

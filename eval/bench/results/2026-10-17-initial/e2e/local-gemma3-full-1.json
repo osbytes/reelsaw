@@ -1,0 +1,82 @@
+{
+  "profile": "local-gemma3",
+  "env": {
+    "AI_MODEL": "compat:gemma3:latest",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "projectId": "887bc14b-c5f9-43ff-944c-5fa2cb21b9c9",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T16:11:40.659Z",
+  "finishedAt": "2026-10-17T16:51:06.796Z",
+  "stages": {
+    "ingest": 444,
+    "transcribe": 3.7,
+    "refine": 1800.3,
+    "analyze": 98.5,
+    "render": 15.7
+  },
+  "totalSec": 2366,
+  "models": {
+    "language": "compat:gemma3:latest",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Revenge Fantasy",
+      "hook": "Don't let them win.",
+      "startSec": 0,
+      "endSec": 24.6,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Don't Just Fit In",
+      "hook": "Be exceptional, not average.",
+      "startSec": 34.9,
+      "endSec": 57.4,
+      "score": 44,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 52,
+    "failed": 31,
+    "totalSec": 5531.4,
+    "p50Ms": 18603,
+    "inputTokens": 23626,
+    "outputTokens": 5415,
+    "byStage": {
+      "refine.disfluency": {
+        "calls": 44,
+        "totalSec": 5383.8
+      },
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 49.1
+      },
+      "analyze": {
+        "calls": 6,
+        "totalSec": 98.6
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  },
+  "step": "full"
+}

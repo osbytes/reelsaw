@@ -1,0 +1,92 @@
+{
+  "profile": "local-gemma3",
+  "env": {
+    "AI_MODEL": "compat:gemma3:latest",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "3d7b5642-2f4c-42e3-9dbd-660e24a1d658",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T17:34:19.951Z",
+  "finishedAt": "2026-10-17T18:11:01.866Z",
+  "stages": {
+    "ingest": 12.2,
+    "transcribe": 261.5,
+    "refine": 1800.7,
+    "analyze": 98.1,
+    "render": 22.3
+  },
+  "totalSec": 2199.3,
+  "models": {
+    "language": "compat:gemma3:latest",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Thinking for Yourself",
+      "hook": "Question everything.",
+      "startSec": 81.6,
+      "endSec": 104.4,
+      "score": 85,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Asian Parent Pressure",
+      "hook": "Breaking generational cycles.",
+      "startSec": 116.7,
+      "endSec": 141.6,
+      "score": 80,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 2,
+      "title": "The Uncomfortable Truth",
+      "hook": "They’ll stop cheering when you win.",
+      "startSec": 62.5,
+      "endSec": 83.8,
+      "score": 65,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 53,
+    "failed": 31,
+    "totalSec": 5535.5,
+    "p50Ms": 19753,
+    "inputTokens": 24436,
+    "outputTokens": 5420,
+    "byStage": {
+      "refine.disfluency": {
+        "calls": 44,
+        "totalSec": 5383.7
+      },
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 53.8
+      },
+      "analyze": {
+        "calls": 7,
+        "totalSec": 98.1
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

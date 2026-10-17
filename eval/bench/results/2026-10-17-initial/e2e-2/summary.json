@@ -1,0 +1,438 @@
+{
+  "at": "2026-10-17T18:11:02.054Z",
+  "source": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+  "maxClips": 3,
+  "profiles": [
+    {
+      "name": "cloud-cheap",
+      "env": {
+        "AI_MODEL": "gateway:openai/gpt-4o-mini",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/gpt-4o-transcribe"
+      }
+    },
+    {
+      "name": "local-gemma3",
+      "env": {
+        "AI_MODEL": "compat:gemma3:latest",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "local"
+      }
+    }
+  ],
+  "results": [
+    {
+      "profile": "cloud-cheap",
+      "env": {
+        "AI_MODEL": "gateway:openai/gpt-4o-mini",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "f469d1f3-b216-44cc-9156-1f59ff8a3a93",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T17:10:12.733Z",
+      "finishedAt": "2026-10-17T17:21:37.288Z",
+      "stages": {
+        "ingest": 13.3,
+        "transcribe": 75.6,
+        "refine": 36,
+        "analyze": 7.3,
+        "render": 547
+      },
+      "totalSec": 681.8,
+      "models": {
+        "language": "gateway:openai/gpt-4o-mini"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Hard Work Equals Worth",
+          "hook": "If it's hard, it's worth it!",
+          "startSec": 0,
+          "endSec": 22.3,
+          "score": 58,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 1,
+          "title": "Rooting for Yourself Matters",
+          "hook": "Be your own biggest fan!",
+          "startSec": 32,
+          "endSec": 53.9,
+          "score": 65,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 2,
+          "title": "The Lonely Chapter Explained",
+          "hook": "Ever felt alone in growth?",
+          "startSec": 54.6,
+          "endSec": 84.5,
+          "score": 58,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 47,
+        "failed": 0,
+        "totalSec": 75.7,
+        "p50Ms": 1484,
+        "inputTokens": 27542,
+        "outputTokens": 6315,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 4.7
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 50.9
+          },
+          "analyze": {
+            "calls": 11,
+            "totalSec": 19.5
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "22516880-1050-41ee-97a0-ac57f655be4b",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T17:21:41.043Z",
+      "finishedAt": "2026-10-17T17:25:09.355Z",
+      "stages": {
+        "ingest": 12.7,
+        "transcribe": 77.4,
+        "refine": 31.2,
+        "analyze": 24,
+        "render": 56.2
+      },
+      "totalSec": 205.7,
+      "models": {
+        "language": "gateway:anthropic/claude-haiku-4.5"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Everything Worth Doing Is Hard—That's How You Know It's Worth It",
+          "hook": "If it's hard, good. No one else will do it.",
+          "startSec": 604.5,
+          "endSec": 633.6,
+          "score": 88,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 1,
+          "title": "The lonely chapter explained",
+          "hook": "Growing means losing your old friends",
+          "startSec": 120.2,
+          "endSec": 163.8,
+          "score": 83,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 2,
+          "title": "Extend Your Time Horizon to Access Opportunity",
+          "hook": "Just extend the time horizon",
+          "startSec": 950.5,
+          "endSec": 1008.1,
+          "score": 81,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 53,
+        "failed": 0,
+        "totalSec": 111,
+        "p50Ms": 1281,
+        "inputTokens": 48413,
+        "outputTokens": 9642,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 3.4
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 42.7
+          },
+          "analyze": {
+            "calls": 17,
+            "totalSec": 64.6
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "e4b3fcca-0541-4250-be83-944b641f83e0",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T17:25:12.628Z",
+      "finishedAt": "2026-10-17T17:30:16.995Z",
+      "stages": {
+        "ingest": 13.3,
+        "transcribe": 74.3,
+        "refine": 50.6,
+        "analyze": 78.9,
+        "render": 80.2
+      },
+      "totalSec": 300.7,
+      "models": {
+        "language": "gateway:google/gemini-2.5-flash"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Embrace The Hard: Your Path To Success",
+          "hook": "If it's hard, that's good.",
+          "startSec": 586.3,
+          "endSec": 615.8,
+          "score": 75,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Mastering The Soul-Crushing Middle",
+          "hook": "Embrace the lonely middle",
+          "startSec": 312.6,
+          "endSec": 364.7,
+          "score": 85,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Why an \"Okay\" Life is Terrifying",
+          "hook": "An \"okay\" life is terrifying.",
+          "startSec": 1060.8,
+          "endSec": 1117.6,
+          "score": 74,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 53,
+        "failed": 0,
+        "totalSec": 384.2,
+        "p50Ms": 4671,
+        "inputTokens": 36619,
+        "outputTokens": 76085,
+        "byStage": {
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 16.8
+          },
+          "refine.disfluency": {
+            "calls": 34,
+            "totalSec": 134.4
+          },
+          "analyze": {
+            "calls": 17,
+            "totalSec": 233.2
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/gpt-4o-transcribe"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "1b76f4ee-3571-42a7-8cb1-1f4f2efbf714",
+      "status": "failed",
+      "error": "Transcription returned no words. Is the audio silent?",
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T17:30:20.264Z",
+      "finishedAt": "2026-10-17T17:34:16.646Z",
+      "stages": {
+        "ingest": 13.3
+      },
+      "totalSec": 233.8,
+      "models": {},
+      "clips": [],
+      "llm": {
+        "calls": 0,
+        "failed": 0,
+        "totalSec": 0,
+        "p50Ms": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "byStage": {}
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    },
+    {
+      "profile": "local-gemma3",
+      "env": {
+        "AI_MODEL": "compat:gemma3:latest",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+        "OPENAI_API_KEY": "local"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "3d7b5642-2f4c-42e3-9dbd-660e24a1d658",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-17T17:34:19.951Z",
+      "finishedAt": "2026-10-17T18:11:01.866Z",
+      "stages": {
+        "ingest": 12.2,
+        "transcribe": 261.5,
+        "refine": 1800.7,
+        "analyze": 98.1,
+        "render": 22.3
+      },
+      "totalSec": 2199.3,
+      "models": {
+        "language": "compat:gemma3:latest",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "Thinking for Yourself",
+          "hook": "Question everything.",
+          "startSec": 81.6,
+          "endSec": 104.4,
+          "score": 85,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Asian Parent Pressure",
+          "hook": "Breaking generational cycles.",
+          "startSec": 116.7,
+          "endSec": 141.6,
+          "score": 80,
+          "status": "done",
+          "layout": "mixed"
+        },
+        {
+          "index": 2,
+          "title": "The Uncomfortable Truth",
+          "hook": "They’ll stop cheering when you win.",
+          "startSec": 62.5,
+          "endSec": 83.8,
+          "score": 65,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 53,
+        "failed": 31,
+        "totalSec": 5535.5,
+        "p50Ms": 19753,
+        "inputTokens": 24436,
+        "outputTokens": 5420,
+        "byStage": {
+          "refine.disfluency": {
+            "calls": 44,
+            "totalSec": 5383.7
+          },
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 53.8
+          },
+          "analyze": {
+            "calls": 7,
+            "totalSec": 98.1
+          }
+        }
+      },
+      "machine": {
+        "platform": "darwin 25.6.0",
+        "arch": "arm64",
+        "cpus": 12,
+        "memGb": 36,
+        "node": "v24.7.0"
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "profile": "local-qwen14",
+  "env": {
+    "AI_MODEL": "compat:qwen2.5:14b",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "step": "refine",
+  "since": "2026-10-17T18:43:56.889Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:43:56.889Z",
+  "finishedAt": "2026-10-17T18:53:57.482Z",
+  "stages": {
+    "refine": 481.2,
+    "render": 117.9
+  },
+  "totalSec": 599.1,
+  "models": {
+    "language": "compat:qwen2.5:14b",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The lonely chapter lasts 5 years not 90 seconds",
+      "hook": "Rocky montage: 90 seconds vs 5 years",
+      "startSec": 1150.1,
+      "endSec": 1190.7,
+      "score": 90,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Why people only cheer at the wrong times",
+      "hook": "They cheer when you don't need it",
+      "startSec": 335.3,
+      "endSec": 364.7,
+      "score": 86,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Nothing to lose makes you dangerous",
+      "hook": "Having nothing makes you incredibly dangerous",
+      "startSec": 541.2,
+      "endSec": 585.7,
+      "score": 80,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 36,
+    "failed": 0,
+    "totalSec": 1464.1,
+    "p50Ms": 35963,
+    "inputTokens": 13224,
+    "outputTokens": 5022,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 97.4
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 1366.7
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

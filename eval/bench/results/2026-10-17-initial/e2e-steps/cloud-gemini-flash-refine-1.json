@@ -1,0 +1,81 @@
+{
+  "profile": "cloud-gemini-flash",
+  "env": {
+    "AI_MODEL": "gateway:google/gemini-2.5-flash",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "refine",
+  "since": "2026-10-17T18:30:17.335Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:30:17.335Z",
+  "finishedAt": "2026-10-17T18:35:17.676Z",
+  "stages": {
+    "refine": 52.5,
+    "render": 246.9
+  },
+  "totalSec": 299.4,
+  "models": {
+    "language": "gateway:google/gemini-2.5-flash"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Hard Is the Moat",
+      "hook": "If it's hard, no one else will",
+      "startSec": 594.6,
+      "endSec": 643.6,
+      "score": 86,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Teacher Stops Student's Revenge Fantasy Cold",
+      "hook": "Win so big they forget you exist",
+      "startSec": 0,
+      "endSec": 49.5,
+      "score": 86,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 2,
+      "title": "Having Nothing to Lose Makes You Dangerous",
+      "hook": "No resources equals infinite shots",
+      "startSec": 551.2,
+      "endSec": 605.1,
+      "score": 85,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 35,
+    "failed": 0,
+    "totalSec": 159.2,
+    "p50Ms": 3560,
+    "inputTokens": 13743,
+    "outputTokens": 29015,
+    "byStage": {
+      "refine.disfluency": {
+        "calls": 33,
+        "totalSec": 135.1
+      },
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 24.6
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

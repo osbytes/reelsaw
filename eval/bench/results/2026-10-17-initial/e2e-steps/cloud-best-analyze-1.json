@@ -1,0 +1,77 @@
+{
+  "profile": "cloud-best",
+  "env": {
+    "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "analyze",
+  "since": "2026-10-17T18:42:33.631Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:42:33.631Z",
+  "finishedAt": "2026-10-17T18:43:53.725Z",
+  "stages": {
+    "analyze": 48.2,
+    "render": 29.2
+  },
+  "totalSec": 77.4,
+  "models": {
+    "language": "gateway:anthropic/claude-sonnet-4.5"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The lonely chapter lasts 5 years not 90 seconds",
+      "hook": "Rocky montage: 90 seconds vs 5 years",
+      "startSec": 1150.1,
+      "endSec": 1190.7,
+      "score": 90,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Why people only cheer at the wrong times",
+      "hook": "They cheer when you don't need it",
+      "startSec": 335.3,
+      "endSec": 364.7,
+      "score": 86,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Nothing to lose makes you dangerous",
+      "hook": "Having nothing makes you incredibly dangerous",
+      "startSec": 541.2,
+      "endSec": 585.7,
+      "score": 80,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 17,
+    "failed": 0,
+    "totalSec": 135.9,
+    "p50Ms": 4095,
+    "inputTokens": 28232,
+    "outputTokens": 5461,
+    "byStage": {
+      "analyze": {
+        "calls": 17,
+        "totalSec": 135.9
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

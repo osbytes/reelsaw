@@ -124,8 +124,18 @@ export const selectionModelSuite: Suite = {
           const found = await ctx.cached(["map", cfg.AI_MODEL, ch.lines, sc], () => mapChunk(o, ch, sc));
           const outside = found.filter((c) => c.startSec < ch.start - 5 || c.endSec > ch.end + 5);
           const snapped = found.map((c) => snapCandidate(c, t.segments, [], defaultProjectSettings, t.durationSec)).filter(Boolean);
+          // model-free quality proxies, comparable across models: how many proposals already respect the
+          // length range, how many overlap another proposal (duplicates), and whether hooks are real
+          const inRange = found.filter((c) => c.endSec - c.startSec >= sc.minSec && c.endSec - c.startSec <= sc.maxSec).length;
+          const overlapping = found.filter((c, k) => found.some((d, j) => j !== k && Math.min(c.endSec, d.endSec) - Math.max(c.startSec, d.startSec) > 0.5 * Math.min(c.endSec - c.startSec, d.endSec - d.startSec))).length;
+          const weakHooks = found.filter((c) => c.hook.trim().length < 12 || c.hook.trim().toLowerCase() === c.title.trim().toLowerCase()).length;
           const pass = found.length > 0 && !outside.length && snapped.length >= Math.ceil(found.length / 2);
-          out.push({ id: `${name}/chunk-${i}`, pass, metrics: { candidates: found.length, outside: outside.length, snappable: snapped.length, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) }, notes: outside.map((c) => `${c.startSec}-${c.endSec}`).join(", ") });
+          out.push({
+            id: `${name}/chunk-${i}`,
+            pass,
+            metrics: { candidates: found.length, outside: outside.length, snappable: snapped.length, inRange, overlapping, weakHooks, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+            notes: outside.map((c) => `${c.startSec}-${c.endSec}`).join(", "),
+          });
         } catch (err) {
           if (isUnavailable(err)) out.push({ id: `${name}/chunk-${i}`, pass: false, skipped: `model unavailable: ${(err as Error).message.slice(0, 100)}` });
           else out.push({ id: `${name}/chunk-${i}`, pass: false, notes: (err as Error).message.slice(0, 160) });
@@ -133,5 +143,17 @@ export const selectionModelSuite: Suite = {
       }
     }
     return out;
+  },
+  summarize(results) {
+    const n = (k: string) => results.reduce((a, r) => a + Number(r.metrics?.[k] ?? 0), 0);
+    const candidates = n("candidates");
+    const rate = (k: string) => Number((candidates ? n(k) / candidates : 0).toFixed(2));
+    return {
+      passRate: { value: Number((results.filter((r) => r.pass).length / (results.length || 1)).toFixed(2)), better: "higher" },
+      candidatesPerChunk: { value: Number((candidates / (results.length || 1)).toFixed(1)), better: "higher" },
+      inRangeRate: { value: rate("inRange"), better: "higher", tolerance: 0.1 },
+      overlapRate: { value: rate("overlapping"), better: "lower", tolerance: 0.1 },
+      weakHookRate: { value: rate("weakHooks"), better: "lower", tolerance: 0.1 },
+    };
   },
 };

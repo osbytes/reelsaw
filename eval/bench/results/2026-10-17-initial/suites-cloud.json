@@ -1,0 +1,3479 @@
+{
+  "at": "2026-10-17T17:24:22.900Z",
+  "offline": false,
+  "noCache": true,
+  "profiles": [
+    {
+      "name": "cloud-cheap",
+      "env": {
+        "AI_MODEL": "gateway:openai/gpt-4o-mini",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-haiku",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-gemini-flash",
+      "env": {
+        "AI_MODEL": "gateway:google/gemini-2.5-flash",
+        "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+      }
+    },
+    {
+      "name": "cloud-best",
+      "env": {
+        "AI_MODEL": "gateway:anthropic/claude-sonnet-4.5",
+        "TRANSCRIPTION_MODEL": "gateway:openai/gpt-4o-transcribe"
+      }
+    }
+  ],
+  "report": [
+    {
+      "profile": "cloud-cheap",
+      "suite": "transcription",
+      "results": [
+        {
+          "id": "copia-budget",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "4/4",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "brightline-coffee",
+          "pass": true,
+          "metrics": {
+            "wer": 0.014,
+            "recall": 1,
+            "entities": "11/11",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "reelsaw-stack",
+          "pass": false,
+          "metrics": {
+            "wer": 0.05,
+            "recall": 0.67,
+            "entities": "6/9",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": "reelsaw is a small typescript service every job goes through pg boss which keeps the queue in postgres the http layer is hono and all database access goes throu"
+        },
+        {
+          "id": "qwen-anthropic",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "12/12",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "podcast-names",
+          "pass": true,
+          "metrics": {
+            "wer": 0.091,
+            "recall": 0.86,
+            "entities": "6/7",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "meanWer": {
+          "value": 0.031,
+          "better": "lower",
+          "tolerance": 0.02
+        },
+        "meanEntityRecall": {
+          "value": 0.906,
+          "better": "higher",
+          "tolerance": 0.05
+        },
+        "falseInsertions": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 14133,
+      "meter": {
+        "llm": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 852,
+          "p95Ms": 1219,
+          "totalMs": 4363,
+          "inputTokens": 775,
+          "outputTokens": 122,
+          "costUsd": 0.000189
+        },
+        "stt": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 1767,
+          "p95Ms": 2576,
+          "totalMs": 9686,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "costUsd": 0.010607,
+          "sttRealtimeFactor": 11
+        }
+      }
+    },
+    {
+      "profile": "cloud-cheap",
+      "suite": "disfluency",
+      "results": [
+        {
+          "id": "01-for-by-whatever-s-due",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repair 68%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…up, and it's already spoken [for] by whatever's due next, with…”"
+        },
+        {
+          "id": "02-the-car-payments-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…rents due on the third, [the] car payments due on the…”"
+        },
+        {
+          "id": "03-for-out-of-whatever-s",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repair 68%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show up, they get paid [for] out of whatever's left in…”"
+        },
+        {
+          "id": "04-pay-actual-pay-dates",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 80%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…when laid out against your [pay] actual pay dates. So you…”"
+        },
+        {
+          "id": "05-of-after-every-dollar",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user rejected · “…it becomes a problem instead [of] after. Every dollar already has…”"
+        },
+        {
+          "id": "06-into-between-now-and",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 63%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…for money to quietly disappear [into] between now and your next…”"
+        },
+        {
+          "id": "07-is-is-that-resistance",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…the point of this slide [is,] is that resistance starch is…”"
+        },
+        {
+          "id": "08-a-small-a-small-little",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this can maybe cause like [a small,] a small little change to…”"
+        },
+        {
+          "id": "09-helpful-helpful-tool-if",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…here. It can be a [helpful] helpful tool. If it's something…”"
+        },
+        {
+          "id": "10-of-walks-out-of",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…an admin of some kind [of] walks out of his office,…”"
+        },
+        {
+          "id": "11-he-s-like-he-s-like-son",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 82%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…out of his office, and [he's like,] he's like, son, and I…”"
+        },
+        {
+          "id": "12-blah-blah-blah-right",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…be working for me, like, [blah,] blah, blah, right? And he's…”"
+        },
+        {
+          "id": "13-blah-blah-right-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…working for me, like, blah, [blah,] blah, right? And he's like,…”"
+        },
+        {
+          "id": "14-he-said-he-said-success",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…they exist. And that's when [he said] he said, success is the…”"
+        },
+        {
+          "id": "15-that-s-when-that-s-when-you",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…wanted to be friends with, [that's when,] that's when you want people…”"
+        },
+        {
+          "id": "16-i-mean-that-s-why-i",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "filler 73%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…my soul from this year. [I mean,] that's why I mean, I…”"
+        },
+        {
+          "id": "17-very-very-beginning-people",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…about, you know, at the [very,] very beginning, people say, you…”"
+        },
+        {
+          "id": "18-you-know-you-know-uh",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…happy and then they start, [you know,] you know, uh, saying bad…”"
+        },
+        {
+          "id": "19-uh-saying-bad-things",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "filler · hand-labelled · “…start, you know, you know, [uh,] saying bad things. Reminder that…”"
+        },
+        {
+          "id": "20-uh-and-so-like",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…to do because they conform. [Uh,] and so like if there's…”"
+        },
+        {
+          "id": "21-i-i-think-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…you do it anyways. And [I,] I think that a lot…”"
+        },
+        {
+          "id": "22-um-being-able-to",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…no one does. Yeah, it's, [um,] being able to think for…”"
+        },
+        {
+          "id": "23-really-really-hard-you-ve",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…because in the beginning it's [really,] really hard. You've been resting…”"
+        },
+        {
+          "id": "24-with-past-trauma-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…and the way you've dealt [with] past trauma and your parents'…”"
+        },
+        {
+          "id": "25-it-just-it-just-wasn-t",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…fathers don't apologize to sons. [It just,] it just wasn't that way.…”"
+        },
+        {
+          "id": "26-and-and-this-is",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…beat him. At his game. [And,] and this is pretty alive…”"
+        },
+        {
+          "id": "27-it-was-it-was-just",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this much a year. Like [it was,] it was just really clear,…”"
+        },
+        {
+          "id": "28-of-like-what-game",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…never even asked the question [of] like, what game am I…”"
+        },
+        {
+          "id": "29-is-is-a-successful",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…goal because my dad was [is] is a successful man. Relatively…”"
+        },
+        {
+          "id": "30-that-that-for-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 82%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…man. Relatively early on. But [that,] that for that exchange, and…”"
+        },
+        {
+          "id": "31-that-for-that-exchange",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 77%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user accepted · “…Relatively early on. But that, [that] for that exchange, and then…”"
+        },
+        {
+          "id": "32-for-like-saying-what",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user rejected · “…and being terrible about myself [for] like saying what I said.…”"
+        },
+        {
+          "id": "33-of-in-myself-are",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…the things I'm most proud [of] in myself are the light…”"
+        },
+        {
+          "id": "34-like-throwing-like-a",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user accepted · “…listening to audio books and [like] throwing like a tennis ball…”"
+        },
+        {
+          "id": "35-like-playing-with-my",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 70%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…ball against the wall or [like] playing with my like in…”"
+        },
+        {
+          "id": "36-like-in-mighty-mouse",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user accepted · “…or like playing with my [like] in Mighty Mouse from Mars…”"
+        },
+        {
+          "id": "37-outside-of-social-groups",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…alone and being on the [outside] of social groups meant that…”"
+        },
+        {
+          "id": "38-that-the-more-you",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user accepted · “…a different way. I think [that] the more you flex whatever…”"
+        },
+        {
+          "id": "39-of-like-independent-thinking",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…flex whatever that muscle is [of] like independent thinking, the more…”"
+        },
+        {
+          "id": "40-that-that-you-can",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…like what's an example of [that] that you can think of.…”"
+        },
+        {
+          "id": "41-of-like-living-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…just the most basic ones [of] like living the life that…”"
+        },
+        {
+          "id": "42-of-on-autopilot-a",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…real then walking through kind [of] on autopilot. A friendly reminder…”"
+        },
+        {
+          "id": "43-like-to-freeze-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…veggie scrap bowl that I [like] to freeze. And then this…”"
+        },
+        {
+          "id": "44-the-end-of-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…summer season, although it is [the] end of the summer season,…”"
+        },
+        {
+          "id": "45-about-to-go-bad",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…some berries that are maybe [about] to go bad and you're…”"
+        },
+        {
+          "id": "46-a-baked-good-like",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…is to make them into [a] baked good like we do…”"
+        },
+        {
+          "id": "47-into-like-your-oatmeal",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…can do and mix it [into] like your oatmeal, mix it…”"
+        },
+        {
+          "id": "48-like-in-a-minute",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show you what that looks [like] in a minute after we…”"
+        },
+        {
+          "id": "49-you-you-don-t-always",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 82%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…of jam. Just to show [you,] you don't always have to…”"
+        },
+        {
+          "id": "50-like-on-a-piece",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…to go ahead and look [like] on a piece of toast,…”"
+        }
+      ],
+      "metrics": {
+        "precision": {
+          "value": 0.8,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "recall": {
+          "value": 0.87,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "falsePositives": {
+          "value": 5,
+          "better": "lower"
+        },
+        "autoFalsePositives": {
+          "value": 0,
+          "better": "lower"
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 88500,
+      "meter": {
+        "llm": {
+          "calls": 82,
+          "errors": 0,
+          "p50Ms": 1084,
+          "p95Ms": 1419,
+          "totalMs": 88246,
+          "inputTokens": 29004,
+          "outputTokens": 4632,
+          "costUsd": 0.00713
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-cheap",
+      "suite": "selection-model",
+      "results": [
+        {
+          "id": "apollo/chunk-0",
+          "pass": true,
+          "metrics": {
+            "candidates": 3,
+            "outside": 0,
+            "snappable": 3,
+            "inRange": 0,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 2.5
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-1",
+          "pass": false,
+          "metrics": {
+            "candidates": 6,
+            "outside": 6,
+            "snappable": 6,
+            "inRange": 1,
+            "overlapping": 6,
+            "weakHooks": 0,
+            "sec": 3.8
+          },
+          "notes": "39-54, 47-58, 58-75, 55-70, 90-110, 100-115"
+        },
+        {
+          "id": "apollo/chunk-2",
+          "pass": false,
+          "metrics": {
+            "candidates": 5,
+            "outside": 5,
+            "snappable": 5,
+            "inRange": 2,
+            "overlapping": 5,
+            "weakHooks": 0,
+            "sec": 4.5
+          },
+          "notes": "9.8-25, 10-15, 10.8-17, 12-42, 14-45"
+        },
+        {
+          "id": "apollo/chunk-3",
+          "pass": false,
+          "metrics": {
+            "candidates": 4,
+            "outside": 4,
+            "snappable": 4,
+            "inRange": 0,
+            "overlapping": 2,
+            "weakHooks": 0,
+            "sec": 3.2
+          },
+          "notes": "14.36-15.04, 17.17-17.53, 19.1-19.44, 19.28-19.44"
+        }
+      ],
+      "metrics": {
+        "passRate": {
+          "value": 0.25,
+          "better": "higher"
+        },
+        "candidatesPerChunk": {
+          "value": 4.5,
+          "better": "higher"
+        },
+        "inRangeRate": {
+          "value": 0.17,
+          "better": "higher",
+          "tolerance": 0.1
+        },
+        "overlapRate": {
+          "value": 0.72,
+          "better": "lower",
+          "tolerance": 0.1
+        },
+        "weakHookRate": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0.1
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 13982,
+      "meter": {
+        "llm": {
+          "calls": 4,
+          "errors": 0,
+          "p50Ms": 3210,
+          "p95Ms": 4478,
+          "totalMs": 13956,
+          "inputTokens": 12838,
+          "outputTokens": 1570,
+          "costUsd": 0.002868
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "suite": "transcription",
+      "results": [
+        {
+          "id": "copia-budget",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "4/4",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "brightline-coffee",
+          "pass": true,
+          "metrics": {
+            "wer": 0.014,
+            "recall": 1,
+            "entities": "11/11",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "reelsaw-stack",
+          "pass": false,
+          "metrics": {
+            "wer": 0.083,
+            "recall": 0.67,
+            "entities": "6/9",
+            "falseIns": 0,
+            "autoFixed": 2
+          },
+          "notes": "reelsaw is a small typescript service every job goes through pg pg boss which keeps the queue in postgres the http layer is hono and all database access goes th"
+        },
+        {
+          "id": "qwen-anthropic",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "12/12",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "podcast-names",
+          "pass": true,
+          "metrics": {
+            "wer": 0.091,
+            "recall": 0.86,
+            "entities": "6/7",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "meanWer": {
+          "value": 0.038,
+          "better": "lower",
+          "tolerance": 0.02
+        },
+        "meanEntityRecall": {
+          "value": 0.906,
+          "better": "higher",
+          "tolerance": 0.05
+        },
+        "falseInsertions": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 20141,
+      "meter": {
+        "llm": {
+          "calls": 6,
+          "errors": 0,
+          "p50Ms": 1101,
+          "p95Ms": 1965,
+          "totalMs": 7794,
+          "inputTokens": 2206,
+          "outputTokens": 196,
+          "costUsd": 0.003186
+        },
+        "stt": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 2238,
+          "p95Ms": 3248,
+          "totalMs": 12285,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "costUsd": 0.010607,
+          "sttRealtimeFactor": 8.6
+        }
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "suite": "disfluency",
+      "results": [
+        {
+          "id": "01-for-by-whatever-s-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…up, and it's already spoken [for] by whatever's due next, with…”"
+        },
+        {
+          "id": "02-the-car-payments-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…rents due on the third, [the] car payments due on the…”"
+        },
+        {
+          "id": "03-for-out-of-whatever-s",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repair 63%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show up, they get paid [for] out of whatever's left in…”"
+        },
+        {
+          "id": "04-pay-actual-pay-dates",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 80%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…when laid out against your [pay] actual pay dates. So you…”"
+        },
+        {
+          "id": "05-of-after-every-dollar",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…it becomes a problem instead [of] after. Every dollar already has…”"
+        },
+        {
+          "id": "06-into-between-now-and",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…for money to quietly disappear [into] between now and your next…”"
+        },
+        {
+          "id": "07-is-is-that-resistance",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…the point of this slide [is,] is that resistance starch is…”"
+        },
+        {
+          "id": "08-a-small-a-small-little",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this can maybe cause like [a small,] a small little change to…”"
+        },
+        {
+          "id": "09-helpful-helpful-tool-if",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…here. It can be a [helpful] helpful tool. If it's something…”"
+        },
+        {
+          "id": "10-of-walks-out-of",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…an admin of some kind [of] walks out of his office,…”"
+        },
+        {
+          "id": "11-he-s-like-he-s-like-son",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 84%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…out of his office, and [he's like,] he's like, son, and I…”"
+        },
+        {
+          "id": "12-blah-blah-blah-right",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…be working for me, like, [blah,] blah, blah, right? And he's…”"
+        },
+        {
+          "id": "13-blah-blah-right-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…working for me, like, blah, [blah,] blah, right? And he's like,…”"
+        },
+        {
+          "id": "14-he-said-he-said-success",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…they exist. And that's when [he said] he said, success is the…”"
+        },
+        {
+          "id": "15-that-s-when-that-s-when-you",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…wanted to be friends with, [that's when,] that's when you want people…”"
+        },
+        {
+          "id": "16-i-mean-that-s-why-i",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "filler 68%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…my soul from this year. [I mean,] that's why I mean, I…”"
+        },
+        {
+          "id": "17-very-very-beginning-people",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…about, you know, at the [very,] very beginning, people say, you…”"
+        },
+        {
+          "id": "18-you-know-you-know-uh",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…happy and then they start, [you know,] you know, uh, saying bad…”"
+        },
+        {
+          "id": "19-uh-saying-bad-things",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "filler · hand-labelled · “…start, you know, you know, [uh,] saying bad things. Reminder that…”"
+        },
+        {
+          "id": "20-uh-and-so-like",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…to do because they conform. [Uh,] and so like if there's…”"
+        },
+        {
+          "id": "21-i-i-think-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…you do it anyways. And [I,] I think that a lot…”"
+        },
+        {
+          "id": "22-um-being-able-to",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…no one does. Yeah, it's, [um,] being able to think for…”"
+        },
+        {
+          "id": "23-really-really-hard-you-ve",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…because in the beginning it's [really,] really hard. You've been resting…”"
+        },
+        {
+          "id": "24-with-past-trauma-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…and the way you've dealt [with] past trauma and your parents'…”"
+        },
+        {
+          "id": "25-it-just-it-just-wasn-t",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 78%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…fathers don't apologize to sons. [It just,] it just wasn't that way.…”"
+        },
+        {
+          "id": "26-and-and-this-is",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…beat him. At his game. [And,] and this is pretty alive…”"
+        },
+        {
+          "id": "27-it-was-it-was-just",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this much a year. Like [it was,] it was just really clear,…”"
+        },
+        {
+          "id": "28-of-like-what-game",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…never even asked the question [of] like, what game am I…”"
+        },
+        {
+          "id": "29-is-is-a-successful",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…goal because my dad was [is] is a successful man. Relatively…”"
+        },
+        {
+          "id": "30-that-that-for-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 80%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…man. Relatively early on. But [that,] that for that exchange, and…”"
+        },
+        {
+          "id": "31-that-for-that-exchange",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 72%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user accepted · “…Relatively early on. But that, [that] for that exchange, and then…”"
+        },
+        {
+          "id": "32-for-like-saying-what",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 3
+          },
+          "notes": "repair · user rejected · “…and being terrible about myself [for] like saying what I said.…”"
+        },
+        {
+          "id": "33-of-in-myself-are",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…the things I'm most proud [of] in myself are the light…”"
+        },
+        {
+          "id": "34-like-throwing-like-a",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user accepted · “…listening to audio books and [like] throwing like a tennis ball…”"
+        },
+        {
+          "id": "35-like-playing-with-my",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 73%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user accepted · “…ball against the wall or [like] playing with my like in…”"
+        },
+        {
+          "id": "36-like-in-mighty-mouse",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…or like playing with my [like] in Mighty Mouse from Mars…”"
+        },
+        {
+          "id": "37-outside-of-social-groups",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…alone and being on the [outside] of social groups meant that…”"
+        },
+        {
+          "id": "38-that-the-more-you",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…a different way. I think [that] the more you flex whatever…”"
+        },
+        {
+          "id": "39-of-like-independent-thinking",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…flex whatever that muscle is [of] like independent thinking, the more…”"
+        },
+        {
+          "id": "40-that-that-you-can",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…like what's an example of [that] that you can think of.…”"
+        },
+        {
+          "id": "41-of-like-living-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…just the most basic ones [of] like living the life that…”"
+        },
+        {
+          "id": "42-of-on-autopilot-a",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…real then walking through kind [of] on autopilot. A friendly reminder…”"
+        },
+        {
+          "id": "43-like-to-freeze-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…veggie scrap bowl that I [like] to freeze. And then this…”"
+        },
+        {
+          "id": "44-the-end-of-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…summer season, although it is [the] end of the summer season,…”"
+        },
+        {
+          "id": "45-about-to-go-bad",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…some berries that are maybe [about] to go bad and you're…”"
+        },
+        {
+          "id": "46-a-baked-good-like",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…is to make them into [a] baked good like we do…”"
+        },
+        {
+          "id": "47-into-like-your-oatmeal",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…can do and mix it [into] like your oatmeal, mix it…”"
+        },
+        {
+          "id": "48-like-in-a-minute",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show you what that looks [like] in a minute after we…”"
+        },
+        {
+          "id": "49-you-you-don-t-always",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 78%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…of jam. Just to show [you,] you don't always have to…”"
+        },
+        {
+          "id": "50-like-on-a-piece",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…to go ahead and look [like] on a piece of toast,…”"
+        }
+      ],
+      "metrics": {
+        "precision": {
+          "value": 0.82,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "recall": {
+          "value": 0.78,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "falsePositives": {
+          "value": 4,
+          "better": "lower"
+        },
+        "autoFalsePositives": {
+          "value": 0,
+          "better": "lower"
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 86672,
+      "meter": {
+        "llm": {
+          "calls": 77,
+          "errors": 0,
+          "p50Ms": 983,
+          "p95Ms": 1534,
+          "totalMs": 86494,
+          "inputTokens": 42618,
+          "outputTokens": 4875,
+          "costUsd": 0.066993
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-haiku",
+      "suite": "selection-model",
+      "results": [
+        {
+          "id": "apollo/chunk-0",
+          "pass": true,
+          "metrics": {
+            "candidates": 4,
+            "outside": 0,
+            "snappable": 4,
+            "inRange": 1,
+            "overlapping": 2,
+            "weakHooks": 1,
+            "sec": 10.6
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-1",
+          "pass": true,
+          "metrics": {
+            "candidates": 8,
+            "outside": 0,
+            "snappable": 8,
+            "inRange": 6,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 13.8
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-2",
+          "pass": true,
+          "metrics": {
+            "candidates": 4,
+            "outside": 0,
+            "snappable": 4,
+            "inRange": 3,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 7.7
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-3",
+          "pass": false,
+          "metrics": {
+            "candidates": 5,
+            "outside": 2,
+            "snappable": 5,
+            "inRange": 4,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 7.5
+          },
+          "notes": "847.2-906, 1184.4-1219"
+        }
+      ],
+      "metrics": {
+        "passRate": {
+          "value": 0.75,
+          "better": "higher"
+        },
+        "candidatesPerChunk": {
+          "value": 5.3,
+          "better": "higher"
+        },
+        "inRangeRate": {
+          "value": 0.67,
+          "better": "higher",
+          "tolerance": 0.1
+        },
+        "overlapRate": {
+          "value": 0.1,
+          "better": "lower",
+          "tolerance": 0.1
+        },
+        "weakHookRate": {
+          "value": 0.05,
+          "better": "lower",
+          "tolerance": 0.1
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 39609,
+      "meter": {
+        "llm": {
+          "calls": 4,
+          "errors": 0,
+          "p50Ms": 7663,
+          "p95Ms": 13832,
+          "totalMs": 39601,
+          "inputTokens": 15660,
+          "outputTokens": 3066,
+          "costUsd": 0.03099
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "suite": "transcription",
+      "results": [
+        {
+          "id": "copia-budget",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "4/4",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "brightline-coffee",
+          "pass": true,
+          "metrics": {
+            "wer": 0.014,
+            "recall": 1,
+            "entities": "11/11",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "reelsaw-stack",
+          "pass": false,
+          "metrics": {
+            "wer": 0.083,
+            "recall": 0.67,
+            "entities": "6/9",
+            "falseIns": 0,
+            "autoFixed": 2
+          },
+          "notes": "reelsaw is a small typescript service every job goes through pg pg boss which keeps the queue in postgres the http layer is hono and all database access goes th"
+        },
+        {
+          "id": "qwen-anthropic",
+          "pass": true,
+          "metrics": {
+            "wer": 0,
+            "recall": 1,
+            "entities": "12/12",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "podcast-names",
+          "pass": true,
+          "metrics": {
+            "wer": 0.091,
+            "recall": 0.86,
+            "entities": "6/7",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "meanWer": {
+          "value": 0.038,
+          "better": "lower",
+          "tolerance": 0.02
+        },
+        "meanEntityRecall": {
+          "value": 0.906,
+          "better": "higher",
+          "tolerance": 0.05
+        },
+        "falseInsertions": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 22981,
+      "meter": {
+        "llm": {
+          "calls": 6,
+          "errors": 0,
+          "p50Ms": 2000,
+          "p95Ms": 2509,
+          "totalMs": 12758,
+          "inputTokens": 1082,
+          "outputTokens": 1718,
+          "costUsd": 0.00462
+        },
+        "stt": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 2156,
+          "p95Ms": 2268,
+          "totalMs": 10160,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "costUsd": 0.010607,
+          "sttRealtimeFactor": 10.4
+        }
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "suite": "disfluency",
+      "results": [
+        {
+          "id": "01-for-by-whatever-s-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…up, and it's already spoken [for] by whatever's due next, with…”"
+        },
+        {
+          "id": "02-the-car-payments-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…rents due on the third, [the] car payments due on the…”"
+        },
+        {
+          "id": "03-for-out-of-whatever-s",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repair 72%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show up, they get paid [for] out of whatever's left in…”"
+        },
+        {
+          "id": "04-pay-actual-pay-dates",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 80%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…when laid out against your [pay] actual pay dates. So you…”"
+        },
+        {
+          "id": "05-of-after-every-dollar",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…it becomes a problem instead [of] after. Every dollar already has…”"
+        },
+        {
+          "id": "06-into-between-now-and",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…for money to quietly disappear [into] between now and your next…”"
+        },
+        {
+          "id": "07-is-is-that-resistance",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…the point of this slide [is,] is that resistance starch is…”"
+        },
+        {
+          "id": "08-a-small-a-small-little",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this can maybe cause like [a small,] a small little change to…”"
+        },
+        {
+          "id": "09-helpful-helpful-tool-if",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…here. It can be a [helpful] helpful tool. If it's something…”"
+        },
+        {
+          "id": "10-of-walks-out-of",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…an admin of some kind [of] walks out of his office,…”"
+        },
+        {
+          "id": "11-he-s-like-he-s-like-son",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 84%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…out of his office, and [he's like,] he's like, son, and I…”"
+        },
+        {
+          "id": "12-blah-blah-blah-right",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…be working for me, like, [blah,] blah, blah, right? And he's…”"
+        },
+        {
+          "id": "13-blah-blah-right-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…working for me, like, blah, [blah,] blah, right? And he's like,…”"
+        },
+        {
+          "id": "14-he-said-he-said-success",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…they exist. And that's when [he said] he said, success is the…”"
+        },
+        {
+          "id": "15-that-s-when-that-s-when-you",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 78%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…wanted to be friends with, [that's when,] that's when you want people…”"
+        },
+        {
+          "id": "16-i-mean-that-s-why-i",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…my soul from this year. [I mean,] that's why I mean, I…”"
+        },
+        {
+          "id": "17-very-very-beginning-people",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…about, you know, at the [very,] very beginning, people say, you…”"
+        },
+        {
+          "id": "18-you-know-you-know-uh",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…happy and then they start, [you know,] you know, uh, saying bad…”"
+        },
+        {
+          "id": "19-uh-saying-bad-things",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "filler · hand-labelled · “…start, you know, you know, [uh,] saying bad things. Reminder that…”"
+        },
+        {
+          "id": "20-uh-and-so-like",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…to do because they conform. [Uh,] and so like if there's…”"
+        },
+        {
+          "id": "21-i-i-think-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…you do it anyways. And [I,] I think that a lot…”"
+        },
+        {
+          "id": "22-um-being-able-to",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "filler · hand-labelled · “…no one does. Yeah, it's, [um,] being able to think for…”"
+        },
+        {
+          "id": "23-really-really-hard-you-ve",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…because in the beginning it's [really,] really hard. You've been resting…”"
+        },
+        {
+          "id": "24-with-past-trauma-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…and the way you've dealt [with] past trauma and your parents'…”"
+        },
+        {
+          "id": "25-it-just-it-just-wasn-t",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…fathers don't apologize to sons. [It just,] it just wasn't that way.…”"
+        },
+        {
+          "id": "26-and-and-this-is",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…beat him. At his game. [And,] and this is pretty alive…”"
+        },
+        {
+          "id": "27-it-was-it-was-just",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 78%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…this much a year. Like [it was,] it was just really clear,…”"
+        },
+        {
+          "id": "28-of-like-what-game",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…never even asked the question [of] like, what game am I…”"
+        },
+        {
+          "id": "29-is-is-a-successful",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…goal because my dad was [is] is a successful man. Relatively…”"
+        },
+        {
+          "id": "30-that-that-for-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repetition · hand-labelled · “…man. Relatively early on. But [that,] that for that exchange, and…”"
+        },
+        {
+          "id": "31-that-for-that-exchange",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 3
+          },
+          "notes": "repair · user accepted · “…Relatively early on. But that, [that] for that exchange, and then…”"
+        },
+        {
+          "id": "32-for-like-saying-what",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 3
+          },
+          "notes": "repair · user rejected · “…and being terrible about myself [for] like saying what I said.…”"
+        },
+        {
+          "id": "33-of-in-myself-are",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…the things I'm most proud [of] in myself are the light…”"
+        },
+        {
+          "id": "34-like-throwing-like-a",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 78%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 3
+          },
+          "notes": "repair · user accepted · “…listening to audio books and [like] throwing like a tennis ball…”"
+        },
+        {
+          "id": "35-like-playing-with-my",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 78%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 2
+          },
+          "notes": "repair · user accepted · “…ball against the wall or [like] playing with my like in…”"
+        },
+        {
+          "id": "36-like-in-mighty-mouse",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 73%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 3
+          },
+          "notes": "repair · user accepted · “…or like playing with my [like] in Mighty Mouse from Mars…”"
+        },
+        {
+          "id": "37-outside-of-social-groups",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…alone and being on the [outside] of social groups meant that…”"
+        },
+        {
+          "id": "38-that-the-more-you",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…a different way. I think [that] the more you flex whatever…”"
+        },
+        {
+          "id": "39-of-like-independent-thinking",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…flex whatever that muscle is [of] like independent thinking, the more…”"
+        },
+        {
+          "id": "40-that-that-you-can",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…like what's an example of [that] that you can think of.…”"
+        },
+        {
+          "id": "41-of-like-living-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 4
+          },
+          "notes": "repair · user rejected · “…just the most basic ones [of] like living the life that…”"
+        },
+        {
+          "id": "42-of-on-autopilot-a",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…real then walking through kind [of] on autopilot. A friendly reminder…”"
+        },
+        {
+          "id": "43-like-to-freeze-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…veggie scrap bowl that I [like] to freeze. And then this…”"
+        },
+        {
+          "id": "44-the-end-of-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…summer season, although it is [the] end of the summer season,…”"
+        },
+        {
+          "id": "45-about-to-go-bad",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…some berries that are maybe [about] to go bad and you're…”"
+        },
+        {
+          "id": "46-a-baked-good-like",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…is to make them into [a] baked good like we do…”"
+        },
+        {
+          "id": "47-into-like-your-oatmeal",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…can do and mix it [into] like your oatmeal, mix it…”"
+        },
+        {
+          "id": "48-like-in-a-minute",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show you what that looks [like] in a minute after we…”"
+        },
+        {
+          "id": "49-you-you-don-t-always",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 78%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…of jam. Just to show [you,] you don't always have to…”"
+        },
+        {
+          "id": "50-like-on-a-piece",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…to go ahead and look [like] on a piece of toast,…”"
+        }
+      ],
+      "metrics": {
+        "precision": {
+          "value": 0.87,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "recall": {
+          "value": 0.87,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "falsePositives": {
+          "value": 3,
+          "better": "lower"
+        },
+        "autoFalsePositives": {
+          "value": 0,
+          "better": "lower"
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 270702,
+      "meter": {
+        "llm": {
+          "calls": 83,
+          "errors": 0,
+          "p50Ms": 2733,
+          "p95Ms": 5886,
+          "totalMs": 270475,
+          "inputTokens": 30532,
+          "outputTokens": 44059,
+          "costUsd": 0.119307
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-gemini-flash",
+      "suite": "selection-model",
+      "results": [
+        {
+          "id": "apollo/chunk-0",
+          "pass": true,
+          "metrics": {
+            "candidates": 8,
+            "outside": 0,
+            "snappable": 8,
+            "inRange": 8,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 33.7
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-1",
+          "pass": true,
+          "metrics": {
+            "candidates": 7,
+            "outside": 0,
+            "snappable": 7,
+            "inRange": 7,
+            "overlapping": 0,
+            "weakHooks": 1,
+            "sec": 20.6
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-2",
+          "pass": true,
+          "metrics": {
+            "candidates": 5,
+            "outside": 0,
+            "snappable": 5,
+            "inRange": 5,
+            "overlapping": 0,
+            "weakHooks": 0,
+            "sec": 34.2
+          },
+          "notes": ""
+        },
+        {
+          "id": "apollo/chunk-3",
+          "pass": true,
+          "metrics": {
+            "candidates": 12,
+            "outside": 0,
+            "snappable": 12,
+            "inRange": 12,
+            "overlapping": 2,
+            "weakHooks": 0,
+            "sec": 36.8
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "passRate": {
+          "value": 1,
+          "better": "higher"
+        },
+        "candidatesPerChunk": {
+          "value": 8,
+          "better": "higher"
+        },
+        "inRangeRate": {
+          "value": 1,
+          "better": "higher",
+          "tolerance": 0.1
+        },
+        "overlapRate": {
+          "value": 0.06,
+          "better": "lower",
+          "tolerance": 0.1
+        },
+        "weakHookRate": {
+          "value": 0.03,
+          "better": "lower",
+          "tolerance": 0.1
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 125281,
+      "meter": {
+        "llm": {
+          "calls": 4,
+          "errors": 0,
+          "p50Ms": 33739,
+          "p95Ms": 36821,
+          "totalMs": 125267,
+          "inputTokens": 14989,
+          "outputTokens": 25851,
+          "costUsd": 0.069124
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "suite": "transcription",
+      "results": [
+        {
+          "id": "copia-budget",
+          "pass": false,
+          "metrics": {
+            "wer": 1,
+            "recall": 0,
+            "entities": "0/4",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "brightline-coffee",
+          "pass": false,
+          "metrics": {
+            "wer": 1,
+            "recall": 0,
+            "entities": "0/11",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "reelsaw-stack",
+          "pass": false,
+          "metrics": {
+            "wer": 1,
+            "recall": 0,
+            "entities": "0/9",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "qwen-anthropic",
+          "pass": false,
+          "metrics": {
+            "wer": 1,
+            "recall": 0,
+            "entities": "0/12",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        },
+        {
+          "id": "podcast-names",
+          "pass": false,
+          "metrics": {
+            "wer": 1,
+            "recall": 0,
+            "entities": "0/7",
+            "falseIns": 0,
+            "autoFixed": 0
+          },
+          "notes": ""
+        }
+      ],
+      "metrics": {
+        "meanWer": {
+          "value": 1,
+          "better": "lower",
+          "tolerance": 0.02
+        },
+        "meanEntityRecall": {
+          "value": 0,
+          "better": "higher",
+          "tolerance": 0.05
+        },
+        "falseInsertions": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 16868,
+      "meter": {
+        "llm": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 1892,
+          "p95Ms": 1965,
+          "totalMs": 9084,
+          "inputTokens": 1620,
+          "outputTokens": 164,
+          "costUsd": 0.00732
+        },
+        "stt": {
+          "calls": 5,
+          "errors": 0,
+          "p50Ms": 1477,
+          "p95Ms": 1796,
+          "totalMs": 7769,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "costUsd": 0.007295
+        }
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "suite": "disfluency",
+      "results": [
+        {
+          "id": "01-for-by-whatever-s-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…up, and it's already spoken [for] by whatever's due next, with…”"
+        },
+        {
+          "id": "02-the-car-payments-due",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…rents due on the third, [the] car payments due on the…”"
+        },
+        {
+          "id": "03-for-out-of-whatever-s",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show up, they get paid [for] out of whatever's left in…”"
+        },
+        {
+          "id": "04-pay-actual-pay-dates",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repair 80%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…when laid out against your [pay] actual pay dates. So you…”"
+        },
+        {
+          "id": "05-of-after-every-dollar",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…it becomes a problem instead [of] after. Every dollar already has…”"
+        },
+        {
+          "id": "06-into-between-now-and",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…for money to quietly disappear [into] between now and your next…”"
+        },
+        {
+          "id": "07-is-is-that-resistance",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 84%",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…the point of this slide [is,] is that resistance starch is…”"
+        },
+        {
+          "id": "08-a-small-a-small-little",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this can maybe cause like [a small,] a small little change to…”"
+        },
+        {
+          "id": "09-helpful-helpful-tool-if",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…here. It can be a [helpful] helpful tool. If it's something…”"
+        },
+        {
+          "id": "10-of-walks-out-of",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…an admin of some kind [of] walks out of his office,…”"
+        },
+        {
+          "id": "11-he-s-like-he-s-like-son",
+          "pass": false,
+          "metrics": {
+            "expect": "keep",
+            "got": "repetition 84%",
+            "outcome": "FP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…out of his office, and [he's like,] he's like, son, and I…”"
+        },
+        {
+          "id": "12-blah-blah-blah-right",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…be working for me, like, [blah,] blah, blah, right? And he's…”"
+        },
+        {
+          "id": "13-blah-blah-right-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (intentional 'blah, blah, blah') · “…working for me, like, blah, [blah,] blah, right? And he's like,…”"
+        },
+        {
+          "id": "14-he-said-he-said-success",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 94% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…they exist. And that's when [he said] he said, success is the…”"
+        },
+        {
+          "id": "15-that-s-when-that-s-when-you",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…wanted to be friends with, [that's when,] that's when you want people…”"
+        },
+        {
+          "id": "16-i-mean-that-s-why-i",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…my soul from this year. [I mean,] that's why I mean, I…”"
+        },
+        {
+          "id": "17-very-very-beginning-people",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…about, you know, at the [very,] very beginning, people say, you…”"
+        },
+        {
+          "id": "18-you-know-you-know-uh",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…happy and then they start, [you know,] you know, uh, saying bad…”"
+        },
+        {
+          "id": "19-uh-saying-bad-things",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…start, you know, you know, [uh,] saying bad things. Reminder that…”"
+        },
+        {
+          "id": "20-uh-and-so-like",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…to do because they conform. [Uh,] and so like if there's…”"
+        },
+        {
+          "id": "21-i-i-think-that",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…you do it anyways. And [I,] I think that a lot…”"
+        },
+        {
+          "id": "22-um-being-able-to",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "filler 97% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "filler · hand-labelled · “…no one does. Yeah, it's, [um,] being able to think for…”"
+        },
+        {
+          "id": "23-really-really-hard-you-ve",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled (emphasis) · “…because in the beginning it's [really,] really hard. You've been resting…”"
+        },
+        {
+          "id": "24-with-past-trauma-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…and the way you've dealt [with] past trauma and your parents'…”"
+        },
+        {
+          "id": "25-it-just-it-just-wasn-t",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…fathers don't apologize to sons. [It just,] it just wasn't that way.…”"
+        },
+        {
+          "id": "26-and-and-this-is",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…beat him. At his game. [And,] and this is pretty alive…”"
+        },
+        {
+          "id": "27-it-was-it-was-just",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…this much a year. Like [it was,] it was just really clear,…”"
+        },
+        {
+          "id": "28-of-like-what-game",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…never even asked the question [of] like, what game am I…”"
+        },
+        {
+          "id": "29-is-is-a-successful",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…goal because my dad was [is] is a successful man. Relatively…”"
+        },
+        {
+          "id": "30-that-that-for-that",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repetition · hand-labelled · “…man. Relatively early on. But [that,] that for that exchange, and…”"
+        },
+        {
+          "id": "31-that-for-that-exchange",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user accepted · “…Relatively early on. But that, [that] for that exchange, and then…”"
+        },
+        {
+          "id": "32-for-like-saying-what",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…and being terrible about myself [for] like saying what I said.…”"
+        },
+        {
+          "id": "33-of-in-myself-are",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…the things I'm most proud [of] in myself are the light…”"
+        },
+        {
+          "id": "34-like-throwing-like-a",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…listening to audio books and [like] throwing like a tennis ball…”"
+        },
+        {
+          "id": "35-like-playing-with-my",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…ball against the wall or [like] playing with my like in…”"
+        },
+        {
+          "id": "36-like-in-mighty-mouse",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…or like playing with my [like] in Mighty Mouse from Mars…”"
+        },
+        {
+          "id": "37-outside-of-social-groups",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…alone and being on the [outside] of social groups meant that…”"
+        },
+        {
+          "id": "38-that-the-more-you",
+          "pass": false,
+          "metrics": {
+            "expect": "cut",
+            "got": "-",
+            "outcome": "FN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user accepted · “…a different way. I think [that] the more you flex whatever…”"
+        },
+        {
+          "id": "39-of-like-independent-thinking",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…flex whatever that muscle is [of] like independent thinking, the more…”"
+        },
+        {
+          "id": "40-that-that-you-can",
+          "pass": true,
+          "metrics": {
+            "expect": "cut",
+            "got": "repetition 96% auto",
+            "outcome": "TP",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · hand-labelled · “…like what's an example of [that] that you can think of.…”"
+        },
+        {
+          "id": "41-of-like-living-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 1
+          },
+          "notes": "repair · user rejected · “…just the most basic ones [of] like living the life that…”"
+        },
+        {
+          "id": "42-of-on-autopilot-a",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…real then walking through kind [of] on autopilot. A friendly reminder…”"
+        },
+        {
+          "id": "43-like-to-freeze-and",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…veggie scrap bowl that I [like] to freeze. And then this…”"
+        },
+        {
+          "id": "44-the-end-of-the",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…summer season, although it is [the] end of the summer season,…”"
+        },
+        {
+          "id": "45-about-to-go-bad",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…some berries that are maybe [about] to go bad and you're…”"
+        },
+        {
+          "id": "46-a-baked-good-like",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…is to make them into [a] baked good like we do…”"
+        },
+        {
+          "id": "47-into-like-your-oatmeal",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…can do and mix it [into] like your oatmeal, mix it…”"
+        },
+        {
+          "id": "48-like-in-a-minute",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…show you what that looks [like] in a minute after we…”"
+        },
+        {
+          "id": "49-you-you-don-t-always",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repetition · user rejected · “…of jam. Just to show [you,] you don't always have to…”"
+        },
+        {
+          "id": "50-like-on-a-piece",
+          "pass": true,
+          "metrics": {
+            "expect": "keep",
+            "got": "-",
+            "outcome": "TN",
+            "mode": "rules+model",
+            "otherFlags": 0
+          },
+          "notes": "repair · user rejected · “…to go ahead and look [like] on a piece of toast,…”"
+        }
+      ],
+      "metrics": {
+        "precision": {
+          "value": 0.92,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "recall": {
+          "value": 0.52,
+          "better": "higher",
+          "tolerance": 0.03
+        },
+        "falsePositives": {
+          "value": 1,
+          "better": "lower"
+        },
+        "autoFalsePositives": {
+          "value": 0,
+          "better": "lower"
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 194334,
+      "meter": {
+        "llm": {
+          "calls": 163,
+          "errors": 147,
+          "p50Ms": 100,
+          "p95Ms": 1628,
+          "totalMs": 46077,
+          "inputTokens": 9247,
+          "outputTokens": 908,
+          "costUsd": 0.041361
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    },
+    {
+      "profile": "cloud-best",
+      "suite": "selection-model",
+      "results": [
+        {
+          "id": "apollo/chunk-0",
+          "pass": false,
+          "notes": "Failed after 3 attempts. Last error: GatewayRateLimitError: No access to this model at this time."
+        },
+        {
+          "id": "apollo/chunk-1",
+          "pass": false,
+          "notes": "Failed after 3 attempts. Last error: GatewayRateLimitError: No access to this model at this time."
+        },
+        {
+          "id": "apollo/chunk-2",
+          "pass": false,
+          "notes": "Failed after 3 attempts. Last error: GatewayRateLimitError: No access to this model at this time."
+        },
+        {
+          "id": "apollo/chunk-3",
+          "pass": false,
+          "notes": "Failed after 3 attempts. Last error: GatewayRateLimitError: No access to this model at this time."
+        }
+      ],
+      "metrics": {
+        "passRate": {
+          "value": 0,
+          "better": "higher"
+        },
+        "candidatesPerChunk": {
+          "value": 0,
+          "better": "higher"
+        },
+        "inRangeRate": {
+          "value": 0,
+          "better": "higher",
+          "tolerance": 0.1
+        },
+        "overlapRate": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0.1
+        },
+        "weakHookRate": {
+          "value": 0,
+          "better": "lower",
+          "tolerance": 0.1
+        }
+      },
+      "regressions": [],
+      "improvements": [],
+      "ms": 25336,
+      "meter": {
+        "llm": {
+          "calls": 12,
+          "errors": 12,
+          "p50Ms": 98,
+          "p95Ms": 172,
+          "totalMs": 1320,
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "stt": {
+          "calls": 0,
+          "errors": 0,
+          "p50Ms": 0,
+          "p95Ms": 0,
+          "totalMs": 0,
+          "inputTokens": 0,
+          "outputTokens": 0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "profile": "cloud-haiku",
+  "env": {
+    "AI_MODEL": "gateway:anthropic/claude-haiku-4.5",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "refine",
+  "since": "2026-10-17T18:16:17.425Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T18:16:17.425Z",
+  "finishedAt": "2026-10-17T18:21:17.767Z",
+  "stages": {
+    "refine": 31.7,
+    "render": 267.8
+  },
+  "totalSec": 299.5,
+  "models": {
+    "language": "gateway:anthropic/claude-haiku-4.5"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The Power of Having Nothing to Lose",
+      "hook": "Nothing to lose? You're dangerous!",
+      "startSec": 92.7,
+      "endSec": 120.8,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 1,
+      "title": "Persistence Over Time",
+      "hook": "The secret to big achievements",
+      "startSec": 168.6,
+      "endSec": 205.9,
+      "score": 81,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Finding Strength in Solitude",
+      "hook": "Embrace your solitude",
+      "startSec": 140.4,
+      "endSec": 175.1,
+      "score": 68,
+      "status": "done",
+      "layout": "face"
+    }
+  ],
+  "llm": {
+    "calls": 36,
+    "failed": 0,
+    "totalSec": 46.9,
+    "p50Ms": 1225,
+    "inputTokens": 20277,
+    "outputTokens": 4952,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 3.7
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 43
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

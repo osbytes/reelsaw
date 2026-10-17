@@ -4,10 +4,10 @@ import { eq, asc } from "drizzle-orm";
 import type { JSONObject } from "@ai-sdk/provider";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, exists } from "./common.js";
+import { StageContext, exists, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
 import { extractEntities, biasProviderOptions } from "./entities.js";
-import { providerOf } from "../ai/registry.js";
+import { underlyingProvider } from "../ai/registry.js";
 import { enqueueRefine } from "./refine.js";
 
 /**
@@ -59,7 +59,7 @@ export async function transcribe(ctx: StageContext) {
 
   await svc.ai.transcriptionModel(); // fail fast if the model id is wrong
   const entities = extractEntities(project.sourceMeta, project.settings.vocabulary);
-  const provider = providerOf(svc.config.TRANSCRIPTION_MODEL);
+  const provider = underlyingProvider(svc.config.TRANSCRIPTION_MODEL);
   const providerOptions = svc.ai.transcriptionOptions() as Record<string, JSONObject>;
   if (svc.config.TRANSCRIPT_BIAS && entities.length) {
     providerOptions[provider] = { ...(providerOptions[provider] ?? {}), ...(biasProviderOptions(provider, entities) as JSONObject) };
@@ -110,6 +110,8 @@ export async function transcribe(ctx: StageContext) {
   const sentences = toSentences(words);
 
   await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length }, async (u) => {
+  // which STT ran, so later expected-time estimates compare like with like (see pipeline/estimates.ts)
+  await u.artifact(projectId, "transcribe", "models", { chunks: chunkFiles.length, words: words.length }, modelsUsed(svc, "transcription", "align"));
   await u.db
     .insert(schema.transcripts)
     .values({

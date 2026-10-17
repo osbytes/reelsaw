@@ -20,6 +20,127 @@ Each run prints a table per suite, writes `eval/reports/<time>.{md,json}` (gitig
 baseline fails now, or a summary metric got worse than its tolerance. Cases that fail in the baseline
 too are *known issues*: they show as FAIL but don't break the run; fixing one shows up as "✓ improved".
 
+Every model call a suite makes is metered (latency, tokens, cost when the provider reports it,
+failures) and printed under the metrics as a `calls` line. Calls served from `eval/.cache` never reach
+the meter, so a cached rerun shows `cached` rather than fake latencies.
+
+## Comparing models and settings (matrix runs)
+
+The same suites run once per **profile**, a named set of env overrides on top of the repo `.env`, and
+end with one comparison table per suite: pass rate, the suite's quality metrics, wall time, LLM
+calls / p50 / p95 / tokens, STT calls / p50 / realtime factor, and cost.
+
+```sh
+pnpm eval disfluency selection-model transcription --matrix eval/bench/models.json
+pnpm eval selection-model --matrix eval/bench/models.json --profiles cloud-cheap,local-small
+pnpm eval disfluency --set AI_MODEL=gateway:anthropic/claude-haiku-4.5      # one ad-hoc profile
+pnpm eval transcription --matrix eval/bench/models.json --no-cache          # timing run: real calls
+```
+
+`eval/bench/models.json` is the starting grid (`{ "profiles": { "<name>": { "ENV": "value" } } }`):
+cloud models through the Vercel AI Gateway (`gateway:<vendor>/<model>`, one `AI_GATEWAY_API_KEY`,
+no token markup, per-request cost in the report), STT vendors directly (`deepgram:`, `groq:`,
+`assemblyai:`), local models through `compat:` (Ollama) and `openai:` + `OPENAI_BASE_URL` (Speaches).
+Keys stay in `.env`; a profile only names models and toggles. Edit the grid rather than growing it:
+8–10 profiles (a few named stacks plus one-axis sweeps) answer most questions, a full cartesian product
+does not.
+
+Rules of a fair comparison:
+
+- **Quality vs speed are separate runs.** Default runs read the cache, so a model's second run costs
+  nothing and reports no latency. `--no-cache` makes every call real (results are still stored).
+  Warm a local model once before a timed run (the first Ollama call includes loading the weights),
+  run local profiles one at a time, and repeat timing runs 3× (report shows per-run p50/p95; take the
+  median across runs by hand or from the JSON).
+- **Profiles are not baselines.** Only the default `.env` run is compared with `eval/baselines/`;
+  `--update` refuses to run with a matrix. Compare profiles with each other in the table.
+- **Record what ran.** Cloud model aliases drift; the report JSON carries the profile env, the date,
+  and per-call model ids. For local runs note hardware and `ollama --version` next to the report.
+- **Gateway ids keep their vendor's options.** `gateway:openai/whisper-1` still gets OpenAI word
+  timestamps and bias prompts (`underlyingProvider` in `ai/registry.ts`), so STT results are
+  comparable with the direct `openai:` id apart from the extra hop.
+
+Which suites say what about a model: `selection-model` (candidates per chunk, in-range / overlap /
+weak-hook rates; a model that fails structured output shows more LLM calls than chunks, from the
+plain-text fallback), `disfluency` (precision, recall, auto-applied false
+positives), `transcription` (WER, entity recall, false insertions), `cuts` (clean cut rate with the
+align model). `--json` keeps everything for a notebook.
+
+### End-to-end stage timings
+
+`pnpm --filter @reelsaw/server bench:e2e` runs the real pipeline on a whole video once per profile in
+a second, isolated compose stack (`reelsaw-bench`: own image tag, volumes and ports, see
+`eval/bench/compose.bench.yml`), so the stack you use is never restarted or re-pointed:
+
+```sh
+docker compose -p reelsaw-bench -f docker-compose.yml -f eval/bench/compose.bench.yml build app   # once per code change (ports are not needed to build)
+pnpm --filter @reelsaw/server bench:e2e -- --matrix eval/bench/models.json --profiles cloud-cheap,local-qwen14 \
+  --source "https://www.youtube.com/watch?v=9hSfOfgrl1I" --max-clips 3 [--repeat 3] [--out eval/bench/results/<name>]
+```
+
+Per profile it recreates the bench app container with the profile's env on top of `.env`, waits for
+`/api/health`, signs up a throwaway user, creates a project from the URL, polls until done, and records:
+seconds per stage from `stage.started` → last `stage.completed` (render: analyze done → project done),
+the clips picked, the models that actually ran (`stage_artifacts.models`) and every LLM call with its
+stage, latency and tokens (`LLM_TRACE=logs` in the bench stack). Output: one JSON per run plus
+`summary.{md,json}` under `eval/bench/results/`. The ASR cache is cleared whenever a profile's
+transcription model differs from the previous profile's (`--fresh-stt`: always), so each STT is paid
+for and timed once; profiles that only change the language model reuse the cached transcript and
+their transcribe cell reads `cached`. Ingest includes the download, so compare it across profiles only
+loosely. Refine steps run alongside analyze, so stages do not sum to the total.
+
+**Isolating steps.** A full run per profile re-downloads and re-transcribes the video even when only
+the language model changed. `--steps refine,analyze` instead finishes one base project with the first
+profile (or `--base-profile <name>`), then re-runs just those steps on that transcript under each
+profile (`projects.refine`, `projects.reanalyze`; analyze includes rendering the new clips). Rows are
+tagged `full` / `refine` / `analyze`; minutes per profile instead of a pipeline each, and the LLM is
+the only thing that changes between rows. Transcription is compared with full runs (STT profiles) and
+the `transcription` suite.
+
+```sh
+pnpm --filter @reelsaw/server bench:e2e -- --matrix eval/bench/models.json --profiles cloud-cheap,cloud-haiku,local-qwen14 \
+  --steps refine,analyze --source "https://www.youtube.com/watch?v=9hSfOfgrl1I" --max-clips 3
+pnpm --filter @reelsaw/server bench:e2e -- --rescan eval/bench/results/<dir>    # re-read LLM calls from the stack's logs
+```
+
+To watch runs in the bench UI (http://localhost:3200), set `BENCH_EMAIL` and `BENCH_PASSWORD` in the
+shell before starting the driver: it signs in to that account (created on first use) instead of a
+throwaway one, so the projects are yours to open.
+
+Keep `eval/bench/results/<date>-<name>/` for sets worth comparing against later (they are small
+JSON/markdown); day-to-day runs can go anywhere with `--out`.
+
+**What the first set taught us** (`eval/bench/results/2026-10-17-initial/README.md` has the numbers):
+
+- *Isolate the variable.* A full run per profile measures download + STT + LLM + ffmpeg together and
+  the noise from the first three swamps a language-model change. Use `--steps` for LLM comparisons and
+  full runs only for STT profiles; the suites (`disfluency`, `selection-model`) answer quality
+  questions far cheaper than a pipeline run does.
+- *Every profile must pin every model it depends on.* Cloud profiles that left `TRANSCRIPT_ALIGN_MODEL`
+  to `.env` re-aligned each cut on the local Speaches model and render went from ~1 to 5–9 minutes,
+  which read as "render is slow" until the LLM trace showed no LLM calls in that window. The grid now
+  sets the align model in each profile.
+- *Capability, not just speed.* `gpt-4o-transcribe` returns segments without word timestamps and the
+  pipeline fails at "Transcription returned no words"; Sonnet was intermittently "No access to this
+  model" on the gateway. A failed row is still a result: keep it, note why.
+- *Slow local models hit job expiry.* The refine disfluency job expires after 30 minutes
+  (`queueDefs` in `queue/boss.ts`); a 4B/14B model at ~40 s per verifier call with 50+ candidates on a
+  20-minute video does not finish, so "refine 1800 s" means expired, not done. Either budget the
+  verifier (batch candidates, cap calls per project) or treat `DISFLUENCY_LLM=false` as the local
+  default; the bench should flag a stage equal to its queue expiry.
+- *Rate limits are part of the profile.* The gateway's free tier allows 5 requests/min/model, which
+  turns a 30 s refine into 10 minutes of 429 retries. Buy credits (or lower concurrency) before timing
+  anything; the eval runner now recognises the credit-card / quota errors as "unavailable" and skips
+  instead of failing cases one by one.
+- *Cost is a column.* The gateway reports per-request cost in `providerMetadata`; the suite
+  comparison shows it. The e2e bench only sees latency and tokens from the trace log, so add the
+  gateway's cost to the trace line next.
+- *Repeat for variance.* `--repeat` exists; one run per profile was enough to find the above but not
+  to rank haiku vs sonnet on a 30 s stage. Three runs on the step rows is the next cheap win.
+
+Not covered yet: a judged comparison of the clips two profiles pick from the same source (pairwise,
+blind, fixed judge model), and gold labels from user decisions once the decision log exists.
+
 ## Suites
 
 | suite | needs | what it checks |
@@ -29,7 +150,7 @@ too are *known issues*: they show as FAIL but don't break the run; fixing one sh
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |
 | `transcription` | STT + LLM, macOS `say` for audio | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction |
-| `selection-model` | LLM | one real map call per sampled chunk: candidates parse, land inside the chunk and snap |
+| `selection-model` | LLM | one real map call per sampled chunk: candidates parse, land inside the chunk and snap; model-free quality proxies (in-range, overlapping, weak-hook rates) for comparing models |
 | `disfluency` | nothing (`--offline`: rules only); LLM for the full pipeline | precision / recall / auto-applied false positives of disfluency detection on 50 reviewed real-transcript windows (user-accepted = cut, user-rejected = keep, plus hand-labelled emphasis and stutters). LLM calls are cached by prompt |
 
 Known issues recorded in the baselines today:

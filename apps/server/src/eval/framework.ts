@@ -17,6 +17,8 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
+import type { AiService } from "../ai/registry.js";
+import type { Meter } from "./meter.js";
 
 export type Need = "models" | "network" | "media";
 
@@ -55,7 +57,16 @@ export interface EvalContext {
   verbose: boolean;
   /** extra `--key value` args for suites, e.g. `--transcription-models a,b` */
   opt(name: string): string | undefined;
+  /**
+   * Which configuration this run uses: "default" is the repo .env; a matrix run (`--matrix`,
+   * `--set`) names one profile per pass. Only "default" is compared with the baselines.
+   */
+  profile: string;
+  /** the configuration of this profile (the .env with the profile's overrides applied) */
   config(): Config;
+  /** models for this profile; language models come back metered (see meter.ts) */
+  ai: AiService;
+  meter: Meter;
   log: Logger;
   cached<T>(key: unknown, fn: () => Promise<T>): Promise<T>;
   /** run a command, return stdout; throws with stderr tail on failure */
@@ -85,13 +96,16 @@ export function exec(cmd: string, args: string[]): Promise<Buffer> {
   });
 }
 
-export function makeCache(dir: string) {
+/** `readThrough: false` (--no-cache) always calls `fn` but still stores the result, for timing runs. */
+export function makeCache(dir: string, readThrough = true) {
   return async <T>(key: unknown, fn: () => Promise<T>): Promise<T> => {
     const file = path.join(dir, "calls", `${hashOf(key)}.json`);
-    try {
-      return JSON.parse(await fs.readFile(file, "utf8")) as T;
-    } catch {
-      /* miss */
+    if (readThrough) {
+      try {
+        return JSON.parse(await fs.readFile(file, "utf8")) as T;
+      } catch {
+        /* miss */
+      }
     }
     const value = await fn();
     await fs.mkdir(path.dirname(file), { recursive: true });
@@ -215,8 +229,8 @@ export function iou(a: [number, number, number, number], b: [number, number, num
   return u > 0 ? inter / u : 0;
 }
 
-/** True for "the model/server isn't there" errors, which make a case skipped rather than failed. */
+/** True for "the model/server isn't there" errors (including billing/quota refusals), which make a case skipped rather than failed. */
 export function isUnavailable(err: unknown): boolean {
   const m = String((err as Error)?.message ?? err);
-  return /Cannot connect to API|ECONNREFUSED|ENOTFOUND|fetch failed|EAI_AGAIN|socket hang up|model .* not found/i.test(m);
+  return /Cannot connect to API|ECONNREFUSED|ENOTFOUND|fetch failed|EAI_AGAIN|socket hang up|model .* not found|requires a valid credit card|insufficient[_ ]quota|insufficient credits|needs [A-Z_]+ (or [A-Z_]+ )?to be set/i.test(m);
 }

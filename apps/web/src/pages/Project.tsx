@@ -11,11 +11,13 @@ import { useToast } from "../lib/toast";
 import { describeEvent, type Tone } from "../lib/activity";
 import { writeHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ConfirmDialog, ProgressBar } from "../components/ui";
+import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
+import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
@@ -102,15 +104,43 @@ export function ProjectPage() {
   const readyCount = sortedClips.filter((c) => c.status === "done").length;
   const failedClips = sortedClips.filter((c) => c.status === "failed");
 
+  // wall clock per stage from the events, and what this instance expects from its past projects
+  const times = useMemo(() => stageTimes(log), [log]);
+  const estimates = p?.estimates ?? null;
+  const expectedFor = (stage: string) => estimates?.find((e) => e.stage === stage) ?? null;
+  const now = useNow(active);
   const activity = useMemo(
     () =>
       log
         .filter((e) => e.type !== "stage.progress")
-        .map((e) => ({ e, d: describeEvent(e) }))
+        .map((e) => {
+          const d = describeEvent(e);
+          if (!d) return { e, d };
+          // "Transcribe finished in 4:50 (expected ~4:00)" / "All done … in 19:53"
+          if (e.type === "stage.completed") {
+            const stage = String((e.payload as { stage?: unknown }).stage);
+            const t = times[stage];
+            const est = expectedFor(stage);
+            if (t?.completedAt !== undefined) d.text += ` in ${formatTime((t.completedAt - t.startedAt) / 1000)}${est ? ` (expected ~${formatTime(est.expectedSec)})` : ""}`;
+          } else if (e.type === "project.done" && times.createdAt !== undefined && times.finishedAt !== undefined) {
+            d.text += ` in ${formatTime((times.finishedAt - times.createdAt) / 1000)}`;
+          }
+          return { e, d };
+        })
         .filter((x): x is { e: ProjectEvent; d: NonNullable<ReturnType<typeof describeEvent>> } => !!x.d)
         .reverse(),
-    [log],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [log, times, estimates],
   );
+  // the running stage: elapsed so far and what to expect, for the header and the waiting panel
+  const eta = (() => {
+    if (!p || !active || !p.stage) return null;
+    const t = times[p.stage];
+    const est = expectedFor(p.stage);
+    if (!t && !est) return null;
+    const elapsedSec = t ? Math.max(0, (now - t.startedAt) / 1000) : null;
+    return { stage: p.stage, elapsedSec, expectedSec: est?.expectedSec ?? null, source: est?.source ?? null, samples: est?.samples ?? 0 };
+  })();
   const stalled = useMemo(() => {
     const last = [...log].reverse().find((e) => e.type !== "stage.progress");
     return active && last?.type === "job.stalled" && last.id !== stallDismissed ? last : null;
@@ -196,7 +226,7 @@ export function ProjectPage() {
   }, [togglePlay]);
 
   if (q.isLoading) return <p className="p-6 text-ink3">Loading…</p>;
-  if (q.error || !p) return <p className="p-6 text-err">{q.error?.message ?? "Not found"}</p>;
+  if (q.error || !p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
 
   const overlays = p.transcript?.overlays ?? [];
   const presentation = !!p.transcript?.textProfile?.presentation;
@@ -304,6 +334,15 @@ export function ProjectPage() {
             <span>Uploaded file</span>
           )}
           {activityTrigger}
+          {eta && (
+            <span
+              className="inline-block min-w-[104px] font-mono text-xs tabular-nums leading-5 text-ink3"
+              title={`${STAGE_LABEL[eta.stage] ?? eta.stage}: elapsed${eta.expectedSec !== null ? ` / expected, ${eta.source === "history" ? `from ${eta.samples} finished project${eta.samples === 1 ? "" : "s"} with these models` : "default until a project finishes with these models"}` : ""}`}
+            >
+              {eta.elapsedSec !== null ? formatTime(eta.elapsedSec) : "–:––"}
+              {eta.expectedSec !== null ? ` / ~${formatTime(eta.expectedSec)}` : ""}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -493,6 +532,10 @@ export function ProjectPage() {
         <b className="text-base">{stageIdx <= 0 ? "Downloading…" : `Transcribing… ${Math.round((progress?.stage === "transcribe" ? progress.value : (p.stageProgress ?? 0)) * 100)}%`}</b>
         <span className="text-[13px] leading-relaxed text-ink2">The transcript appears here when transcription finishes. Fixes, then clips, follow. You can leave; this keeps running on the server.</span>
         <ProgressBar value={progress?.value ?? p.stageProgress ?? 0} />
+        <div className="flex h-5 justify-between font-mono text-xs tabular-nums leading-5 text-ink3">
+          <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
+          <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the download"}</span>
+        </div>
         {[92, 78, 85, 60, 88, 70].map((w, i) => (
           <div key={i} className="flex gap-2.5">
             <div className="h-3.5 w-10 rounded-full bg-sunk" />

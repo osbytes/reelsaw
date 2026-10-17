@@ -1,0 +1,87 @@
+{
+  "profile": "cloud-cheap",
+  "env": {
+    "AI_MODEL": "gateway:openai/gpt-4o-mini",
+    "TRANSCRIPTION_MODEL": "gateway:openai/whisper-1"
+  },
+  "run": 1,
+  "step": "full",
+  "projectId": "f469d1f3-b216-44cc-9156-1f59ff8a3a93",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T17:10:12.733Z",
+  "finishedAt": "2026-10-17T17:21:37.288Z",
+  "stages": {
+    "ingest": 13.3,
+    "transcribe": 75.6,
+    "refine": 36,
+    "analyze": 7.3,
+    "render": 547
+  },
+  "totalSec": 681.8,
+  "models": {
+    "language": "gateway:openai/gpt-4o-mini"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "Hard Work Equals Worth",
+      "hook": "If it's hard, it's worth it!",
+      "startSec": 0,
+      "endSec": 22.3,
+      "score": 58,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 1,
+      "title": "Rooting for Yourself Matters",
+      "hook": "Be your own biggest fan!",
+      "startSec": 32,
+      "endSec": 53.9,
+      "score": 65,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 2,
+      "title": "The Lonely Chapter Explained",
+      "hook": "Ever felt alone in growth?",
+      "startSec": 54.6,
+      "endSec": 84.5,
+      "score": 58,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 47,
+    "failed": 0,
+    "totalSec": 75.7,
+    "p50Ms": 1484,
+    "inputTokens": 27542,
+    "outputTokens": 6315,
+    "byStage": {
+      "refine.entities": {
+        "calls": 2,
+        "totalSec": 4.7
+      },
+      "refine.disfluency": {
+        "calls": 34,
+        "totalSec": 50.9
+      },
+      "analyze": {
+        "calls": 11,
+        "totalSec": 19.5
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "profile": "local-gemma3",
+  "env": {
+    "AI_MODEL": "compat:gemma3:latest",
+    "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+    "OPENAI_COMPATIBLE_API_KEY": "ollama",
+    "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8000/v1",
+    "OPENAI_API_KEY": "local"
+  },
+  "run": 1,
+  "step": "analyze",
+  "since": "2026-10-17T19:32:11.561Z",
+  "projectId": "3a62a53b-50bb-4d3b-9d3e-ad871f2e9727",
+  "status": "done",
+  "error": null,
+  "durationSec": 1213.986,
+  "startedAt": "2026-10-17T19:32:11.561Z",
+  "finishedAt": "2026-10-17T19:33:55.660Z",
+  "stages": {
+    "analyze": 80.5,
+    "render": 21
+  },
+  "totalSec": 101.5,
+  "models": {
+    "language": "compat:gemma3:latest",
+    "languageEndpoint": "host.docker.internal:11434"
+  },
+  "clips": [
+    {
+      "index": 0,
+      "title": "The Lonely Chapter",
+      "hook": "Let them go.",
+      "startSec": 199.5,
+      "endSec": 229.6,
+      "score": 86,
+      "status": "done",
+      "layout": "mixed"
+    },
+    {
+      "index": 1,
+      "title": "Root for Yourself",
+      "hook": "Root for yourself first.",
+      "startSec": 234.5,
+      "endSec": 260.3,
+      "score": 83,
+      "status": "done",
+      "layout": "face"
+    },
+    {
+      "index": 2,
+      "title": "Success is the Revenge",
+      "hook": "Success is the only revenge.",
+      "startSec": 113.5,
+      "endSec": 133.9,
+      "score": 82,
+      "status": "done",
+      "layout": "mixed"
+    }
+  ],
+  "llm": {
+    "calls": 6,
+    "failed": 0,
+    "totalSec": 78.7,
+    "p50Ms": 11662,
+    "inputTokens": 12172,
+    "outputTokens": 2414,
+    "byStage": {
+      "analyze": {
+        "calls": 6,
+        "totalSec": 78.7
+      }
+    }
+  },
+  "machine": {
+    "platform": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "memGb": 36,
+    "node": "v24.7.0"
+  }
+}
