@@ -11,6 +11,7 @@ import { LoginPage } from "./pages/Login";
 import { ProjectsPage } from "./pages/Projects";
 import { NewProjectPage } from "./pages/NewProject";
 import { ProjectPage } from "./pages/Project";
+import { LibraryPage } from "./pages/Library";
 import { SettingsPage } from "./pages/Settings";
 import { PendingPage } from "./pages/Pending";
 import { AdminUsersPage } from "./pages/AdminUsers";
@@ -128,6 +129,9 @@ export function TopBar() {
         <NavLink to="/" className={() => nav({ isActive: inProjects })}>
           Projects
         </NavLink>
+        <NavLink to="/library" className={nav}>
+          Library
+        </NavLink>
         <NavLink to="/settings" className={nav}>
           Settings
         </NavLink>
@@ -184,6 +188,7 @@ export function App() {
       <Route path="/consent" element={<ConsentPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
+      <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />

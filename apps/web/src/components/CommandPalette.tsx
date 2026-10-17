@@ -3,12 +3,13 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
-import { ChevronLeft, Download, ExternalLink, Film, FolderOpen, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, Download, ExternalLink, Film, FolderOpen, Images, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
 import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
 import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
-import { useUploads } from "../lib/uploads";
+import { setPendingBumperFile, useUploads } from "../lib/uploads";
+import { useMe } from "../lib/account";
 import { useToast } from "../lib/toast";
 import { extractUrls, isOnlyUrls, linkKey } from "../lib/links";
 import { ago } from "../lib/time";
@@ -25,7 +26,7 @@ const Ctx = createContext<(q?: string) => void>(() => {});
 export const useCommandPalette = () => useContext(Ctx);
 
 /** What the action list (→) is about. */
-type Target = { kind: "project" | "clip"; id: string };
+type Target = { kind: "project" | "clip" | "asset"; id: string } | { kind: "pick"; slot: "intro" | "outro"; id: string };
 
 interface Item {
   key: string;
@@ -100,12 +101,23 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const [, toggleTheme] = useTheme();
   const { startProjects, openWithFile } = useUploads();
   const fileRef = useRef<HTMLInputElement>(null);
+  const bumperFileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const retry = useMutation(trpc.projects.retry.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
+  const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
+  const setDefault = useMutation(trpc.bumpers.setDefault.mutationOptions());
+  const removeAsset = useMutation(trpc.bumpers.delete.mutationOptions());
+  const defaults = useMe().data?.projectDefaults;
+
+  // the intro/outro library, fetched only while the palette is open
+  const libQ = useQuery({ ...trpc.bumpers.list.queryOptions(), enabled: open, staleTime: 30_000 });
+  const library = libQ.data?.assets;
+  const libFuse = useMemo(() => (library ? createFuzzy(library, [{ name: "name", weight: 1 }]) : null), [library]);
+  const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
 
   // one small index of every project and clip, fuzzy-matched locally as you type
   const indexQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 30_000 });
@@ -136,7 +148,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
 
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
-  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete"; id: string; title: string }>(null);
+  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "asset"; id: string; title: string }>(null);
   const savedQ = useRef("");
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -222,6 +234,43 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     // ----- an item's own action list -----
     if (target) {
       const acts: Item[] = [];
+      if (target.kind === "pick") {
+        const { slot, id: projectId } = target;
+        const label = slot === "intro" ? "Intro" : "Outro";
+        const n = stats.get(projectId)?.done ?? 0;
+        const choose = (choice: string, name: string) =>
+          go(() => {
+            setBumpers.mutateAsync({ id: projectId, [slot]: choice, rerender: false }).then(
+              () => (refresh(projectId), toast(`${label}: ${name}. Saved; re-render ${plural(n, "clip")} to apply`)),
+              (err: Error) => toast(`Couldn’t set the ${slot}: ${err.message.slice(0, 120)}`),
+            );
+          });
+        const P = (key: string, text: string, run: () => void, hint?: string, thumb?: string): Item => ({ key: `tp-${key}`, group: label, label: text, hint, icon: <Images className="h-4 w-4" />, thumb, run });
+        acts.push(P("default", `Default (${assetName(defaults?.[slot === "intro" ? "introAssetId" : "outroAssetId"])})`, choose("default", "default"), "What Settings say now"));
+        acts.push(P("none", "None", choose("none", "none"), "No " + slot + " on this project"));
+        for (const a of library ?? []) acts.push(P(a.id, a.name, choose(a.id, a.name), `${a.kind} · ${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`));
+        return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
+      }
+      if (target.kind === "asset") {
+        const a = library?.find((x) => x.id === target.id);
+        if (!a) return out;
+        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
+        for (const slot of ["intro", "outro"] as const) {
+          const current = defaults?.[slot === "intro" ? "introAssetId" : "outroAssetId"];
+          acts.push(
+            A(
+              slot,
+              current === a.id ? `Stop using as ${slot} default` : `Use as ${slot} default`,
+              <Images className="h-4 w-4" />,
+              act(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`, "Couldn’t save", () => setDefault.mutateAsync({ slot, assetId: current === a.id ? null : a.id }).then(() => qc.invalidateQueries({ queryKey: trpc.me.pathKey() })), undefined),
+              "For new projects",
+            ),
+          );
+        }
+        acts.unshift(A("open", "Open in library", <ExternalLink className="h-4 w-4" />, go(() => nav(`/library#asset=${a.id}`))));
+        acts.push(A("remove", "Remove", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "asset", id: a.id, title: a.name })), a.usedBy ? `Used by ${plural(a.usedBy, "project")}; they keep rendering with it` : "You can restore it for 30 days", true));
+        return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
+      }
       if (target.kind === "project") {
         const p = d?.projects.find((x) => x.id === target.id);
         if (!p) return out;
@@ -239,6 +288,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
               act(`Retrying ${plural(s.failed.length, "failed clip")}`, "Couldn’t retry", () => Promise.all(s.failed.map((c) => rerender.mutateAsync({ id: c.id }))), p.id),
             ),
           );
+        acts.push(A("intro", "Set intro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "intro", id: p.id })), "Default, none or a library item"));
+        acts.push(A("outro", "Set outro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "outro", id: p.id })), "Default, none or a library item"));
         if (p.status === "done" || p.status === "failed") acts.push(A("refine", "Re-run refine", <Sparkles className="h-4 w-4" />, go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })), "Names, disfluencies, scene changes"));
         acts.push(A("delete", "Delete project", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })), "Removes the source, transcript and every clip", true));
       } else {
@@ -290,6 +341,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       { key: "a-new", group: "Actions", icon: <Plus className="h-4 w-4" />, label: "New project", hint: "paste a link or upload", run: go(() => nav("/new")) },
       { key: "a-upload", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload videos…", hint: "several start a project each", run: () => fileRef.current?.click() },
       { key: "a-projects", group: "Actions", icon: <FolderOpen className="h-4 w-4" />, label: "Go to projects", run: go(() => nav("/")) },
+      { key: "a-library", group: "Actions", icon: <Images className="h-4 w-4" />, label: "Go to library", hint: "intros and outros", run: go(() => nav("/library")) },
+      { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload intro / outro…", hint: "video or image for your library", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
@@ -329,6 +382,20 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     }
     const actionFuse = createFuzzy(actions, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 });
     for (const r of actionFuse.search(ql, 3)) out.push({ ...r.item, label: <Highlight text={String(r.item.label)} matches={r.matches} k="label" /> });
+    if (libFuse) {
+      for (const r of libFuse.search(ql).slice(0, 5)) {
+        const a = r.item;
+        out.push({
+          key: `l-${a.id}`,
+          group: "Library",
+          icon: <Images className="h-4 w-4" />,
+          label: <Highlight text={a.name} matches={r.matches} k="name" />,
+          hint: `${a.kind} · ${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s · ${a.usedBy ? `used by ${plural(a.usedBy, "project")}` : "not used yet"}`,
+          actions: { kind: "asset", id: a.id },
+          run: go(() => nav(`/library#asset=${a.id}`)),
+        });
+      }
+    }
     if (fuse) {
       for (const r of fuse.projects.search(ql).slice(0, 6)) out.push(projectItem(r.item, "Projects", <Highlight text={r.item.title} matches={r.matches} k="title" />));
       for (const r of fuse.clips.search(ql).slice(0, 10)) {
@@ -349,7 +416,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, linkMode, urls, target, index, fuse, stats, failedClips, failedProjects]);
+  }, [q, linkMode, urls, target, index, fuse, stats, failedClips, failedProjects, library, libFuse, defaults]);
 
   useEffect(() => setCursor(0), [q, target]);
   useEffect(() => {
@@ -357,8 +424,11 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   }, [open]);
   // the item an open action list belongs to was deleted: back to the list
   useEffect(() => {
-    if (target && index && !(target.kind === "project" ? index.projects.some((p) => p.id === target.id) : index.clips.some((c) => c.id === target.id))) setTarget(null);
-  }, [target, index]);
+    if (!target) return;
+    if (target.kind === "asset") {
+      if (library && !library.some((a) => a.id === target.id)) setTarget(null);
+    } else if (index && !(target.kind === "project" || target.kind === "pick" ? index.projects.some((p) => p.id === target.id) : index.clips.some((c) => c.id === target.id))) setTarget(null);
+  }, [target, index, library]);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     listRef.current?.querySelector(`[data-idx="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
@@ -375,7 +445,15 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     setQ(savedQ.current);
     inputRef.current?.focus();
   };
-  const crumb = target ? (target.kind === "project" ? index?.projects.find((p) => p.id === target.id)?.title : index?.clips.find((c) => c.id === target.id)?.title || "Untitled clip") : null;
+  const crumb = !target
+    ? null
+    : target.kind === "asset"
+      ? library?.find((a) => a.id === target.id)?.name
+      : target.kind === "pick"
+        ? `${index?.projects.find((p) => p.id === target.id)?.title ?? ""} · ${target.slot === "intro" ? "Intro" : "Outro"}`
+        : target.kind === "project"
+          ? index?.projects.find((p) => p.id === target.id)?.title
+          : index?.clips.find((c) => c.id === target.id)?.title || "Untitled clip";
 
   let lastGroup = "";
   return (
@@ -444,7 +522,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                     back();
                   }
                 }}
-                placeholder={target ? "Filter actions…" : "Search projects and clips, or paste video links…"}
+                placeholder={target ? (target.kind === "pick" ? "Filter intros and outros…" : "Filter actions…") : "Search projects, clips and your library, or paste video links…"}
                 className="h-[52px] min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink3 focus-visible:outline-none"
                 aria-label={target ? "Filter actions" : "Search"}
               />
@@ -511,6 +589,21 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
               <span className="ml-auto hidden sm:inline">{target ? "esc goes back" : `Drop videos anywhere to start projects · ${MOD}K`}</span>
             </div>
             <input
+              ref={bumperFileRef}
+              type="file"
+              accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
+              className="hidden"
+              aria-label="Choose an intro or outro file"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                onOpenChange(false);
+                setPendingBumperFile(f);
+                nav("/library");
+              }}
+            />
+            <input
               ref={fileRef}
               type="file"
               multiple
@@ -539,6 +632,21 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           refine.mutateAsync({ id: c.id }).then(
             () => (refresh(c.id), toast("Re-running refine")),
             (err: Error) => toast(`Couldn’t re-run refine: ${err.message.slice(0, 120)}`),
+          );
+        }}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "asset"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title="Remove from your library?"
+        body={`“${confirm?.title ?? ""}” is hidden from pickers and defaults. Projects that use it keep rendering with it. You can restore it for 30 days.`}
+        confirm="Remove"
+        danger
+        onConfirm={() => {
+          const c = confirm!;
+          removeAsset.mutateAsync({ id: c.id }).then(
+            () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }), toast("Removed. You can restore it in the library.")),
+            (err: Error) => toast(`Couldn’t remove: ${err.message.slice(0, 120)}`),
           );
         }}
       />

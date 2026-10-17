@@ -1,6 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router";
-import { Plus } from "lucide-react";
+import { useRef } from "react";
+import { Link, useNavigate } from "react-router";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
+import { useCommandPalette } from "../components/CommandPalette";
+import { setPendingBumperFile, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
@@ -9,6 +13,74 @@ import { ago } from "../lib/time";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
+
+/** New project plus a chevron menu for the other ways to add things. Both parts have fixed widths. */
+function NewProjectMenu() {
+  const nav = useNavigate();
+  const openPalette = useCommandPalette();
+  const { startProjects, openWithFile } = useUploads();
+  const videos = useRef<HTMLInputElement>(null);
+  const bumper = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex shrink-0">
+      <Link to="/new" className="btn-primary w-[9.5rem] justify-center rounded-r-none py-2.5 text-sm no-underline">
+        <Plus className="h-4 w-4" /> New project
+      </Link>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" className="btn-primary w-10 justify-center rounded-l-none border-l border-white/30 px-0 py-2.5" aria-label="More ways to add" title="More ways to add">
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[240px]">
+            <DropdownMenu.Item className="menu-item" onSelect={() => videos.current?.click()}>
+              <Film className="h-4 w-4" /> Upload videos…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => openPalette()}>
+              <Link2 className="h-4 w-4" /> Paste links…
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+            <DropdownMenu.Item className="menu-item" onSelect={() => bumper.current?.click()}>
+              <Upload className="h-4 w-4" /> Upload intro / outro…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => nav("/library")}>
+              <Images className="h-4 w-4" /> Open library
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <input
+        ref={videos}
+        type="file"
+        multiple
+        accept="video/*,.mkv,.mov,.mp4,.webm"
+        className="hidden"
+        aria-label="Choose videos"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = "";
+          if (files.length === 1) openWithFile(files[0]!);
+          else if (files.length > 1) startProjects(files);
+        }}
+      />
+      <input
+        ref={bumper}
+        type="file"
+        accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
+        className="hidden"
+        aria-label="Choose an intro or outro file"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          setPendingBumperFile(f);
+          nav("/library");
+        }}
+      />
+    </div>
+  );
+}
 
 export function ProjectsPage() {
   const trpc = useTRPC();
@@ -36,9 +108,7 @@ export function ProjectsPage() {
               <p className="mt-1 min-h-5" />
             )}
           </div>
-          <Link to="/new" className="btn-primary py-2.5 text-sm no-underline">
-            <Plus className="h-4 w-4" /> New project
-          </Link>
+          <NewProjectMenu />
         </div>
 
         {q.isLoading && <p className="text-ink3">Loading projects…</p>}

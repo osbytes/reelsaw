@@ -35,6 +35,17 @@ export function takePendingFile(): File | null {
   return f;
 }
 
+/** An intro/outro file picked outside the Library page (⌘K, the Projects menu); the page uploads it on arrival. */
+let pendingBumper: File | null = null;
+export const setPendingBumperFile = (f: File) => {
+  pendingBumper = f;
+};
+export function takePendingBumperFile(): File | null {
+  const f = pendingBumper;
+  pendingBumper = null;
+  return f;
+}
+
 interface Job {
   key: string;
   name: string;

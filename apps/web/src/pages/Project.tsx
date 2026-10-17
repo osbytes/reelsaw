@@ -14,6 +14,7 @@ import { ConfirmDialog, ProgressBar } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
+import { ProjectBumpersModal } from "../components/BumperField";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
@@ -57,6 +58,7 @@ export function ProjectPage() {
   const [srcTime, setSrcTime] = useState(0);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
   const [actOpen, setActOpen] = useState(false);
+  const [bumpersOpen, setBumpersOpen] = useState(false);
   const [drawer, setDrawer] = useState(true);
   const [preview, setPreview] = useState<ClipView | null>(null);
   const [stallDismissed, setStallDismissed] = useState<number | null>(null);
@@ -393,6 +395,10 @@ export function ProjectPage() {
                   <div className="text-xs text-ink3">Replaces current clips</div>
                 </DropdownMenu.Item>
               )}
+              <DropdownMenu.Item className="menu-item block" onSelect={() => setBumpersOpen(true)}>
+                Intro and outro
+                <div className="text-xs text-ink3">Default, none or a library item</div>
+              </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}>
                 Report an issue…
                 <div className="text-xs text-ink3">Send the project's data and logs</div>
@@ -720,6 +726,7 @@ export function ProjectPage() {
         danger
         onConfirm={() => del.mutateAsync({ id }).then(() => nav("/"))}
       />
+      <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} />
     </div>
   );
 }
