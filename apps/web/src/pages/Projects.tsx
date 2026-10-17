@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
 import { useCommandPalette } from "../components/CommandPalette";
-import { setPendingBumperFile, useUploads } from "../lib/uploads";
+import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useTRPC } from "../lib/trpc";
 import { StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
@@ -67,14 +67,15 @@ function NewProjectMenu() {
       <input
         ref={bumper}
         type="file"
+        multiple
         accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
         className="hidden"
-        aria-label="Choose an intro or outro file"
+        aria-label="Choose intro or outro files"
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          const files = [...(e.target.files ?? [])];
           e.target.value = "";
-          if (!f) return;
-          setPendingBumperFile(f);
+          if (!files.length) return;
+          setPendingBumperFiles(files);
           nav("/library");
         }}
       />

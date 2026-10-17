@@ -1,0 +1,1 @@
+ALTER TABLE "bumper_assets" ADD COLUMN "thumbnail_key" text;

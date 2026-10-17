@@ -9,7 +9,7 @@ import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
 import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
 import { Segmented, Modal, Kbd } from "./ui";
-import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, effectiveAsset, useBumperLibrary } from "./BumperField";
+import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, effectiveAsset, effectiveSeconds, useBumperLibrary } from "./BumperField";
 import { ThemeToggle } from "../App";
 import { useHistory } from "../lib/history";
 import {
@@ -504,14 +504,16 @@ export function ClipEditor(props: Props) {
   const introId = effectiveAsset(bumpers.intro, settings.introAssetId);
   const outroId = effectiveAsset(bumpers.outro, settings.outroAssetId);
   const libAll = [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])];
-  const secLabel = (id: string | null | undefined, last: number | undefined) => {
-    const n = id ? (libAll.find((a) => a.id === id)?.durationSec ?? last) : undefined;
+  // effective length: an image uses this clip's seconds, else the project's, else its own; a video its own length
+  const secLabel = (slot: "intro" | "outro", id: string | null | undefined, last: number | undefined) => {
+    const asset = id ? libAll.find((a) => a.id === id) : undefined;
+    const n = !id ? undefined : asset?.kind === "image" ? effectiveSeconds(bumpers[`${slot}Sec`], bumpers[slot], settings[`${slot}Sec`], asset.durationSec) : (asset?.durationSec ?? last);
     return n ? ` ${n.toFixed(n % 1 ? 1 : 0)} s` : "";
   };
   const bumpersLabel =
     !introId && !outroId
       ? "no intro / outro"
-      : [introId ? `+ intro${secLabel(introId, clip.diagnostics?.bumpers?.introSec)}` : "", outroId ? `+ outro${secLabel(outroId, clip.diagnostics?.bumpers?.outroSec)}` : ""].filter(Boolean).join(" · ");
+      : [introId ? `+ intro${secLabel("intro", introId, clip.diagnostics?.bumpers?.introSec)}` : "", outroId ? `+ outro${secLabel("outro", outroId, clip.diagnostics?.bumpers?.outroSec)}` : ""].filter(Boolean).join(" · ");
   const busy = update.isPending || updateStyle.isPending;
   const requestExit = () => (changed ? setGuard(true) : onExit());
 
@@ -1115,7 +1117,7 @@ export function ClipEditor(props: Props) {
         </button>
       </div>
       {/* fixed-height block: what the rendered file adds around this source range (the timeline is source time only) and this clip's own choice */}
-      <div className="flex h-[3.75rem] w-full flex-col items-center justify-start gap-1 overflow-hidden text-xs text-ink2">
+      <div className="flex h-[7.25rem] w-full flex-col items-center justify-start gap-1.5 overflow-hidden text-xs text-ink2">
         <div className="flex h-5 items-center gap-3">
           <span className="font-mono" title="Added around the clip in the rendered file; not part of the source timeline">
             {bumpersLabel}
@@ -1124,7 +1126,7 @@ export function ClipEditor(props: Props) {
             Project…
           </button>
         </div>
-        <BumperSelects value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} className="justify-center" />
+        <BumperSelects value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} className="w-full max-w-[26rem] px-3" />
       </div>
     </div>
   );
@@ -1300,7 +1302,7 @@ export function ClipEditor(props: Props) {
         </div>
       )}
 
-      <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} />
+      <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
 
       <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">

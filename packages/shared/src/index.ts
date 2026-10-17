@@ -134,7 +134,9 @@ export interface DetectedSegment {
  * Per-clip intro/outro choice. A missing key inherits the project's, `null` means none, a string is a
  * library asset id. Stored on the clip, so it survives pipeline re-runs.
  */
-export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), outro: z.string().min(1).max(100).nullable().optional() });
+export const bumperSecondsSchema = z.number().min(1).max(10);
+/** `introSec` / `outroSec` override how long an image shown in that slot lasts (videos keep their own length). */
+export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), introSec: bumperSecondsSchema.optional(), outro: z.string().min(1).max(100).nullable().optional(), outroSec: bumperSecondsSchema.optional() });
 export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
 
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
@@ -204,6 +206,9 @@ export const projectSettingsSchema = styleSchema.extend({
    */
   introAssetId: z.string().max(100).nullable().optional(),
   outroAssetId: z.string().max(100).nullable().optional(),
+  /** How long an image intro / outro lasts in this project, overriding the library item's own length. */
+  introSec: bumperSecondsSchema.optional(),
+  outroSec: bumperSecondsSchema.optional(),
 });
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});

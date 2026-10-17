@@ -391,7 +391,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // intro/outro from the project's settings; an unusable one is skipped, never fatal
   // the clip's own choice per slot, else the project's
   const chosen = resolveClipBumpers(settings, clip);
-  const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, clip.id, log);
+  const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, { intro: chosen.introSec, outro: chosen.outroSec }, clip.id, log);
   const srcHasAudio = bumpers.intro || bumpers.outro ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean): { graph: string; audioMap: string[] } => {
@@ -556,7 +556,7 @@ interface LoadedBumper {
  * that snapshotted the id keep working); a missing, foreign or unreadable one is skipped with a
  * plain-language event so the clip renders without it instead of failing.
  */
-async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, clipId: string, log: Logger) {
+async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, secs: { intro?: number; outro?: number }, clipId: string, log: Logger) {
   const { svc, projectId, db } = ctx;
   const out: { intro?: LoadedBumper; outro?: LoadedBumper; skipped: string[] } = { skipped: [] };
   for (const slot of ["intro", "outro"] as const) {
@@ -573,13 +573,15 @@ async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: stri
       continue;
     }
     try {
+      // an image lasts as long as this clip or project says, else its own default; a video keeps its length
+      const used = asset.kind === "image" && secs[slot] ? { ...asset, durationSec: secs[slot]! } : asset;
       const file = await ensureNormalised(
         { ffmpeg: (args, o) => svc.media.ffmpeg(args, o), storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") },
-        asset,
+        used,
         { width: OUT_W, height: OUT_H, fitChain: FIT_CHAIN(OUT_W, OUT_H) },
         ctx.signal,
       );
-      out[slot] = { id, path: file, sec: bumperFrames(asset.durationSec) / BUMPER_FPS };
+      out[slot] = { id, path: file, sec: bumperFrames(used.durationSec) / BUMPER_FPS };
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       await skip(`the ${slot} file could not be read`, err);

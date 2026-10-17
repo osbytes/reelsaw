@@ -3,12 +3,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
-import { ChevronLeft, Download, ExternalLink, Film, FolderOpen, Images, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, Download, Ban, ExternalLink, Film, FolderOpen, Images, Star, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
 import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
 import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
-import { setPendingBumperFile, useUploads } from "../lib/uploads";
+import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { useToast } from "../lib/toast";
 import { extractUrls, isOnlyUrls, linkKey } from "../lib/links";
@@ -35,6 +35,8 @@ interface Item {
   hint?: ReactNode;
   icon?: ReactNode;
   thumb?: string | null;
+  /** a 9:16 thumbnail (library items) rather than a 16:9 one */
+  tall?: boolean;
   danger?: boolean;
   /** → / Tab / the ⋯ button open this item's action list */
   actions?: Target;
@@ -86,6 +88,12 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** kind, length, size and badges of a library item on one line */
+function assetHint(a: { kind: string; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
+  const badges = [defaults?.introAssetId === a.id ? "default intro" : "", defaults?.outroAssetId === a.id ? "default outro" : "", a.usedBy ? `used by ${a.usedBy}` : ""].filter(Boolean);
+  return [a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].join(" · ");
+}
+
 function download(href: string) {
   const a = Object.assign(document.createElement("a"), { href, download: "" });
   document.body.append(a);
@@ -112,6 +120,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const setDefault = useMutation(trpc.bumpers.setDefault.mutationOptions());
   const removeAsset = useMutation(trpc.bumpers.delete.mutationOptions());
   const defaults = useMe().data?.projectDefaults;
+  // seconds for an image picked in a Set intro / outro list; empty = the item's own length
+  const [pickSec, setPickSec] = useState("");
 
   // the intro/outro library, fetched only while the palette is open
   const libQ = useQuery({ ...trpc.bumpers.list.queryOptions(), enabled: open, staleTime: 30_000 });
@@ -238,17 +248,22 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         const { slot, id: projectId } = target;
         const label = slot === "intro" ? "Intro" : "Outro";
         const n = stats.get(projectId)?.done ?? 0;
+        const defaultId = defaults?.[slot === "intro" ? "introAssetId" : "outroAssetId"];
         const choose = (choice: string, name: string) =>
           go(() => {
-            setBumpers.mutateAsync({ id: projectId, [slot]: choice, rerender: false }).then(
+            const shownId = choice === "default" ? defaultId : choice;
+            const isImage = !!shownId && library?.find((a) => a.id === shownId)?.kind === "image";
+            const sec = Number(pickSec);
+            const secs = isImage && pickSec !== "" && Number.isFinite(sec) ? { [`${slot}Sec`]: Math.min(10, Math.max(1, sec)) } : {};
+            setBumpers.mutateAsync({ id: projectId, [slot]: choice, ...secs, rerender: false }).then(
               () => (refresh(projectId), toast(`${label}: ${name}. Saved; re-render ${plural(n, "clip")} to apply`)),
               (err: Error) => toast(`Couldn’t set the ${slot}: ${err.message.slice(0, 120)}`),
             );
           });
-        const P = (key: string, text: string, run: () => void, hint?: string, thumb?: string): Item => ({ key: `tp-${key}`, group: label, label: text, hint, icon: <Images className="h-4 w-4" />, thumb, run });
-        acts.push(P("default", `Default (${assetName(defaults?.[slot === "intro" ? "introAssetId" : "outroAssetId"])})`, choose("default", "default"), "What Settings say now"));
-        acts.push(P("none", "None", choose("none", "none"), "No " + slot + " on this project"));
-        for (const a of library ?? []) acts.push(P(a.id, a.name, choose(a.id, a.name), `${a.kind} · ${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`));
+        const P = (key: string, text: string, icon: ReactNode, run: () => void, hint?: string, thumb?: string): Item => ({ key: `tp-${key}`, group: label, label: text, hint, icon, thumb, tall: !!thumb, run });
+        acts.push(P("default", `Project default (${assetName(defaultId)})`, <Star className="h-4 w-4" />, choose("default", "default"), "What Settings say now"));
+        acts.push(P("none", "None", <Ban className="h-4 w-4" />, choose("none", "none"), "No " + slot + " on this project"));
+        for (const a of library ?? []) acts.push(P(a.id, a.name, <Images className="h-4 w-4" />, choose(a.id, a.name), assetHint(a, defaults), a.thumbnailUrl));
         return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "asset") {
@@ -389,8 +404,10 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
           key: `l-${a.id}`,
           group: "Library",
           icon: <Images className="h-4 w-4" />,
+          thumb: a.thumbnailUrl,
+          tall: true,
           label: <Highlight text={a.name} matches={r.matches} k="name" />,
-          hint: `${a.kind} · ${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s · ${a.usedBy ? `used by ${plural(a.usedBy, "project")}` : "not used yet"}`,
+          hint: assetHint(a, defaults),
           actions: { kind: "asset", id: a.id },
           run: go(() => nav(`/library#asset=${a.id}`)),
         });
@@ -416,9 +433,10 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, linkMode, urls, target, index, fuse, stats, failedClips, failedProjects, library, libFuse, defaults]);
+  }, [q, linkMode, urls, target, index, fuse, stats, failedClips, failedProjects, library, libFuse, defaults, pickSec]);
 
   useEffect(() => setCursor(0), [q, target]);
+  useEffect(() => setPickSec(""), [target]);
   useEffect(() => {
     if (!open) setTarget(null);
   }, [open]);
@@ -541,7 +559,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                       <div data-idx={i} onMouseMove={() => setCursor(i)} className={`flex w-full items-center gap-1 rounded-[10px] ${sel ? "bg-sunk" : ""}`}>
                         <button onClick={it.run} className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2.5 py-2 text-left">
                           {it.thumb ? (
-                            <img src={it.thumb} alt="" referrerPolicy="no-referrer" className={`shrink-0 rounded-[6px] object-cover ${it.group === "Clips" ? "h-9 w-[20px]" : "h-8 w-[56px]"}`} />
+                            <img src={it.thumb} alt="" referrerPolicy="no-referrer" className={`shrink-0 rounded-[6px] object-cover ${it.group === "Clips" || it.tall ? "h-9 w-[20px]" : "h-8 w-[56px]"}`} />
                           ) : (
                             <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-sunk ${it.danger ? "text-err" : "text-ink2"}`}>{it.icon ?? <FolderOpen className="h-4 w-4" />}</span>
                           )}
@@ -570,6 +588,12 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                 })}
               </div>
             </ScrollArea>
+            {target?.kind === "pick" && (
+              <label className="flex items-center gap-2 border-t border-line px-4 py-2 text-xs text-ink2">
+                Seconds, if you pick an image
+                <input className="input h-7 w-16 px-2 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={pickSec} placeholder="its own" onChange={(e) => setPickSec(e.target.value)} aria-label="Seconds an image is shown" />s
+              </label>
+            )}
             <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap border-t border-line px-4 py-2 text-[11px] text-ink3">
               <span>
                 <span className="kbd">↑↓</span> move
@@ -591,15 +615,16 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
             <input
               ref={bumperFileRef}
               type="file"
+              multiple
               accept=".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg"
               className="hidden"
-              aria-label="Choose an intro or outro file"
+              aria-label="Choose intro or outro files"
               onChange={(e) => {
-                const f = e.target.files?.[0];
+                const files = [...(e.target.files ?? [])];
                 e.target.value = "";
-                if (!f) return;
+                if (!files.length) return;
                 onOpenChange(false);
-                setPendingBumperFile(f);
+                setPendingBumperFiles(files);
                 nav("/library");
               }}
             />

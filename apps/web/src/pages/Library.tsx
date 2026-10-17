@@ -4,9 +4,9 @@ import { Link2 } from "lucide-react";
 import { useMe } from "../lib/account";
 import { useToast } from "../lib/toast";
 import { linkWith, useHashParams } from "../lib/hash";
-import { takePendingBumperFile } from "../lib/uploads";
+import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
-import { AssetCard, RemovedList, RemoveDialog, UploadBar, useBumperActions, useBumperLibrary, type LibraryAsset } from "../components/BumperField";
+import { AssetCard, RemovedList, RemoveDialog, UploadBar, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "../components/BumperField";
 
 /**
  * Your intro and outro library. Deep links: `#asset=<id>` highlights a card, `?upload=1` opens the file picker.
@@ -24,12 +24,18 @@ export function LibraryPage() {
   const assets = list.data?.assets ?? [];
   const deleted = list.data?.deleted ?? [];
   const selected = useHashParams().get("asset");
+  // images whose length was just changed: their cards say "re-render to apply"
+  const [applied, setApplied] = useState<Set<string>>(new Set());
 
-  // a file picked from ⌘K or the Projects menu uploads on arrival
+  // files picked in ⌘K or the Projects menu, or dropped anywhere on this page, upload as one batch
+  const imageSecRef = useRef(imageSec);
+  imageSecRef.current = imageSec;
+  const uploadRef = useRef(actions.uploadMany);
+  uploadRef.current = actions.uploadMany;
   useEffect(() => {
-    const f = takePendingBumperFile();
-    if (f) void actions.upload(f, "3");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const take = () => uploadRef.current(takePendingBumperFiles(), imageSecRef.current);
+    take();
+    return onBumperFiles(take);
   }, []);
   // ?upload=1 opens the picker (browsers may refuse without a click, so the file input is focused too)
   useEffect(() => {
@@ -74,6 +80,7 @@ export function LibraryPage() {
         <div className="min-h-4 text-xs text-err" role="status">
           {actions.error}
         </div>
+        <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
         {/* the grid keeps its height while loading or empty */}
         <div className="grid min-h-[230px] grid-cols-2 content-start gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {assets.length === 0 && <p className="col-span-full text-xs text-ink3">{list.isLoading ? "Loading…" : "Nothing here yet. Add a video or an image above."}</p>}
@@ -85,6 +92,8 @@ export function LibraryPage() {
               outroId={defaults?.outroAssetId}
               busy={actions.busy}
               highlighted={selected === a.id}
+              applied={applied.has(a.id)}
+              onSeconds={(sec) => void actions.setSeconds(a, sec).then((ok) => ok && setApplied((s) => new Set(s).add(a.id)))}
               onSelect={() => select(a)}
               onUse={(slot) => actions.setDefault(slot, a, slot === "intro" ? defaults?.introAssetId : defaults?.outroAssetId)}
               onRemove={() => (a.usedBy ? setRemoving(a) : actions.remove(a))}

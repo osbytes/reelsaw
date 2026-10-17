@@ -764,7 +764,7 @@ export function ProjectPage() {
         danger
         onConfirm={() => del.mutateAsync({ id }).then(() => nav("/"))}
       />
-      <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} />
+      <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} introSec={p.settings.introSec} outroSec={p.settings.outroSec} />
     </div>
   );
 }
