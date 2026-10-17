@@ -5,8 +5,8 @@ import type { UnitOfWork } from "../uow.js";
 
 /**
  * Drop an upload (row now, object after commit) once no project still needs it as its input.
- * A project needs it until its source is stored. Call it in the same unit of work that stores the
- * source (ingest) or deletes the project. Safe to call when the upload is already gone.
+ * A project needs it until its source is stored. Called when a project is deleted (ingest keeps
+ * the upload so an expired source can be restored by Retry). Safe to call when the upload is already gone.
  */
 export async function releaseUpload(svc: Services, u: UnitOfWork, projectId: string, uploadId: unknown) {
   if (typeof uploadId !== "string" || !uploadId) return;

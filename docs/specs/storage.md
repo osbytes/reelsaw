@@ -159,6 +159,9 @@ What not to do:
   footprint doubles (loss 6).
 - Do not trust a size match as equal content.
 
+## Phase 1 decision
+- The upload object is kept after ingest (only `deleteProject` removes it): it is the restore copy for an expired upload source; free on local (same inode), a second copy on S3, accepted.
+
 ## Open questions
 - Is the hosted instance expected to see the same video from several users often? That decides
   phase 2; one number from production (distinct `source_meta->>'webpage_url'` versus project

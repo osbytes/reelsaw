@@ -16,8 +16,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
   if (config.SOURCE_RETENTION_DAYS > 0) {
     const cutoff = new Date(Date.now() - config.SOURCE_RETENTION_DAYS * 86_400_000);
     const rows = await svc.database.db.query.projects.findMany({
-      // uploads are skipped: their upload object is deleted once the source is stored, so the source is the only copy
-      where: and(eq(schema.projects.sourceType, "url"), isNotNull(schema.projects.sourceKey), isNull(schema.projects.sourceExpiredAt), lt(schema.projects.updatedAt, cutoff), sql`${schema.projects.status} in ('done', 'failed')`),
+      where: and(isNotNull(schema.projects.sourceKey), isNull(schema.projects.sourceExpiredAt), lt(schema.projects.updatedAt, cutoff), sql`${schema.projects.status} in ('done', 'failed')`),
       columns: { id: true, sourceKey: true },
       limit: 200,
     });

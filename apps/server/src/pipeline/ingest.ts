@@ -4,7 +4,6 @@ import { sourceMinutesExceeded } from "../quota.js";
 import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
-import { releaseUpload } from "../storage/uploads.js";
 import { QUEUES } from "../queue/boss.js";
 import { StageContext, exists } from "./common.js";
 
@@ -99,8 +98,6 @@ export async function ingest(ctx: StageContext) {
       .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
     await u.enqueue(QUEUES.transcribe, { projectId });
-    // the source is stored and recorded in this commit: the upload has done its job
-    await releaseUpload(svc, u, projectId, project.sourceMeta?.uploadId);
   });
   void svc;
 }
