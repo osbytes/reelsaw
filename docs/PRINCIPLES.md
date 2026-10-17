@@ -112,7 +112,12 @@ project already hit the problem it prevents.
   utilities can override them.
 - **Primitives:** Radix and shadcn-style components. Scrolling regions use the `ScrollArea`
   component, never native `overflow-auto`. To cap a ScrollArea's height, give the ScrollArea
-  itself a max height. Selects are the `Select` primitive, never a native `<select>`.
+  itself a max height. For any UI control (select, menu, tooltip, tabs, date picker, toggle…)
+  look first in `components/ui.tsx` and `components/`, then at what shadcn/ui or Radix already
+  ships for it (add the Radix package, wrap it once in `ui.tsx`, style it with our tokens), then
+  at a maintained library. Browser-native widgets with their own OS chrome (`<select>`,
+  `<input type="date">`) are not used where a themed primitive exists. See "Don't rebuild what
+  exists".
 - **No layout shift.**
   - Nothing appears *above* what the user is interacting with and pushes it down.
   - Follow-up actions go into space reserved for them (a label row, a status line that's always
