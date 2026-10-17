@@ -32,9 +32,12 @@ export function stageTimes(log: ProjectEvent[]): StageTimes & { createdAt?: numb
 /**
  * Seconds each `stage.completed` / `project.done` / `project.failed` event took, walked in log order so
  * a stage that ran several times (retry, refine or re-analyze later) gets each run's own duration, and
- * "All done" counts from the start of the run that just finished (project creation, or the first stage
- * started after the previous finish), not from the project's creation every time.
+ * "All done" counts from the start of the run that just finished (project creation, or the first stage,
+ * re-render or retry after the previous finish), not from the project's creation every time.
  */
+/** Events that begin work on an idle project without a `stage.started` of their own (re-render, retry, a clip added by hand). */
+const RUN_STARTERS = new Set(["clip.rendering", "clip.retrying", "clip.created"]);
+
 export function eventDurations(log: ProjectEvent[]): Map<ProjectEvent, number> {
   const out = new Map<ProjectEvent, number>();
   const started: Record<string, number> = {};
@@ -52,6 +55,10 @@ export function eventDurations(log: ProjectEvent[]): Map<ProjectEvent, number> {
         idle = false;
       }
       started[stage] = t;
+    } else if (idle && RUN_STARTERS.has(e.type)) {
+      // a re-render, retry or new clip after "All done" is a run of its own: the idle hours before it don't count
+      runStart = t;
+      idle = false;
     } else if (e.type === "stage.completed" && typeof stage === "string" && started[stage] !== undefined) {
       out.set(e, (t - started[stage]!) / 1000);
     } else if (e.type === "project.done" || e.type === "project.failed") {
