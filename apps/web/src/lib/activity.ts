@@ -1,12 +1,17 @@
-import type { ProjectEvent } from "@reelsaw/shared";
+import { formatTime, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE: Record<string, string> = { ingest: "Download", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
 const STEP: Record<string, string> = { entities: "names", disfluency: "disfluencies", scenes: "scene changes", overlays: "on-screen text" };
 
 export type Tone = "ok" | "run" | "warn" | "err";
 
+const REASON: Record<string, string> = { created: "new project", retry: "retry", rerender: "re-render", refine: "refine", reanalyze: "re-analyze", clip_added: "clip added" };
+export const reasonLabel = (r: unknown) => (typeof r === "string" ? (REASON[r] ?? r) : null);
+const sec = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
 /** Event log in plain sentences. Raw payloads stay in the CLI (`reelsaw events`). */
-export function describeEvent(e: ProjectEvent): { text: string; tone: Tone } | null {
+/** `expectedSec` (per stage) adds "(expected ~4:00)" to a finished stage. */
+export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => number | null): { text: string; tone: Tone } | null {
   const p = e.payload as Record<string, unknown>;
   const clip = typeof p.index === "number" ? `Clip ${p.index + 1}` : "A clip";
   switch (e.type) {
@@ -20,14 +25,24 @@ export function describeEvent(e: ProjectEvent): { text: string; tone: Tone } | n
           : { text: p.changed ? `Transcript updated (${p.changed} fix${p.changed === 1 ? "" : "es"})` : "Transcript updated", tone: "ok" };
       if (p.stage === "refine" && Array.isArray(p.steps)) return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
-    case "stage.completed":
-      return { text: `${STAGE[String(p.stage)] ?? p.stage} finished`, tone: "ok" };
+    case "run.started": {
+      const why = reasonLabel(p.reason);
+      return p.reason === "created" || !why ? null : { text: `Started: ${why}`, tone: "run" };
+    }
+    case "stage.completed": {
+      const d = sec(p.durationSec);
+      const exp = d !== null && expectedSec ? expectedSec(String(p.stage)) : null;
+      return { text: `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`, tone: "ok" };
+    }
     case "stage.failed":
       return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${p.error}`, tone: "err" };
     case "project.failed":
       return { text: `Stopped: ${p.error}`, tone: "err" };
-    case "project.done":
-      return { text: `All done: ${p.clips} clip${p.clips === 1 ? "" : "s"} ready${p.failed ? `, ${p.failed} failed` : ""}`, tone: "ok" };
+    case "project.done": {
+      const t = sec(p.runSec);
+      const why = p.runReason === "created" ? null : reasonLabel(p.runReason);
+      return { text: `All done: ${p.clips} clip${p.clips === 1 ? "" : "s"} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`, tone: "ok" };
+    }
     case "clip.created":
       return { text: `Found a moment: “${p.title}”`, tone: "ok" };
     case "clip.rendering":
@@ -45,4 +60,55 @@ export function describeEvent(e: ProjectEvent): { text: string; tone: Tone } | n
     default:
       return null;
   }
+}
+
+export interface Entry {
+  e: ProjectEvent;
+  d: { text: string; tone: Tone };
+}
+export interface RunGroup {
+  seq: number;
+  reason: string | null;
+  startedAt: number;
+  outcome: "running" | "done" | "failed";
+  /** seconds, from the run's finishing event; null while running or for runs from before durations were recorded */
+  runSec: number | null;
+  /** newest first, like the feed */
+  entries: Entry[];
+}
+
+/** Group the log by run (newest run first, entries newest first). A run starts at `run.started`; older logs start one at `project.created`. */
+export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null): RunGroup[] {
+  const explicit = log.some((e) => e.type === "run.started");
+  const groups: RunGroup[] = [];
+  let cur: RunGroup | null = null;
+  const fresh = (seq: number, reason: string | null, startedAt: number): RunGroup => ({ seq, reason, startedAt, outcome: "running", runSec: null, entries: [] });
+  for (const e of log) {
+    if (e.type === "stage.progress") continue;
+    const t = new Date(e.createdAt).getTime();
+    const p = e.payload as Record<string, unknown>;
+    const reason = typeof p.reason === "string" ? p.reason : null;
+    if (e.type === "run.started") {
+      if (cur && cur.entries.every((x) => x.e.type === "project.created")) {
+        cur.seq = Number(p.seq) || cur.seq;
+        cur.reason = reason;
+      } else groups.push((cur = fresh(Number(p.seq) || groups.length + 1, reason, t)));
+    } else if (!cur) {
+      // a late event of a finished run (a stray clip event) stays with that run; otherwise this is an older log whose runs we can't see
+      if (explicit && groups.length) {
+        const d = describe(e);
+        if (d) groups[groups.length - 1]!.entries.unshift({ e, d });
+        continue;
+      }
+      groups.push((cur = fresh(groups.length + 1, e.type === "project.created" ? "created" : null, t)));
+    }
+    const d = describe(e);
+    if (d) cur!.entries.unshift({ e, d });
+    if (e.type === "project.done" || e.type === "project.failed") {
+      cur!.outcome = e.type === "project.done" ? "done" : "failed";
+      cur!.runSec = sec(p.runSec);
+      cur = null;
+    }
+  }
+  return groups.reverse();
 }

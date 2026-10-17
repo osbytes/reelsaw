@@ -12,6 +12,7 @@ import { PIPELINE_STAGES, type PipelineStage } from "@reelsaw/shared";
 import type { Db } from "../db/index.js";
 import type { Config } from "../config.js";
 import { providerOf } from "../ai/registry.js";
+import { firstStageSeconds, loadRunLogs, runsOf } from "./runs.js";
 
 export type Factors = Record<PipelineStage, number>;
 
@@ -99,7 +100,7 @@ export function estimateStages(durationSec: number, models: Models, history: Sta
   });
 }
 
-/** Stage seconds of finished projects, newest first, from their events and stage artifacts. */
+/** Stage seconds of finished projects, newest first: their runs (pipeline/runs.ts) and stage artifacts. */
 export async function loadHistory(db: Db, limit = 40): Promise<StageSample[]> {
   const rows = (
     await db.execute(sql`
@@ -108,52 +109,26 @@ export async function loadHistory(db: Db, limit = 40): Promise<StageSample[]> {
         where status in ('done', 'failed') and duration_sec is not null and duration_sec > 0
         order by updated_at desc limit ${limit}
       ),
-      -- the first run of each stage: a later refine / re-analyze on the same project must not stretch it
-      stage_starts as (
-        select e.project_id, e.payload->>'stage' as stage, min(e.created_at) as started
-        from project_events e join recent r on r.id = e.project_id
-        where e.type = 'stage.started' and e.payload ? 'stage'
-        group by 1, 2
-      ),
-      stage_times as (
-        select s.project_id, s.stage, s.started,
-          (select min(c.created_at) from project_events c
-            where c.project_id = s.project_id and c.type = 'stage.completed' and c.payload->>'stage' = s.stage and c.created_at > s.started) as completed
-        from stage_starts s
-      ),
-      done_at as (
-        select e.project_id, min(e.created_at) as at from project_events e join recent r on r.id = e.project_id where e.type = 'project.done' group by 1
-      ),
       models as (
         select a.project_id, jsonb_object_agg(k, v) as models
         from stage_artifacts a join recent r on r.id = a.project_id, jsonb_each_text(a.models) as kv(k, v)
         where k in ('language', 'transcription') group by 1
       )
-      select r.id, r.title, r.duration_sec, r.updated_at, m.models,
-        coalesce(jsonb_object_agg(s.stage, extract(epoch from (s.completed - s.started))) filter (where s.stage is not null and s.completed is not null), '{}'::jsonb) as stages,
-        (select at from done_at d where d.project_id = r.id) as done_at,
-        (select completed from stage_times t where t.project_id = r.id and t.stage = 'analyze') as analyze_done
-      from recent r
-      left join stage_times s on s.project_id = r.id
-      left join models m on m.project_id = r.id
-      group by r.id, r.title, r.duration_sec, r.updated_at, m.models
+      select r.id, r.title, r.duration_sec, r.updated_at, m.models
+      from recent r left join models m on m.project_id = r.id
       order by r.updated_at desc
     `)
-  ).rows as Array<{ id: string; title: string; duration_sec: number | string; updated_at: Date | string; models: Partial<Models> | null; stages: Record<string, number | string>; done_at: Date | string | null; analyze_done: Date | string | null }>;
-  // raw `execute` rows are not run through drizzle's column mappers: timestamps and numerics may be strings
-  const when = (v: Date | string | null) => (v ? new Date(v).getTime() : null);
-  return rows.map((r) => {
-    const stages: Partial<Record<PipelineStage, number>> = {};
-    for (const stage of PIPELINE_STAGES) {
-      const sec = Number(r.stages?.[stage]);
-      if (Number.isFinite(sec) && sec > 0) stages[stage] = Math.round(sec * 10) / 10;
-    }
-    // render has no stage.completed of its own: it runs per clip and ends with project.done
-    const done = when(r.done_at);
-    const analyzed = when(r.analyze_done);
-    if (stages.render === undefined && done !== null && analyzed !== null && done > analyzed) stages.render = Math.round(((done - analyzed) / 1000) * 10) / 10;
-    return { projectId: r.id, title: r.title, durationSec: Number(r.duration_sec), finishedAt: new Date(r.updated_at).toISOString(), models: r.models ?? {}, stages };
-  });
+  ).rows as Array<{ id: string; title: string; duration_sec: number | string; updated_at: Date | string; models: Partial<Models> | null }>;
+  const logs = await loadRunLogs(db, rows.map((r) => r.id));
+  // each stage counts from the first run that completed it: a later refine / re-analyze / re-render on the same project must not stretch it
+  return rows.map((r) => ({
+    projectId: r.id,
+    title: r.title,
+    durationSec: Number(r.duration_sec),
+    finishedAt: new Date(r.updated_at).toISOString(),
+    models: r.models ?? {},
+    stages: Object.fromEntries(Object.entries(firstStageSeconds(runsOf(logs.get(r.id) ?? []))).filter(([, sec]) => sec > 0)) as StageSample["stages"],
+  }));
 }
 
 export interface ProcessingTimes {
