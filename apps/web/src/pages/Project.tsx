@@ -9,11 +9,12 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
 import { describeEvent, type Tone } from "../lib/activity";
-import { writeHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
+import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ConfirmDialog, ProgressBar } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
+import { BulkBumpersBar } from "../components/BumperField";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
@@ -159,6 +160,17 @@ export function ProjectPage() {
   const hashCard = hash.get("card");
   const hashT = hash.get("t");
   const clipsLoaded = !!q.data;
+  // multi-select for bulk actions; kept in the hash (#sel=id1,id2) so it survives reloads and can be shared
+  const [sel, setSel] = useState<string[]>(() => (readHash().get("sel") ?? "").split(",").filter(Boolean));
+  useEffect(() => {
+    if (!clipsLoaded) return;
+    const live = new Set(q.data!.clips.map((x) => x.id));
+    setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
+  }, [clipsLoaded, q.data]);
+  useEffect(() => {
+    if (clipsLoaded) writeHash({ sel: sel.join(",") || null });
+  }, [sel, clipsLoaded]);
+  const toggleSel = (cid: string) => setSel((cur) => (cur.includes(cid) ? cur.filter((x) => x !== cid) : [...cur, cid]));
   const focusCard = (id: string, toTab = false) => {
     setActiveClip(id);
     setDrawer(true);
@@ -573,11 +585,28 @@ export function ProjectPage() {
           )}
         </div>
       )}
+      {/* always present, so selecting never shifts the list */}
+      {sortedClips.length > 1 && (
+        <div className="flex h-9 items-center gap-3 px-4 text-xs text-ink2">
+          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={sel.length === sortedClips.length} onClick={() => setSel(sortedClips.map((c) => c.id))}>
+            Select all
+          </button>
+          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={!sel.length} onClick={() => setSel([])}>
+            Clear
+          </button>
+          <span className="font-mono text-ink3">{sel.length ? `${sel.length} selected` : ""}</span>
+        </div>
+      )}
       <div className="flex flex-col gap-3 p-3">
         {sortedClips.map((c) => (
           <ClipCard
             key={c.id}
             clip={c as ClipView}
+            projectIntroId={p.settings.introAssetId}
+            projectOutroId={p.settings.outroAssetId}
+            selected={sel.includes(c.id)}
+            selecting={sel.length > 0}
+            onToggleSelect={() => toggleSel(c.id)}
             projectId={p.id}
             progress={clipProgress[c.id]}
             active={activeClip === c.id}
@@ -592,6 +621,16 @@ export function ProjectPage() {
           />
         ))}
       </div>
+      {sel.length > 0 && (
+        <BulkBumpersBar
+          projectId={p.id}
+          clipIds={sel}
+          rerenderable={sortedClips.filter((c) => sel.includes(c.id) && (c.status === "done" || c.status === "failed")).length}
+          projectIntroId={p.settings.introAssetId}
+          projectOutroId={p.settings.outroAssetId}
+          onDone={() => setSel([])}
+        />
+      )}
     </>
   );
 

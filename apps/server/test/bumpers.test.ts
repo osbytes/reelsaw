@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bumperConcat, bumperFrames, bumperKind, bumperProblem, ensureNormalised, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
+import { bumperConcat, bumperFrames, resolveClipBumpers, bumperKind, bumperProblem, ensureNormalised, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
 import { FIT_CHAIN } from "../src/pipeline/render.js";
 
 const run = promisify(execFile);
@@ -36,6 +36,22 @@ async function packets(file: string, stream: "v" | "a") {
   const { stdout } = await run("ffprobe", ["-v", "error", "-select_streams", `${stream}:0`, "-show_entries", "packet=pts_time,dts_time,duration_time", "-of", "json", file]);
   return (JSON.parse(stdout) as { packets: Array<{ pts_time: string; dts_time: string; duration_time: string }> }).packets;
 }
+
+describe("resolveClipBumpers", () => {
+  const project = { introAssetId: "pi", outroAssetId: "po" };
+  it("inherits the project when the clip has no choice", () => {
+    for (const clip of [{}, { bumpers: null }, { bumpers: {} }]) assert.deepEqual(resolveClipBumpers(project, clip), { introId: "pi", outroId: "po", fromClip: [] });
+  });
+  it("lets the clip pick a different asset, or none, per slot", () => {
+    assert.deepEqual(resolveClipBumpers(project, { bumpers: { intro: "ci" } }), { introId: "ci", outroId: "po", fromClip: ["intro"] });
+    assert.deepEqual(resolveClipBumpers(project, { bumpers: { outro: null } }), { introId: "pi", outroId: null, fromClip: ["outro"] });
+    assert.deepEqual(resolveClipBumpers(project, { bumpers: { intro: null, outro: null } }), { introId: null, outroId: null, fromClip: ["intro", "outro"] });
+  });
+  it("lets a clip add just one slot when the project has none, and treats project null/unset as none", () => {
+    assert.deepEqual(resolveClipBumpers({ introAssetId: null }, { bumpers: { outro: "co" } }), { introId: null, outroId: "co", fromClip: ["outro"] });
+    assert.deepEqual(resolveClipBumpers({}, {}), { introId: null, outroId: null, fromClip: [] });
+  });
+});
 
 describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () => {
   let dir: string;

@@ -49,6 +49,27 @@ export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: 
   return null;
 }
 
+/**
+ * Which asset each slot uses for a clip: its own choice if it made one (a string, or null = none),
+ * otherwise the project's, otherwise none. `fromClip` lists the slots the clip decided itself.
+ */
+export function resolveClipBumpers(
+  project: { introAssetId?: string | null; outroAssetId?: string | null },
+  clip: { bumpers?: { intro?: string | null; outro?: string | null } | null },
+): { introId: string | null; outroId: string | null; fromClip: Array<"intro" | "outro"> } {
+  const own = clip.bumpers ?? {};
+  const fromClip: Array<"intro" | "outro"> = [];
+  const pick = (slot: "intro" | "outro", inherited: string | null | undefined) => {
+    const v = own[slot];
+    if (v === undefined) return inherited || null;
+    fromClip.push(slot);
+    return v || null;
+  };
+  const introId = pick("intro", project.introAssetId);
+  const outroId = pick("outro", project.outroAssetId);
+  return { introId, outroId, fromClip };
+}
+
 export interface Canvas {
   width: number;
   height: number;
