@@ -138,7 +138,7 @@ export function ModelsSection() {
                   {test.isPending && test.variables?.id === value ? "Testing…" : "Test"}
                 </button>
                 {s?.override[kind] && (
-                  <button type="button" className="btn-quiet min-w-0 max-w-full text-xs" title={`Back to .env: ${s.env[kind]}`} disabled={save.isPending} onClick={() => save.mutate({ [kind]: null })}>
+                  <button type="button" className="btn-quiet min-w-0 max-w-full text-xs" title={`Back to .env: ${s.env[kind]} (applied when you Save)`} disabled={save.isPending || draft[kind] === s.env[kind]} onClick={() => setDraft((d) => ({ ...d, [kind]: s.env[kind] }))}>
                     <span className="block truncate">
                       Back to .env <span className="font-mono">({s.env[kind]})</span>
                     </span>
