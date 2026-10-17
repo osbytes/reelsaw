@@ -145,6 +145,17 @@ export function createApp(svc: Services) {
     }
   });
 
+  // A user's own intro/outro, for the Settings preview. Owner only; soft-deleted assets stay readable by their owner.
+  app.get("/media/bumpers/:id", async (c) => {
+    const session = await activeRequester(auth, db, c.req.raw.headers);
+    if (!session) return c.text("unauthorized", 401);
+    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    if (!asset) return c.text("not found", 404);
+    const loc = await storage.resolve(asset.sourceKey);
+    if ("url" in loc) return c.redirect(loc.url, 302);
+    return sendFile(c.req.raw, loc.file);
+  });
+
   app.get("/media/clips/:projectId/:file", async (c) => {
     const session = await activeRequester(auth, db, c.req.raw.headers);
     if (!session) return c.text("unauthorized", 401);

@@ -143,6 +143,8 @@ export interface ClipDiagnostics {
     skipped: Array<{ start: number; end: number; reason: string }>;
   };
   outDurationSec: number;
+  /** intro/outro attached to this render (ids, seconds) and which were skipped, and why */
+  bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[] };
   renderMs: number;
 }
 
@@ -188,6 +190,13 @@ export const projectSettingsSchema = styleSchema.extend({
   instructions: z.string().max(2000).optional(),
   /** Names, brands and jargon the transcriber should spell correctly (comma separated). */
   vocabulary: z.string().max(1000).optional(),
+  /**
+   * Intro / outro video (bumper_assets ids) attached to every clip. Snapshotted from the user's
+   * defaults when the project is created. Unset = none; null is reserved for "none, although my
+   * default has one" (project override, phase 2).
+   */
+  introAssetId: z.string().max(100).nullable().optional(),
+  outroAssetId: z.string().max(100).nullable().optional(),
 });
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});
@@ -210,6 +219,9 @@ export const userProjectDefaultsSchema = z
     highlightColor: hexColor,
     wordsPerLine: z.number().int().min(1).max(8),
     uppercase: z.boolean(),
+    /** Intro / outro (bumper_assets ids). Changed only through `bumpers.*`, never by the defaults form. */
+    introAssetId: z.string().max(100),
+    outroAssetId: z.string().max(100),
   })
   .partial(); // no defaults here: an unset field means "use the built-in default"
 export type UserProjectDefaults = z.infer<typeof userProjectDefaultsSchema>;
@@ -309,6 +321,8 @@ export const PROJECT_EVENT_TYPES = [
   "clip.failed",
   /** a clip job attempt ended without finishing (error, crash, restart) and will be retried */
   "clip.retrying",
+  /** an intro/outro could not be used; the clip rendered without it */
+  "clip.bumper_skipped",
   /** no progress for a long time on a running clip/stage (watchdog) */
   "job.stalled",
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */

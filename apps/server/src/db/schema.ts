@@ -212,6 +212,33 @@ export const uploads = pgTable("uploads", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * A user's intro/outro video. Immutable: replacing one is a new row, so a cache keyed by id is
+ * correct and a clip's diagnostics say exactly which version it used. Soft-deleted rows still
+ * resolve at render time so projects that snapshotted the id keep working.
+ */
+export const bumperAssets = pgTable(
+  "bumper_assets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"video" | "image">().notNull().default("video"),
+    name: text("name").notNull(),
+    durationSec: real("duration_sec").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    hasAudio: boolean("has_audio").notNull(),
+    sourceKey: text("source_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("bumper_assets_user_idx").on(t.userId)],
+);
+export type BumperAsset = typeof bumperAssets.$inferSelect;
+
 export const projects = pgTable(
   "projects",
   {

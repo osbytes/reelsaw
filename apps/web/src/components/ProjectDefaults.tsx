@@ -4,6 +4,7 @@ import type { UserProjectDefaults } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useToast } from "../lib/toast";
 import { useMe } from "../lib/account";
+import { BumpersSection } from "./BumperField";
 
 type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no" };
 
@@ -159,6 +160,7 @@ export function ProjectDefaultsSection() {
           <span className="min-h-5 text-xs text-ink3">{dirty ? "Unsaved changes" : ""}</span>
         </div>
       </form>
+      <BumpersSection introId={me.data?.projectDefaults.introAssetId} outroId={me.data?.projectDefaults.outroAssetId} />
     </section>
   );
 }
