@@ -29,6 +29,8 @@ interface Case {
   source?: FixtureSource;
   target: { index: number; span: number };
   label: string;
+  /** the text alone does not settle the label: the case runs and prints, but never counts in precision/recall or as a regression */
+  uncertain?: boolean;
   words: Word[];
 }
 
@@ -76,11 +78,12 @@ export const disfluencySuite: Suite = {
         const others = flags.filter((f) => f !== hit).length;
         out.push({
           id: c.id,
-          pass,
+          pass: c.uncertain ? true : pass,
           metrics: {
             expect: c.expect,
             got: flagged ? `${hit!.subkind} ${Math.round(hit!.confidence * 100)}%${hit!.status === "auto" ? " auto" : ""}` : "-",
-            outcome: c.expect === "cut" ? (flagged ? "TP" : "FN") : flagged ? "FP" : "TN",
+            // "TP?" etc. for uncertain labels: shown, not scored
+            outcome: (c.expect === "cut" ? (flagged ? "TP" : "FN") : flagged ? "FP" : "TN") + (c.uncertain ? "?" : ""),
             mode,
             split: c.split,
             otherFlags: others,
