@@ -40,7 +40,7 @@ the biggest are 23 to 24 MB each. The volume holds other data too (47 of 59 GB u
 | Clip render gen N | `projects/<id>/clips/<clip>.<N>.mp4` (gen 0 has no suffix) | scratch + store (hardlink) | 3 to 25 MB | current gen: until project delete or `CLIP_RETENTION_DAYS` (default 0) | store: `requestRender` (`lifecycle.ts:29`), `render.ts:476`; scratch: nobody |
 | Thumbnail | same name, `.jpg` | scratch + store | 25 KB | as its clip | same as clip |
 | Cut preview | not a file | n/a | n/a | n/a | Previews are rendered on demand; no persisted class found (grep for preview keys in `storage` is empty). Cut ranges live in `clips.diagnostics`. |
-| ASR cache | `DATA_DIR/cache/asr` | scratch | under 1 MB | pruned at boot | boot pruning (config.ts) |
+| ASR cache | `DATA_DIR/cache/asr` | scratch | under 1 MB | pruned at boot | boot pruning (services.ts) |
 | Logs | `DATA_DIR/logs` | scratch | 60 MB, 58 MB on busiest day | rotated | log rotation only |
 | Export / hear temp | `DATA_DIR/tmp/export-*`, `hear-*.mp4` | scratch | MB | request | `export.ts:317` (hear files in `cli.ts:281` never) |
 

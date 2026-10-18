@@ -8,6 +8,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   pnpm --filter @reelsaw/server cli <command> [...args]          (dev)
  *
  * Commands
+ *   users                                   list accounts: role, status, sign-up date
+ *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
+ *   make-admin <email>                      promote an account to admin (approves it first if needed)
+ *   retention                               run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS)
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
@@ -37,8 +41,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           the intro/outro library. The user is --user, else the only account
  *                                           on this install; otherwise pass --user
  *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
+ *                                           a project's intro/outro: the library default, none or a specific item
  *   clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
- *                                           per project / per clip choice; acts as the project's owner;
+ *                                           a clip's own choice (inherit the project's, none or an item);
+ *                                           both act as the project's owner;
  *                                           --rerender re-renders only the affected clips
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)

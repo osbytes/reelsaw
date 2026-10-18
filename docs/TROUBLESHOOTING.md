@@ -23,12 +23,13 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Symptom | Look at | Usual cause |
 |---|---|---|
 | Shot changes missing (layout, snapping, text filter act as if one shot) | `reelsaw scenes <projectId>` | Old fixed-threshold detector on dark footage; `--store` the adaptive result |
-| Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes after heartbeat expiry (~15 s) + retry backoff. Each restart burns a retry. |
+| Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes once pg-boss notices the missed heartbeat (heartbeat every 15 s, supervisor pass every 60 s) and the retry delay passes (15 s, doubling per retry): expect a minute or two, not seconds. Each restart burns a retry. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under 45. |
 | Face off-centre | Editor layout track; `reelsaw clip` → layout segments `cx` | Old render (pre-settle tracker) or detector found no face (`fit`). Drag the picture to re-centre. |
 | Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
+| A project or clip setting has no effect | Is the matching `.env` gate on? `TRANSCRIPT_BIAS=false` ignores vocabulary hints and `DISFLUENCY_REMOVAL=false` ignores the disfluency settings, silently; see "Settings and precedence" in the README | The env gate wins over the per-project value (stage knobs are `.env` only). Check `docker compose exec app env \| grep -E 'TRANSCRIPT_|DISFLUENCY_|FACE_|VAD|ALIGNER|TEXT_DETECTION'`, then re-run the stage. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
 
 Reading runs: the `runs` block of `reelsaw status` lists one line per run (`#3 re-render … done 0:41 clips 1 [render 0:41]`):
@@ -39,14 +40,41 @@ is that line, not the gap between events. A run still `running` with no live job
 ## 2. Tools
 
 - **`reelsaw` CLI** (`apps/server/src/cli.ts`, also `pnpm --filter @reelsaw/server cli`): same composition root as
-  the server with HTTP/workers off, so it sees the exact config, models and storage. Commands: `status`, `events`,
-  `clip`, `rerender <clipId…>`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
-  and context audio; `--fixture` exports a regression case), `align` (raw word timestamps for any source window),
-  `hear` (transcribe a range of the *rendered* clip: what viewers actually hear), `flags`.
-  Intro/outro: `bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]`,
-  `project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--rerender]`, `clip-bumpers <projectId>
-  <clipId…> [--intro inherit|none|<id>] [--outro …] [--rerender]`. They run the same tRPC procedures as the web app
-  and the MCP tools, as the project's owner (`--user` for library commands when the install has several accounts).
+  the server with HTTP/workers off, so it sees the exact config, models and storage. The intro/outro commands run
+  the same tRPC procedures as the web app and the MCP tools, as the project's owner (`--user` for library commands
+  when the install has several accounts). Every command:
+
+<!-- generated:cli -->
+Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).
+
+| Command | What it does |
+| --- | --- |
+| `reelsaw users` | list accounts: role, status, sign-up date |
+| `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
+| `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
+| `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
+| `reelsaw events <projectId> [n=30]` | recent pipeline events |
+| `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
+| `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
+| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
+| `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
+| `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
+| `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
+| `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
+| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
+| `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
+| `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
+| `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
+| `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
+<!-- /generated -->
+
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
   output length and render time.
 - **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `projectId`, `clipId`, `jobId`,
@@ -258,7 +286,6 @@ Next:
 
 ## 8. Evals and regression cases
 
-Every fixed bug should leave a case behind: `pnpm eval` runs all suites (selection, framing, overlays,
-cuts, transcription, selection-model) against committed fixtures and baselines and exits non-zero on a
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
 regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
 pull more data from: [EVALS.md](EVALS.md).

@@ -17,6 +17,12 @@ project already hit the problem it prevents.
 - **Plain language.** Events, errors and notices are sentences a user understands ("No clean cut
   after 8 tries: it clipped the next word"), with the raw detail one click away. Say
   "disfluencies", not "stutters".
+- **One precedence chain per setting, written down.** Models and provider keys: `.env`, then the
+  admin's runtime override; stage knobs (`TRANSCRIPT_BIAS`, `DISFLUENCY_*`, detectors): `.env` only,
+  and an off gate silently disables the matching per-project setting; a project: shared defaults,
+  the user's defaults, the create input, frozen into `projects.settings`; style: project, then clip;
+  framing: auto, project, clip, section; quotas: `.env`, then per-user limits. A new setting says
+  where it sits in this chain (README, "Settings and precedence").
 
 ## Backend
 

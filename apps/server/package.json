@@ -17,6 +17,8 @@
     "eval:cuts": "tsx src/eval/run.ts cuts",
     "bench:e2e": "tsx src/eval/e2e.ts",
     "bundle": "node scripts/bundle.mjs",
+    "docs:gen": "tsx scripts/gen-docs.ts",
+    "docs:check": "tsx scripts/gen-docs.ts --check",
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {

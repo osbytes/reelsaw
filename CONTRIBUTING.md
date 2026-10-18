@@ -13,9 +13,12 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 ## Pull requests
 
 - One change per PR, with a description of what and why.
-- Typecheck both apps, run `pnpm --filter @reelsaw/server test` against a local stack, and check
-  UI changes in the browser at phone width.
-- Keep docs current: `README.md`, `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
+- Typecheck both apps and check UI changes in the browser at phone width. CI runs the tests that
+  need no stack; the rest (`pnpm --filter @reelsaw/server test`) need the local stack, so run the
+  ones you touched against it before opening the PR.
+- Changed an env var, a CLI command or an eval suite? Run `pnpm docs:gen` (CI runs `pnpm docs:check`):
+  `.env.example`, `docs/CONFIG.md` and the command/suite tables are generated from the code.
+- Keep docs current: `README.md`, `docs/CONFIG.md` (generated), `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
 
 ## Licensing and the Developer Certificate of Origin
 
