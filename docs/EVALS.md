@@ -51,9 +51,15 @@ A suite whose every case was skipped reports no metrics (nothing ran, so nothing
   to check, and treat the heldout numbers as the honest ones; a dev score far above the heldout score
   means the rules were fitted to the cases. Once a heldout case has informed a change, move it to `dev`
   and add fresh heldout cases.
+- **Uncertain labels.** A disfluency case whose label the text alone does not settle (a tag "right?",
+  a hedge "sort of") carries `uncertain: true`: it runs and prints with its outcome marked `TP?` /
+  `FP?` etc., but never counts in precision / recall and never fails as a regression. Prefer that to
+  guessing a label.
 - **Provenance.** Cases may carry `source: { url?, projectId?, userId?, decidedAt? }` (the video, the
-  project and reviewer the label came from). The disfluency windows predate it and record none of
-  these yet, so fill them in from the project when you touch a case; leave unknown fields out.
+  project and reviewer the label came from). The first 50 disfluency windows predate it and record
+  none of these yet, so fill them in from the project when you touch a case; leave unknown fields out.
+  Caption-diff cases (51 onwards) record the video url with `&t=` and a `note` saying how the label
+  was made.
 
 ## Comparing models and settings (matrix runs)
 
@@ -187,7 +193,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | `speakers` | media | active speaker detection (mouth motion × audio envelope synchrony) vs known talkers, incl. a drinking listener |
 | `overlays` | media | burned-in captions/watermarks: per-frame detection recall and whole-video aggregation (no scene text) |
 | `cuts` | models | disfluency jump cuts on real audio: removed cleanly, refused safely, or broken |
-| `transcription` | models, media | WER + entity recall on synthesized speech through the configured STT, bias and correction |
+| `transcription` | models, media | WER + entity recall through the configured STT, bias and correction: synthetic `say` audio, and real speech graded against human captions |
 | `disfluency` | nothing (runs offline) | disfluency detection precision/recall on reviewed real-transcript cases (rules + model) |
 | `selection-model` | models | one real map call per sampled chunk: candidates inside the chunk, parseable, snappable |
 <!-- /generated -->
@@ -204,14 +210,29 @@ Framing track tolerances are fractions of the source width (`maxErrFrac`, `maxPa
 Scene-cut defaults (`SCENE_FLOOR`, `SCENE_RATIO` in `pipeline/scenes.ts`) were tuned on one dark podcast. The `scenes` suite needs a bright, high-motion fixture (sport, vlog, screencast) before they are retuned; until then treat them as unvalidated outside dark talking-head footage.
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |
-| `transcription` | STT + LLM, macOS `say` for audio | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction |
+| `transcription` | STT + LLM; macOS `say` for the synthetic audio; media for the real cases | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction. 5 **synthetic** cases (`say`, one voice, fabricated name-dense text: they measure bias + correction, not recognition; the unprefixed summary metrics) and **real** cases (`source` set: 2-minute slices of real videos graded against the video's human caption track; `real.*` metrics: raw WER, WER after filler/repeat normalisation, names-only error rate, and `misheard`, how many of YouTube's own ASR misspellings the output repeats). See "Real-speech transcription cases" below |
 | `selection-model` | LLM | one real map call per sampled chunk: candidates parse, land inside the chunk and snap; model-free quality proxies (in-range, overlapping, weak-hook rates) for comparing models |
-| `disfluency` | nothing (`--offline`: rules only); LLM for the full pipeline | precision / recall / auto-applied false positives of disfluency detection on 50 reviewed real-transcript windows (user-accepted = cut, user-rejected = keep, plus hand-labelled emphasis and stutters). LLM calls are cached by prompt |
+| `disfluency` | nothing (`--offline`: rules only); LLM for the full pipeline | precision / recall / auto-applied false positives of disfluency detection on 98 real-transcript windows: 50 around the app's own proposals (user-accepted = cut, user-rejected = keep, plus hand-labelled emphasis and stutters) and 48 from caption diffs of two other videos, which are **not** drawn from the detector's proposals (see "Disfluency cases from caption diffs"). LLM calls are cached by prompt |
 
 Known issues recorded in the baselines today:
 - `disfluency`: discourse "like" fillers ("and like throwing a ball") and optional "that" are missed
   (recall 0.70); the verifier keeps them, which is the safe direction. One comma-separated quotative
   repeat ("he's like, he's like, son") is still proposed, for review only.
+- `disfluency` (caption-diff cases 51-98, rules only): the repetition rule **auto-applies** cuts to
+  grammatical or literal repeats the human captioner kept: "had had llamas", "thresholds that that
+  allows for", "you'll see that that was", "dot dot" (the directory) and "run which which" (5 auto
+  false positives, the costliest kind). Misses: "your way way around", "configures configuring", "why
+  doesn't why don't", the false start "I think we I don't know" and "like, you know,". On these 44
+  scored cases alone the rules reach precision 0.80 (20/25) and recall 0.80 (20/25); with the model
+  (qwen2.5:14b) "like, you know," is caught, giving precision 0.81 (21/26) and recall 0.84 (21/25), and
+  the five auto-applied false positives remain (the rule fires before the model sees them).
+- `transcription` real cases (faster-whisper-small + qwen2.5:14b correction, 2026-10-18): Whisper
+  writes the Tlaxcalans as "Lashkarlands" and the Totonacs as "Totonax"; with only the real title as
+  metadata, entity recall is 0.36 (`real-dwarkesh-tlaxcalans` fails) and the project vocabulary lifts
+  it to 0.64. `real-dwarkesh-conquistadors` fails at WER 0.29 because Whisper skipped about 25 s of
+  speech near the start of the slice. Raw and normalised WER are almost equal (0.140 vs 0.139):
+  Whisper itself writes nearly clean verbatim, so the disfluency gap shows only against YouTube's ASR.
+  Names-only error rate 0.24 (27/114 proper-noun tokens).
 - `selection/apollo/snapping`: segment-level only; apollo has no word timings, so its candidates can still end mid-sentence (word-level fixtures like `lonely-chapter` are covered by `finishThought`).
 - `overlays/frame-640s`: the "YT/APOLLO" handle is occluded by a mic.
 - `overlays/aggregate-apollo-100-220`: with no scene cuts detected, a small text-like patch on a
@@ -301,6 +322,50 @@ To add a suite: create `apps/server/src/eval/suites/<name>.ts` exporting a `Suit
 (`name`, `description`, `needs`, `run(ctx) → CaseResult[]`, optional `summarize`) and register it in
 `suites/index.ts`. Use `materialize`, `ctx.cached`, `transcribeCached` (eval/asr.ts) and
 `isUnavailable(err)` (skip, don't fail, when a model/server is down).
+
+## Disfluency cases from caption diffs
+
+The first 50 disfluency cases are windows around candidates the detector itself proposed, so they
+cannot show a disfluency the detector never proposes (recall is measured only over what it already
+finds). Cases 51+ come from somewhere else: YouTube videos that have both an ASR caption track
+(`en-orig`: verbatim, word timings, every um and restart) and a human track (`en`: clean verbatim).
+The words a human editor dropped are disfluency **candidates**; the words the editor kept although
+they look like disfluencies ("very, very", "had had", "dot dot") are `keep` candidates.
+
+```bash
+cd apps/server
+npx tsx src/eval/tools/caption-diff.ts <videoId> --dir /tmp/caps --out cands.json          # dropped words
+npx tsx src/eval/tools/caption-diff.ts <videoId> --dir /tmp/caps --kept --out kept.json    # kept look-alikes
+```
+
+The tool fetches both tracks with yt-dlp (`YTDLP_PATH`; the human track with `--write-subs` only, so a
+video without one fails instead of diffing ASR against ASR; it sleeps 10 s between fetches because
+YouTube rate-limits captions), aligns them with a word-level LCS over normalised words, and writes
+each candidate as a ±30-word ASR window with timings and a `target`, the shape of a fixture.
+
+A candidate is not a label. Read each one with the human track's text next to it and decide:
+`cut` for a filler, a repeat or a false start; `keep` when the editor dropped a real word for brevity
+(a sentence-initial "And", "to go capture" → "to capture") or kept emphasis; `uncertain: true` when
+the text alone cannot say (a tag "right?", a hedge "sort of"). Target the earlier copy of a repeat,
+as the older cases do. Keep `cut` and `keep` roughly balanced and assign `split` alternately within
+each. Commit only the window words, never the whole track. Sources so far: Dwarkesh Patel × Si
+Sheppard `LwQQ7nBCGSs` (host and guest) and Missing Semester lecture 1 `MSgoeuMqUmU` (lecturers and a
+student).
+
+## Real-speech transcription cases
+
+The synthetic `transcription` cases are one TTS voice reading text written for the test, so they say
+nothing about recognising real speech. Real cases are 120 s slices of videos with a human English
+caption track: `source` (url + start/end, materialised by the framework like any media case), `text`
+= the human track's words inside the window (`caption-diff.ts <id> --ref <start>-<end>`), real
+`meta` (title, uploader, tags) and, where YouTube's own ASR misspelled names in the window,
+`corrections: [{ heard, expected }]`. Human tracks are clean verbatim, so the suite reports both the
+raw WER and the WER after dropping um/uh/er and collapsing immediate 1-3 word repeats on both sides;
+the gap between them is the share of the error that is disfluency, not mis-recognition. The
+names-only error rate takes the proper nouns from the reference (capitalised words that do not start
+a sentence) and counts how many the aligned output got wrong. A `vocabulary` field on a case is
+passed to entity extraction like a project's vocabulary, so a pair of cases on the same audio (with
+and without it) measures what the vocabulary step buys.
 
 ## Where to get more cases
 
