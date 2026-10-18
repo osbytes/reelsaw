@@ -273,6 +273,344 @@
      "required": false
     }
    ]
+  },
+  {
+   "file": "frames/sistercircle/t0.8.jpg",
+   "t": 0.8,
+   "video": "sistercircle",
+   "labels": [
+    {
+     "name": "lower-third-left",
+     "kind": "lower-third",
+     "box": [
+      0.14,
+      0.84,
+      0.29,
+      0.92
+     ]
+    },
+    {
+     "name": "lower-third-right",
+     "kind": "lower-third",
+     "box": [
+      0.455,
+      0.84,
+      0.66,
+      0.92
+     ]
+    },
+    {
+     "name": "logo",
+     "kind": "watermark",
+     "box": [
+      0.045,
+      0.79,
+      0.135,
+      0.94
+     ],
+     "required": false
+    }
+   ]
+  },
+  {
+   "file": "frames/sistercircle/t8.jpg",
+   "t": 8,
+   "video": "sistercircle",
+   "labels": [
+    {
+     "name": "logo",
+     "kind": "watermark",
+     "box": [
+      0.045,
+      0.79,
+      0.135,
+      0.94
+     ],
+     "required": false
+    },
+    {
+     "name": "cue-card",
+     "kind": "scene",
+     "box": [
+      0.66,
+      0.82,
+      0.78,
+      0.98
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/sistercircle/t32.jpg",
+   "t": 32,
+   "video": "sistercircle",
+   "labels": [
+    {
+     "name": "logo",
+     "kind": "watermark",
+     "box": [
+      0.045,
+      0.79,
+      0.135,
+      0.94
+     ],
+     "required": false
+    },
+    {
+     "name": "set-screen",
+     "kind": "scene",
+     "box": [
+      0.33,
+      0.14,
+      0.49,
+      0.36
+     ]
+    },
+    {
+     "name": "sweatshirt",
+     "kind": "scene",
+     "box": [
+      0.21,
+      0.4,
+      0.31,
+      0.5
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/sistercircle/t260.jpg",
+   "t": 260,
+   "video": "sistercircle",
+   "labels": [
+    {
+     "name": "lower-third",
+     "kind": "lower-third",
+     "box": [
+      0.13,
+      0.84,
+      0.31,
+      0.93
+     ]
+    },
+    {
+     "name": "logo",
+     "kind": "watermark",
+     "box": [
+      0.045,
+      0.79,
+      0.135,
+      0.94
+     ],
+     "required": false
+    },
+    {
+     "name": "sweatshirt",
+     "kind": "scene",
+     "box": [
+      0.34,
+      0.62,
+      0.56,
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/oxford/t70.jpg",
+   "t": 70,
+   "video": "oxford",
+   "labels": [
+    {
+     "name": "caption",
+     "kind": "caption",
+     "box": [
+      0.25,
+      0.88,
+      0.74,
+      0.95
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/oxford/t88.5.jpg",
+   "t": 88.5,
+   "video": "oxford",
+   "labels": [
+    {
+     "name": "caption",
+     "kind": "caption",
+     "box": [
+      0.28,
+      0.88,
+      0.72,
+      0.95
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/oxford/t144.jpg",
+   "t": 144,
+   "video": "oxford",
+   "labels": [
+    {
+     "name": "caption",
+     "kind": "caption",
+     "box": [
+      0.25,
+      0.88,
+      0.74,
+      0.96
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/oxford/t177.5.jpg",
+   "t": 177.5,
+   "video": "oxford",
+   "labels": [
+    {
+     "name": "caption",
+     "kind": "caption",
+     "box": [
+      0.2,
+      0.88,
+      0.79,
+      0.96
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/valsorda/t600.jpg",
+   "t": 600,
+   "video": "valsorda",
+   "labels": [
+    {
+     "name": "title-strip",
+     "kind": "watermark",
+     "box": [
+      0.01,
+      0.0,
+      0.56,
+      0.055
+     ]
+    },
+    {
+     "name": "code",
+     "kind": "scene",
+     "box": [
+      0.08,
+      0.1,
+      0.58,
+      0.95
+     ]
+    },
+    {
+     "name": "terminal",
+     "kind": "scene",
+     "box": [
+      0.6,
+      0.1,
+      1.0,
+      0.65
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/bradford/t20.jpg",
+   "t": 20,
+   "video": "bradford",
+   "labels": [
+    {
+     "name": "bug",
+     "kind": "watermark",
+     "box": [
+      0.8,
+      0.04,
+      0.95,
+      0.16
+     ]
+    },
+    {
+     "name": "ad-boards",
+     "kind": "scene",
+     "box": [
+      0.1,
+      0.18,
+      0.47,
+      0.23
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/bradford/t56.jpg",
+   "t": 56,
+   "video": "bradford",
+   "labels": [
+    {
+     "name": "bug",
+     "kind": "watermark",
+     "box": [
+      0.79,
+      0.05,
+      0.95,
+      0.15
+     ]
+    },
+    {
+     "name": "ad-peckover",
+     "kind": "scene",
+     "box": [
+      0.25,
+      0.16,
+      0.39,
+      0.21
+     ]
+    },
+    {
+     "name": "ad-whitneys",
+     "kind": "scene",
+     "box": [
+      0.1,
+      0.19,
+      0.25,
+      0.24
+     ]
+    },
+    {
+     "name": "ad-mk-maintenance",
+     "kind": "scene",
+     "box": [
+      0.0,
+      0.46,
+      0.15,
+      0.55
+     ]
+    }
+   ]
+  },
+  {
+   "file": "frames/rpodcast/t930.jpg",
+   "t": 930,
+   "video": "rpodcast",
+   "labels": [
+    {
+     "name": "title-band",
+     "kind": "watermark",
+     "box": [
+      0.05,
+      0.47,
+      0.995,
+      0.53
+     ]
+    }
+   ]
   }
  ],
  "aggregate": [
@@ -525,6 +863,474 @@
    ],
    "expectPresentation": true,
    "note": "Recorded webinar: templated slides for nearly the whole video with a small webcam inset. Slide text is the content: it must be recognised as a presentation (no masking by default) and the slide body must never become an overlay region."
+  },
+  {
+   "id": "sistercircle-0-300",
+   "source": {
+    "id": "sistercircle-0-300",
+    "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+    "start": 0,
+    "end": 300,
+    "sha256": "314baf8f62af095e2aa472281ee7beb7aeba12f7e805a51d2de6fca3571ecc4c"
+   },
+   "sceneCuts": [
+    18.151,
+    19.92,
+    23.423,
+    25.792,
+    27.327,
+    30.53,
+    34.101,
+    42.142,
+    45.545,
+    51.585,
+    55.389,
+    59.526,
+    62.229,
+    67.301,
+    71.338,
+    72.806,
+    74.308,
+    76.043,
+    80.247,
+    82.382,
+    100.968,
+    103.303,
+    109.209,
+    111.511,
+    114.114,
+    115.115,
+    116.216,
+    118.185,
+    120.887,
+    123.89,
+    125.192,
+    129.196,
+    130.33,
+    132.699,
+    136.136,
+    138.038,
+    140.44,
+    142.442,
+    144.711,
+    146.68,
+    148.582,
+    150.45,
+    153.153,
+    154.788,
+    158.959,
+    160.727,
+    170.303,
+    172.372,
+    179.679,
+    182.749,
+    195.062,
+    198.665,
+    204.905,
+    208.108,
+    210.644,
+    212.646,
+    215.582,
+    217.851,
+    219.619,
+    221.021,
+    222.789,
+    224.424,
+    225.792,
+    234.768,
+    237.537,
+    242.175,
+    244.644,
+    248.648,
+    250.15,
+    254.387,
+    257.124,
+    264.164,
+    266.9,
+    270.871,
+    272.539,
+    277.611,
+    279.379,
+    286.219,
+    291.558
+   ],
+   "expectOverlays": [
+    {
+     "name": "logo",
+     "box": [
+      0.05,
+      0.8,
+      0.13,
+      0.93
+     ],
+     "kind": "watermark"
+    },
+    {
+     "name": "lower-third",
+     "box": [
+      0.14,
+      0.845,
+      0.31,
+      0.925
+     ]
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "sweatshirt-closeup",
+     "box": [
+      0.36,
+      0.64,
+      0.58,
+      1.0
+     ]
+    },
+    {
+     "name": "set-screen",
+     "box": [
+      0.33,
+      0.14,
+      0.49,
+      0.36
+     ]
+    },
+    {
+     "name": "guest-face",
+     "box": [
+      0.35,
+      0.12,
+      0.6,
+      0.48
+     ]
+    },
+    {
+     "name": "tagboard-post",
+     "box": [
+      0.68,
+      0.2,
+      0.92,
+      0.72
+     ]
+    }
+   ],
+   "expectPresentation": false,
+   "note": "Talk-show segment, multi-camera (scene cuts from the app's own ffmpeg scene filter + pickSceneCuts on this section). Overlays: the round 'Sister Circle LIVE' bug bottom-left (whole video) and Roland Martin's 'name / @handle' lower third, shown on most of his close-ups (35-41, 62-67, 103-109, 160-170, 182-195, 225-235, 257-264, 279-286 s). The lower-third kind is not asserted (neither caption nor watermark fits a name plate); the result's kind is in the notes. Traps: the 'BLACK VOTERS MATTER' sweatshirt print sits at the same screen place in every close-up of the guest (scene text that repeats across shots), the 'Sister Circle LIVE' set screen is in every wide shot, and an 82-101 s full-screen social-post card. Labels from 1 fps contact sheets and grid frames at 0.8/8/32/260 s."
+  },
+  {
+   "id": "oxford-60-180",
+   "source": {
+    "id": "oxford-60-180",
+    "url": "https://www.youtube.com/watch?v=jd5bCpWWBXA",
+    "start": 60,
+    "end": 180,
+    "sha256": "5a246718ddee06bd6d0ad4812b20a11244b48f05c06b111ec6aca9b89f53c55c"
+   },
+   "sceneCuts": [
+    3.167,
+    4.233,
+    4.833,
+    9.2,
+    9.967,
+    12.667,
+    14.8,
+    22.767,
+    23.933,
+    25.233,
+    54.267,
+    55.933,
+    61.567,
+    63.1,
+    65.333,
+    70.033,
+    78.1,
+    83.667,
+    85.867,
+    105.267,
+    110.633,
+    115.767,
+    117
+   ],
+   "expectOverlays": [
+    {
+     "name": "caption-band",
+     "box": [
+      0.3,
+      0.885,
+      0.7,
+      0.95
+     ],
+     "kind": "caption"
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "interviewee-face",
+     "box": [
+      0.42,
+      0.12,
+      0.66,
+      0.5
+     ]
+    },
+    {
+     "name": "interviewee-body",
+     "box": [
+      0.38,
+      0.5,
+      0.7,
+      0.85
+     ]
+    }
+   ],
+   "expectPresentation": false,
+   "note": "Outdoor street interview with jump cuts. Burned-in captions are centred low (y 0.885-0.95, white with yellow keyword highlights), NOT bottom-right as the sourcing report said; no legible outdoor scene text in 60-180 s (Radcliffe Square, no signs in frame). Tests the low band (below the Apollo 0.67-0.74 band). Labels from 1 fps contact sheets and grid frames at 70/88.5/144/177.5 s."
+  },
+  {
+   "id": "valsorda-540-660",
+   "source": {
+    "id": "valsorda-540-660",
+    "url": "https://www.youtube.com/watch?v=YNzgRNsB9UA",
+    "start": 540,
+    "end": 660,
+    "sha256": "8e95e2913a7d28999baa0379b3ed74b9c877a31c49928f2a4c7a12b7628313ec"
+   },
+   "sceneCuts": [
+    25.3,
+    28,
+    33.933
+   ],
+   "expectOverlays": [
+    {
+     "name": "title-strip",
+     "box": [
+      0.02,
+      0.005,
+      0.54,
+      0.05
+     ]
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "code-body",
+     "box": [
+      0.1,
+      0.12,
+      0.58,
+      0.92
+     ]
+    },
+    {
+     "name": "terminal",
+     "box": [
+      0.62,
+      0.15,
+      0.98,
+      0.6
+     ]
+    },
+    {
+     "name": "webcam-face",
+     "box": [
+      0.68,
+      0.7,
+      0.88,
+      1.0
+     ]
+    }
+   ],
+   "expectPresentation": true,
+   "note": "Live-coding screencast: editor left, terminal top-right, webcam bottom-right, a stream title strip ('age-tool.com livecoding - @FiloSottile  What next?') across the top. The code is the content (must never be blurred) and the video should read as a presentation/screen share; the title strip is the only burned-in overlay. 25-34 s is a browser tab (cuts). Labels from 0.25 fps contact sheet and a grid frame at 600 s."
+  },
+  {
+   "id": "bradford-0-120",
+   "source": {
+    "id": "bradford-0-120",
+    "url": "https://www.youtube.com/watch?v=F_FQy5Syc3A",
+    "start": 0,
+    "end": 120,
+    "sha256": "b23b86331e77be1c7d99c08096dc3144f1cd7109b0f23d4430b605874583ac65"
+   },
+   "sceneCuts": [
+    0.16,
+    1.4,
+    2.2,
+    4.76,
+    8.64,
+    26.88,
+    45.88,
+    48.76,
+    60.16,
+    72.52,
+    88.88,
+    90.8,
+    99.88,
+    117.36
+   ],
+   "expectOverlays": [
+    {
+     "name": "corner-bug",
+     "box": [
+      0.81,
+      0.06,
+      0.94,
+      0.14
+     ],
+     "kind": "watermark"
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "pitch-and-boards",
+     "box": [
+      0.0,
+      0.15,
+      0.75,
+      0.6
+     ]
+    }
+   ],
+   "expectPresentation": false,
+   "note": "Football highlights: 0-14 s sponsor/club intro cards, then match footage with a top-right bug that reads 'SBK / GambleAware' (about 14-42 s and 112-120 s) and 'BANTAMS TV' (about 42-112 s) in the same box. Stadium ad boards (banq, PECKOVER, WHITNEYS, sky bet, MK MAINTENANCE) are scene text that pans with the camera. Labels from 0.25 fps contact sheet and grid frames at 20 and 56 s."
+  },
+  {
+   "id": "rpodcast-900-960",
+   "source": {
+    "id": "rpodcast-900-960",
+    "url": "https://www.youtube.com/watch?v=GzCeABCU3Gk",
+    "start": 900,
+    "end": 960,
+    "sha256": "3ce519eea3764bbcd7dccbd946a36cb20a0b61356178dc525e346cf9685259e1"
+   },
+   "sceneCuts": [],
+   "expectOverlays": [
+    {
+     "name": "title-band",
+     "box": [
+      0.06,
+      0.475,
+      0.99,
+      0.525
+     ],
+     "kind": "watermark"
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "waveform-top",
+     "box": [
+      0.0,
+      0.3,
+      1.0,
+      0.44
+     ]
+    }
+   ],
+   "expectPresentation": false,
+   "note": "Audio podcast over a still photo with an animated waveform: one full-width yellow title line ('R-Podcast 019: Talking Shiny at rstudio::conf with ...') at mid-height (y 0.475-0.525) for the whole video, no cuts, no face. Tests the single-shot rule that only trusts the top 15% and bottom 40%. Labels from a 0.1 fps contact sheet and a grid frame at 930 s."
+  },
+  {
+   "id": "voa-ships-0-150",
+   "source": {
+    "id": "voa-ships-0-150",
+    "url": "https://www.youtube.com/watch?v=AK0A6L6-agU",
+    "start": 0,
+    "end": 150,
+    "sha256": "68ec5f3e80345a635d2a4247643f862e0f6f3b7b9b17d799448e29119e99d57b"
+   },
+   "sceneCuts": [
+    4.92,
+    7.84,
+    9.56,
+    11.44,
+    14.8,
+    19.8,
+    24.56,
+    26.8,
+    29.2,
+    32.76,
+    35.84,
+    38.88,
+    41.76,
+    44.16,
+    46.68,
+    53.04,
+    59.52,
+    61.4,
+    64.28,
+    70.88,
+    77.52,
+    80,
+    84.4,
+    86.56,
+    91.44,
+    94.92,
+    100.28,
+    102.56,
+    104,
+    104.92,
+    107.4,
+    110.44,
+    124.36,
+    125.04,
+    126.04,
+    129.24,
+    135.52,
+    139.16,
+    143.36,
+    148.36
+   ],
+   "expectOverlays": [
+    {
+     "name": "voa-bug",
+     "box": [
+      0.87,
+      0.81,
+      0.93,
+      0.91
+     ],
+     "kind": "watermark"
+    },
+    {
+     "name": "lower-third",
+     "box": [
+      0.11,
+      0.735,
+      0.43,
+      0.845
+     ]
+    }
+   ],
+   "mustNotCover": [
+    {
+     "name": "interviewee-face",
+     "box": [
+      0.52,
+      0.1,
+      0.7,
+      0.45
+     ]
+    },
+    {
+     "name": "chart",
+     "box": [
+      0.15,
+      0.15,
+      0.85,
+      0.95
+     ]
+    }
+   ],
+   "expectPresentation": false,
+   "note": "News package (standard YouTube licence, VOA with AP footage: url and times only, no committed frames). VOA bug bottom-right throughout (from ~1 s); two-line lower thirds bottom-left on the interviews ('George Whittier / Fairbanks Morse Defense CEO' around 45-53 s, 'Admiral Jim Kilby / Acting Chief of Naval Operations' around 92-100 s): only 2 of ~40 shots, so the multi-shot rule may legitimately drop them. Scene text: 'FAIRBANKS MORSE DEFENSE' banners and jacket prints, 'STACKING THE DECKS' banner, a 64-71 s bar chart. No 'AP' credit was visible in 0-150 s on the 1 fps / 0.2 fps sheets. Labels from those sheets and grid frames at 51 and 97 s (viewed locally, not committed)."
   }
- ]
+ ],
+ "sources": {
+  "sistercircle": "https://www.youtube.com/watch?v=uYFjIHelrH0 (CC BY, TV One / Sister Circle); frame t = source seconds",
+  "oxford": "https://www.youtube.com/watch?v=jd5bCpWWBXA (CC BY, MrUniverse street interviews)",
+  "valsorda": "https://www.youtube.com/watch?v=YNzgRNsB9UA (CC BY, Filippo Valsorda live-coding; 1152x720 source, frame scaled to 960x600)",
+  "bradford": "https://www.youtube.com/watch?v=F_FQy5Syc3A (CC BY, Bradford City AFC highlights)",
+  "rpodcast": "https://www.youtube.com/watch?v=GzCeABCU3Gk (CC BY, R Podcast ep. 19; 720p source)"
+ },
+ "framesNote": "Frames with a `video` field come from these CC BY sources (2026-10-18). Boxes drawn by hand on 960 px grid overlays of the same frames, with slack, like the Apollo labels. Kinds: caption = subtitles that change with speech, watermark = always-on bug/logo/title, lower-third = name plate shown for a few seconds, scene = text that belongs to the picture (sweatshirt print, set screen, stadium ad boards, the code being written) and must not be masked. The Sister Circle logo is stylised script and is not required per frame, as with the Apollo logo."
 }

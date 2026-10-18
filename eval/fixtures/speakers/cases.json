@@ -1,5 +1,5 @@
 {
-  "note": "Two-person wide shots with known talkers (from the transcript: the left speaker's monologue 'I learned this with Alex Hormozi last year…'). The right speaker drinks from a can during it, which fooled a motion-only detector.",
+  "note": "Two-person wide shots with known talkers (from the transcript: the left speaker's monologue 'I learned this with Alex Hormozi last year\u2026'). The right speaker drinks from a can during it, which fooled a motion-only detector.",
   "cases": [
     {
       "id": "apollo-left-monologue-drinking",
@@ -11,10 +11,198 @@
         "sha256": "304dbcb335978293835bcb18841c44f09f591d9987bfe33c2af1fde31bc04bf1",
         "localPath": "/data/projects/51eb110e-aa09-4b5d-a8e9-712fab566502/source.mp4"
       },
-      "segment": [21.1, 39.43],
-      "speakers": [0.134, 0.817],
-      "truth": [{ "start": 0, "end": 18.33, "who": 0 }],
+      "segment": [
+        21.1,
+        39.43
+      ],
+      "speakers": [
+        0.134,
+        0.817
+      ],
+      "truth": [
+        {
+          "start": 0,
+          "end": 18.33,
+          "who": 0
+        }
+      ],
       "minAgreement": 0.85
+    },
+    {
+      "id": "sistercircle-couch-handover",
+      "source": {
+        "id": "sistercircle-0-300",
+        "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+        "start": 0,
+        "end": 300,
+        "sha256": "314baf8f62af095e2aa472281ee7beb7aeba12f7e805a51d2de6fca3571ecc4c"
+      },
+      "segment": [
+        0,
+        18.0
+      ],
+      "speakers": [
+        0.29,
+        0.66
+      ],
+      "truth": [
+        {
+          "start": 0.3,
+          "end": 9.4,
+          "who": 0
+        },
+        {
+          "start": 10.1,
+          "end": 17.0,
+          "who": 1
+        }
+      ],
+      "minAgreement": 0.8,
+      "note": "Two co-hosts on a couch, one static two-shot (first cut at 18.15 s), faces about 0.37 apart. Left host reads the intro ('welcome back to Sister Circle Live ... at the helm of his own news show on TV One and', 0.3-9.6 s), right host continues the same sentence ('of course you know he's also an author ... please welcome to the Sister Circle', 9.8-17.2 s) while the left host keeps a wide smile. Hand-over 9.4-10.1 s unlabelled. Lower thirds with both names at 0-1.5 s. Turns from YouTube auto-caption word timings (json3 tStartMs+tOffsetMs; the Oxford track marks speaker changes with '>>'), confirmed by lip motion on 2-5 fps face crops. Hand-overs and spans under 3 s are left unlabelled (not scored)."
+    },
+    {
+      "id": "sistercircle-couch-smiling-listener",
+      "source": {
+        "id": "sistercircle-0-300",
+        "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+        "start": 0,
+        "end": 300,
+        "sha256": "314baf8f62af095e2aa472281ee7beb7aeba12f7e805a51d2de6fca3571ecc4c"
+      },
+      "segment": [
+        291.7,
+        298.6
+      ],
+      "speakers": [
+        0.29,
+        0.7
+      ],
+      "truth": [
+        {
+          "start": 0.3,
+          "end": 5.9,
+          "who": 0
+        }
+      ],
+      "minAgreement": 0.8,
+      "note": "Closing two-shot (cut at 291.56 s, cut to a graphic at ~298.7 s): left host says 'now if you're gonna stay with us for the full hour he is joining us at the table so make sure you stay exactly where you are' (lips moving 292.0-297.6 s); the right host listens, then smiles with parted lips from ~295 s. Turns from YouTube auto-caption word timings (json3 tStartMs+tOffsetMs; the Oxford track marks speaker changes with '>>'), confirmed by lip motion on 2-5 fps face crops. Hand-overs and spans under 3 s are left unlabelled (not scored)."
+    },
+    {
+      "id": "sistercircle-threeshot-unsure",
+      "source": {
+        "id": "sistercircle-0-300",
+        "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+        "start": 0,
+        "end": 300,
+        "sha256": "314baf8f62af095e2aa472281ee7beb7aeba12f7e805a51d2de6fca3571ecc4c"
+      },
+      "segment": [
+        286.3,
+        291.5
+      ],
+      "speakers": [
+        0.245,
+        0.57
+      ],
+      "truth": [
+        {
+          "start": 2.1,
+          "end": 5.2,
+          "who": 1
+        }
+      ],
+      "minAgreement": 0,
+      "expectUnsure": true,
+      "note": "Wide three-shot (286.22-291.56 s): guest left (face x~0.245), host middle (x~0.57, face turned down), second host right (x~0.745, silent, lips closed throughout). Given the guest and middle host as the split pair, the third same-size face must make the detector answer 'unsure' (no runs). Truth is informational only and UNCERTAIN: the guest finishes '...so that's why' (to ~287.8 s) and a host says 'okay all right thank you so much for being here' (~288.4-291.5 s); the middle host is the likely talker (she continues in the next close two-shot) but her mouth is not readable here. Turns from YouTube auto-caption word timings (json3 tStartMs+tOffsetMs; the Oxford track marks speaker changes with '>>'), confirmed by lip motion on 2-5 fps face crops. Hand-overs and spans under 3 s are left unlabelled (not scored)."
+    },
+    {
+      "id": "oxford-qa-offcamera-interviewer",
+      "source": {
+        "id": "oxford-60-180",
+        "url": "https://www.youtube.com/watch?v=jd5bCpWWBXA",
+        "start": 60,
+        "end": 180,
+        "sha256": "5a246718ddee06bd6d0ad4812b20a11244b48f05c06b111ec6aca9b89f53c55c"
+      },
+      "segment": [
+        4.4,
+        60.0
+      ],
+      "speakers": [
+        0.54,
+        1.0
+      ],
+      "truth": [
+        {
+          "start": 0.6,
+          "end": 8.0,
+          "who": 1
+        },
+        {
+          "start": 8.4,
+          "end": 11.5,
+          "who": 0
+        },
+        {
+          "start": 12.5,
+          "end": 16.6,
+          "who": 1
+        },
+        {
+          "start": 20.9,
+          "end": 31.5,
+          "who": 0
+        },
+        {
+          "start": 35.0,
+          "end": 41.6,
+          "who": 0
+        },
+        {
+          "start": 42.1,
+          "end": 51.5,
+          "who": 1
+        },
+        {
+          "start": 51.7,
+          "end": 55.6,
+          "who": 0
+        }
+      ],
+      "minAgreement": 0.7,
+      "note": "Street interview: only the interviewee is on camera (centre, face x 0.50-0.60 across jump cuts; she holds the mic); the interviewer is off-camera, so speaker B is a nominal right-edge seat (x=1.0) with no face. who=1 means 'the off-camera interviewer is talking'. Interviewer turns: 64.96-72.4 ('That is very unusual ... especially from America?'), 76.9-81.0 ('You say friendly question mark ...', she laughs open-mouthed), 106.5-115.9 ('I think it happens in the UK as well ...', she listens with pursed lips); interviewee turns: 72.8-75.9, 85.2-95.9, 99.4-106.0, 116.1-120 source seconds. Burned-in captions show the same words at the same times. Turns from YouTube auto-caption word timings (json3 tStartMs+tOffsetMs; the Oxford track marks speaker changes with '>>'), confirmed by lip motion on 2-5 fps face crops. Hand-overs and spans under 3 s are left unlabelled (not scored)."
+    },
+    {
+      "id": "oxford-offcamera-monologue",
+      "source": {
+        "id": "oxford-60-180",
+        "url": "https://www.youtube.com/watch?v=jd5bCpWWBXA",
+        "start": 60,
+        "end": 180,
+        "sha256": "5a246718ddee06bd6d0ad4812b20a11244b48f05c06b111ec6aca9b89f53c55c"
+      },
+      "segment": [
+        94.6,
+        120.0
+      ],
+      "speakers": [
+        0.54,
+        1.0
+      ],
+      "truth": [
+        {
+          "start": 0.3,
+          "end": 9.9,
+          "who": 0
+        },
+        {
+          "start": 10.1,
+          "end": 25.4,
+          "who": 1
+        }
+      ],
+      "minAgreement": 0.7,
+      "note": "Interviewee answers (154.9-164.5 s source: 'Like you can always try something for free ...'), then the off-camera interviewer talks for 15 s ('Pro tip, just ask ...') while she listens, smiling with closed lips (checked at 1 fps). Speaker B is a nominal off-camera seat at x=1.0. Turns from YouTube auto-caption word timings (json3 tStartMs+tOffsetMs; the Oxford track marks speaker changes with '>>'), confirmed by lip motion on 2-5 fps face crops. Hand-overs and spans under 3 s are left unlabelled (not scored)."
     }
   ]
 }

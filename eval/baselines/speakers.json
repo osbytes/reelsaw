@@ -1,7 +1,12 @@
 {
-  "updatedAt": "2026-10-15T20:44:47.163Z",
+  "updatedAt": "2026-10-18T16:38:06.056Z",
   "cases": {
-    "apollo-left-monologue-drinking": true
+    "apollo-left-monologue-drinking": true,
+    "sistercircle-couch-handover": true,
+    "sistercircle-couch-smiling-listener": true,
+    "sistercircle-threeshot-unsure": true,
+    "oxford-qa-offcamera-interviewer": false,
+    "oxford-offcamera-monologue": false
   },
   "metrics": {}
 }
