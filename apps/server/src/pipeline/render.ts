@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
 
@@ -60,8 +60,9 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
   if (layout === "fit") return { chain: `${FIT_CHAIN(OUT_W, OUT_H)},setsar=1`, width: OUT_W, height: OUT_H };
 
   // crop window: full height, 9:16 wide (or full width if the source is already narrower)
-  const cropW = Math.min(srcW, Math.round((srcH * 9) / 16));
-  const cropH = Math.min(srcH, Math.round((srcW * 16) / 9));
+  const vc = verticalCrop(srcW, srcH);
+  const cropW = Math.round(vc.w);
+  const cropH = Math.round(vc.h);
   const xs = track.map((p) => ({ t: p.t, v: Math.max(0, Math.min(srcW - cropW, p.x * srcW - cropW / 2)) }));
   const xExpr = !xs.length ? `(iw-${cropW})/2` : piecewiseExpr(xs, 2);
   const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
@@ -269,7 +270,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   const speechProbs = svc.vad && clipAudio ? await svc.vad.probabilities(clipAudio) : null;
   const layoutDiag = newLayoutDiag();
-  let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces, layoutDiag);
+  let segments = resolveSegments(timeline, samples, { ...svc.config, srcAspect: srcW / srcH }, sceneCuts, !!svc.faces, layoutDiag);
   // what the content-region logic saw: one summary at debug; the per-frame vote at trace (module render)
   log.debug(
     { samples: samples.length, firstSample: sampleDigest(samples[0]), lastSample: sampleDigest(samples.at(-1)), frames: layoutDiag.frames, voting: layoutDiag.voting, textFrames: frames.length, samplesWithText: samples.filter((sm) => sm.text).length, candidates: layoutDiag.candidates, decisions: layoutDiag.decisions },
@@ -723,8 +724,8 @@ export function sourceVideo(overlays: SourceOverlay[], srcW: number, srcH: numbe
   let cur = "[0:v]";
   overlays.forEach((o, i) => {
     // pad a little: detector boxes hug the glyphs, glows and outlines extend past them
-    const padX = 0.01 * srcW;
-    const padY = 0.012 * srcH;
+    const padX = OVERLAY_PAD_X * srcW;
+    const padY = OVERLAY_PAD_Y * srcH;
     const x = Math.max(0, Math.floor(o.x1 * srcW - padX));
     const y = Math.max(0, Math.floor(o.y1 * srcH - padY));
     const w = Math.min(srcW - x, Math.ceil((o.x2 - o.x1) * srcW + 2 * padX));

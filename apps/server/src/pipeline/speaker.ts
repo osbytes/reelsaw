@@ -8,6 +8,10 @@
  * correlated face is the speaker; otherwise the previous speaker holds. Runs shorter than `minShot`
  * fold into their neighbours. (A first version compared raw mouth motion during speech and followed
  * a speaker who was drinking: motion magnitude alone can't tell drinking from talking.)
+ *
+ * Contract: exactly two speakers at the positions the split layout found. When a third face of
+ * comparable size persists, who is talking is ambiguous, so the result is "unsure" (no runs,
+ * confidence 0) and the caller keeps its default framing instead of guessing wrong.
  * Lightweight stand-in for audio-visual ASD models (TalkNet / Light-ASD; docs/RESEARCH.md B7).
  */
 import { spawn } from "node:child_process";
@@ -97,6 +101,10 @@ export async function activeSpeakers(
   const frameBytes = W * H * 3;
   const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${W}:${H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
   const act: [number[], number[]] = [[], []];
+  // a box belongs to a speaker when its centre is within a third of the seat separation (capped at
+  // 0.12 for far-apart seats, so close-seated pairs get a tighter, non-overlapping tolerance)
+  const seatTol = Math.min(0.12, Math.max(0.04, Math.abs(speakers[1] - speakers[0]) / 3));
+  let thirdFrames = 0;
   const times: number[] = [];
   let prevGray: Uint8Array | null = null;
   let buf = Buffer.alloc(0);
@@ -110,17 +118,23 @@ export async function activeSpeakers(
       const boxes = await deps.faces.detect(downscale2x(rgb));
       const t = f / fps;
       times.push(t);
+      const matched: FaceBox[] = [];
       for (const who of [0, 1] as const) {
         // the box nearest this speaker's usual position (ignores posters and passers-by)
-        const b = boxes.map((bx) => ({ bx, d: Math.abs((bx.x1 + bx.x2) / 2 - speakers[who]) })).filter((x) => x.d < 0.12).sort((p, q) => p.d - q.d)[0]?.bx;
+        const b = boxes.map((bx) => ({ bx, d: Math.abs((bx.x1 + bx.x2) / 2 - speakers[who]) })).filter((x) => x.d < seatTol).sort((p, q) => p.d - q.d)[0]?.bx;
+        if (b) matched.push(b);
         act[who].push(b && prevGray ? mouthMotion(g, prevGray, b) : NaN);
       }
+      // a third face about as big as the speakers' own, unmatched to either seat
+      const seatH = matched.length ? Math.min(...matched.map((m) => m.y2 - m.y1)) : 0;
+      if (seatH > 0 && boxes.some((bx) => !matched.includes(bx) && bx.y2 - bx.y1 >= 0.6 * seatH)) thirdFrames++;
       prevGray = g;
       f++;
     }
   }
   const n = times.length;
   if (n < fps) return { runs: [], confidence: 0, frames: n };
+  if (thirdFrames >= 0.3 * n) return { runs: [], confidence: 0, frames: n }; // more than two people: unsure, not wrong
   const env = times.map((t) => envelope(t));
   // motion change rate is what tracks syllables; use frame-to-frame motion as is (already a difference)
   const maxLag = Math.round(0.2 * fps); // jaw and sound are not perfectly simultaneous

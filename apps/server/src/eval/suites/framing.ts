@@ -9,8 +9,10 @@
  *    divider probe too (generated with the text model on first run). The layout must be "stack" with
  *    the content region on the expected side and at least `minWidth` wide, and the auto segmentation of the
  *    range (`segments`) must show the region as its own piece when it appears and goes away.
- *  - track cases: the "heavy tripod" camera (`tripodTrack`) must settle within `maxErrPx` of the
- *    face after `settleSec`, and never pan faster than `maxPanPxPerSec`.
+ *  - track cases: the "heavy tripod" camera (`tripodTrack`) must settle within `maxErrFrac` (of the
+ *    source width) of the face after `settleSec`, and never pan faster than `maxPanFracPerSec`
+ *    (source widths per second). Source-size independent; the legacy `maxErrPx` / `maxPanPxPerSec`
+ *    keys (1920 px source) are still accepted and converted.
  * Face samples are committed (samples.json, derived from the video); when missing they are
  * regenerated from the materialised media with UltraFace.
  */
@@ -42,6 +44,9 @@ interface FramingCase {
     maxOffset?: number;
     maxDrift?: number;
     settleSec?: number;
+    maxErrFrac?: number;
+    maxPanFracPerSec?: number;
+    /** legacy: pixels of a 1920 px wide source */
     maxErrPx?: number;
     maxPanPxPerSec?: number;
     /** content cases: the region shown on top: the side it hugs (or an explicit box, +-0.03), and at least this share of the frame width */
@@ -166,6 +171,9 @@ export const framingSuite: Suite = {
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else {
         const track = tripodTrack(samples, c.sceneCuts ?? []);
+        // tolerances are fractions of the source width; legacy px keys are 1920 px source pixels
+        const maxErrPx = (c.expect.maxErrFrac ?? (c.expect.maxErrPx ?? 30) / 1920) * c.srcW;
+        const maxPanPxPerSec = (c.expect.maxPanFracPerSec ?? (c.expect.maxPanPxPerSec ?? 1200) / 1920) * c.srcW;
         const settle = c.expect.settleSec ?? 2;
         const t0 = samples[0]?.t ?? 0;
         const errs: number[] = [];
@@ -180,16 +188,16 @@ export const framingSuite: Suite = {
         errs.sort((a, b) => a - b);
         const median = errs[Math.floor(errs.length / 2)] ?? NaN;
         const fails: string[] = [];
-        if (!(median <= (c.expect.maxErrPx ?? 30))) fails.push(`median error ${median.toFixed(0)}px after ${settle}s`);
+        if (!(median <= maxErrPx)) fails.push(`median error ${median.toFixed(0)}px after ${settle}s`);
         const rc = c.expect.recentre;
         let recentreErr = 0;
         if (rc) {
           // the face must be framed by `within` seconds after the shot change, and stay framed for the next second and a half
           const late = track.flatMap((tp, i) => (tp.t - t0 >= rc.at + rc.within && tp.t - t0 <= rc.at + rc.within + 1.5 && samples[i]?.box ? [Math.abs(tp.x - (samples[i]!.box!.x1 + samples[i]!.box!.x2) / 2) * c.srcW] : []));
           recentreErr = late.length ? Math.max(...late) : NaN;
-          if (!(recentreErr <= (c.expect.maxErrPx ?? 30) * 2)) fails.push(`${recentreErr.toFixed(0)}px off the face ${rc.within}s after the shot change`);
+          if (!(recentreErr <= maxErrPx * 2)) fails.push(`${recentreErr.toFixed(0)}px off the face ${rc.within}s after the shot change`);
         }
-        if (maxSpeed > (c.expect.maxPanPxPerSec ?? 1200)) fails.push(`pans at ${maxSpeed.toFixed(0)}px/s`);
+        if (maxSpeed > maxPanPxPerSec) fails.push(`pans at ${maxSpeed.toFixed(0)}px/s`);
         out.push({ id: name, pass: !fails.length, metrics: { medianErrPx: Number(median.toFixed(1)), maxPanPxPerSec: Math.round(maxSpeed), points: errs.length, ...(rc ? { recentreErrPx: Math.round(recentreErr) } : {}) }, notes: fails.join("; ") || c.note || "" });
       }
     }

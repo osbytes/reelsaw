@@ -5,6 +5,25 @@ import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
 import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
 
+/**
+ * Layout thresholds config. Face sizes are normalized to the frame height, so their meaning shifts
+ * with the source shape; `srcAspect` (width / height) lets them be read relative to the SHORTER
+ * side instead (see `faceFloor`). Absent, a landscape 16:9 source is assumed.
+ */
+export type LayoutConfig = Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE"> & { srcAspect?: number };
+
+/**
+ * A face-height floor given as a fraction of min(srcW, srcH), converted to a fraction of frame
+ * height. Identical for any landscape source (min side is the height); a vertical source needs a
+ * proportionally smaller height fraction for the same pixel size.
+ */
+export function faceFloor(frac: number, config: { srcAspect?: number }): number {
+  return frac * Math.min(1, config.srcAspect ?? 16 / 9);
+}
+
+/** Smallest second face (fraction of min(srcW, srcH)) that makes a shot a two-person shot. */
+const MIN_SECOND_FACE = 0.08;
+
 /** Resolved layout for one clip. */
 export type Layout = "face" | "split" | "stack" | "fit" | "center" | "none";
 
@@ -93,7 +112,7 @@ function median(xs: number[]) {
  */
 export function decideLayout(
   samples: FaceSample[],
-  config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">,
+  config: LayoutConfig,
   sceneCuts: number[] = [],
   opts: { content?: boolean } = {},
 ): LayoutDecision {
@@ -115,14 +134,14 @@ export function decideLayout(
     return { ...base, layout: "fit", reason: withFace.length ? `face in only ${Math.round(faceRatio * 100)}% of frames` : "no face detected" };
   }
   // two people on screen most of the time (interview / podcast wide shot) → one crop per speaker
-  const twoFaces = samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08).length / Math.max(1, samples.length);
+  const twoFaces = samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config)).length / Math.max(1, samples.length);
   if (twoFaces >= 0.5) {
     const pair = assignPair(samples);
     const t1 = tripodTrack(pair.a, sceneCuts);
     const t2 = tripodTrack(pair.b, sceneCuts);
     return { ...base, track: t1, track2: t2, speakerSizes: pairSizes(pair), layout: "split", reason: `two faces in ${Math.round(twoFaces * 100)}% of frames` };
   }
-  if (faceSize < config.LAYOUT_MIN_FACE_SIZE || inCorner) {
+  if (faceSize < faceFloor(config.LAYOUT_MIN_FACE_SIZE, config) || inCorner) {
     return { ...base, layout: "stack", content: FULL_FRAME, reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
   }
   // a big speaker beside an app screen / title card (a side-by-side composite): stack that region on top
@@ -140,7 +159,7 @@ export function decideLayout(
  * the whole stretch; when a bridged gap (OCR lost the title for a few seconds) pulls its share under
  * the threshold, the frames that did show the region decide, with the stretch's own face track.
  */
-function contentDecision(inside: FaceSample[], config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">, cuts: number[]): LayoutDecision {
+function contentDecision(inside: FaceSample[], config: LayoutConfig, cuts: number[]): LayoutDecision {
   const d = decideLayout(inside, config, cuts);
   if (d.content || d.layout !== "face") return d;
   const found = detectContentRegion(inside.filter((s) => frameVote(s)));
@@ -356,7 +375,7 @@ export interface LayoutSegment {
  */
 export function segmentLayouts(
   samples: FaceSample[],
-  config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">,
+  config: LayoutConfig,
   sceneCuts: number[],
   duration: number,
   minSeg = 2.5,
@@ -365,8 +384,8 @@ export function segmentLayouts(
   if (!samples.length || duration <= 0) return [];
   // per-sample framing state, smoothed over ±2 samples
   const raw = samples.map((s) => {
-    const big = !!s.box && s.box.y2 - s.box.y1 >= config.LAYOUT_MIN_FACE_SIZE;
-    const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08;
+    const big = !!s.box && s.box.y2 - s.box.y1 >= faceFloor(config.LAYOUT_MIN_FACE_SIZE, config);
+    const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config);
     return two ? "split" : big ? "face" : "none";
   });
   // a second speaker who briefly disappears (drinks, turns away, leans out) shouldn't flip the
@@ -546,7 +565,7 @@ export function staticDecision(layout: Layout, reason: string): LayoutDecision {
 }
 
 /** Use the detector's tracks but force the layout the user asked for. */
-export function forcedDecision(samples: FaceSample[], layout: Layout, config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">, sceneCuts: number[]): LayoutDecision {
+export function forcedDecision(samples: FaceSample[], layout: Layout, config: LayoutConfig, sceneCuts: number[]): LayoutDecision {
   if (!samples.length || !samples.some((s) => s.box)) return staticDecision(layout === "face" || layout === "split" || layout === "stack" ? "center" : layout, "manual (no face found, centre crop)");
   const base = decideLayout(samples, config, sceneCuts);
   if (layout === "split" && !base.track2) {
@@ -582,7 +601,7 @@ export function offsetDecision(d: LayoutDecision, offsetX: number | undefined, s
 export function resolveSegments(
   pieces: TimelinePiece[],
   samples: FaceSample[],
-  config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">,
+  config: LayoutConfig,
   sceneCuts: number[],
   hasDetector: boolean,
   diag?: LayoutDiag,
@@ -644,14 +663,20 @@ export function sparseTrack(track: LayoutDecision["track"], start: number, end: 
  * Boxes are clustered by centre across the clip; a cluster seen in enough frames whose centre and
  * size barely vary is treated as static and removed from every sample.
  */
-export function dropStaticFaces(samples: FaceSample[], opts = { radius: 0.05, minFrames: 8, maxStd: 0.0025 }): { samples: FaceSample[]; dropped: Array<{ x: number; y: number; frames: number }> } {
+export function dropStaticFaces(samples: FaceSample[], opts: { radius?: number; minSeconds?: number; maxStd?: number } = {}): { samples: FaceSample[]; dropped: Array<{ x: number; y: number; frames: number }> } {
+  const radius = opts.radius ?? 0.05;
+  const maxStd = opts.maxStd ?? 0.0025;
+  // a static cluster must persist for `minSeconds` of footage whatever the sampling rate (8 frames at 4 fps)
+  const dts = samples.slice(1).map((s, i) => s.t - samples[i]!.t).filter((d) => d > 0);
+  const fps = dts.length ? 1 / median(dts) : 4;
+  const minFrames = Math.max(2, Math.round((opts.minSeconds ?? 2) * fps));
   type Cluster = { x: number; y: number; members: FaceBox[] };
   const clusters: Cluster[] = [];
   for (const s of samples)
     for (const b of s.boxes) {
       const cx = (b.x1 + b.x2) / 2;
       const cy = (b.y1 + b.y2) / 2;
-      const c = clusters.find((k) => Math.abs(k.x - cx) < opts.radius && Math.abs(k.y - cy) < opts.radius);
+      const c = clusters.find((k) => Math.abs(k.x - cx) < radius && Math.abs(k.y - cy) < radius);
       if (c) {
         c.members.push(b);
         c.x += (cx - c.x) / c.members.length;
@@ -665,11 +690,11 @@ export function dropStaticFaces(samples: FaceSample[], opts = { radius: 0.05, mi
   const isStatic = new Set<FaceBox>();
   const dropped: Array<{ x: number; y: number; frames: number }> = [];
   for (const c of clusters) {
-    if (c.members.length < opts.minFrames) continue;
+    if (c.members.length < minFrames) continue;
     const xs = c.members.map((b) => (b.x1 + b.x2) / 2);
     const ys = c.members.map((b) => (b.y1 + b.y2) / 2);
     const hs = c.members.map((b) => b.y2 - b.y1);
-    if (std(xs) < opts.maxStd && std(ys) < opts.maxStd && std(hs) < opts.maxStd) {
+    if (std(xs) < maxStd && std(ys) < maxStd && std(hs) < maxStd) {
       for (const b of c.members) isStatic.add(b);
       dropped.push({ x: Number(c.x.toFixed(3)), y: Number(c.y.toFixed(3)), frames: c.members.length });
     }
