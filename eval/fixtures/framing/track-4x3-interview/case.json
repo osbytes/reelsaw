@@ -1,0 +1,21 @@
+{
+  "kind": "track",
+  "note": "VOA interview with President Obama (CC BY, US federal outlet), source 1:00-1:43.5, 640x480 (4:3, the first non-16:9 framing case): one uninterrupted close-up, face at x ~0.39, ~0.3 of the frame height; the VOA logo bug sits top-left (x 0.15, y 0.12). Frames viewed at 2 fps over 0-44 s and a grid frame at 50 s; the next shot change is at 43.78 s. The tripod camera must settle on the face without fast pans; tolerances are fractions of the 640 px width.",
+  "source": {
+    "id": "voa-obama-60-180",
+    "url": "https://www.youtube.com/watch?v=LK5W9zjuBWk",
+    "start": 60,
+    "end": 180,
+    "sha256": "15cebb23a51b746c0c03c87664818e9f97af8addcc8b24da1fa37d4910af6a49"
+  },
+  "start": 0,
+  "end": 43.5,
+  "srcW": 640,
+  "srcH": 480,
+  "sceneCuts": [],
+  "expect": {
+    "settleSec": 2,
+    "maxErrFrac": 0.015625,
+    "maxPanFracPerSec": 0.625
+  }
+}

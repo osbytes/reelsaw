@@ -1,0 +1,20 @@
+{
+  "kind": "split",
+  "note": "Sister Circle (TV One, CC BY claimed), source 0:00-0:17.8: close two-shot of two hosts on a couch, faces at x 0.28 and 0.68, ~0.2 of the frame height (frames viewed at 2 fps over 0-18 s, grid frame at 8 s). Name lower thirds sit at y 0.83-0.93 only for the first 1.5 s, so no avoid band. Expected: split, each crop centred on its host without wandering to the other.",
+  "source": {
+    "id": "sistercircle-0-300",
+    "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+    "start": 0,
+    "end": 300,
+    "sha256": "57bf2d2ae1b8dc6159ebc67a0e648c794214c511f775cc5894cf41f6178e4c57"
+  },
+  "start": 0,
+  "end": 17.8,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": {
+    "layout": "split",
+    "maxOffset": 0.2,
+    "maxDrift": 0.08
+  }
+}
