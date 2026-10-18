@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Redaction for issue reports: secrets never leave the machine.
  *  - config: every setting in full unless it's secret (secrets → "set" / "unset"); model and
@@ -89,6 +90,8 @@ export function makeRedactor(config: Config, extra: Iterable<string> = []): (tex
     let s = text;
     for (const v of forms) if (s.includes(v)) s = s.split(v).join("[redacted]");
     for (const [re, rep] of PATTERNS) s = s.replace(re, rep);
+    // user ids in JSON lines (request logs, job data, events) become the same 12-char pseudonym as project.json's ownerHash
+    s = s.replace(/"(userId|user_id|actorId)":"([A-Za-z0-9_-]{8,})"/g, (_m, k: string, id: string) => `"${k}":"${createHash("sha256").update(id).digest("hex").slice(0, 12)}"`);
     return s;
   };
 }
