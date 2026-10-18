@@ -1,6 +1,7 @@
 import { inArray, eq, desc } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { sweepRetention } from "../retention.js";
+import { pruneHistory } from "../events-retention.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -27,6 +28,7 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
   let requeued = 0;
   const active = await db.query.projects.findMany({
     where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]),
+    columns: { id: true, status: true }, // not the whole row (settings etc.): only these two are read
   });
   for (const p of active) {
     if (p.status === "rendering") {
@@ -79,11 +81,12 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
     reconcile(svc)
       .then(() => detectStalls(svc, svc.config.STALL_MINUTES))
       .then(() => sweepRetention(svc))
+      .then(() => pruneHistory(svc)) // daily per table, batched and resumable; a no-op between runs
       .then(async () => {
         // leftover files nothing points at: at most hourly (a safety net for crashes between commit and delete)
         if (Date.now() - lastSweep < 60 * 60_000) return;
         lastSweep = Date.now();
-        await sweepScratch(svc);
+        await sweepScratch(svc, { budgeted: true });
         await purgeBumperAssets(svc);
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
@@ -102,14 +105,17 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const db = svc.database.db;
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
-  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]) });
+  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), columns: { id: true, status: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
     if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
+    // live jobs by (name, singleton_key): enqueue sets the key to the project id (stage jobs) or the clip id (render/prepare),
+    // and exclusive-policy queues index exactly that, unlike data->>'projectId' which scans the whole job table
+    const clipIds = (await db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, p.id))).map((c) => c.id);
     const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; started_on: Date | null; singleton_key: string }>(
-      `select name, state, retry_count, started_on, singleton_key from pgboss.job where data->>'projectId' = $1 and state in ('created','retry','active') order by created_on`,
-      [p.id],
+      `select name, state, retry_count, started_on, singleton_key from pgboss.job where name = any($1) and singleton_key = any($2) and state in ('created','retry','active') order by created_on`,
+      [Object.values(QUEUES), [p.id, ...clipIds]],
     );
     const info = {
       projectId: p.id,

@@ -403,7 +403,11 @@ export const projectEvents = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("project_events_project_id_idx").on(t.projectId, t.id)],
+  (t) => [
+    index("project_events_project_id_idx").on(t.projectId, t.id),
+    // serves the delete of a finished stage's progress ticks (uow.ts emit) without scanning the project's other events
+    index("project_events_progress_idx").on(t.projectId, t.id).where(sql`${t.type} = 'stage.progress'`),
+  ],
 );
 
 export type Project = typeof projects.$inferSelect;

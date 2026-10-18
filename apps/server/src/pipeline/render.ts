@@ -1,4 +1,5 @@
 import path from "node:path";
+import { capDiagnostics } from "../transcript-limits.js";
 import fs from "node:fs/promises";
 import { eq, and } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -495,7 +496,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   await svc.storage.putFile(thumbnailKey, thumbPath, "image/jpeg");
   if (svc.storage.driver !== "local") await fs.rm(outPath, { force: true }).catch(() => {});
 
-  const diagnostics: ClipDiagnostics = {
+  const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),
     ...(captionTiming ? { captionTiming } : {}),
@@ -518,7 +519,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         }
       : {}),
     renderMs: Date.now() - renderStarted,
-  };
+  });
   // commit only if this is still the clip's current generation; a newer request wins and our files go
   const committed = await svc.tx(async (u) => {
     const [cur] = await u.db.select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
