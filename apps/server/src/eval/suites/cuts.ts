@@ -8,11 +8,15 @@
  *   broken – something was cut but a word is left over or a neighbour was damaged
  * A case passes when the verdict matches `expect` (default "clean"; "kept" is accepted for cases
  * labelled `"expect": "clean-or-kept"`). ASR calls are cached by audio hash.
+ *
+ * A case with `"manual": true` is a cut the user made. It must never be dropped: `"expect": "applied"`
+ * passes when a cut comes back with both seams within `tolerance` (default 0.15 s) of the user's range,
+ * whether or not the seam check could confirm it (`verified` is reported in the metrics).
  */
 import { loadAligner, type Aligner } from "../../audio/align.js";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Word } from "@reelsaw/shared";
+import { normalizeToken, type Word } from "@reelsaw/shared";
 import { refineCuts } from "../../pipeline/audiocuts.js";
 import { isUnavailable, type CaseResult, type Suite } from "../framework.js";
 import { transcribeCached } from "../asr.js";
@@ -21,11 +25,13 @@ interface Case {
   range: { start: number; end: number };
   deleted: string[];
   words: Word[];
-  expect?: "clean" | "kept" | "clean-or-kept";
+  expect?: "clean" | "kept" | "clean-or-kept" | "applied";
+  manual?: boolean;
+  tolerance?: number;
   note?: string;
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9']+/g, "");
+const norm = normalizeToken;
 
 let alignerP: Promise<Aligner> | undefined;
 const getAligner = (dir: string) => (alignerP ??= loadAligner(dir));
@@ -62,7 +68,7 @@ export const cutsSuite: Suite = {
           wav,
           0,
           dur,
-          [c.range],
+          [{ ...c.range, ...(c.manual ? { manual: true } : {}) }],
           c.words,
         );
         const cut = res.cuts[0];
@@ -84,11 +90,13 @@ export const cutsSuite: Suite = {
           verdict = adjacent && gone ? "clean" : "broken";
         }
         const expect = c.expect ?? "clean";
-        const pass = expect === "clean-or-kept" ? verdict !== "broken" : verdict === expect;
+        const tol = c.tolerance ?? 0.15;
+        const atBounds = !!cut && Math.abs(cut.start - c.range.start) <= tol && Math.abs(cut.end - c.range.end) <= tol;
+        const pass = expect === "applied" ? atBounds : expect === "clean-or-kept" ? verdict !== "broken" : verdict === expect;
         out.push({
           id: name,
           pass,
-          metrics: { verdict, cut: cut ? `${cut.start.toFixed(3)}-${cut.end.toFixed(3)}` : "-", asrCalls: calls, newAsrCalls: uncached, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+          metrics: { verdict: c.manual ? (!cut ? "dropped" : atBounds ? "applied" : "moved") : verdict, ...(cut ? { verified: cut.verified } : {}), cut: cut ? `${cut.start.toFixed(3)}-${cut.end.toFixed(3)}` : "-", asrCalls: calls, newAsrCalls: uncached, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
           notes: heardText || res.skipped[0]?.reason.slice(0, 160) || "",
         });
       } catch (err) {

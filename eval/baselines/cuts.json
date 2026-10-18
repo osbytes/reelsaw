@@ -1,8 +1,9 @@
 {
-  "updatedAt": "2026-10-15T20:11:51.706Z",
+  "updatedAt": "2026-10-18T05:43:44.715Z",
   "cases": {
     "into-coarticulated": true,
-    "pay-repeat": true
+    "pay-repeat": true,
+    "manual-repeated-sentence": true
   },
   "metrics": {
     "clean": {
@@ -14,7 +15,7 @@
       "better": "lower"
     },
     "asrCallsPerCase": {
-      "value": 2,
+      "value": 4.3,
       "better": "lower",
       "tolerance": 2
     }

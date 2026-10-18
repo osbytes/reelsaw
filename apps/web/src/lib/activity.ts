@@ -55,6 +55,8 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
       return { text: `Retrying ${p.step} (attempt ${p.attempt} of ${p.max}) after: ${p.reason}`, tone: "warn" };
     case "clip.bumper_skipped":
       return { text: `${p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
+    case "clip.cut_unverified":
+      return { text: `Applied your cut at ${formatTime(Number(p.at))} without a seam check: the audio around it couldn't be matched`, tone: "warn" };
     case "job.stalled":
       return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:

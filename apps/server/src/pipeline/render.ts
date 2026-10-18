@@ -21,6 +21,7 @@ import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
 import { spawn } from "node:child_process";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
+import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
@@ -358,10 +359,13 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     void ctx.progress(0.05, `Verifying disfluency cut ${i + 1}/${n}${attempt > 1 ? ` (try ${attempt})` : ""}`, { clipId }).catch(() => {}),
   );
   for (const sk of cutResult.skipped) log.warn({ span: [sk.range.start, sk.range.end], reason: sk.reason }, "disfluency cut skipped");
-  for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end] }, "disfluency cut");
+  for (const c of cutResult.cuts) log.debug({ cut: [c.start, c.end], verified: c.verified, manual: c.manual ?? false }, "disfluency cut");
+  for (const c of cutResult.cuts.filter((x) => !x.verified && x.manual)) {
+    await svc.events.emit(projectId, "clip.cut_unverified", { clipId, at: Number((c.start + clip.startSec).toFixed(2)), reason: (c.reason ?? "").slice(0, 1500) }).catch(() => {});
+  }
   // long pauses: shortened with jump cuts (VAD on the clip audio), merged with the disfluency cuts
   let pauseInfo: ClipDiagnostics["pauses"];
-  let cuts = cutResult.cuts;
+  let cuts: CutRange[] = cutResult.cuts;
   const maxPause = settings.pauses === "off" ? 0 : settings.pauses === "tight" ? 0.35 : 0.6;
   if (speechProbs && maxPause > 0) {
     try {
@@ -390,7 +394,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         .filter((w) => w.end > clip.startSec && w.start < clip.endSec)
         .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }));
       const res = await alignWordTimes(svc.aligner, clipAudio, heard);
-      const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
+      const norm = normalizeToken;
       // match caption words to heard words one-to-one and in order: a repeated word ("or … or")
       // must not reuse an earlier occurrence's timing, or lines go back in time and overlap
       let cursor = 0;
@@ -553,7 +557,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     ...(captionTiming ? { captionTiming } : {}),
     layout: summary,
     cuts: {
-      applied: cutResult.cuts.map((c) => ({ start: Number((c.start + clip.startSec).toFixed(3)), end: Number((c.end + clip.startSec).toFixed(3)) })),
+      applied: cutResult.cuts.map((c) => ({ start: Number((c.start + clip.startSec).toFixed(3)), end: Number((c.end + clip.startSec).toFixed(3)), verified: c.verified, ...(c.reason ? { reason: c.reason.slice(0, 2000) } : {}), ...(c.manual ? { manual: true } : {}) })),
       skipped: cutResult.skipped.map((sk) => ({ start: Number((sk.range.start + clip.startSec).toFixed(3)), end: Number((sk.range.end + clip.startSec).toFixed(3)), reason: sk.reason.slice(0, 2000) })),
     },
     outDurationSec: Number(outDuration.toFixed(2)),

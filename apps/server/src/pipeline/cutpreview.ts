@@ -99,7 +99,7 @@ export async function planCutPreview(svc: Services, userId: string, projectId: s
         input,
         ws,
         we - ws,
-        [{ start: flag.start - ws, end: flag.end - ws }],
+        [{ start: flag.start - ws, end: flag.end - ws, ...(flag.subkind === "manual" ? { manual: true } : {}) }],
         words,
       ).catch((err) => {
         if (budget.aborted && !opts.signal?.aborted) return { cuts: [], skipped: [{ range: { start: 0, end: 0 }, reason: "No clean cut found within 30 s. The full render search may still find one." }] };

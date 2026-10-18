@@ -159,7 +159,11 @@ export interface ClipDiagnostics {
   pauses?: { cuts: number; removedSec: number; maxPause: number };
   layout: string;
   cuts: {
-    applied: Array<{ start: number; end: number }>;
+    /**
+     * `verified: false` (absent in renders from before it existed, meaning verified) = applied at the
+     * word timings without a seam check, with `reason`; `manual` = the user's own cut
+     */
+    applied: Array<{ start: number; end: number; verified?: boolean; reason?: string; manual?: boolean }>;
     skipped: Array<{ start: number; end: number; reason: string }>;
   };
   outDurationSec: number;
@@ -348,6 +352,8 @@ export const PROJECT_EVENT_TYPES = [
   "clip.retrying",
   /** an intro/outro could not be used; the clip rendered without it */
   "clip.bumper_skipped",
+  /** a cut the user made was applied without a seam check (the audio around it couldn't be matched) */
+  "clip.cut_unverified",
   /** no progress for a long time on a running clip/stage (watchdog) */
   "job.stalled",
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
@@ -655,3 +661,5 @@ export const CONNECTOR_WORDS: ReadonlySet<string> = new Set([
   "i'm", "i've", "i'll", "i'd", "you're", "you've", "you'll", "you'd", "we're", "we've", "we'll", "they're", "they've", "they'll",
   "he's", "she's", "it's", "that's", "there's", "what's", "let's", "don't", "can't", "won't",
 ]);
+
+export * from "./tokens.js";

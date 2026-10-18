@@ -412,21 +412,23 @@ export async function detectDisfluencies(model: LanguageModel | null, words: Wor
 }
 
 /** Time ranges (clip-relative) to cut out of a clip for the applied disfluency flags. */
-export function cutRanges(flags: TranscriptFlag[], clipStart: number, clipEnd: number, pad = 0, minCut = 0.05): Array<{ start: number; end: number }> {
+export function cutRanges(flags: TranscriptFlag[], clipStart: number, clipEnd: number, pad = 0, minCut = 0.05): Array<{ start: number; end: number; manual?: boolean }> {
   const ranges = flags
     .filter((f) => f.kind === "disfluency" && (f.status === "auto" || f.status === "accepted"))
-    .map((f) => ({ start: Math.max(clipStart, f.start - pad), end: Math.min(clipEnd, f.end + pad) }))
+    .map((f) => ({ start: Math.max(clipStart, f.start - pad), end: Math.min(clipEnd, f.end + pad), manual: f.subkind === "manual" }))
     .filter((r) => r.end - r.start >= minCut && r.end > clipStart && r.start < clipEnd)
-    .map((r) => ({ start: r.start - clipStart, end: r.end - clipStart }))
+    .map((r) => ({ start: r.start - clipStart, end: r.end - clipStart, manual: r.manual }))
     .sort((a, b) => a.start - b.start);
   // merge overlaps
   const merged: typeof ranges = [];
   for (const r of ranges) {
     const last = merged[merged.length - 1];
-    if (last && r.start <= last.end + 0.01) last.end = Math.max(last.end, r.end);
-    else merged.push({ ...r });
+    if (last && r.start <= last.end + 0.01) {
+      last.end = Math.max(last.end, r.end);
+      last.manual = last.manual || r.manual; // a range the user cut stays theirs when detector cuts touch it
+    } else merged.push({ ...r });
   }
-  return merged;
+  return merged.map(({ manual, ...r }) => (manual ? { ...r, manual } : r));
 }
 
 /** Keep-segments after removing `cuts` from [0, duration], plus a function mapping old time → new time. */

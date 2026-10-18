@@ -12,6 +12,7 @@ import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom } from "./BumperField";
 import { ThemeToggle } from "../App";
 import { reportClientError } from "../lib/diagnostics";
+import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
 import {
   defaultStyle,
@@ -920,25 +921,30 @@ export function ClipEditor(props: Props) {
       .map((f) => {
         const applied = f.status === "auto" || f.status === "accepted";
         const refused = applied ? skipped.find((s) => Math.abs(s.start - f.start) < 0.35) : undefined;
-        const label = refused ? "Kept in audio" : applied ? "Cut" : f.status === "pending" ? "Needs review" : "Kept";
-        const tone = refused || f.status === "pending" ? "bg-warn-soft" : applied ? "bg-ok-soft" : "bg-sunk";
+        const outcome = applied && clip.diagnostics ? cutState(f, [{ startSec: clip.startSec, endSec: clip.endSec, diagnostics: clip.diagnostics }]) : null;
+        const unverified = outcome?.state === "unverified" ? outcome : undefined;
+        const label = refused ? "▲ Kept in audio" : unverified ? "▲ Cut unverified" : applied ? "Cut" : f.status === "pending" ? "Needs review" : "Kept";
+        const tone = refused || unverified || f.status === "pending" ? "bg-warn-soft" : applied ? "bg-ok-soft" : "bg-sunk";
         const reason = refused
           ? "The removal couldn’t be verified, so the audio was kept. Captions still drop the word."
-          : f.status === "pending"
+          : unverified
+            ? cutStateTitle(unverified)
+            : f.status === "pending"
             ? "Waiting for your call in the project transcript."
             : f.status === "rejected"
               ? "You kept it."
               : f.subkind === "manual" ? "You marked this to cut." : `${f.subkind === "repair" ? "False start" : f.subkind === "repetition" ? "Repeated word" : "Filler"} · ${Math.round(f.confidence * 100)}% confident.`;
-        return { f, label, tone, reason, refused };
+        return { f, label, tone, reason, refused, unverified: !!unverified };
       });
   }, [flags, range, clip.diagnostics]);
-  const nCut = cuts.filter((c) => c.label === "Cut").length;
+  const nCut = cuts.filter((c) => c.label === "Cut" || c.unverified).length;
   const nKept = cuts.filter((c) => c.refused).length;
+  const nUnverified = cuts.filter((c) => c.unverified).length;
   const pauses = clip.diagnostics?.pauses;
   const cutsTab = (
     <div className="flex flex-col gap-3">
       <p className="text-[13px] leading-snug text-ink2">
-        {cuts.length ? `${nCut} cut${nCut === 1 ? "" : "s"} applied${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}` : "No disfluencies in this range."}
+        {cuts.length ? `${nCut} cut${nCut === 1 ? "" : "s"} applied${nUnverified ? ` (▲ ${nUnverified} without a seam check)` : ""}${nKept ? `; ${nKept} kept because removal couldn’t be verified. Captions still drop the word.` : "."}` : "No disfluencies in this range."}
         {pauses?.cuts ? ` ${pauses.cuts} pause${pauses.cuts === 1 ? "" : "s"} shortened to ${pauses.maxPause}s (${pauses.removedSec.toFixed(1)}s removed).` : ""}
       </p>
       {cuts.map(({ f, label, tone, reason }) => (
@@ -955,7 +961,7 @@ export function ClipEditor(props: Props) {
             <span className="font-mono text-[11px] text-ink3">{fmtPrecise(f.start - range[0])}</span>
             <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
           </div>
-          <span className="text-xs leading-snug text-ink2">{reason}</span>
+          <span className="whitespace-pre-line text-xs leading-snug text-ink2">{reason}</span>
           <a
             href={`/p/${projectId}#fix=${f.id}`}
             target="_blank"

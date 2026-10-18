@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clipMeta, clipsText, type MetaClip } from "../../web/src/lib/clipMeta.ts";
+import { cutState } from "../../web/src/lib/cutState.ts";
 
 const modeLabel = { face: "Follow speaker", split: "Two stacked" };
 const base: MetaClip = { layout: "face", layoutOverride: null, diagnostics: null, bumpers: null };
@@ -32,6 +33,26 @@ test("set framing across sections and kept cuts", () => {
   const m = clipMeta({ ...base, layoutOverride: "split", layoutSegments: [{ layout: "face" }, { layout: "face" }, { layout: "split" }], diagnostics: diag({ cuts: { applied: [1, 2], skipped: [{ start: 3, reason: "echo" }] } }) }, proj);
   assert.equal(m.text, "Follow speaker → Two stacked (set) · intro 3 s · outro 3 s · 2 cuts · ▲ 1 cut kept");
   assert.match(m.title, /echo/);
+});
+
+test("a cut applied without a seam check is called out, apart from cuts kept in the audio", () => {
+  const applied = [{ start: 1, end: 2, verified: true }, { start: 5, end: 7, verified: false, reason: "re-alignment could not find it" }, { start: 9, end: 10 }];
+  const m = clipMeta({ ...base, diagnostics: diag({ cuts: { applied, skipped: [{ start: 3, reason: "echo" }] } }) }, proj);
+  assert.equal(m.text, "Auto · Follow speaker · intro 3 s · outro 3 s · 3 cuts · ▲ 1 cut unverified · ▲ 1 cut kept");
+  assert.equal(m.warn, true);
+  assert.match(m.title, /without a seam check[^\n]*\n\s+re-alignment could not find it/);
+  assert.equal(clipMeta({ ...base, diagnostics: diag({ cuts: { applied: [{ start: 1, end: 2, verified: true }], skipped: [] } }) }, proj).warn, false);
+});
+
+test("cutState: applied, unverified and kept, worst across clips", () => {
+  const d = { cuts: { applied: [{ start: 5, end: 7, verified: false, reason: "r" }, { start: 20, end: 21, verified: true }], skipped: [{ start: 30, end: 31, reason: "echo" }] } };
+  const clip = { startSec: 0, endSec: 40, diagnostics: d };
+  assert.deepEqual(cutState({ start: 5.1, end: 6.9 }, [clip]), { state: "unverified", reason: "r" });
+  assert.deepEqual(cutState({ start: 20, end: 21 }, [clip]), { state: "applied" });
+  assert.deepEqual(cutState({ start: 30, end: 31 }, [clip]), { state: "skipped", reason: "echo" });
+  assert.equal(cutState({ start: 35, end: 36 }, [clip]), null);
+  assert.equal(cutState({ start: 5, end: 6 }, [{ startSec: 0, endSec: 40, diagnostics: null }]), null);
+  assert.equal(cutState({ start: 20, end: 21 }, [clip, { startSec: 0, endSec: 40, diagnostics: d }])?.state, "applied");
 });
 
 test("clipsText joins clips with a rule", () => {

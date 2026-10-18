@@ -9,6 +9,7 @@ import { readHash, writeHash, linkWith } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import type { Playback } from "../lib/playback";
+import { cutState, cutStateLabel, cutStateTitle, type CutDiagnostics, type CutState } from "../lib/cutState";
 import { formatTime, type TranscriptSegment, type TranscriptFlag, type Word } from "@reelsaw/shared";
 
 interface Props {
@@ -45,6 +46,8 @@ export interface TranscriptClip {
   score?: number;
   thumbnailUrl?: string | null;
   videoUrl?: string | null;
+  /** what the last render did with this clip's cuts */
+  diagnostics?: CutDiagnostics | null;
 }
 const cutKind = (f: TranscriptFlag) => (f.subkind === "manual" ? "your cut" : f.subkind === "repair" ? "false start" : (f.subkind ?? "filler"));
 interface CutPlan {
@@ -633,6 +636,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                           open={openFlag === flag.id}
                           pinned={pinnedFlag === flag.id}
                           highlighted={orderedFlags[flagCursor]?.id === flag.id}
+                          rendered={flag.kind === "disfluency" ? cutState(flag, clips) : null}
                           where={`${formatTime(flag.start)}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
                           position={`${orderedFlags.indexOf(flag) + 1} of ${orderedFlags.length}`}
                           anchorRef={(el) => {
@@ -726,6 +730,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                 const st = f.status;
                 const isCut = f.kind === "disfluency";
                 const rep = d?.replacement ?? f.replacement ?? f.suggested;
+                const rendered = isCut && (st === "auto" || st === "accepted") ? cutState(f, clips) : null;
                 const [label, tone] = d
                   ? [`Staged: ${d.status === "accepted" ? "accept" : "reject"}`, "bg-acc-soft"]
                   : st === "pending"
@@ -755,6 +760,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                         </span>
                         <span className="block text-[11px] text-ink3">
                           <span className="font-mono">{formatTime(f.start)}</span> · {isCut ? cutKind(f) : f.subkind === "manual" ? "your correction" : "name fix"} · {Math.round(f.confidence * 100)}%
+                          {rendered && (
+                            <span className={rendered.state === "applied" ? "" : "font-semibold text-warn"} title={cutStateTitle(rendered)}>
+                              {" "}· {rendered.state === "applied" ? "cut in render" : rendered.state === "unverified" ? "▲ cut unverified" : "▲ kept in audio"}
+                            </span>
+                          )}
                         </span>
                       </span>
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-ink ${tone}`}>{label}</span>
@@ -867,6 +877,7 @@ function FlagWord({
   word,
   flag,
   decision,
+  rendered,
   open,
   pinned,
   highlighted,
@@ -888,6 +899,8 @@ function FlagWord({
   word: Word;
   flag: TranscriptFlag;
   decision?: Decision;
+  /** what the last render did with this cut (disfluencies only) */
+  rendered?: CutState | null;
   open: boolean;
   pinned: boolean;
   highlighted: boolean;
@@ -988,6 +1001,11 @@ function FlagWord({
               <div className="text-xs text-ink3">{where}</div>
             </div>
             <span className={`chip ${stateTone}`}>{stateLabel}</span>
+            {rendered && rendered.state !== "applied" && (
+              <span className="chip bg-warn-soft" title={cutStateTitle(rendered)}>
+                {cutStateLabel(rendered)}
+              </span>
+            )}
             {onCopyLink && (
               <button className="text-ink3 hover:text-ink" onClick={onCopyLink} aria-label="Copy link to this fix" title="Copy link to this fix">
                 <Link2 className="h-4 w-4" />
@@ -1003,6 +1021,7 @@ function FlagWord({
             <div>
               <span className="text-ink3">Cuts </span>
               <s>“{flag.heard}”</s>
+              {rendered && <p className={`mt-1 whitespace-pre-line text-xs ${rendered.state === "applied" ? "text-ink3" : "text-warn"}`}>{rendered.state === "applied" ? "Cut in the last render." : cutStateTitle(rendered)}</p>}
             </div>
           ) : (
             <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
