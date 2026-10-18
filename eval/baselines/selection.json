@@ -1,12 +1,22 @@
 {
-  "updatedAt": "2026-10-18T05:16:27.674Z",
+  "updatedAt": "2026-10-18T15:55:38.840Z",
   "cases": {
     "repair-mmss": true,
     "apollo/chunking": true,
     "apollo/snapping": true,
     "lonely-chapter/chunking": true,
     "lonely-chapter/snapping": true,
-    "lonely-chapter/ends-on-thought": true
+    "lonely-chapter/ends-on-thought": true,
+    "gate/stingy/relative": true,
+    "gate/stingy/absolute": true,
+    "gate/generous/relative": true,
+    "gate/generous/absolute": true,
+    "gate/bimodal/relative": true,
+    "gate/bimodal/absolute": true,
+    "gate/affine-invariant": true,
+    "gate/degenerate": true,
+    "pairwise/passes-1": true,
+    "pairwise/passes-3": true
   },
   "metrics": {
     "passRate": {
