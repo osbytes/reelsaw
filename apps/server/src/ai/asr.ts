@@ -9,7 +9,9 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { transcribe as aiTranscribe } from "ai";
 import type { JSONObject } from "@ai-sdk/provider";
-import type { AiService } from "./registry.js";
+import { providerOf, type AiService } from "./registry.js";
+import type { ProviderGate } from "./gate.js";
+import { llmContext, type LlmContext } from "./trace.js";
 import type { Logger } from "../log.js";
 
 export interface AsrResult {
@@ -18,18 +20,31 @@ export interface AsrResult {
   segments: Array<{ text: string; startSecond: number; endSecond: number }>;
 }
 
+/** One transcription that reached a provider (cache hits are not reported). */
+export interface SttUsage {
+  ctx: LlmContext;
+  provider: string;
+  model: string;
+  audioSec: number;
+  ms: number;
+  ok: boolean;
+}
+
 export interface Asr {
   /** Transcribe `audio` with `modelId` (default TRANSCRIPTION_MODEL) and its word-timestamp options. */
   transcribe(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject>; signal?: AbortSignal; maxRetries?: number; functionId?: string; telemetry?: boolean }): Promise<AsrResult & { cached: boolean }>;
   stats(): { hits: number; misses: number };
   prune(maxAgeDays: number): Promise<number>;
+  /** Called after every provider call (usage accounting). Set once the database is up. */
+  onUsage: ((u: SttUsage) => void) | null;
 }
 
-export function createAsr(ai: AiService, defaultModel: () => string, dir: string, log: Logger): Asr {
+export function createAsr(ai: AiService, defaultModel: () => string, dir: string, log: Logger, gate?: ProviderGate | null): Asr {
   let hits = 0;
   let misses = 0;
   const fileFor = (key: string) => path.join(dir, key.slice(0, 2), `${key}.json`);
-  return {
+  const asr: Asr = {
+    onUsage: null,
     async transcribe(audio, opts = {}) {
       const modelId = opts.modelId ?? defaultModel();
       const providerOptions = opts.providerOptions ?? (ai.transcriptionOptions(modelId) as Record<string, JSONObject>);
@@ -43,14 +58,29 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
         /* miss */
       }
       misses++;
-      const res = await aiTranscribe({
-        model: await ai.transcriptionModel(modelId),
-        audio,
-        providerOptions,
-        abortSignal: opts.signal,
-        maxRetries: opts.maxRetries ?? 2,
-        ...(opts.functionId ? { telemetry: { isEnabled: !!opts.telemetry, functionId: opts.functionId, recordOutputs: false } } : {}),
-      });
+      const model = await ai.transcriptionModel(modelId);
+      const provider = providerOf(modelId);
+      const call = async () => {
+        const t0 = Date.now();
+        try {
+          const r = await aiTranscribe({
+            model,
+            audio,
+            providerOptions,
+            abortSignal: opts.signal,
+            maxRetries: opts.maxRetries ?? 2,
+            ...(opts.functionId ? { telemetry: { isEnabled: !!opts.telemetry, functionId: opts.functionId, recordOutputs: false } } : {}),
+          });
+          const audioSec = r.durationInSeconds ?? r.segments.at(-1)?.endSecond ?? 0;
+          asr.onUsage?.({ ctx: llmContext(), provider, model: modelId, audioSec, ms: Date.now() - t0, ok: true });
+          return r;
+        } catch (err) {
+          asr.onUsage?.({ ctx: llmContext(), provider, model: modelId, audioSec: 0, ms: Date.now() - t0, ok: false });
+          throw err;
+        }
+      };
+      // a self-hosted whisper is one shared machine: the provider gate caps calls across every job and process
+      const res = gate ? await gate.run(provider, call, opts.signal) : await call();
       const out: AsrResult = { text: res.text, language: res.language, segments: res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })) };
       try {
         await fs.mkdir(path.dirname(file), { recursive: true });
@@ -78,4 +108,5 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
       return removed;
     },
   };
+  return asr;
 }

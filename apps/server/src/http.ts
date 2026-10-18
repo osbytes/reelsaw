@@ -14,6 +14,7 @@ import type { Services } from "./services.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
+import { checkStorageQuota } from "./quota.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
@@ -155,6 +156,12 @@ export function createApp(svc: Services) {
     if (length > config.MAX_UPLOAD_MB * 1024 * 1024) {
       c.get("log").warn({ bytes: length, maxMb: config.MAX_UPLOAD_MB }, "upload rejected: too large");
       return c.json({ error: `file exceeds ${config.MAX_UPLOAD_MB} MB` }, 413);
+    }
+    try {
+      await checkStorageQuota(db, config, session.user.id, length);
+    } catch (err) {
+      c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
+      return c.json({ error: (err as Error).message }, 413);
     }
     if (!c.req.raw.body) return c.json({ error: "empty body" }, 400);
     const id = randomUUID();

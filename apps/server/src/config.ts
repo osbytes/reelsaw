@@ -70,6 +70,8 @@ export const envSchema = z.object({
   TRANSCRIBE_CONCURRENCY: z.coerce.number().int().min(0).max(8).default(0),
   /** Parallel LLM calls while finding/scoring moments. 0 = auto (1 for a self-hosted model, 4 for cloud). */
   ANALYZE_CONCURRENCY: z.coerce.number().int().min(0).max(16).default(0),
+  /** Model calls in flight per provider across every process ("ollama=2,openai=16"; 0 = unlimited). Unset: 2 for self-hosted (the compatible server, openai with a base URL), unlimited for cloud. See ai/gate.ts. */
+  PROVIDER_CONCURRENCY: z.string().default(""),
   /** Rubric samples per candidate (median is kept). 0 = auto (1 self-hosted, 3 cloud). */
   ANALYZE_SCORE_SAMPLES: z.coerce.number().int().min(0).max(7).default(0),
   /** Pairwise re-ranking of the top clips with position swapping. auto = on for cloud models only. */
@@ -119,6 +121,9 @@ export const envSchema = z.object({
   MAX_PROJECTS_PER_USER: z.coerce.number().int().min(0).default(0),
   MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),
   MAX_NEW_PROJECTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
+  MAX_LIVE_JOBS_PER_USER: z.coerce.number().int().min(0).default(0), // queued + running jobs a user's own requests may add to (hosted: e.g. 12)
+  MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders and hand-made clips a user may ask for per hour
+  MAX_STORAGE_MB: z.coerce.number().int().min(0).default(0), // sources + uploads + renders + intros/outros per user; checked at upload and project creation
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),

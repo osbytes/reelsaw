@@ -546,6 +546,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
 
   const outputKey = keys.clip(projectId, clip.id, gen);
   const thumbnailKey = keys.thumb(projectId, clip.id, gen);
+  const outputBytes = (await fs.stat(outPath)).size;
   await svc.storage.putFile(outputKey, outPath, "video/mp4");
   await svc.storage.putFile(thumbnailKey, thumbPath, "image/jpeg");
   if (svc.storage.driver !== "local") await fs.rm(outPath, { force: true }).catch(() => {});
@@ -579,7 +580,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const committed = await svc.tx(async (u) => {
     const [cur] = await u.db.select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!cur || cur.gen !== gen) return false;
-    await u.db.update(schema.clips).set({ status: "done", outputKey, thumbnailKey, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    await u.db.update(schema.clips).set({ status: "done", outputKey, outputBytes, thumbnailKey, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(projectId, "clip.done", { clipId, index: clip.index });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded

@@ -7,8 +7,9 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
 import type { Config } from "./config.js";
+import type { Admission } from "./queue/boss.js";
 
-export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_NEW_PROJECTS_PER_HOUR"] as const;
+export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
 
@@ -34,6 +35,7 @@ const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
 /** Before creating a project. */
 export async function checkProjectQuota(db: Db, config: Config, userId: string) {
   const l = await limitsFor(db, config, userId);
+  if (l.MAX_STORAGE_MB > 0) checkStorage(l, await storedBytes(db, userId));
   if (l.MAX_PROJECTS_PER_USER > 0) {
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
     if (n >= l.MAX_PROJECTS_PER_USER) throw new QuotaError(`You have ${n} projects, the most this account may keep (${l.MAX_PROJECTS_PER_USER}). Delete one to start another.`);
@@ -47,6 +49,45 @@ export async function checkProjectQuota(db: Db, config: Config, userId: string) 
     const used = await minutesToday(db, userId);
     if (used >= l.MAX_SOURCE_MINUTES_PER_DAY) throw new QuotaError(`Daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes of video reached (${Math.round(used)} used); resets at ${hhmm(nextMidnightUtc())}.`);
   }
+}
+
+/**
+ * Before work a person asked for is queued (uow.ts `enqueue`, under the user's job lock): jobs in flight
+ * across every queue, and renders / new clips asked for in the last hour. `admission` already counts the
+ * unit's own earlier enqueues, so a bulk re-render that would pass the limit is refused whole.
+ */
+export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
+  if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.live >= l.MAX_LIVE_JOBS_PER_USER)
+    throw new QuotaError(`You have ${a.live} jobs queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`);
+  if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR)
+    throw new QuotaError(`${a.userRendersLastHour} renders requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`);
+}
+
+/** Before an upload or a new project: what the account stores now (sources, uploads, renders, intros/outros) plus what is arriving. */
+export async function checkStorageQuota(db: Db, config: Config, userId: string, incomingBytes = 0) {
+  const l = await limitsFor(db, config, userId);
+  if (l.MAX_STORAGE_MB > 0) checkStorage(l, (await storedBytes(db, userId)) + incomingBytes);
+}
+
+function checkStorage(l: Limits, bytes: number) {
+  if (l.MAX_STORAGE_MB <= 0) return;
+  const mb = Math.round(bytes / 1_048_576);
+  if (mb >= l.MAX_STORAGE_MB) throw new QuotaError(`This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Delete projects or uploads to make room.`);
+}
+
+/**
+ * Bytes one account keeps in storage: downloaded sources, uploads, rendered clips and intro/outro assets (removed
+ * ones too until the purge). Thumbnails and scratch files are not counted. `output_bytes` counts only while
+ * `output_key` is set (a re-render or retention clears the key); clips rendered before it existed count 0.
+ */
+export async function storedBytes(db: Db, userId: string): Promise<number> {
+  const [r] = (await db.execute(sql`
+    select
+      coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
+      + coalesce((select sum(size_bytes) from uploads where user_id = ${userId}), 0)
+      + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
+      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)).rows as Array<{ bytes: string | number }>;
+  return Number(r?.bytes ?? 0);
 }
 
 /** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
@@ -68,19 +109,30 @@ async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
   return Number(m);
 }
 
-/** What each limit counts right now, for the admin Limits dialog: kept projects, minutes since 00:00 UTC, projects in the last hour. */
+/** What each limit counts right now, for the admin Limits dialog: kept projects, minutes since 00:00 UTC, projects in the last hour, jobs in flight, renders asked for in the last hour, MB stored. */
 export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKey, number>> {
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
   const [{ hour }] = await db
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.projects)
     .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, new Date(Date.now() - 3_600_000))));
-  return { MAX_PROJECTS_PER_USER: total, MAX_SOURCE_MINUTES_PER_DAY: Math.round(await minutesToday(db, userId)), MAX_NEW_PROJECTS_PER_HOUR: hour };
+  const [jobs] = (await db.execute(sql`
+    select
+      (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'userId' = ${userId}) as live,
+      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)).rows as Array<{ live: number; renders: number }>;
+  return {
+    MAX_PROJECTS_PER_USER: total,
+    MAX_SOURCE_MINUTES_PER_DAY: Math.round(await minutesToday(db, userId)),
+    MAX_NEW_PROJECTS_PER_HOUR: hour,
+    MAX_LIVE_JOBS_PER_USER: Number(jobs?.live ?? 0),
+    MAX_RERENDERS_PER_HOUR: Number(jobs?.renders ?? 0),
+    MAX_STORAGE_MB: Math.round((await storedBytes(db, userId)) / 1_048_576),
+  };
 }
 
 /**
- * Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls and tokens,
- * stored bytes. One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
+ * Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls, tokens and the
+ * cost providers reported, seconds of audio transcribed, stored bytes (all time: sources, uploads, renders, intros/outros). One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
  * without ids it covers the first 500 accounts.
  */
 export async function usageByUser(db: Db, days: number | null, userIds?: string[]) {
@@ -88,8 +140,8 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
   if (!ids.length) return [];
   // null = all time
   const since = days == null ? sql`'-infinity'::timestamptz` : sql`now() - make_interval(days => ${days}::int)`;
-  const { projects: P, clips: C, uploads: U, llmUsage: L } = schema;
-  const [proj, clip, up, llm] = await Promise.all([
+  const { projects: P, clips: C, uploads: U, llmUsage: L, sttUsage: S, bumperAssets: B } = schema;
+  const [proj, clip, up, llm, stt, rendered, bump] = await Promise.all([
     db
       .select({
         id: P.userId,
@@ -114,26 +166,44 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
         llmCalls: sql<number>`count(*)::int`,
         llmInputTokens: sql<number>`coalesce(sum(${L.inputTokens}), 0)`,
         llmOutputTokens: sql<number>`coalesce(sum(${L.outputTokens}), 0)`,
+        llmCostUsd: sql<number | null>`sum(${L.costUsd})`,
       })
       .from(L)
       .where(and(inArray(L.userId, ids), sql`${L.createdAt} >= ${since}`))
       .groupBy(L.userId),
+    db
+      .select({ id: S.userId, sttCalls: sql<number>`count(*)::int`, sttSeconds: sql<number>`coalesce(sum(${S.audioSec}), 0)` })
+      .from(S)
+      .where(and(inArray(S.userId, ids), sql`${S.createdAt} >= ${since}`))
+      .groupBy(S.userId),
+    db
+      .select({ id: P.userId, bytes: sql<number>`coalesce(sum(${C.outputBytes}), 0)` })
+      .from(C)
+      .innerJoin(P, eq(P.id, C.projectId))
+      .where(and(inArray(P.userId, ids), sql`${C.outputKey} is not null`))
+      .groupBy(P.userId),
+    db.select({ id: B.userId, bytes: sql<number>`coalesce(sum(${B.sizeBytes}), 0)` }).from(B).where(inArray(B.userId, ids)).groupBy(B.userId),
   ]);
   const by = <T extends { id: string | null }>(rows: T[]) => new Map(rows.map((r) => [r.id, r]));
-  const [pm, cm, um, lm] = [by(proj), by(clip), by(up), by(llm)];
+  const [pm, cm, um, lm, sm, rm, bm] = [by(proj), by(clip), by(up), by(llm), by(stt), by(rendered), by(bump)];
   return ids.map((id) => {
     const p = pm.get(id);
     const l = lm.get(id);
+    const s = sm.get(id);
     return {
       id,
       projects: p?.projects ?? 0,
       projectsTotal: p?.projectsTotal ?? 0,
       sourceMinutes: Math.round(Number(p?.sourceMinutes ?? 0)),
       clipsRendered: cm.get(id)?.clipsRendered ?? 0,
-      storedBytes: Number(p?.sourceBytes ?? 0) + Number(um.get(id)?.bytes ?? 0),
+      storedBytes: Number(p?.sourceBytes ?? 0) + Number(um.get(id)?.bytes ?? 0) + Number(rm.get(id)?.bytes ?? 0) + Number(bm.get(id)?.bytes ?? 0),
       llmCalls: l?.llmCalls ?? 0,
       llmInputTokens: Number(l?.llmInputTokens ?? 0),
       llmOutputTokens: Number(l?.llmOutputTokens ?? 0),
+      /** null when no call in the window reported a price (self-hosted and most direct providers) */
+      llmCostUsd: l?.llmCostUsd == null ? null : Number(Number(l.llmCostUsd).toFixed(4)),
+      sttCalls: s?.sttCalls ?? 0,
+      sttMinutes: Math.round(Number(s?.sttSeconds ?? 0) / 6) / 10,
     };
   });
 }

@@ -2,6 +2,7 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { createProviderRegistry, customProvider, type LanguageModel, type TranscriptionModel } from "ai";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
+import type { ProviderGate } from "./gate.js";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
@@ -106,6 +107,8 @@ export function createAi(
   current: () => { language: string; transcription: string } = () => ({ language: config.AI_MODEL, transcription: config.TRANSCRIPTION_MODEL }),
   /** where keys and base URLs come from (ai/providers.ts); the environment when not given */
   credentials: CredentialSource = envCredentialSource(config),
+  /** per-provider concurrency gate (ai/gate.ts); none in evals and tests */
+  gate?: ProviderGate | null,
 ): AiService {
   type Registry = ReturnType<typeof createProviderRegistry<Record<string, any>, ":">>;
   let registry: { version: number; value: Promise<Registry> } | undefined;
@@ -247,7 +250,10 @@ export function createAi(
     languageModel: async (id = current().language) => {
       const model = (await resolve("language", id)) as Exclude<LanguageModel, string>;
       // every model handed out: lenient OpenAI schemas, then LLM_TRACE capture (logs / Langfuse) when on
-      return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: middleware ? [lenientJsonSchema, middleware] : lenientJsonSchema }) as LanguageModel;
+      const chain = middleware ? [lenientJsonSchema, middleware] : [lenientJsonSchema];
+      // the provider gate goes outermost, so a call's traced latency doesn't include its wait for a slot
+      if (gate) chain.unshift(gate.middleware(providerOf(id)));
+      return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: chain }) as LanguageModel;
     },
     transcriptionModel: async (id = current().transcription) => (await resolve("transcription", id)) as TranscriptionModel,
     transcriptionOptions: (id = current().transcription) => {

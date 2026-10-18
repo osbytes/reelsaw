@@ -9,6 +9,7 @@ import {
   jsonb,
   bigserial,
   bigint,
+  numeric,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -160,9 +161,32 @@ export const llmUsage = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     ms: integer("ms").notNull().default(0),
     ok: boolean("ok").notNull().default(true),
+    /** USD the provider reported for the call (AI Gateway does); null when it did not say */
+    costUsd: numeric("cost_usd", { precision: 14, scale: 8, mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("llm_usage_user_id_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * One row per speech-to-text call that reached a provider (cache hits are free and not written), for usage per
+ * user: seconds of audio transcribed. Written by the asr hook in services.ts; pruned with llm_usage.
+ */
+export const sttUsage = pgTable(
+  "stt_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id"),
+    projectId: text("project_id"),
+    stage: text("stage"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    audioSec: real("audio_sec").notNull().default(0),
+    ms: integer("ms").notNull().default(0),
+    ok: boolean("ok").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("stt_usage_user_id_idx").on(t.userId, t.createdAt)],
 );
 
 /**
@@ -366,6 +390,8 @@ export const clips = pgTable(
     origin: text("origin").$type<ClipOrigin>().notNull().default("ai"),
     error: text("error"),
     outputKey: text("output_key"),
+    /** size of the rendered file at output_key, for the per-user storage total (null: rendered before it was kept) */
+    outputBytes: bigint("output_bytes", { mode: "number" }),
     thumbnailKey: text("thumbnail_key"),
     layout: text("layout"),
     layoutInfo: jsonb("layout_info").$type<{ reason: string; faceRatio: number; faceSize: number }>(),
