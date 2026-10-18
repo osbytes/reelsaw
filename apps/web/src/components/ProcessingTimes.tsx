@@ -1,5 +1,5 @@
 /**
- * Settings → Machine: expected vs actual processing time per stage on this instance, learned from
+ * Settings → System → Machine: expected vs actual processing time per stage on this instance, learned from
  * its finished projects with the current models. Nothing to configure: the runs are the calibration.
  */
 import { useQuery } from "@tanstack/react-query";

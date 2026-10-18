@@ -1,0 +1,201 @@
+# Configuration reference
+
+Reelsaw is configured by environment variables (12-factor): a `.env` next to `docker-compose.yml`, or
+the process environment. Empty values count as unset. [`.env.example`](../.env.example) (from source) and
+[`deploy/.env.example`](../deploy/.env.example) (hosted install) list the same variables in file form.
+
+Not everything is set here: admins change the **models** and **provider keys** at runtime under
+Settings → System → Models, and per-user quotas on the Users page. The order in which `.env`, admin
+settings and per-project settings combine is in the README under "Settings and precedence".
+
+The tables below are generated from the zod schema in `apps/server/src/config.ts` (names, types,
+defaults) and `apps/server/scripts/docs-meta.ts` (descriptions). Run `pnpm docs:gen` after changing
+either; `pnpm docs:check` fails when this file is stale.
+
+<!-- generated:env -->
+### Core
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_ENV` | `development` | `production` enforces a 32+ character BETTER_AUTH_SECRET. The image sets it. |
+| `PORT` | `3000` | Port the HTTP server listens on. |
+| `APP_URL` | `http://localhost:3000` | Public URL people open in the browser; used for auth cookies, CORS, the OAuth issuer and links in emails. |
+| `REELSAW_VERSION` | `dev` | Release version baked into the image at build time (`dev` from source). |
+| `REELSAW_COMMIT` | `unknown` | Git commit baked into the image at build time. |
+| `REELSAW_BUILT_AT` | `unknown` | Build timestamp baked into the image. |
+| `DATABASE_URL` | `x` | Postgres connection string. Compose sets it; set it yourself when running from source. |
+| `BETTER_AUTH_SECRET` | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` | 32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable. |
+| `DATA_DIR` | `./data` | Working directory for uploads, per-project scratch files, the local storage driver and caches. |
+| `WEB_DIST` | unset | Directory of the built web app to serve. Unset: the bundled location. |
+| `RUN_WORKERS` | `true` | Process pipeline jobs in this process. false for a web-only container. At least one of RUN_HTTP / RUN_WORKERS must be on. |
+| `RUN_HTTP` | `true` | Serve HTTP in this process. false for a worker-only container. |
+| `MAX_UPLOAD_MB` | `4096` | Largest accepted file upload in MB. |
+| `MAX_SOURCE_FILE_MB` | `8192` | Largest file yt-dlp may download for a link source, in MB (`--max-filesize`). |
+| `ALLOW_PRIVATE_SOURCE_URLS` | `false` | `true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). |
+
+### Accounts and sign-up
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SIGNUP_MODE` | unset | `open`: anyone may sign up. `approval`: new accounts wait for an admin. `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. Values: `open | approval | closed`. |
+| `ALLOW_SIGNUP` | unset | Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE. |
+| `EMAIL_DRIVER` | `none` | Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off. Values: `none | smtp | resend`. |
+| `EMAIL_FROM` | unset | Sender, e.g. `Reelsaw <no-reply@example.com>`. Required with an email driver. |
+| `SMTP_URL` | unset | SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp. |
+| `RESEND_API_KEY` | unset | Required with EMAIL_DRIVER=resend. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | With an email driver: users must click the verification link before they can sign in. |
+| `TERMS_URL` | unset | Terms of service link shown on the sign-up form when set. |
+| `PRIVACY_URL` | unset | Privacy policy link shown on the sign-up form when set. |
+| `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
+| `CAPTCHA_SITE_KEY` | unset | Public captcha key. |
+| `CAPTCHA_SECRET_KEY` | unset | Secret captcha key. |
+| `MCP_OAUTH` | `false` | MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work. |
+| `HEALTH_DETAILS` | `false` | Include machine numbers in `GET /api/health` for anonymous callers (private networks only). Admins always get them. |
+
+### Models
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AI_MODEL` | `openai:gpt-4o-mini` | Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models. |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1` | Default speech-to-text model as `provider:model`. It must return word timestamps: `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, or a Speaches model through OPENAI_BASE_URL. `openai:gpt-4o-transcribe` returns none and does not work. |
+| `TRANSCRIPT_ALIGN_MODEL` | unset | Model that re-aligns cut boundaries on short windows. Unset: TRANSCRIPTION_MODEL. A bigger whisper here is cheap and pays off. |
+
+### Provider keys
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | unset | OpenAI key. With OPENAI_BASE_URL it is the key for that server (`local` for Speaches). |
+| `OPENAI_BASE_URL` | unset | Point the OpenAI provider at a local OpenAI-compatible server (Speaches, LM Studio, vLLM), e.g. `http://speaches:8000/v1`. |
+| `OPENAI_API_MODE` | unset | `responses` (OpenAI default) or `chat`. Defaults to `chat` whenever OPENAI_BASE_URL is set. Values: `responses | chat`. |
+| `ANTHROPIC_API_KEY` | unset | Anthropic key (language model only; Anthropic has no speech-to-text). |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | unset | Google Gemini key. |
+| `GROQ_API_KEY` | unset | Groq key (language and transcription models). |
+| `DEEPGRAM_API_KEY` | unset | Deepgram key (transcription). |
+| `ASSEMBLYAI_API_KEY` | unset | AssemblyAI key (transcription). |
+| `AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports. |
+| `VERCEL_OIDC_TOKEN` | unset | Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform). |
+| `OPENAI_COMPATIBLE_BASE_URL` | unset | Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`). |
+| `OPENAI_COMPATIBLE_API_KEY` | unset | Key for the compat server (`ollama` for Ollama). |
+| `OPENAI_COMPATIBLE_NAME` | `compat` | Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>`. |
+| `OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS` | `true` | Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient. |
+
+### Pipeline tuning
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RENDER_CONCURRENCY` | `auto` | Parallel renders per worker. `auto` follows CPUs and free memory (see the resource governor); a number pins it. |
+| `TRANSCRIBE_CHUNK_SECONDS` | `600` | Audio is split into chunks of this length for transcription APIs with upload limits. |
+| `TRANSCRIBE_CONCURRENCY` | `0` | Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors. |
+| `ANALYZE_CONCURRENCY` | `0` | Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud. |
+| `ANALYZE_SCORE_SAMPLES` | `0` | Rubric samples per candidate (the median is kept). 0 = auto: 1 self-hosted, 3 cloud. |
+| `ANALYZE_PAIRWISE` | `auto` | Pairwise re-ranking of the top clips with position swapping. `auto` = on for cloud models only. Values: `auto | on | off`. |
+| `ANALYZE_PAIRWISE_PASSES` | `3` | Sliding pairwise passes over the top 10 candidates. 3 passes = 48 judge calls, 1 = 18. |
+| `ANALYZE_SCORE_RULE` | `relative` | How auto mode drops weak picks. `relative`: below max(ANALYZE_MIN_SCORE_FLOOR, median - ANALYZE_SCORE_MAD_K x MAD) of the run's scores, so it holds across judges. `absolute`: the old fixed cutoff of 45. The best clip is always kept. Values: `relative | absolute`. |
+| `ANALYZE_MIN_SCORE_FLOOR` | `25` | With the relative rule: never keep a clip whose rubric total is below this (25 means the judge called it unpostable). |
+| `ANALYZE_SCORE_MAD_K` | `1` | With the relative rule: how many median absolute deviations below the median still count as a keeper. |
+| `ANALYZE_JUDGE_MODEL` | unset | Model that scores and compares candidates, as `provider:model` (e.g. `anthropic:claude-sonnet-4-5`). Unset: the language model. |
+| `TRANSCRIPT_BIAS` | `true` | Feed entities from the video metadata (channel, title, description, tags) and the project's "Names & terms" to the transcriber as vocabulary hints. Set false and those per-project hints are silently ignored. |
+| `TRANSCRIPT_CORRECTION` | `true` | After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). |
+| `DISFLUENCY_REMOVAL` | `true` | Detect fillers, repetitions and false starts and cut them from captions. Set false and the per-project disfluency settings are silently ignored. |
+| `DISFLUENCY_LLM` | `true` | Add a model pass to the rule-based disfluency pass. false skips the slowest refine step on small local models. |
+| `TRANSCRIPT_AUTO_FIX_CONFIDENCE` | `0.85` | Corrections at or above this model confidence are applied automatically; the rest wait for the user. |
+| `FACE_DETECTION` | `true` | Face detection for automatic layout (follow crop, stacked webcam). false = fit only. |
+| `LAYOUT_MIN_FACE_RATIO` | `0.6` | Share of sampled frames that must contain a face before a clip gets a face-following layout. |
+| `LAYOUT_MIN_FACE_SIZE` | `0.18` | Median face height / frame height needed for a face-following layout. |
+
+### On-device models (face, text, voice, alignment)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot. |
+| `FACE_MODEL_PATH` | `./models/ultraface-rfb-320.onnx` | UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
+| `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |
+| `VAD` | `true` | Silero voice activity detection for tightening long pauses. false = never trim silence. |
+| `ALIGNER` | `true` | wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search. |
+| `ALIGN_MODEL_DIR` | `./models/wav2vec2-base-960h` | wav2vec2 model directory. |
+| `VAD_MODEL_PATH` | `./models/silero-vad.onnx` | Silero VAD ONNX model. |
+| `TEXT_MODEL_PATH` | `./models/ppocrv4-det.onnx` | PP-OCRv4 text detector ONNX model. |
+
+### Storage
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | `local` | `local` (inside DATA_DIR) or `s3`. Values: `local | s3`. |
+| `STORAGE_LOCAL_DIR` | unset | Directory for the local driver. Unset: DATA_DIR/storage. |
+| `S3_BUCKET` | unset | Bucket name. Required with STORAGE_DRIVER=s3. |
+| `S3_REGION` | `us-east-1` | Bucket region. |
+| `S3_ENDPOINT` | unset | Custom endpoint for MinIO, R2, B2 and similar. Empty for AWS. |
+| `S3_ACCESS_KEY_ID` | unset | Access key id. |
+| `S3_SECRET_ACCESS_KEY` | unset | Secret access key. |
+| `S3_FORCE_PATH_STYLE` | `false` | Path-style addressing; required for MinIO. |
+| `S3_PREFIX` | unset | Optional key prefix inside the bucket. |
+| `S3_PUBLIC_URL` | unset | Serve clips from a public bucket or CDN at this base URL instead of presigned URLs. |
+| `S3_PRESIGN_EXPIRES` | `3600` | Presigned URL lifetime in seconds. |
+| `CLEANUP_WORKDIR` | `true` | Delete audio, chunks and subtitle intermediates when a project finishes. |
+
+### Quotas, retention and history
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `EVENT_REPLAY_LIMIT` | `300` | Events a project page replays when it connects (progress ticks never replay); older ones load on request. |
+| `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. |
+| `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. |
+| `MAX_NEW_PROJECTS_PER_HOUR` | `0` | Quota: new projects per account per hour. 0 = unlimited. |
+| `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. |
+| `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. |
+| `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever. |
+| `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. |
+| `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. |
+| `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. |
+
+### Resource governor and workers
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STALL_MINUTES` | `15` | A running job with no progress event for this long is reported (log and UI) as stalled. |
+| `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. |
+| `MAX_CPU_PERCENT` | `90` | Heavy steps wait while total CPU time is busier than this (measured, any OS). |
+| `MIN_FREE_MEM_MB` | `512` | Heavy steps wait while free memory is below this. |
+| `MIN_FREE_DISK_MB` | `2048` | Below this, jobs fail fast with a "low disk" error instead of corrupting output. |
+| `RESOURCE_WAIT_MAX_SECONDS` | `900` | Longest a step waits for the governor. |
+
+### Logging, tracing and telemetry
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LOG_LEVEL` | `info` | A level (`trace`..`silent`) optionally followed by per-module overrides, e.g. `info,render=debug,http=warn`. Change it without a restart with `reelsaw log-level`. |
+| `LOG_FORMAT` | `auto` | `auto` (pretty on a terminal, JSON otherwise), `json` or `pretty`. Values: `auto | json | pretty`. |
+| `OTEL_ENABLED` | `false` | OpenTelemetry traces and metrics over OTLP/HTTP (see the OTEL_* variables at the end). |
+| `LLM_TRACE` | `none` | Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse`; comma-separate for several. |
+| `LLM_TRACE_MAX_CHARS` | `4000` | Truncate captured prompts and responses to this many characters. |
+| `LANGFUSE_PUBLIC_KEY` | unset | Langfuse public key (checked at boot when LLM_TRACE includes langfuse). |
+| `LANGFUSE_SECRET_KEY` | unset | Langfuse secret key. |
+| `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Langfuse host. |
+| `LOG_FILE` | unset | Also write JSON lines here (daily files, 7 kept). Survives container re-creation; `reelsaw logs` and issue reports read it. |
+
+### Media tools and downloads
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary. |
+| `FFPROBE_PATH` | `ffprobe` | ffprobe binary. |
+| `YTDLP_PATH` | `yt-dlp` | yt-dlp binary. |
+| `YTDLP_PROXY` | unset | Route yt-dlp through a proxy. YouTube blocks many datacentre IPs. |
+| `YTDLP_COOKIES_FILE` | unset | Cookies file in Netscape format for yt-dlp. |
+| `CAPTION_FONT` | `DejaVu Sans` | Font family for burned-in captions; it must be installed where ffmpeg runs. |
+
+### Docker Compose and OpenTelemetry (read outside config.ts)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | `reelsaw` | Database password used by both the db and app containers (compose only). |
+| `REELSAW_IMAGE` | `ghcr.io/osbytes/reelsaw:latest` | Image the compose file runs (compose only). |
+| `WHISPER_MODEL` | `Systran/faster-whisper-small` | Speech model the Speaches container downloads (`Systran/faster-whisper-large-v3` on a GPU). Compose only. |
+| `RUN_WORKERS_IN_APP` | `true` | Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs. |
+| `OTEL_SERVICE_NAME` | `reelsaw` | OpenTelemetry service name (read by otel.ts). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP collector, e.g. `http://otel-collector:4318`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | unset | Extra OTLP headers, e.g. `authorization=Bearer%20xxx`. |
+| `OTEL_METRICS_ENABLED` | `true` | Export metrics as well as traces. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `30000` | Metric export interval in milliseconds. |
+| `OTEL_LOG_LEVEL` | unset | Diagnostic log level of the OpenTelemetry SDK itself. |
+<!-- /generated -->

@@ -29,6 +29,8 @@ jobs:
           [ -n "$sh_yaml" ] && [ "$sh_yaml" = "$ps_yaml" ] || { echo "compose templates differ"; diff <(echo "$sh_yaml") <(echo "$ps_yaml"); exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      # .env.example, docs/CONFIG.md and the CLI/suite tables are generated from the code (pnpm docs:gen)
+      - run: pnpm docs:check
       - run: pnpm --filter @reelsaw/web build
       - run: pnpm --filter @reelsaw/server bundle
       # every test file that does not import test/helpers.ts (no app, no Postgres); see docs/EVALS.md

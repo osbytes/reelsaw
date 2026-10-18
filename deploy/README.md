@@ -5,7 +5,9 @@ speakers and burns in captions. Runs on your machine with Docker.
 
 ## Install
 
-Requires Docker with Compose (Docker Desktop on macOS/Windows), 8 GB RAM for hosted providers or the smallest local model (`gemma3:4b`), 12 GB or more for `qwen2.5:7b`, 24 GB or more for `qwen2.5:14b`, and ~10 GB disk.
+Requires Docker with Compose (Docker Desktop on macOS/Windows) and ~10 GB disk. RAM depends on where the
+language model runs: 8 GB is enough with a hosted provider; the fully local stack also needs room for the
+Ollama model (the installer picks it by RAM, see below).
 
 ### Fully local in one command (Ollama + Speaches)
 
@@ -29,11 +31,12 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 above as is. `~/reelsaw` is `$HOME\reelsaw` on Windows; the same `REELSAW_*` options apply, set
 as `$env:REELSAW_LLM = "qwen2.5:7b"` before running.
 
-It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls a language model sized to your RAM (`qwen2.5:14b` from 24 GB, `qwen2.5:7b` from 12 GB, else `gemma3:4b`; the script prints its choice), starts
-everything and waits until the app answers. `REELSAW_LLM=<model>` overrides the choice. On Linux with Ollama already running on the host, it must
-listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) so the container can reach it; the script checks this and
-says how to fix it. See the top of
-the script for the other options.
+It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the language model, starts
+everything and waits until the app answers. The model is chosen by the machine's RAM: `qwen2.5:14b`
+(~9 GB) with 24 GB or more, `qwen2.5:7b` with 12 GB or more, `gemma3:4b` below that; the script prints
+its choice. Set `REELSAW_LLM=<ollama model>` to choose yourself. On Linux with Ollama already running on
+the host, it must listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) so the container can reach it; the
+script checks this and says how to fix it. See the top of the script for the other options.
 
 ### By hand
 
@@ -46,11 +49,17 @@ open http://localhost:3000    # the first account is the admin; then set SIGNUP_
 ### AI providers
 
 - **Hosted:** set `AI_MODEL` / `TRANSCRIPTION_MODEL` and the matching API key in `.env`.
-- **Fully local:** install [Ollama](https://ollama.com), `ollama pull qwen2.5:14b`, uncomment the
-  "fully local" block in `.env`, and start with `docker compose --profile local-ai up -d`.
+- **Fully local:** install [Ollama](https://ollama.com), `ollama pull qwen2.5:14b` (`qwen2.5:7b` or
+  `gemma3:4b` on less RAM), uncomment the "fully local" block in `.env`, and start with
+  `docker compose --profile local-ai up -d`.
 
 The app checks every provider at startup and exits with a message naming what's wrong. See it with
 `docker compose logs app`.
+
+## Configuration
+
+`.env.example` lists every variable with its default and meaning; the same list as a table is
+[docs/CONFIG.md](../docs/CONFIG.md) in the repository.
 
 ## Accounts
 

@@ -20,7 +20,9 @@
     "test": "node --import tsx --test test/*.test.ts",
     "test:unit": "node scripts/unit-tests.mjs",
     "eval:offline": "tsx src/eval/run.ts --offline",
-    "models:download": "sh ../../scripts/download-models.sh models"
+    "models:download": "sh ../../scripts/download-models.sh models",
+    "docs:gen": "tsx scripts/gen-docs.ts",
+    "docs:check": "tsx scripts/gen-docs.ts --check"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.79",

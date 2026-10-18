@@ -174,6 +174,26 @@ blind, fixed judge model), and gold labels from user decisions once the decision
 
 ## Suites
 
+Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm docs:gen`); `pnpm eval --list` prints the same.
+
+<!-- generated:suites -->
+| Suite | Needs | What it checks |
+| --- | --- | --- |
+| `selection` | nothing (runs offline) | chunking, timestamp repair and sentence snapping invariants on a real transcript |
+| `framing` | nothing (runs offline) | speaker crops centre faces and avoid burned-in text; tripod camera settles on the face |
+| `scenes` | media | shot-cut detection on real footage (dark/low-contrast included): precision and recall vs hand-verified cuts |
+| `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause |
+| `alignment` | nothing (runs offline) | wav2vec2 forced alignment: deleted words land inside cuts verified clean by ear; spans ordered and in bounds |
+| `speakers` | media | active speaker detection (mouth motion × audio envelope synchrony) vs known talkers, incl. a drinking listener |
+| `overlays` | media | burned-in captions/watermarks: per-frame detection recall and whole-video aggregation (no scene text) |
+| `cuts` | models | disfluency jump cuts on real audio: removed cleanly, refused safely, or broken |
+| `transcription` | models, media | WER + entity recall on synthesized speech through the configured STT, bias and correction |
+| `disfluency` | nothing (runs offline) | disfluency detection precision/recall on reviewed real-transcript cases (rules + model) |
+| `selection-model` | models | one real map call per sampled chunk: candidates inside the chunk, parseable, snappable |
+<!-- /generated -->
+
+### Notes on the older suites (hand-written)
+
 | suite | needs | what it checks |
 |---|---|---|
 | `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md); the auto-mode score gate on synthetic stingy / generous / bimodal judges (`gate/*`: leader kept, sane share, affine invariance, absolute 45 shown collapsing a stingy judge) and PRP-Sliding-K placement with a fake judge (`pairwise/passes-*`) |

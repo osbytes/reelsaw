@@ -104,7 +104,7 @@ Decisions, in order of how hard they are to reverse:
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` shown on sign-up when set.
 - **MCP over OAuth 2.1** (`@better-auth/mcp` + `@better-auth/oauth-provider`, dynamic client
   registration) so claude.ai and Claude Desktop connectors sign in with the browser; API keys
-  stay for CLIs and scripts. Resource metadata at `/.well-known/oauth-protected-resource`.
+  stay for CLIs and scripts. Resource metadata at `/.well-known/oauth-protected-resource/api/mcp`.
 
 ## Part D: running it
 

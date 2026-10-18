@@ -35,7 +35,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Agents and automation**
 
 - **MCP server** – `/api/mcp` (Streamable HTTP) lets Claude Code, Claude Desktop, Cursor or a script create projects, wait for them, read timed transcripts, edit, create and re-render clips, manage the intro/outro library and download the results. Authenticate with an API key from Settings, or with `MCP_OAUTH=true` so claude.ai and Claude Desktop connectors sign in through the browser.
-- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more.
+- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
 
 **Hosting and accounts**
 
@@ -44,7 +44,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 **Operations**
 
-- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; heartbeats re-queue jobs from dead workers within seconds and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
+- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; a worker that stops heartbeating (every 15 s) has its job re-queued by pg-boss within about a minute or two, and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
 - **Storage and install** – local volume or `s3` (AWS S3, MinIO, Cloudflare R2, Backblaze B2…); superseded renders, expired sources and orphaned files are swept hourly (`reelsaw storage` reports, `reelsaw storage sweep` runs it). One-line installers for macOS/Linux (bash) and Windows (PowerShell), and **Report an issue** saves a zip of a project's data, decisions and logs, with secrets left out.
 - **Observable and fail-fast** – every service is built in `main` and self-checks, so the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable or the DB is down. `LLM_TRACE=logs` or `langfuse` captures every prompt/response (tokens, latency, project/clip/stage), and `OTEL_ENABLED=true` turns on OTLP traces and metrics for HTTP, Postgres, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp and each stage.
 
@@ -72,7 +72,7 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
-the model (chosen by RAM: `qwen2.5:14b` ~9 GB from 24 GB, `qwen2.5:7b` from 12 GB, else `gemma3:4b`; the script prints its choice and `REELSAW_LLM=<model>` overrides it), starts everything and waits
+the model (chosen by RAM: `qwen2.5:14b`, ~9 GB, on 24 GB or more; `qwen2.5:7b` from 12 GB; `gemma3:4b` below that; the script prints its choice and `REELSAW_LLM=<model>` overrides it), starts everything and waits
 until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
 The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
 they are served from `main` (see [docs/RELEASING.md](docs/RELEASING.md)).
@@ -109,8 +109,10 @@ The language model and the transcription model are independent; mix vendors free
 
 | Env | Example values |
 |---|---|
-| `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:llama3.1` |
-| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `openai:gpt-4o-transcribe`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+| `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:qwen2.5:14b` |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+
+The transcription model must return word timestamps (captions and cuts need them), so `openai:gpt-4o-transcribe`, which returns none, is not supported.
 
 ### Fully local (no API keys)
 
@@ -119,13 +121,13 @@ Ollama only serves language models; it has no speech-to-text. So the local stack
 ```bash
 docker compose --profile local-ai up -d            # Speaches; use your native Ollama (macOS: Metal GPU)
 docker compose --profile local-ai --profile ollama up -d   # Linux: also run Ollama in a container
-ollama pull llama3.1:8b                            # or: docker compose exec ollama ollama pull llama3.1:8b
+ollama pull qwen2.5:14b                            # or: docker compose exec ollama ollama pull qwen2.5:14b
 ```
 
 `.env`:
 
 ```
-AI_MODEL=compat:llama3.1:8b
+AI_MODEL=compat:qwen2.5:14b            # qwen2.5:7b or gemma3:4b on less RAM
 OPENAI_COMPATIBLE_BASE_URL=http://host.docker.internal:11434/v1   # native Ollama; http://ollama:11434/v1 for the container
 OPENAI_COMPATIBLE_API_KEY=ollama
 TRANSCRIPTION_MODEL=openai:Systran/faster-whisper-small
@@ -133,7 +135,7 @@ OPENAI_BASE_URL=http://speaches:8000/v1
 OPENAI_API_KEY=local
 ```
 
-Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; llama3.1 8b, qwen2.5 14b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
+Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; qwen2.5 14b (the installer's default on 24 GB or more), llama3.1 8b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
 
 ### What to expect: processing time
 
@@ -151,7 +153,7 @@ Rule of thumb: **a vendor stack finishes a video in about a fifth of its length;
 
 ¹ Apple-silicon laptop, `qwen2.5:14b` on Ollama + `faster-whisper-small` on Speaches (CPU), 20-minute podcast: download 15 s, transcribe 4.9 min, refine 10 min, find moments 4 min, render 47 s; 20 min in all. On a local 14B model the disfluency verifier (one call per candidate, ~40 s each) is the bottleneck, not transcription; a smaller model or `DISFLUENCY_LLM=false` cuts refine to a fraction. ² Same video through the Vercel AI Gateway, `whisper-1` + `claude-haiku-4.5`: download 13 s, transcribe 77 s, refine 31 s, find moments 24 s, render 56 s; 3.4 min in all. Gemini 2.5 Flash took 5 min (long "thinking" outputs), Sonnet 4.5 about 4. Mixing a vendor LLM with a *local* `TRANSCRIPT_ALIGN_MODEL` makes render the slowest stage (5–9 min: every cut is re-aligned on the CPU); keep alignment on the same vendor as transcription. Full numbers in `eval/bench/results/`.
 
-These factors are only the starting point. The app learns from its own finished projects: each stage's expected time is the median over your recent projects that ran with the same models, shown next to the elapsed time on the project page while it runs, in the activity feed when a stage finishes (`Transcribe finished in 4:50 (expected ~4:00)`), and as a per-stage expected vs actual table under Settings → Machine. There is no calibration step; the runs are the calibration.
+These factors are only the starting point. The app learns from its own finished projects: each stage's expected time is the median over your recent projects that ran with the same models, shown next to the elapsed time on the project page while it runs, in the activity feed when a stage finishes (`Transcribe finished in 4:50 (expected ~4:00)`), and as a per-stage expected vs actual table under Settings → System → Machine. There is no calibration step; the runs are the calibration.
 
 ### Switching models without a restart
 
@@ -178,7 +180,7 @@ projects and settings only. `SIGNUP_MODE` decides who gets in:
 | --- | --- |
 | `open` (default) | Anyone can sign up and use the app at once. Right for a single-user box. |
 | `approval` | New accounts wait on a "Waiting for approval" page until an admin approves them (Users page, or `reelsaw approve <email>`). Admins get an email when `EMAIL_DRIVER` is set. |
-| `closed` | No sign-ups. `ALLOW_SIGNUP=false` still works as an alias. |
+| `closed` | No sign-ups. (The older `ALLOW_SIGNUP=false` is still read as `closed`; use `SIGNUP_MODE`.) |
 
 Every user has **Settings → Project defaults** (vocabulary, instructions, language, clip length,
 pauses, caption style…) applied to each new project they or their agents start; the new-project
@@ -247,6 +249,66 @@ validation are identical (`apps/server/src/mcp.ts`). The same key also authentic
 (`/api/trpc/*`), uploads and media downloads, so an agent can fetch the rendered clips. Keys are
 hashed at rest (`@better-auth/api-key`); revoke them from Settings.
 
+## Operator CLI
+
+`docker compose exec app reelsaw <command>` (see [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) for when to reach for which). Generated from the header of `apps/server/src/cli.ts`.
+
+<!-- generated:cli -->
+Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).
+
+| Command | What it does |
+| --- | --- |
+| `reelsaw users` | list accounts: role, status, sign-up date |
+| `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
+| `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
+| `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
+| `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
+| `reelsaw restore-clip <clipId>` | bring back a clip a re-analyze replaced |
+| `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
+| `reelsaw events <projectId> [n=30]` | recent pipeline events |
+| `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
+| `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
+| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
+| `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
+| `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
+| `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
+| `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
+| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
+| `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
+| `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
+| `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
+| `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
+<!-- /generated -->
+
+## Settings and precedence
+
+Where a value comes from, from the weakest source to the strongest (a later link overrides an earlier one):
+
+| What | Chain |
+| --- | --- |
+| Models (language, transcription, alignment) | `.env` (`AI_MODEL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPT_ALIGN_MODEL`) then the admin's runtime override (Settings → System → Models, stored in `instance_settings`). A stage already running keeps the model it started with. |
+| Provider keys and URLs | `.env` then the encrypted keys admins enter in Settings. |
+| Stage knobs (`TRANSCRIPT_BIAS`, `TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
+| A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |
+| A clip's style | the project's style, then the clip's own override (`clips.style`). `updateStyle` clears clip overrides unless told to keep them. |
+| Framing | `auto` (face detection decides), then the project's `reframe`, then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i].mode`). |
+| Quotas | `.env` `MAX_*` (0 = unlimited), then a per-user limit set by an admin on the Users page. |
+
+Two things to know:
+
+- **An env gate wins silently.** `TRANSCRIPT_BIAS=false` ignores the project's vocabulary hints and `DISFLUENCY_REMOVAL=false` skips the disfluency settings; neither tells the user. If a project setting seems to do nothing, check the gate first ([TROUBLESHOOTING](docs/TROUBLESHOOTING.md), "A project or clip setting has no effect").
+- **Existing projects keep their frozen settings.** Changing your Project defaults affects new projects only.
+
+Code: `apps/server/src/pipeline/settings.ts` (project), `resolveStyle` in `packages/shared/src/index.ts` (style), `apps/server/src/pipeline/render.ts` (framing), `apps/server/src/ai/models.ts` (models), `apps/server/src/quota.ts` (quotas).
+
 ## Architecture
 
 ```
@@ -255,17 +317,7 @@ apps/server   Hono + tRPC + Better Auth + Drizzle (Postgres) + pg-boss workers +
 packages/shared  zod schemas and types shared by both
 ```
 
-Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot output looks like:
-
-```
-[boot] config ok
-[boot] media tools (ffmpeg, ffprobe, yt-dlp) ok
-[boot] ai model check (anthropic:claude-sonnet-4-5, deepgram:nova-3) ok
-[boot] storage (s3:reelsaw) ok
-...
-[boot] startup failed at step "ai model check (anthropic:claude-sonnet-4-5, anthropic:whisper)":
-  TRANSCRIPTION_MODEL: provider "anthropic" has no transcription models ("anthropic:whisper"). Use e.g. openai:whisper-1, deepgram:nova-3, ...
-```
+Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
 
 Pipeline (each box is a pg-boss queue; each stage emits events and enqueues the next):
 
@@ -284,7 +336,7 @@ Durability model:
 - `pgboss.job` is the source of truth for "what should run". `projects.status` / `clips.status` is the source of truth for "what happened".
 - Each stage checks for existing output first (source file in storage, transcript chunk rows, clip rows, rendered clip in storage) and skips work that is done.
 - Queues use `policy: exclusive` + `singletonKey` so a stage can never run twice concurrently for the same project/clip.
-- `heartbeatSeconds` on every queue: if a worker dies, pg-boss fails the job within ~30 s and retries it elsewhere (with backoff).
+- `heartbeatSeconds` (15 s) on every queue: if a worker dies, pg-boss notices the missed heartbeat on its next supervisor pass (every 60 s), fails the job and retries it elsewhere after a 15 s delay that doubles per retry. Budget a minute or two, not seconds; each interruption uses one retry.
 - On boot and every 5 minutes a reconciler re-enqueues any in-progress project or clip that has no live job.
 - Manual **Retry** resumes from the furthest completed stage; **Re-analyze** keeps the transcript and picks new clips.
 
@@ -310,7 +362,7 @@ pnpm dev               # server on :3000 (tsx watch), web on :5173 (vite, proxie
 
 Requires ffmpeg, ffprobe and yt-dlp on your PATH for local dev. Schema changes: edit `apps/server/src/db/schema.ts`, then `pnpm db:generate`; migrations run automatically on boot.
 
-Tests run against the local stack (they create and delete their own users and data):
+Most tests run against the local stack (they create and delete their own users and data); CI runs only the ones that need no stack, so run the ones you touched against yours:
 
 ```bash
 pnpm --filter @reelsaw/server test
@@ -349,7 +401,7 @@ work on one. Spec: [docs/specs/distribution-and-issue-reports.md](docs/specs/dis
 
 ## Environment reference
 
-See [`.env.example`](.env.example) for every variable with comments.
+Every variable, with its default and meaning, is in [docs/CONFIG.md](docs/CONFIG.md) (generated from `apps/server/src/config.ts`; `pnpm docs:gen` refreshes it). [`.env.example`](.env.example) and [`deploy/.env.example`](deploy/.env.example) are generated from the same source.
 
 ## Observability
 
@@ -377,7 +429,7 @@ Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay d
 
 ### Eval
 
-Regression evals live in one runner with pluggable suites (transcription, cuts, overlays, framing, selection); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
+Regression evals live in one runner with pluggable suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
 
 ```bash
 pnpm eval                 # all suites
@@ -410,7 +462,7 @@ OPENAI_BASE_URL=http://localhost:4545/v1 OPENAI_API_KEY=mock AI_MODEL=openai:moc
 
 ## Troubleshooting
 
-Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the CLI (`status`, `events`, `clip`, `rerender`, `cuts`, `align`, `hear`, `flags`, `storage`, `bumpers`), structured logs, diagnostics and evals.
+Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the CLI, structured logs, diagnostics and evals, including a "setting has no effect" checklist.
 
 ## Roadmap
 

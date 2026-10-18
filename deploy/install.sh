@@ -172,7 +172,7 @@ POSTGRES_PASSWORD=$(rand 24)
 APP_URL=http://localhost:$PORT
 PORT=$PORT
 REELSAW_IMAGE=$IMAGE
-ALLOW_SIGNUP=true
+SIGNUP_MODE=open
 
 # language model: Ollama ($OLLAMA_MODE)
 AI_MODEL=compat:$LLM
@@ -216,7 +216,7 @@ for _ in $(seq 1 120); do
     say "Reelsaw is running: http://localhost:$PORT"
     cat <<DONE
 
-  Create your account, then set ALLOW_SIGNUP=false in $DIR/.env and restart.
+  Create your account, then set SIGNUP_MODE=closed (or approval) in $DIR/.env and restart.
 
   cd $DIR
   docker compose -p $PROJECT ${PROFILES[*]} logs -f app   # logs
