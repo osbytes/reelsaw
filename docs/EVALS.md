@@ -216,6 +216,36 @@ Known issues recorded in the baselines today:
 - `overlays/frame-640s`: the "YT/APOLLO" handle is occluded by a mic.
 - `overlays/aggregate-apollo-100-220`: with no scene cuts detected, a small text-like patch on a
   speaker's shirt becomes an "overlay" (blurring it would smudge the person).
+- `overlays/aggregate-sistercircle-0-300`: in a heavily cut talk show (about 80 shots in 300 s) the
+  guest's name lower third is on screen in 8 close-ups and is still dropped, because the multi-shot rule
+  asks for text in 20% of the sampled shots. The set screen ("Sister Circle LIVE") that is in every
+  wide shot becomes a `caption` region: scene text that repeats in place across shots looks like an overlay.
+- `overlays/aggregate-bradford-0-120`: the main camera is fixed, so stadium ad boards sit in the same
+  place across shots and become regions; the "SBK"/"BANTAMS TV" bug is found by the aggregation but
+  missed on single frames (`frame-bradford-*`).
+- `overlays/aggregate-rpodcast-900-960`: a full-width title line at mid-height over a still image is
+  never found: with no cuts, only the top 15% and bottom 40% of the frame are trusted.
+- `overlays/aggregate-voa-ships-0-150`: news lower thirds (2 of about 40 shots) are not found; the VOA
+  bug is.
+- `speakers/oxford-*`: an off-camera interviewer cannot be attributed: with one face on screen the
+  timeline stays on the visible person (agreement equals her share of the talking).
+- `speakers/sistercircle-couch-smiling-listener` passes with confidence 0: no frame had a clear
+  leader, so it is the initial pick that is right, not evidence.
+
+Fixtures from other sources than the Apollo podcast (October 2026; CC BY, frames committed at 960 px
+under `overlays/frames/<video>/`, except the VOA package, which is referenced by URL and time only):
+Sister Circle `uYFjIHelrH0` (talk show: lower thirds, round corner bug, a sweatshirt print and a set
+screen as scene text), MrUniverse Oxford `jd5bCpWWBXA` (street interview, captions centred low at
+y 0.89-0.95, not bottom-right as first reported), Valsorda `YNzgRNsB9UA` (live-coding: title strip is
+the overlay, the code is content, presentation expected), Bradford City `F_FQy5Syc3A` (bug plus ad
+boards), R Podcast `GzCeABCU3Gk` (title band over a still), VOA `AK0A6L6-agU` (news package). Frame
+labels may carry `video` (their source) and the `lower-third` kind; only frames without `video` feed
+the original Apollo metrics and the mask-residual check, while `overlayRecall` (required burned-in
+labels found) and `rawPrecision` (share of detected boxes on burned-in text; scene text lowers it by
+design) cover every frame. Aggregate `expectOverlays` entries can name the expected `kind`.
+Speaker cases can set `expectUnsure` (three people in the shot: pass only when the detector returns
+no runs); truth only covers confident turns of 3 s or more, so hand-overs are not scored. Turns come
+from auto-caption word timings (and `>>` speaker marks) checked against lip motion in face crops.
 
 ## What CI runs
 
