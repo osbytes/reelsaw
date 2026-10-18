@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-18T15:55:38.840Z",
+  "updatedAt": "2026-10-18T17:15:47.763Z",
   "cases": {
     "repair-mmss": true,
     "apollo/chunking": true,
@@ -16,12 +16,66 @@
     "gate/affine-invariant": true,
     "gate/degenerate": true,
     "pairwise/passes-1": true,
-    "pairwise/passes-3": true
+    "pairwise/passes-3": true,
+    "creator-picks/dwarkesh-sheppard": false,
+    "creator-picks/dwarkesh-sheppard/live": false,
+    "creator-picks/huberman-kanoski": false,
+    "creator-picks/huberman-kanoski/live": false,
+    "creator-picks/lex-dhh": true,
+    "creator-picks/lex-dhh/live": true
   },
   "metrics": {
     "passRate": {
       "value": 1,
       "better": "higher"
+    },
+    "creatorRecallAtN": {
+      "value": 0.15,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 13
+      }
+    },
+    "creatorPicksFound": {
+      "value": 0.4,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 5
+      }
+    },
+    "creatorGateKeepsMatches": {
+      "value": 0.67,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 3
+      }
+    },
+    "creatorLiveRecallAtN": {
+      "value": 0.15,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 13
+      }
+    },
+    "creatorLivePicksFound": {
+      "value": 0.4,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 5
+      }
+    },
+    "creatorLiveGateKeepsMatches": {
+      "value": 0.67,
+      "better": "higher",
+      "ratio": {
+        "k": 2,
+        "n": 3
+      }
     }
   }
 }

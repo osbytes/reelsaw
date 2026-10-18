@@ -179,7 +179,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 <!-- generated:suites -->
 | Suite | Needs | What it checks |
 | --- | --- | --- |
-| `selection` | nothing (runs offline) | chunking, timestamp repair and sentence snapping invariants on a real transcript |
+| `selection` | nothing (runs offline) | chunking, timestamp repair and sentence snapping invariants on a real transcript; recall of creators' own short picks |
 | `framing` | nothing (runs offline) | speaker crops centre faces and avoid burned-in text; tripod camera settles on the face |
 | `scenes` | media | shot-cut detection on real footage (dark/low-contrast included): precision and recall vs hand-verified cuts |
 | `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause |
@@ -196,7 +196,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 
 | suite | needs | what it checks |
 |---|---|---|
-| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md); the auto-mode score gate on synthetic stingy / generous / bimodal judges (`gate/*`: leader kept, sane share, affine invariance, absolute 45 shown collapsing a stingy judge) and PRP-Sliding-K placement with a fake judge (`pairwise/passes-*`) |
+| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md); the auto-mode score gate on synthetic stingy / generous / bimodal judges (`gate/*`: leader kept, sane share, affine invariance, absolute 45 shown collapsing a stingy judge) and PRP-Sliding-K placement with a fake judge (`pairwise/passes-*`); whether the picker finds the moments creators cut their own shorts from (`creator-picks/*`, below) |
 | `framing` | nothing (committed face samples) | split crops centre each speaker and stay clear of burned-in caption bands; tripod camera settles on the face, no fast pans; a speaker beside an app screen or title card is a `stack` with the panel on top (`panel` cases commit face boxes, text boxes and a divider probe per frame) |
 
 Framing track tolerances are fractions of the source width (`maxErrFrac`, `maxPanFracPerSec` in `case.json`; 0.015625 and 0.625 equal 30 px and 1200 px/s on a 1920 px source), so a case means the same on any source size. The legacy `maxErrPx` / `maxPanPxPerSec` keys (1920 px pixels) still load and are converted. Face-size thresholds in the layout code are relative to the shorter source side, which is identical to the old height fractions for landscape input.
@@ -216,6 +216,97 @@ Known issues recorded in the baselines today:
 - `overlays/frame-640s`: the "YT/APOLLO" handle is occluded by a mic.
 - `overlays/aggregate-apollo-100-220`: with no scene cuts detected, a small text-like patch on a
   speaker's shirt becomes an "overlay" (blurring it would smudge the person).
+- `selection/creator-picks/*`: see "Creator picks" below for what the picker misses.
+
+### Creator picks (`selection/creator-picks/*`)
+
+Real "which moments" labels. Some podcasts publish the full episode and also vertical shorts cut
+from it; the creator has already chosen the moments worth a short. Each fixture is one episode and
+every short of it we could locate:
+
+| fixture | episode | shorts → creator spans (s) | transcript | split |
+|---|---|---|---|---|
+| `dwarkesh-sheppard` | `LwQQ7nBCGSs` (Si Sheppard, 5843 s) | `B6FAMw8FgX4` 5630.5-5675.6, 5689.7-5731.6; `hjhJQXlQ6HQ` 3866.2-3990.2; `_hH7vnTWnq8` 4075.7-4095.5, 4157.4-4217.1, 4258.0-4299.6 | manual `en` track | dev |
+| `huberman-kanoski` | `PXHRYbr3mp4` (7327 s) | `xZAsG5MShnk` 6375.8-6414.3 | auto `en-orig` | heldout |
+| `lex-dhh` | `vagyIcmIGOQ` (#474 DHH, 2025, 22128 s) | `upeawiM1Sag` (a montage) 13623.0-13644.4, 13667.2-13683.0, 13803.6-13822.7, 13834.7-13877.0, 13904.6-14005.0, 14032.2-14088.3 | auto `en-orig` | dev |
+
+**Labels.** `pnpm --filter @reelsaw/server creator-spans <episodeId> <shortId>… --fixture <name>`
+(`apps/server/src/eval/tools/creator-spans.ts`) fetches the json3 auto-captions of the short and the
+episode with yt-dlp, indexes every 5-gram of episode words, clusters the short's matching 5-grams by
+offset, keeps clusters with ≥ 10 hits (real pieces have 11-305, coincidences 1-3) and snaps them to
+word boundaries. Pieces ≤ 10 s apart in the episode are one moment with its pauses tightened; a small
+piece joins a neighbour only if it also continues it seamlessly in the short (a sentence trimmed
+mid-way). It writes `transcript.json` (segments from the manual track when the episode has one,
+else from the auto track, pause-split because it has little punctuation) and `picks.json`
+(`{shortId, hook: the short's title, spans}`; the title is a human reference for a later
+hook-quality eval). Only ±10 min around the spans plus one 15 min stretch far from them (never the
+first 5 min: cold opens replay the best moments) is kept, so the committed caption text stays small.
+
+Traps:
+- **Pick the episode by upload date.** DHH was on Lex twice; the 2026 episode `NYFGCESmikA` shares
+  2 coincidental 5-grams with this short, the 2025 #474 `vagyIcmIGOQ` shares 502 (the 2026 count is from the sourcing check; this tool was not run against `NYFGCESmikA`).
+- **Not every short of a channel aligns.** `RUoY5GCdONY` ("… - Si Sheppard", the plague) matches
+  nothing in `LwQQ7nBCGSs` (zero 5-grams at any threshold): it is not cut from this episode despite
+  the title. The tool prints a warning and leaves such a short out of `picks.json`. Voice-over or
+  text-to-speech shorts fail the same way.
+- **YouTube rate-limits caption fetches** (HTTP 429 after ~6 quick calls). The tool waits `--sleep`
+  (default 12 s) before every fetch after the first and caches json3 + info under
+  `eval/.cache/captions`, so reruns are free. It needs a current yt-dlp with `--js-runtimes node`
+  (set `YTDLP_PATH`).
+
+**Metrics** (per fixture, all creator spans of all its shorts):
+- `recallAtN`: share of creator spans that one of our top N candidates matches with IoU ≥ 0.3,
+  N = number of creator spans + 2. IoU is loose on purpose: a creator span can be 124 s while our
+  clips are at most 60 s (best possible IoU 0.48).
+- `bestRank`: rank of our best-placed candidate that matches any creator span (-1: none does).
+- `matching` / `matchingKept`: candidates that match a creator span, and how many of them the
+  relative score gate (`scoreGate`, analyze.ts, with the `.env` `ANALYZE_*` settings) keeps.
+- `picksFound`: shorts with at least one span recalled.
+- Summary: `creatorRecallAtN`, `creatorPicksFound`, `creatorGateKeepsMatches` as k/n ratios with
+  Wilson intervals (n is tiny: read them as a smoke test).
+
+A case passes when at least one creator span is in our top N and the gate keeps every candidate that
+matches one. A miss is a finding about the picker, recorded as failing in the baseline, never fixed
+by loosening the IoU. `passRate` covers only the invariant cases.
+
+**Two ways to run.**
+- `creator-picks/<name>`: model-free, on `candidates.json`, the real picker's ranked pool recorded
+  from one run (model, judge, samples and date are in the file). Rank and gate are recomputed with the
+  current code, so a gate change shows up offline.
+- `creator-picks/<name>/live`: the real picker (chunk each window, map, second look at sparse chunks,
+  snap, pool, rubric scores, pairwise if the config enables it), mirroring `analyze()` without the
+  database. Every model call goes through `ctx.cached` (the map key is shared with `selection-model`),
+  so `--offline` replays a recorded run. It calls the model only with `--creator-picks live`, or
+  `--creator-picks save`, which also rewrites `candidates.json`; otherwise a cache miss is a skip.
+
+```bash
+(cd apps/server && npx tsx src/eval/run.ts selection --creator-picks save)   # once, with Ollama up
+(cd apps/server && npx tsx src/eval/run.ts selection --offline)              # replays / uses candidates.json
+```
+
+Recorded run (2026-10-18, `compat:qwen2.5:14b` on local Ollama, 1 score sample, no pairwise, as the
+pipeline runs a self-hosted judge; 44 LLM calls, 51 min; `candidates.json` in each fixture):
+
+| fixture | recall@N | N | best rank | gate keeps matches | our top N from the negative stretch |
+|---|---|---|---|---|---|
+| `dwarkesh-sheppard` | 1/6 (`_hH7vnTWnq8` 4076-4096 at rank 5) | 8 | 5 | 1/2 (fails) | 4 |
+| `huberman-kanoski` | 0/1 | 3 | none | n/a | 1 |
+| `lex-dhh` | 1/6 (13835-13877 at rank 5) | 8 | 5 | 1/1 | 2 |
+
+Summary: recall@N 2/13 = 0.15 (95% CI 0.04-0.42), shorts with a span found 2/5. What it says:
+- **The right moment, the wrong bounds.** Huberman: our rank-1 candidate (6397-6449, "Rewiring
+  Cravings") is the creator's moment, but starts 21 s late and runs 35 s past it (IoU 0.23).
+- **The judge cannot separate candidates.** One sample from a 14B model gives most candidates the same
+  total (68); ties keep pool order, so rank among them is noise, and moments from the negative stretch
+  (which the creator did not cut) fill a quarter to a half of the top N.
+- **The relative gate collapses on ties.** With most totals equal, MAD = 0 and the threshold is the
+  median: on Dwarkesh it drops a candidate matching the creator's "How Spain Got Rich" span (total
+  39 against a threshold of 68).
+- Long creator spans (the 124 s Spain short, the 100 s Lex piece) can only be matched loosely by a
+  60 s clip; that is the length setting, not the picker.
+
+Rerun with a cloud judge (`--set ANALYZE_JUDGE_MODEL=…`, 3 samples, pairwise) before drawing
+conclusions about the prompt; these numbers describe the default local setup.
 
 ## What CI runs
 
