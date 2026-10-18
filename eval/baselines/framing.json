@@ -1,11 +1,14 @@
 {
-  "updatedAt": "2026-10-18T04:39:02.035Z",
+  "updatedAt": "2026-10-18T04:52:24.877Z",
   "cases": {
     "split-wide-two-speakers": true,
     "track-closeup-settle": true,
     "split-spurious-box-beside-speaker": true,
     "panel-left-title-card": true,
-    "panel-right-app-screen": true
+    "panel-right-app-screen": true,
+    "panel-left-card-ends-before-clip": true,
+    "panel-left-card-ends-before-clip-2": true,
+    "panel-left-hold-through-gap": true
   },
   "metrics": {
     "worstSpeakerOffset": {

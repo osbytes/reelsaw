@@ -35,6 +35,8 @@ interface FramingCase {
   srcW: number;
   srcH: number;
   avoid?: Array<{ y1: number; y2: number }>;
+  /** panel cases: scene cuts inside the range (seconds from its start), as the render passes them */
+  sceneCuts?: number[];
   expect: {
     layout?: string;
     maxOffset?: number;
@@ -46,6 +48,8 @@ interface FramingCase {
     panel?: { side: "left" | "right"; minWidth: number };
     /** panel cases: the auto segmentation of the range, in order (the panel appears and goes away mid-range) */
     segments?: string[];
+    /** panel cases: where the segments change, in seconds from the range start (+-0.3 s) */
+    edges?: number[];
   };
 }
 
@@ -126,7 +130,9 @@ export const framingSuite: Suite = {
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else if (c.kind === "panel") {
-        const d = decideLayout(samples, cfg, []);
+        // the way a render does it: segment the clip (with its scene cuts), judge the stack piece
+        const segs = segmentLayouts(samples, cfg, c.sceneCuts ?? [], c.end - c.start);
+        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.panel)?.decision ?? decideLayout(samples, cfg, c.sceneCuts ?? []);
         const fails: string[] = [];
         const checks: Record<string, number | string> = { layout: d.layout, share: d.panelSignals?.share ?? 0 };
         if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.panelSignals?.rejected ? ` (${d.panelSignals.rejected})` : ""}`);
@@ -142,9 +148,15 @@ export const framingSuite: Suite = {
           }
         }
         if (c.expect.segments) {
-          const got = segmentLayouts(samples, cfg, [], c.end - c.start).map((sg) => sg.decision.layout);
+          const got = segs.map((sg) => sg.decision.layout);
           checks.segments = got.join(",");
           if (got.join(",") !== c.expect.segments.join(",")) fails.push(`segments ${got.join(",")}, expected ${c.expect.segments.join(",")}`);
+        }
+        if (c.expect.edges) {
+          const got = segs.slice(0, -1).map((sg) => Number(sg.end.toFixed(1)));
+          checks.edges = got.join(",");
+          const off = c.expect.edges.some((e, i) => got[i] === undefined || Math.abs(got[i]! - e) > 0.3);
+          if (off || got.length !== c.expect.edges.length) fails.push(`boundaries at ${got.join(",")} s, expected ${c.expect.edges.join(",")} (+-0.3)`);
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
+import { panelRuns, type PanelRun } from "./panel-runs.js";
 import { probeDivider, detectSidePanel, panelReason, frameVote, type PanelRegion, type PanelSignals, type PBox, type DividerProbe } from "./side-panel.js";
 
 /** Resolved layout for one clip. */
@@ -93,6 +94,7 @@ export function decideLayout(
   samples: FaceSample[],
   config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">,
   sceneCuts: number[] = [],
+  opts: { panel?: boolean } = {},
 ): LayoutDecision {
   const withFace = samples.filter((s) => s.box);
   const faceRatio = samples.length ? withFace.length / samples.length : 0;
@@ -123,12 +125,27 @@ export function decideLayout(
     return { ...base, layout: "stack", reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
   }
   // a big speaker beside an app screen / title card (a side-by-side composite): stack the panel on top
+  if (opts.panel === false) return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
   const found = detectSidePanel(samples);
   if (found.panel) {
     const { panel, ...signals } = found;
     return { ...base, layout: "stack", panel, panelSignals: signals, reason: panelReason(panel, signals) };
   }
   return { ...base, layout: "face", panelSignals: found, reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+}
+
+/**
+ * The stack decision for one stretch where the panel was on screen. The aggregate rule decides on
+ * the whole stretch; when a bridged gap (OCR lost the title for a few seconds) pulls its share under
+ * the threshold, the frames that did show the panel decide, with the stretch's own face track.
+ */
+function panelDecision(inside: FaceSample[], config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">, cuts: number[]): LayoutDecision {
+  const d = decideLayout(inside, config, cuts);
+  if (d.panel || d.layout !== "face") return d;
+  const found = detectSidePanel(inside.filter((s) => frameVote(s)));
+  if (!found.panel) return d;
+  const { panel, ...signals } = found;
+  return { ...d, layout: "stack", panel, panelSignals: signals, reason: `${panelReason(panel, signals)}; held through a gap in the evidence` };
 }
 
 /**
@@ -308,8 +325,7 @@ export function segmentLayouts(
   const raw = samples.map((s) => {
     const big = !!s.box && s.box.y2 - s.box.y1 >= config.LAYOUT_MIN_FACE_SIZE;
     const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08;
-    // a speaker beside an app screen / title card is its own state, so the shot gets its own segment
-    return two ? "split" : big ? (frameVote(s) ? "panel" : "face") : "none";
+    return two ? "split" : big ? "face" : "none";
   });
   // a second speaker who briefly disappears (drinks, turns away, leans out) shouldn't flip the
   // layout: "split" holds while two faces were seen in ≥35% of the surrounding ±3 s
@@ -318,9 +334,9 @@ export function segmentLayouts(
     const wide = raw.slice(Math.max(0, i - hold), i + hold + 1);
     if (wide.filter((w) => w === "split").length / wide.length >= 0.35) return "split" as const;
     const win = raw.slice(Math.max(0, i - 2), i + 3);
-    const counts = { face: 0, split: 0, none: 0, panel: 0 };
+    const counts = { face: 0, split: 0, none: 0 };
     for (const w of win) counts[w as keyof typeof counts]++;
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as "face" | "split" | "none" | "panel";
+    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as "face" | "split" | "none";
   });
   const cuts = sceneCuts.filter((c) => c > 0 && c < duration).sort((a, b) => a - b);
   const bounds = new Set<number>([0, duration, ...cuts]);
@@ -341,13 +357,38 @@ export function segmentLayouts(
     kept.push(e);
   }
   edges = kept;
+  const runs = panelRuns(samples, duration, cuts);
   const segs: LayoutSegment[] = [];
   for (let i = 0; i + 1 < edges.length; i++) {
     const start = edges[i]!;
     const end = edges[i + 1]!;
-    const inside = samples.filter((s) => s.t >= start && s.t < end);
-    const decision = decideLayout(inside.length ? inside : samples, config, cuts.filter((c) => c > start && c < end).map((c) => c));
-    segs.push({ start, end, decision });
+    // a panel stack only exists inside the runs where the panel was seen: cut the piece at the run's
+    // edges, so a leading or trailing sliver stays the plain face crop (never half the room on top)
+    const pieces: Array<{ a: number; b: number; run?: PanelRun }> = [];
+    let t = start;
+    for (const r of runs) {
+      const a = Math.max(r.start, start);
+      const b = Math.min(r.end, end);
+      if (b - a <= 0.01) continue;
+      if (a - t > 0.01) pieces.push({ a: t, b: a });
+      pieces.push({ a, b, run: r });
+      t = b;
+    }
+    if (end - t > 0.01) pieces.push({ a: t, b: end });
+    for (const p of pieces) {
+      const inside = samples.filter((s) => s.t >= p.a && s.t < p.b);
+      const near = inside.length ? inside : [samples.reduce((best, s) => (Math.abs(s.t - p.a) < Math.abs(best.t - p.a) ? s : best))];
+      const cutsIn = cuts.filter((c) => c > p.a && c < p.b);
+      if (p.run) {
+        const d = panelDecision(samples.filter((s) => s.t >= p.run!.start && s.t < p.run!.end), config, cuts.filter((c) => c > p.run!.start && c < p.run!.end));
+        if (d.panel) {
+          const track = d.track.filter((pt) => pt.t >= p.a - 1e-6 && pt.t < p.b);
+          segs.push({ start: p.a, end: p.b, decision: { ...d, track: track.length ? track : d.track.slice(0, 1) } });
+          continue;
+        }
+      }
+      segs.push({ start: p.a, end: p.b, decision: decideLayout(near, config, cutsIn, { panel: false }) });
+    }
   }
   // a short one-face stretch beside a split, where the visible face IS one of the split's speakers
   // (same place, same size), is the same two-person shot with the other speaker momentarily

@@ -111,6 +111,39 @@ describe("side panel", () => {
     assert.ok(Math.abs(segs[1]!.start - 6) < 0.6);
   });
 
+  it("a short gap in the evidence inside a continuous card is held (divider stays at the same x)", () => {
+    const card = { box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } };
+    // 3 s where OCR lost the title and the divider is soft (0.35): no vote on its own
+    const s = frames(80, (i) => (i >= 28 && i < 40 ? { box: face(0.62, 0.86), divider: { x: 0.495, s: 0.35 } } : card));
+    const segs = segmentLayouts(s, cfg, [], 20);
+    assert.deepEqual(segs.map((x) => x.decision.layout), ["stack"]);
+    assert.equal(segs[0]!.decision.panel?.side, "left");
+  });
+
+  it("a gap with no divider is not held", () => {
+    const card = { box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } };
+    const s = frames(80, (i) => (i >= 28 && i < 40 ? { box: face(0.43, 0.58) } : card));
+    assert.deepEqual(segmentLayouts(s, cfg, [], 20).map((x) => x.decision.layout), ["stack", "face", "stack"]);
+  });
+
+  it("a panel that ends before the clip does is not extended over the short tail", () => {
+    const card = { box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } };
+    const s = frames(80, (i) => (i < 72 ? card : { box: face(0.43, 0.58) })); // card gone for the last 2 s
+    const segs = segmentLayouts(s, cfg, [18], 20);
+    assert.deepEqual(segs.map((x) => x.decision.layout), ["stack", "face"]);
+    assert.ok(Math.abs(segs[0]!.end - 18) < 0.3);
+  });
+
+  it("a panel that appears under 2.5 s before the end stays a face crop", () => {
+    const s = frames(80, (i) => (i < 72 ? { box: face(0.43, 0.58) } : { box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } }));
+    assert.deepEqual(segmentLayouts(s, cfg, [], 20).map((x) => x.decision.layout), ["face"]);
+  });
+
+  it("no face means fit, never a panel stack", () => {
+    const s = frames(40, () => ({ text: column(0.1, 0.3, 0.1, 6), divider: { x: 0.5, s: 0.5 } })).map((x) => ({ ...x, box: null, boxes: [] }));
+    assert.deepEqual(segmentLayouts(s as never, cfg, [], 10).map((x) => x.decision.layout), ["fit"]);
+  });
+
   it("panelReason names what it found", () => {
     assert.equal(panelReason({ side: "right", x1: 0.68, x2: 1 }, { evidence: "divider", panelLines: 0 }), "panel beside the speaker (right 32%)");
   });

@@ -56,6 +56,11 @@ correlated with the audio envelope) runs only on `split` segments of 3 s or more
 states are smoothed over 2 samples either side (split holds across a missed second face for 3 s),
 boundaries snap to a scene cut within 1 s, pieces under 2.5 s fold into a neighbour, each piece
 runs `decideLayout` on its own samples, and neighbours with the same layout (and panel side) merge.
+Side panels are segmented separately (`panelRuns`, `panel-runs.ts`): runs of frames that voted for a
+panel (holes up to 0.75 s closed; gaps up to 4 s bridged when the divider stays at the same x),
+trimmed to the last voting frame plus one sample and snapped to a scene cut within 0.25 s. A run under
+2.5 s, or with the speaker in under 60% of its frames, is dropped. A panel stack only exists inside a
+run, so a short tail or lead-in next to a panel is the plain face crop, never folded into the stack.
 A short one-face stretch beside a split that is one of its speakers is held as split.
 
 **Post-passes** (`render.ts`): active-speaker expansion of splits; `fitTextHeavy` turns auto
@@ -97,9 +102,12 @@ decision is stored per clip (`layoutSegments`, with `panel`) and shown in the ed
 - The divider probe takes the single strongest vertical edge per frame at 320 px width, so a panel
   edge weaker than a window frame or door in the room is not seen, and edge position is good to about
   1% of the width (both crops keep 1.2% clear of it).
-- A panel, or the plain shot around it, shorter than 2.5 s does not become its own segment: it folds
-  into its neighbour (the title-card fixture needed 3.5 s of lead-out before the last `face` piece
-  survived).
+- Ordinary pieces under 2.5 s fold into the safe neighbour; a panel never outlives the panel: a 1 s
+  face tail after a title card stays a face crop, and a panel that appears under 2.5 s before the end
+  never becomes a stack.
+- A gap of up to 4 s inside a panel (OCR loses the title, divider soft) is held only while the divider
+  stays within 0.03 of the panel edge in 60% of the gap frames; a longer gap, or one without the
+  divider, splits the stack.
 - The reason text "app panel" vs "title card" is a guess from the number of text lines (5+ is an app).
 - 4:3 and vertical sources: the full-height crop is narrower than the source, so `face` barely moves;
   nothing special is done for vertical input, and side-panel detection assumes a landscape composite.
@@ -124,6 +132,8 @@ committed samples (faces, plus text boxes and divider for `panel` cases), so it 
 | `split`: spurious box beside a speaker must not swap crops | `split-spurious-box-beside-speaker` |
 | `stack` with panel, right (app screen, panel appears mid-range) | `panel-right-app-screen` |
 | `stack` with panel, left (title card, appears and goes away) | `panel-left-title-card` |
+| panel held through a short gap in the evidence; full-screen table with no face is `fit` | `panel-left-hold-through-gap` |
+| panel ends 1-3 s before the clip: the tail stays `face` | `panel-left-card-ends-before-clip`, `panel-left-card-ends-before-clip-2` |
 | `stack`: small webcam over a screen share | no fixture yet |
 | `stack`: webcam in a corner | no fixture yet |
 | `fit`: no face (b-roll, graphics) | no fixture yet |

@@ -79,7 +79,7 @@ export interface PanelSignals {
   rejected?: string;
 }
 
-interface FrameVote {
+export interface FrameVote {
   side: PanelSide;
   /** panel edge nearest the face */
   edge: number;
