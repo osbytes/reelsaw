@@ -4,8 +4,17 @@
  * bounded time. The override is stored in `instance_settings` (key `log_level`) so every process (api,
  * workers) applies it: the one that saved it at once, the others on their next poll (~5 s). When the
  * time is up each process drops back to the environment's levels on its own, and the row is removed.
+ *
+ * Applying is immediate: `set` NOTIFYs `reelsaw_loglevel`, every api/worker process holds a LISTEN
+ * connection, re-reads the row and answers on `reelsaw_loglevel_ack` (pid, host, instance id), which
+ * lets `reelsaw log-level` print how many processes applied it. The 5 s poll stays as the fallback
+ * for a dropped listener.
  */
-import { eq } from "drizzle-orm";
+export const LOG_LEVEL_CHANNEL = "reelsaw_loglevel";
+export const LOG_LEVEL_ACK_CHANNEL = "reelsaw_loglevel_ack";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "./db/index.js";
 import { schema } from "./db/index.js";
 import { formatLogLevels, logControl, parseLogLevels, type LogLevel, type LogLevels, type Logger } from "./log.js";
@@ -28,7 +37,7 @@ export interface LogLevelSettings {
   /** re-read the stored override (every process does this on a timer) */
   refresh(): Promise<LogLevelState>;
   /** set an override for `forMs` (default 15 min, max 24 h); `null` clears it */
-  set(spec: string | null, actor: string, forMs?: number): Promise<LogLevelState>;
+  set(spec: string | null, actor: string, forMs?: number, waitAcksMs?: number): Promise<LogLevelState & { acks?: number }>;
   stop(): void;
 }
 
@@ -45,7 +54,11 @@ export function mergeLogLevels(base: LogLevels, spec: string): LogLevels {
   return { global: over.global, modules: { ...base.modules, ...over.modules } };
 }
 
-export function createLogLevelSettings(log: Logger, opts: { pollMs?: number } = {}): LogLevelSettings & { attach(db: Db): Promise<LogLevelState> } {
+export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; listen?: boolean } = {}): LogLevelSettings & { attach(db: Db, connectionString?: string): Promise<LogLevelState> } {
+  const instanceId = randomUUID().slice(0, 8);
+  let url: string | undefined;
+  let listener: pg.Client | undefined;
+  let stopped = false;
   const control = logControl(log);
   let db: Db | undefined;
   let timer: NodeJS.Timeout | undefined;
@@ -82,12 +95,86 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number } = 
     return state();
   }
 
+  /** LISTEN for a change made by another process; apply it at once and acknowledge. */
+  async function listen() {
+    if (stopped || !url) return;
+    const c = new pg.Client({ connectionString: url });
+    const retry = () => {
+      c.removeAllListeners();
+      listener = undefined;
+      if (!stopped) setTimeout(() => void listen(), 2000).unref();
+    };
+    c.on("notification", (msg) => {
+      if (msg.channel !== LOG_LEVEL_CHANNEL) return;
+      const token = (() => {
+        try {
+          return (JSON.parse(msg.payload ?? "{}") as { token?: string }).token;
+        } catch {
+          return undefined;
+        }
+      })();
+      void load()
+        .then(() => db?.execute(sql`select pg_notify(${LOG_LEVEL_ACK_CHANNEL}, ${JSON.stringify({ token, id: `${process.pid}@${instanceId}`, applied: state().effective })})`))
+        .catch((err) => log.warn({ module: "log", err }, "log level change not applied"));
+    });
+    c.on("error", retry);
+    c.on("end", retry);
+    try {
+      await c.connect();
+      await c.query(`LISTEN ${LOG_LEVEL_CHANNEL}`);
+      listener = c;
+    } catch (err) {
+      log.warn({ module: "log", err }, "log level listener failed, relying on the poll");
+      retry();
+    }
+  }
+
+  /** Tell every listening process, and count the answers for up to `waitMs`. */
+  async function broadcast(waitMs: number): Promise<number | undefined> {
+    const token = randomUUID();
+    const ids = new Set<string>();
+    let ack: pg.Client | undefined;
+    if (waitMs > 0 && url) {
+      ack = new pg.Client({ connectionString: url });
+      await ack.connect().catch(() => (ack = undefined));
+      if (ack) {
+        ack.on("notification", (m) => {
+          try {
+            const p = JSON.parse(m.payload ?? "{}") as { token?: string; id?: string };
+            if (p.token === token && p.id) ids.add(p.id);
+          } catch {
+            /* ignore */
+          }
+        });
+        await ack.query(`LISTEN ${LOG_LEVEL_ACK_CHANNEL}`).catch(() => {});
+      }
+    }
+    await db!.execute(sql`select pg_notify(${LOG_LEVEL_CHANNEL}, ${JSON.stringify({ token })})`);
+    if (!ack) return undefined;
+    const t0 = Date.now();
+    let last = 0;
+    let seen = 0;
+    while (Date.now() - t0 < waitMs) {
+      await new Promise((r) => setTimeout(r, 50));
+      if (ids.size !== seen) {
+        seen = ids.size;
+        last = Date.now();
+      }
+      if (seen > 0 && Date.now() - last > 400) break; // answers have stopped coming
+    }
+    ack.removeAllListeners();
+    await ack.end().catch(() => {});
+    return ids.size;
+  }
+
   return {
     state,
     refresh: load,
-    async attach(database) {
+    async attach(database, connectionString) {
       db = database;
+      url = connectionString;
       const s = await load();
+      if (opts.listen && connectionString) void listen();
       const pollMs = opts.pollMs ?? 5000;
       if (pollMs > 0) {
         timer = setInterval(() => void load().catch((err) => log.warn({ module: "log", err }, "log level refresh failed")), pollMs);
@@ -95,12 +182,12 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number } = 
       }
       return s;
     },
-    async set(spec, actor, forMs = DEFAULT_LOG_OVERRIDE_MS) {
+    async set(spec, actor, forMs = DEFAULT_LOG_OVERRIDE_MS, waitAcksMs = 0) {
       if (!db) throw new Error("log level settings are not attached to a database");
       if (spec === null || spec.trim() === "") {
         await db.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         apply(null);
-        return state();
+        return { ...state(), acks: await broadcast(waitAcksMs) };
       }
       parseLogLevels(spec); // throws a readable message on a bad spec
       const ms = Math.max(1000, Math.min(forMs, MAX_LOG_OVERRIDE_MS));
@@ -111,10 +198,13 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number } = 
         .values({ key: KEY, value, updatedBy: actor })
         .onConflictDoUpdate({ target: schema.instanceSettings.key, set: { value, updatedBy: actor, updatedAt: new Date() } });
       apply({ ...value, by: actor });
-      return state();
+      return { ...state(), acks: await broadcast(waitAcksMs) };
     },
     stop() {
+      stopped = true;
       if (timer) clearInterval(timer);
+      listener?.removeAllListeners();
+      void listener?.end().catch(() => {});
     },
   };
 }

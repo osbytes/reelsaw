@@ -201,9 +201,9 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return d;
   });
 
-  const logLevel = createLogLevelSettings(log);
+  const logLevel = createLogLevelSettings(log, { listen: env.REELSAW_CLI !== "1" });
   await step("log level settings", async () => {
-    await logLevel.attach(database.db);
+    await logLevel.attach(database.db, config.DATABASE_URL);
   });
 
   await step("model settings", async () => {

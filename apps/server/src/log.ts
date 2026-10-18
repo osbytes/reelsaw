@@ -130,7 +130,7 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
   const moduleOf = new WeakMap<object, string | undefined>();
   let live: Array<WeakRef<Logger>> = [];
 
-  const origChild = root.child.bind(root) as unknown as (this: Logger, bindings: Record<string, unknown>, options?: Record<string, unknown>) => Logger;
+  const origChild = root.child as unknown as (this: Logger, bindings: Record<string, unknown>, options?: Record<string, unknown>) => Logger;
   // children of children reach this through the prototype chain (pino builds them with Object.create)
   (root as unknown as { child: unknown }).child = function (this: Logger, bindings: Record<string, unknown>, options?: Record<string, unknown>) {
     const module = typeof bindings?.module === "string" ? bindings.module : moduleOf.get(this);
