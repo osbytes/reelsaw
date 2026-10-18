@@ -1,9 +1,15 @@
 {
-  "updatedAt": "2026-10-16T17:16:45.067Z",
+  "updatedAt": "2026-10-18T05:08:54.583Z",
   "cases": {
     "split-wide-two-speakers": true,
     "track-closeup-settle": true,
-    "split-spurious-box-beside-speaker": true
+    "split-spurious-box-beside-speaker": true,
+    "panel-left-title-card": true,
+    "panel-right-app-screen": true,
+    "panel-left-card-ends-before-clip": true,
+    "panel-left-card-ends-before-clip-2": true,
+    "panel-left-hold-through-gap": true,
+    "track-recentre-after-card": true
   },
   "metrics": {
     "worstSpeakerOffset": {
@@ -12,7 +18,7 @@
       "tolerance": 0.03
     },
     "worstTrackErrPx": {
-      "value": 5.5,
+      "value": 4.2,
       "better": "lower",
       "tolerance": 6
     },

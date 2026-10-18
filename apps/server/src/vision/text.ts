@@ -88,11 +88,12 @@ export async function loadTextDetector(modelPath: string): Promise<TextDetector>
   const inputName = session.inputNames[0]!;
   const outputName = session.outputNames[0]!;
   const n = TEXT_INPUT_W * TEXT_INPUT_H;
-  const input = new Float32Array(3 * n);
   return {
     async detect(rgb) {
       if (rgb.length !== n * 3) throw new Error(`expected ${n * 3} bytes of RGB24, got ${rgb.length}`);
-      // Paddle reads images as BGR and normalizes channel-wise with ImageNet mean/std
+      // Paddle reads images as BGR and normalizes channel-wise with ImageNet mean/std. The tensor is this
+      // call's own (see faces.ts): the detector is shared by every clip rendering at once.
+      const input = new Float32Array(3 * n);
       for (let i = 0; i < n; i++) {
         const r = rgb[i * 3]! / 255;
         const g = rgb[i * 3 + 1]! / 255;

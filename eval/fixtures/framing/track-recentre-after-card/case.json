@@ -1,0 +1,11 @@
+{
+  "kind": "track",
+  "note": "The speaker sits at x 0.76 beside a title card until the shot changes at 2:09 (source 116.37 + 12.8 s) and is centred at 0.51 afterwards (source 1:56-2:27). With the cut unknown to the tripod (no scene cut passed: the detector can miss one) the camera must jump to the face, not average across the change and pan 0.25 of the width over about 0.7 s. The real render showed the crop starting in the wrong place after the card and the black card sliding through the frame while it recentred; the face must be centred within 0.25 s of the change.",
+  "source": { "id": "budgeting-116-158", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 116.37, "end": 158.16, "sha256": "82e3876c91a0c3967860ce9e8bee78f32d3e84929ac2b0b0051d7737ce508608", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
+  "start": 0,
+  "end": 30.63,
+  "srcW": 1920,
+  "srcH": 1080,
+  "sceneCuts": [],
+  "expect": { "settleSec": 2, "maxErrPx": 30, "maxPanPxPerSec": 1200, "recentre": { "at": 12.8, "within": 0.25 } }
+}

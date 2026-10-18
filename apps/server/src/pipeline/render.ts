@@ -12,6 +12,8 @@ import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
+import { attachText, voteTrace } from "./content-region.js";
+import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
 import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
@@ -20,8 +22,8 @@ import { spawn } from "node:child_process";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { toWords } from "./transcript.js";
-import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { resolveStyle, speakerCrop, cropX, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
+import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
+import { resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
 
@@ -43,6 +45,8 @@ export interface FrameGeometry {
   size?: number;
   size2?: number;
   avoid?: Array<{ y1: number; y2: number }>;
+  /** "stack": the region of the frame shown on top (absent or the whole frame = the classic stack) */
+  content?: ContentRegion;
 }
 
 export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: LayoutDecision["track"] = [], track2: LayoutDecision["track"] = [], geo: FrameGeometry = {}): { chain: string; width: number; height: number } {
@@ -80,6 +84,35 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
       height: OUT_H,
     };
   }
+  if (layout === "stack" && geo.content && !isFullFrame(geo.content)) {
+    // top half: just the content region (an app screen or title card), kept at its own aspect over a
+    // blurred copy of itself; bottom half: the speaker, cropped from the part of the frame it is not on
+    const halfH = OUT_H / 2;
+    const g = contentStackGeometry(srcW, srcH, geo.content, { cy: trackCenter(track).y, size: geo.size ?? 0.3 }, OUT_W / halfH, geo.avoid);
+    const px1 = Math.floor(g.content.x / 2) * 2;
+    const py1 = Math.floor(g.content.y / 2) * 2;
+    const pw = Math.floor(g.content.w / 2) * 2;
+    const ph = Math.floor(g.content.h / 2) * 2;
+    const free = g.free;
+    const zoomW = Math.floor(g.zoom.w / 2) * 2;
+    const zoomH = Math.floor(g.zoom.h / 2) * 2;
+    const zoomY = Math.round(g.zoom.y);
+    const zx = track.map((tp) => ({ t: tp.t, v: Math.max(free.lo, Math.min(free.hi - zoomW, tp.x * srcW - zoomW / 2)) }));
+    const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `${Math.round((free.lo + free.hi - zoomW) / 2)}`;
+    const blur = "boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2";
+    return {
+      chain:
+        `[0:v]split=2[psrc][bot];` +
+        `[psrc]crop=${pw}:${ph}:${px1}:${py1},split=2[pbg][pfg];` +
+        `[pbg]scale=${OUT_W}:${halfH}:force_original_aspect_ratio=increase,crop=${OUT_W}:${halfH},${blur}[pbgb];` +
+        `[pfg]scale=${OUT_W}:${halfH}:force_original_aspect_ratio=decrease:flags=lanczos[pfgs];` +
+        `[pbgb][pfgs]overlay=(W-w)/2:(H-h)/2[tops];` +
+        `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${zoomY},scale=${OUT_W}:${halfH}:flags=lanczos[bots];` +
+        `[tops][bots]vstack,setsar=1`,
+      width: OUT_W,
+      height: OUT_H,
+    };
+  }
   if (layout === "stack") {
     // top: whole frame letterboxed to 1080 wide; bottom: speaker crop sized to the (small) face
     const topH = Math.round((OUT_W * srcH) / srcW / 2) * 2;
@@ -110,6 +143,11 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
 
 function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+}
+
+/** Short checksum of a sample's contents (time, face boxes, divider, text boxes): two renders of one clip log the same value. */
+function sampleDigest(s: FaceSample | undefined): string | null {
+  return s ? createHash("sha1").update(JSON.stringify([s.t, s.boxes, s.divider, s.text])).digest("hex").slice(0, 10) : null;
 }
 
 export async function renderClip(ctx: StageContext, clipId: string, jobGen?: number) {
@@ -197,7 +235,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   // keep speaker crops clear only of text that is on screen for much of the clip; brief text is just blurred
   let avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
-  const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid });
+  const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid, ...(d.content ? { content: d.content } : {}) });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
@@ -205,7 +243,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     samples = await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: sourcePath, startSec: clip.startSec, durationSec: duration, signal: ctx.signal, sampleFps: 4 });
     const filtered = dropStaticFaces(samples);
     if (filtered.dropped.length) log.info({ dropped: filtered.dropped }, "ignoring static faces (posters/photos)");
-    samples = filtered.samples;
+    // text boxes seen by the per-clip scan (one pass, no extra decode) tell a content region beside the speaker from a plain talking head
+    samples = attachText(filtered.samples, frames.map((f) => ({ t: f.t, all: f.all })));
   }
   // never blur a face: a region that keeps landing on one (while it is "on") is scene texture, not an overlay
   if (overlays.length && samples.length) {
@@ -228,7 +267,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     });
   }
   const speechProbs = svc.vad && clipAudio ? await svc.vad.probabilities(clipAudio) : null;
-  let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces);
+  const layoutDiag = newLayoutDiag();
+  let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces, layoutDiag);
+  // what the content-region logic saw: one summary at debug; the per-frame vote at trace (module render)
+  log.debug(
+    { samples: samples.length, firstSample: sampleDigest(samples[0]), lastSample: sampleDigest(samples.at(-1)), frames: layoutDiag.frames, voting: layoutDiag.voting, textFrames: frames.length, samplesWithText: samples.filter((sm) => sm.text).length, candidates: layoutDiag.candidates, decisions: layoutDiag.decisions },
+    "content runs",
+  );
+  for (const sm of samples) log.trace(voteTrace(sm), "content vote");
   // two people on screen: follow whoever is talking when detection is confident, otherwise keep the
   // split. No setting: a section forced to Split in the editor (manual) is always left alone.
   if (svc.faces && speechProbs && segments.some((sg) => sg.decision.layout === "split" && !sg.manual)) {
@@ -275,7 +321,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const first = segments[0]!;
   const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
   log.info({ layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount }, "layout resolved");
-  log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
+  log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount, ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}) })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
   const detected: DetectedSegment[] = segments.map((sg) => {
     const c1 = trackCenter(sg.decision.track);
     const c2 = sg.decision.track2 ? trackCenter(sg.decision.track2) : undefined;
@@ -292,6 +338,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       ...(sg.decision.speakerSizes ? { size2: sg.decision.speakerSizes[1] } : {}),
       ...(sg.decision.track.length > 1 ? { track: sparseTrack(sg.decision.track, sg.start, sg.end, clip.startSec) } : {}),
       ...(sg.offsetX ? { offsetX: sg.offsetX } : {}),
+      ...(sg.decision.layout === "stack" && sg.decision.content ? { content: sg.decision.content } : {}),
     };
   });
   await db
