@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSubscription } from "@trpc/tanstack-react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { ChevronDown, ChevronRight, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -8,6 +7,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
+import { useProjectEvents } from "../lib/projectEvents";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ProjectPageSkeleton } from "../components/PageSkeletons";
@@ -44,6 +44,9 @@ export function ProjectPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
+  // the words, segments and flags are megabytes on a long source: their own query, refreshed only by transcript changes
+  const tq = useQuery(trpc.transcripts.get.queryOptions({ projectId: id }));
+  const transcript = tq.data ?? null;
   const retry = useMutation(trpc.projects.retry.mutationOptions());
   const reanalyze = useMutation(trpc.projects.reanalyze.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
@@ -73,40 +76,51 @@ export function ProjectPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id }) });
 
-  const sub = useSubscription(
-    trpc.projects.events.subscriptionOptions(
-      { id },
-      {
-        onData: (envelope) => {
-          const evt = envelope.data;
-          if (evt.type !== "stage.progress") setLog((l) => (l.some((e) => e.id === evt.id) ? l : [...l.slice(-499), evt]));
-          if (evt.type === "stage.progress") {
-            const p = evt.payload as { stage: string; progress: number; message?: string; clipId?: string };
-            setProgress({ stage: p.stage, value: p.progress, message: p.message });
-            if (p.clipId) setClipProgress((c) => ({ ...c, [p.clipId!]: p.progress }));
-          } else {
-            void invalidate();
-            qc.invalidateQueries({ queryKey: trpc.projects.list.queryKey() });
-          }
-        },
-      },
-    ),
-  );
-
-  // The event stream replays history right after it connects and has no "caught up" marker, so the log
-  // counts as loaded at the first event, or shortly after the stream is connected with nothing to replay.
-  const [logSettled, setLogSettled] = useState(false);
-  useEffect(() => setLogSettled(false), [id]);
-  useEffect(() => {
-    if (logSettled) return;
-    if (log.length > 0) return setLogSettled(true);
-    if (sub.status !== "pending") return;
-    const t = window.setTimeout(() => setLogSettled(true), 700);
-    return () => window.clearTimeout(t);
-  }, [log.length, sub.status, logSettled]);
+  // The stream replays the newest events, then says how many there are (`events.replayed`); older ones load on request.
+  const [replayed, setReplayed] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  useProjectEvents(id, {
+    list: true,
+    onEvent: (evt, live) => {
+      setLog((l) => (l.some((e) => e.id === evt.id) ? l : [...l, evt].sort((a, b) => a.id - b.id)));
+      if (live) setTotal((n) => n + 1);
+    },
+    onProgress: (evt) => {
+      const p = evt.payload as { stage: string; progress: number; message?: string; clipId?: string };
+      setProgress({ stage: p.stage, value: p.progress, message: p.message });
+      if (p.clipId) setClipProgress((c) => ({ ...c, [p.clipId!]: p.progress }));
+    },
+    onReplayed: (m, reconnect) => {
+      setReplayed(true);
+      setTotal(m.total);
+      if (!reconnect) setHasOlder(m.hasMore);
+    },
+  });
+  async function loadOlder() {
+    const oldest = log[0]?.id;
+    if (!oldest) return;
+    setLoadingOlder(true);
+    try {
+      const page = await qc.fetchQuery({ ...trpc.projects.eventsPage.queryOptions({ id, before: oldest, limit: 200 }), staleTime: 0 });
+      setLog((l) => {
+        const have = new Set(l.map((e) => e.id));
+        return [...page.events.filter((e) => !have.has(e.id)), ...l];
+      });
+      setHasOlder(page.hasMore);
+    } catch (err) {
+      toast.error(`Couldn’t load older activity: ${(err as Error).message.slice(0, 100)}`);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   useEffect(() => {
     setLog([]);
+    setReplayed(false);
+    setTotal(0);
+    setHasOlder(false);
     setProgress(null);
     setClipProgress({});
     setActiveClip(null);
@@ -126,9 +140,9 @@ export function ProjectPage() {
   const now = useNow(active);
   // the log grouped by run (newest first); each finished event carries its own duration from the server
   const runGroups = useMemo(
-    () => groupByRun(log, (e) => describeEvent(e, (stage) => expectedFor(stage)?.expectedSec ?? null)),
+    () => groupByRun(log, (e) => describeEvent(e, (stage) => expectedFor(stage)?.expectedSec ?? null), hasOlder),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [log, estimates],
+    [log, estimates, hasOlder],
   );
   const activity = useMemo(() => runGroups.flatMap((g) => g.entries), [runGroups]);
   // the latest run is open, older ones collapsed; a click or #run=<seq> overrides
@@ -256,9 +270,9 @@ export function ProjectPage() {
   if (q.isLoading) return <ProjectPageSkeleton compact={compact} width={width} />;
   if (q.error || !p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
 
-  const overlays = p.transcript?.overlays ?? [];
-  const presentation = !!p.transcript?.textProfile?.presentation;
-  const masking = overlays.length > 0 && masksSourceText(p.settings.sourceText, p.transcript?.textProfile);
+  const overlays = transcript?.overlays ?? [];
+  const presentation = !!transcript?.textProfile?.presentation;
+  const masking = overlays.length > 0 && masksSourceText(p.settings.sourceText, transcript?.textProfile);
   const hasCaptions = overlays.some((o) => o.kind === "caption");
   const host = (() => {
     try {
@@ -267,7 +281,7 @@ export function ProjectPage() {
       return null;
     }
   })();
-  const activityLoading = !logSettled && activity.length === 0;
+  const activityLoading = !replayed && activity.length === 0;
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
 
@@ -295,7 +309,7 @@ export function ProjectPage() {
         const open = openRuns[g.seq] ?? i === 0;
         const dur = g.outcome === "running" ? `running ${formatTime(Math.max(0, (now - g.startedAt) / 1000))}` : g.runSec !== null ? `${g.outcome === "failed" ? "failed after" : "done in"} ${fmtRun(g.runSec)}` : g.outcome;
         const why = reasonLabel(g.reason);
-        const label = [`Run ${g.seq}`, why ? why[0]!.toUpperCase() + why.slice(1) : null, dur, new Date(g.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · ");
+        const label = [g.continued ? `… Run ${g.seq || ""}`.trim() : `Run ${g.seq}`, why ? why[0]!.toUpperCase() + why.slice(1) : null, dur, new Date(g.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · ");
         const tone: Tone = g.outcome === "running" ? "run" : g.outcome === "failed" ? "err" : "ok";
         return (
           <section key={g.seq} id={`run-${g.seq}`}>
@@ -347,6 +361,18 @@ export function ProjectPage() {
           </section>
         );
       })}
+      {replayed && (hasOlder || total > log.length) && (
+        <div className="flex h-8 items-center justify-between gap-2 pt-1 text-xs text-ink3">
+          <span className="tabular-nums">
+            Showing the last {log.length.toLocaleString()} of {Math.max(total, log.length).toLocaleString()} events
+          </span>
+          {hasOlder && (
+            <button className="btn-quiet px-2 py-1 text-xs" disabled={loadingOlder} onClick={() => void loadOlder()}>
+              {loadingOlder ? "Loading…" : "Load older"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -615,6 +641,16 @@ export function ProjectPage() {
     </div>
   );
 
+  const transcriptSkeleton = (
+    <SkeletonRegion label="Loading transcript…" className="flex min-h-0 flex-1 flex-col gap-2.5 border-t border-line px-5 py-6">
+      {[92, 78, 85, 60, 88, 70, 80, 66].map((w, i) => (
+        <div key={i} className="flex gap-2.5">
+          <Skeleton className="h-3.5 w-10" />
+          <Skeleton className="h-3.5" />
+        </div>
+      ))}
+    </SkeletonRegion>
+  );
   const transcriptStage = stageIdx >= 2 || p.status === "done" || !!p.transcript;
   const waiting = (
     <div className="flex min-h-0 flex-1 items-start justify-center border-t border-line px-5 py-10">
@@ -740,7 +776,7 @@ export function ProjectPage() {
             <div className="flex min-h-0 flex-1 flex-col">
               {source}
               {transcriptStage ? (
-                <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+                tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
               ) : (
                 waiting
               )}
@@ -759,7 +795,7 @@ export function ProjectPage() {
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
             {transcriptStage ? (
-              <TranscriptPanel className="flex-1" projectId={p.id} language={p.transcript?.language ?? null} segments={p.transcript?.segments ?? []} words={p.transcript?.rawWords ?? p.transcript?.words ?? []} flags={p.transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={p.transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+              tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
             ) : (
               waiting
             )}

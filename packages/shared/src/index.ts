@@ -364,6 +364,20 @@ export interface ProjectEvent {
   createdAt: string;
 }
 
+/**
+ * First message of a project's event stream after the stored history has been replayed (progress ticks
+ * never replay). `shown` events were sent out of `total` non-progress events the project has; when more exist,
+ * `projects.eventsPage` pages back from `oldestId`.
+ */
+export interface EventsReplayed {
+  type: "events.replayed";
+  shown: number;
+  total: number;
+  oldestId: number | null;
+  hasMore: boolean;
+}
+export const isEventsReplayed = (e: ProjectEvent | EventsReplayed): e is EventsReplayed => e.type === "events.replayed";
+
 export function formatTime(sec: number): string {
   const s = Math.max(0, sec);
   const h = Math.floor(s / 3600);

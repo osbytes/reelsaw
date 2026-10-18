@@ -21,7 +21,7 @@ import { addBumperInput, assetMap, clipBumpersCall, downloadAsUpload, effectiveB
 
 const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (poll until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
-Clips can be edited (update_clip: title, hook, caption, hashtags, bounds, framing) and re-rendered. get_transcript gives the timed transcript for picking your own moments with create_clip.
+Clips can be edited (update_clip: title, hook, caption, hashtags, bounds, framing) and re-rendered. get_project returns only a transcript summary; get_transcript gives the timed transcript (optionally a time range) for picking your own moments with create_clip. search_clips finds clips and projects by words in their titles, hooks and captions.
 Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). get_project and get_clip show the effective intro/outro and where it comes from. Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
 All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
@@ -108,7 +108,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
 
   server.registerTool(
     "get_project",
-    { title: "Get project", description: "A project with its clips (title, hook, bounds, score, status, download links) and settings. Use get_transcript for the transcript.", inputSchema: { id: z.string() }, annotations: { readOnlyHint: true } },
+    { title: "Get project", description: "A project with its clips (title, hook, bounds, score, status, download links) and settings. The transcript is only summarised (language, pending fixes); use get_transcript to read it.", inputSchema: { id: z.string() }, annotations: { readOnlyHint: true } },
     ({ id }) =>
       run(async () => {
         const p = await api.projects.get({ id });
@@ -120,7 +120,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
           url: abs(`/p/${p.id}`),
           sourceVideoUrl: abs(p.sourceVideoUrl),
           exportZipUrl: abs(`/api/projects/${p.id}/export.zip`),
-          transcript: transcript ? { language: transcript.language, words: transcript.words.length, pendingFlags: transcript.flags.filter((f) => f.status === "pending").length } : null,
+          transcript,
           clips: clips.map((c) => ({ ...clipSummary(c), bumpers: effectiveBumpers(p.settings, c, assets) })),
         };
       }),
@@ -191,9 +191,10 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     ({ id, fromSec, toSec, maxChars }) =>
       run(async () => {
         const p = await api.projects.get({ id });
-        if (!p.transcript) return `No transcript yet (project status: ${p.status}).`;
-        const segs = p.transcript.segments.filter((s) => (fromSec === undefined || s.end >= fromSec) && (toSec === undefined || s.start <= toSec));
-        let out = `# ${p.title} (${p.transcript.language ?? "?"}, ${p.durationSec ? mmss(p.durationSec) : "?"})\n`;
+        const t = await api.transcripts.get({ projectId: id });
+        if (!t) return `No transcript yet (project status: ${p.status}).`;
+        const segs = t.segments.filter((s) => (fromSec === undefined || s.end >= fromSec) && (toSec === undefined || s.start <= toSec));
+        let out = `# ${p.title} (${t.language ?? "?"}, ${p.durationSec ? mmss(p.durationSec) : "?"})\n`;
         let truncated = false;
         for (const s of segs) {
           const line = `[${mmss(s.start)}] ${s.text}\n`;
@@ -205,6 +206,25 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
           out += line;
         }
         return truncated || segs.length ? out : out + "(empty)";
+      }),
+  );
+
+  server.registerTool(
+    "search_clips",
+    {
+      title: "Search clips",
+      description: "Find clips and projects by words in their title, hook or caption (every word must appear; case-insensitive). Most recently changed projects first; returns at most 8 projects and `limit` clips, and says when more match (narrow the query).",
+      inputSchema: { q: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(15) },
+      annotations: { readOnlyHint: true },
+    },
+    ({ q, limit }) =>
+      run(async () => {
+        const r = await api.search({ q, limit });
+        return {
+          projects: r.projects.map((p) => ({ id: p.id, title: p.title, status: p.status, clips: `${p.clipsDone}/${p.clipCount} rendered`, updatedAt: p.updatedAt, url: abs(`/p/${p.id}`) })),
+          clips: r.clips.map((c) => ({ id: c.id, projectId: c.projectId, project: c.projectTitle, title: c.title, hook: c.hook, caption: c.caption, status: c.status, startSec: c.startSec, endSec: c.endSec, videoUrl: abs(c.videoUrl), editorUrl: abs(`/p/${c.projectId}/clips/${c.id}`) })),
+          ...(r.truncated ? { truncated: true, hint: "More matched than shown; use a more specific query." } : {}),
+        };
       }),
   );
 

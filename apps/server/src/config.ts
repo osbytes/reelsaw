@@ -99,6 +99,8 @@ export const envSchema = z.object({
   S3_PUBLIC_URL: z.string().optional(),
   S3_PRESIGN_EXPIRES: z.coerce.number().int().default(3600),
   CLEANUP_WORKDIR: boolTrue,
+  /** Events a project page replays when it connects (progress ticks never replay); older ones load on request */
+  EVENT_REPLAY_LIMIT: z.coerce.number().int().min(20).max(2000).default(300),
 
   OTEL_ENABLED: boolFalse,
   // quotas (0 = unlimited); admins can override per user in Users → Limits
