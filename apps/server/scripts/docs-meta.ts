@@ -75,6 +75,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   TRANSCRIBE_CHUNK_SECONDS: ["pipeline", "Audio is split into chunks of this length for transcription APIs with upload limits."],
   TRANSCRIBE_CONCURRENCY: ["pipeline", "Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors."],
+  PROVIDER_CONCURRENCY: ["pipeline", "Model calls in flight per provider across every app and worker process, e.g. `compat=2,openai=2` (`compat` = the compatible provider's name). Unset providers: 2 for a self-hosted server (the compatible provider, openai with OPENAI_BASE_URL), unlimited for cloud."],
   ANALYZE_CONCURRENCY: ["pipeline", "Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud."],
   ANALYZE_SCORE_SAMPLES: ["pipeline", "Rubric samples per candidate (the median is kept). 0 = auto: 1 self-hosted, 3 cloud."],
   ANALYZE_PAIRWISE: ["pipeline", "Pairwise re-ranking of the top clips with position swapping. `auto` = on for cloud models only."],
@@ -118,6 +119,9 @@ export const DOCS: Record<string, [GroupId, string]> = {
   MAX_PROJECTS_PER_USER: ["limits", "Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page."],
   MAX_SOURCE_MINUTES_PER_DAY: ["limits", "Quota: minutes of source video per account per day. 0 = unlimited."],
   MAX_NEW_PROJECTS_PER_HOUR: ["limits", "Quota: new projects per account per hour. 0 = unlimited."],
+  MAX_LIVE_JOBS_PER_USER: ["limits", "Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited."],
+  MAX_RERENDERS_PER_HOUR: ["limits", "Quota: re-renders and hand-made clips per account per hour. 0 = unlimited."],
+  MAX_STORAGE_MB: ["limits", "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited."],
   SOURCE_RETENTION_DAYS: ["limits", "Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep."],
   CLIP_RETENTION_DAYS: ["limits", "Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep."],
   EVENT_RETENTION_DAYS: ["limits", "Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep."],

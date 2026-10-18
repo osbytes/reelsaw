@@ -77,6 +77,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
+| `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
+| `reelsaw limits <email>` | an account's quotas: instance value, override, in force, in use now |
 <!-- /generated -->
 
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
@@ -226,6 +228,31 @@ and list it in `SUPPORTED` in `language.ts`.
   one back. Clips edited before `edited_at` existed are only recognised by their framing, style or intro/outro.
   A project finishes (`finalizeProjectIfDone`) only from `rendering`, so a kept clip that finishes while the
   re-analyze is still picking does not end the run early.
+- **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
+  owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
+  nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The
+  priority is fixed at enqueue: a backlog queued before a second user arrived keeps its place only for the jobs
+  already ahead. Jobs a person asked for (create, retry, re-render, new clip, from the UI, MCP or `--user` CLI calls)
+  also carry `data.by = "user"` and are refused past `MAX_LIVE_JOBS_PER_USER` ("You have 12 jobs queued or
+  running…") or `MAX_RERENDERS_PER_HOUR`; pipeline hand-offs and the reconciler are never refused. Both are
+  counted from `pgboss.job` under a per-user advisory lock in the same transaction as the enqueue, so replicas
+  agree. Jobs queued before this change have no `userId` and are not counted. See one account with
+  `reelsaw limits <email>`; inspect the queue with
+  `select name, priority, data->>'userId', state from pgboss.job where state in ('created','retry','active') order by priority desc, created_on`.
+- **One model server, many jobs: `PROVIDER_CONCURRENCY`.** `ANALYZE_CONCURRENCY` / `TRANSCRIBE_CONCURRENCY` are per
+  job; the provider gate (`ai/gate.ts`) caps calls per provider across all jobs and processes (default 2 for a
+  self-hosted Ollama / Speaches, unlimited for cloud). Each process has an in-memory semaphore, and the cross-process
+  limit is N Postgres session advisory locks per provider (`pg_locks` rows with `locktype = 'advisory'`) held on a
+  dedicated connection for the length of the call, so each process holds at most N extra database connections
+  per gated provider. A process that dies drops its slot with its connection. Calls waiting for a slot log
+  `waiting for a provider slot` at debug after 5 s; their traced latency does not include the wait. Raise the
+  number only if the server itself runs requests in parallel (`OLLAMA_NUM_PARALLEL`).
+- **Usage per user** (`reelsaw usage [--days 30]`, Users → Usage): model calls and tokens from `llm_usage`, with
+  `cost_usd` when the provider reports it (AI Gateway; self-hosted and most direct vendors leave it empty), minutes
+  transcribed from `stt_usage` (one row per provider call; cache hits are free and not written; pruned with
+  `LLM_USAGE_RETENTION_DAYS`), stored bytes = sources + uploads + rendered clips (`clips.output_bytes`, empty for
+  clips rendered before it existed) + intros/outros. `MAX_STORAGE_MB` refuses an upload or a new project once the
+  total passes it.
 - **Deleted fixes past 200** move to `stage_artifacts` (`stage=review`, `kind=deleted_flags`); Restore still finds them.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,

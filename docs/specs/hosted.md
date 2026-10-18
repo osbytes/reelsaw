@@ -106,6 +106,13 @@ Decisions, in order of how hard they are to reverse:
   registration) so claude.ai and Claude Desktop connectors sign in with the browser; API keys
   stay for CLIs and scripts. Resource metadata at `/.well-known/oauth-protected-resource/api/mcp`.
 
+- **Fair share and shared providers (done 2026-10-18):** jobs carry their owner and a priority of minus the owner's
+  live jobs, so one account's 20 videos queue behind everyone else's first; `MAX_LIVE_JOBS_PER_USER`,
+  `MAX_RERENDERS_PER_HOUR` and `MAX_STORAGE_MB` join the per-user limits (0 = unlimited); `PROVIDER_CONCURRENCY`
+  caps model calls per provider across processes (Postgres advisory-lock slots; self-hosted default 2); usage adds
+  reported LLM cost (`llm_usage.cost_usd`), minutes transcribed (`stt_usage`) and rendered-clip bytes. Hosted sets
+  e.g. `MAX_LIVE_JOBS_PER_USER=12`, `MAX_RERENDERS_PER_HOUR=60`, `MAX_STORAGE_MB=20000`.
+
 ## Part D: running it
 
 - Image from the release workflow, `reelsaw-infra` pins the tag. Managed Postgres (point-in-time

@@ -87,6 +87,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `TRANSCRIBE_CHUNK_SECONDS` | `600` | Audio is split into chunks of this length for transcription APIs with upload limits. |
 | `TRANSCRIBE_CONCURRENCY` | `0` | Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors. |
 | `ANALYZE_CONCURRENCY` | `0` | Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud. |
+| `PROVIDER_CONCURRENCY` | unset | Model calls in flight per provider across every app and worker process, e.g. `compat=2,openai=2` (`compat` = the compatible provider's name). Unset providers: 2 for a self-hosted server (the compatible provider, openai with OPENAI_BASE_URL), unlimited for cloud. |
 | `ANALYZE_SCORE_SAMPLES` | `0` | Rubric samples per candidate (the median is kept). 0 = auto: 1 self-hosted, 3 cloud. |
 | `ANALYZE_PAIRWISE` | `auto` | Pairwise re-ranking of the top clips with position swapping. `auto` = on for cloud models only. Values: `auto | on | off`. |
 | `ANALYZE_PAIRWISE_PASSES` | `3` | Sliding pairwise passes over the top 10 candidates. 3 passes = 48 judge calls, 1 = 18. |
@@ -141,6 +142,9 @@ either; `pnpm docs:check` fails when this file is stale.
 | `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. |
 | `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. |
 | `MAX_NEW_PROJECTS_PER_HOUR` | `0` | Quota: new projects per account per hour. 0 = unlimited. |
+| `MAX_LIVE_JOBS_PER_USER` | `0` | Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited. |
+| `MAX_RERENDERS_PER_HOUR` | `0` | Quota: re-renders and hand-made clips per account per hour. 0 = unlimited. |
+| `MAX_STORAGE_MB` | `0` | Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited. |
 | `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. |
 | `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. |
 | `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever. |
