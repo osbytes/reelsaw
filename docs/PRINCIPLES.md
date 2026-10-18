@@ -192,6 +192,7 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - **Measure before and after.** Model-facing or heuristic behaviour (selection, cuts, framing,
   text masking, disfluencies) changes only with an eval run (`pnpm eval <suite>`). Real
   failures become fixtures; build them from user decisions (accepted/rejected) where possible.
+  Framing layouts, triggers and their fixture coverage: [LAYOUTS.md](LAYOUTS.md).
   Update baselines deliberately with `--update`.
 - **Don't overfit.** A fix should be a general rule that explains the failure, not a special
   case for one video. The regression fixture proves the case. Other fixtures prove you didn't
