@@ -303,7 +303,7 @@ Big media never goes in git. A fixture names it as a **media source**:
 `materialize()` produces `eval/.cache/media/<id>.mp4` from, in order: the cache, `localPath` (ffmpeg
 stream copy, works inside the app container), or `yt-dlp --download-sections`. The sha256 is
 informational for suites whose labels tolerate a re-encode (a mismatch is logged); suites with
-sub-second labels (`scenes` cut times, `speakers` turns) pass `strictSha: true` to `materialize()`, and
+sub-second labels (`scenes` cut times, `speakers` turns) pass `strictSha: true` to `materialize()`; with `EVAL_STRICT_MEDIA=1` a mismatch then fails the case instead of warning (default: warn, because yt-dlp's encode differs per machine and version: two runs on one laptop gave two hashes for the same section), and
 a mismatch there **fails the case** (`MediaDriftError`) instead of producing numbers against shifted
 labels. (`alignment`, `cuts` and `pauses` commit their WAVs, so there is no download to drift.) Derived data that is cheap to commit
 and makes a case run offline (face samples, labelled JPEG frames, 6 s WAVs) is committed next to the case.
