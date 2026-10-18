@@ -31,8 +31,13 @@ export class QuotaError extends TRPCError {
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
 const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
 
-/** Before creating a project. */
-export async function checkProjectQuota(db: Db, config: Config, userId: string) {
+/**
+ * Before creating a project. Pass the creating unit of work's `u.db` with `lock: true`: a per-user transaction lock
+ * then serialises concurrent creates of one user, so the counts below include every project committed before this one
+ * and N parallel requests can't all pass a cap they jointly exceed. (Without `lock` it is only an early, advisory check.)
+ */
+export async function checkProjectQuota(db: Db, config: Config, userId: string, o: { lock?: boolean } = {}) {
+  if (o.lock) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`);
   const l = await limitsFor(db, config, userId);
   if (l.MAX_PROJECTS_PER_USER > 0) {
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
