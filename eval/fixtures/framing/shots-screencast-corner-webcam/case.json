@@ -1,0 +1,34 @@
+{
+  "kind": "shots",
+  "note": "Filippo Valsorda live-coding (CC BY), source 9:00-11:00, 1152x720: editor + terminal screencast with a title strip along the top (y 0-0.05) and his webcam in the bottom-right corner (x 0.6-1.0, y 0.67-1.0), face centre ~(0.80, 0.86), ~0.2 of the frame height. From 25.3 to 33.9 s he shows his Twitch page, which contains a second, smaller copy of the stream with his face (~x 0.47, y 0.67, 0.08 tall). Labels from 2 fps contact sheets over the whole 120 s and a full frame at 30 s (t30.jpg). Expected throughout: stack (the screen on top, the webcam face below), the face crop on the real webcam. Known failure (a finding, not a label problem): UltraFace finds the on-screen copy of his face, which is just at the 0.08 second-face floor, so 25.3-33.9 s becomes a split of the screenshot face and the webcam, and the 'one speaker undetected' hold stretches that split over 17.3-39.5 s.",
+  "source": {
+    "id": "valsorda-540-660",
+    "url": "https://www.youtube.com/watch?v=YNzgRNsB9UA",
+    "start": 540,
+    "end": 660,
+    "sha256": "8e95e2913a7d28999baa0379b3ed74b9c877a31c49928f2a4c7a12b7628313ec"
+  },
+  "start": 0,
+  "end": 120,
+  "srcW": 1152,
+  "srcH": 720,
+  "sceneCuts": [
+    25.3,
+    28,
+    33.933
+  ],
+  "expect": {
+    "minAgreement": 0.9,
+    "faceTol": 0.08,
+    "windows": [
+      {
+        "from": 0,
+        "to": 120,
+        "layout": "stack",
+        "faces": [
+          0.8
+        ]
+      }
+    ]
+  }
+}

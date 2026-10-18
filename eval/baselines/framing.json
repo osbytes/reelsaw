@@ -1,5 +1,12 @@
 {
-  "updatedAt": "2026-10-18T05:08:54.583Z",
+  "updatedAt": "2026-10-18T16:40:10.464Z",
+  "acceptedRegressions": [
+    {
+      "metric": "passRate",
+      "reason": "passRate drops only because two new shots cases fail on real detector limits (pans boxed as faces in a face-free POV clip; an on-screen copy of the streamer's face read as a second speaker); all 9 existing cases still pass with identical metrics",
+      "at": "2026-10-18T16:40:10.464Z"
+    }
+  ],
   "cases": {
     "split-wide-two-speakers": true,
     "track-closeup-settle": true,
@@ -9,7 +16,14 @@
     "panel-left-card-ends-before-clip": true,
     "panel-left-card-ends-before-clip-2": true,
     "panel-left-hold-through-gap": true,
-    "track-recentre-after-card": true
+    "track-recentre-after-card": true,
+    "shots-4x3-interview-cutaways": true,
+    "shots-couch-multicam": true,
+    "shots-pov-hands-no-face": false,
+    "shots-screencast-corner-webcam": false,
+    "shots-vertical-source": true,
+    "split-couch-two-shot": true,
+    "track-4x3-interview": true
   },
   "metrics": {
     "worstSpeakerOffset": {
@@ -23,8 +37,13 @@
       "tolerance": 6
     },
     "passRate": {
-      "value": 1,
+      "value": 0.88,
       "better": "higher"
+    },
+    "worstShotAgreement": {
+      "value": 0.796,
+      "better": "higher",
+      "tolerance": 0.05
     }
   }
 }
