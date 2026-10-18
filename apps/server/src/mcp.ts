@@ -213,7 +213,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     "search_clips",
     {
       title: "Search clips",
-      description: "Find clips and projects by words in their title, hook or caption (every word must appear; case-insensitive). Most recently changed projects first; returns at most 8 projects and `limit` clips, and says when more match (narrow the query).",
+      description: "Find clips and projects by words in their title, hook or caption (every word must match; case-insensitive and typo-tolerant: \"budgt\" finds \"Budgeting\"; best matches first). Returns at most 8 projects and `limit` clips, and says when more match (narrow the query).",
       inputSchema: { q: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(15) },
       annotations: { readOnlyHint: true },
     },

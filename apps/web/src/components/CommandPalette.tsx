@@ -182,8 +182,9 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const fuse = useMemo(() => {
     if (!index) return null;
     return {
-      projects: createFuzzy(index.projects, [{ name: "title", weight: 1 }]),
-      clips: createFuzzy(index.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }]),
+      // loose: the server already decided what matches, Fuse only orders and highlights what it recognises
+      projects: createFuzzy(index.projects, [{ name: "title", weight: 1 }], { threshold: 0.6 }),
+      clips: createFuzzy(index.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }], { threshold: 0.6 }),
     };
   }, [index]);
   // per-project clip facts come with each project row
