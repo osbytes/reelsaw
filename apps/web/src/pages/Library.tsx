@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Link2 } from "lucide-react";
 import { useMe } from "../lib/account";
-import { toast } from "sonner";
-import { linkWith, useHashParams } from "../lib/hash";
+import { useHashParams } from "../lib/hash";
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { Skeleton, SkeletonRegion } from "../components/ui";
@@ -74,15 +72,6 @@ export function LibraryPage() {
             <p className="mt-1 min-h-5 text-sm text-ink2">Intros and outros you can attach to clips</p>
           </div>
           <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isPending ? <Skeleton className="ml-auto h-3.5 w-12" /> : `${assets.length} item${assets.length === 1 ? "" : "s"}`}</span>
-          <button
-            type="button"
-            className="btn-ghost min-w-[7.5rem]"
-            disabled={!selected}
-            onClick={() => selected && void navigator.clipboard.writeText(linkWith({ asset: selected }, "/library")).then(() => toast("Link copied"))}
-            title={selected ? "Copy a link to the selected item" : "Select an item to link to it"}
-          >
-            <Link2 className="h-4 w-4" /> Copy link
-          </button>
         </div>
         <UploadCard inputRef={input} actions={actions} />
         {list.isPending ? (
