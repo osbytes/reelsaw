@@ -142,8 +142,13 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
 }
 
 
+/**
+ * A path for a filter option written as name='…' in a filtergraph. The graph parser takes the quoted text
+ * literally, then the option parser unescapes it: backslash first, then ':' (its separator). A quote has to
+ * leave the quoted text, pass the graph parser as \' and reach the option parser as an escaped quote.
+ */
 function escapeFilterPath(p: string): string {
-  return p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+  return p.replace(/[\\:]/g, (c) => `\\${c}`).replace(/'/g, "'\\\\\\''");
 }
 
 /** Short checksum of a sample's contents (time, face boxes, divider, text boxes): two renders of one clip log the same value. */
