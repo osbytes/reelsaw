@@ -1,6 +1,6 @@
 import { formatTime, type ProjectEvent } from "@reelsaw/shared";
 
-const STAGE: Record<string, string> = { ingest: "Download", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
+const STAGE: Record<string, string> = { prepare: "Clip preparation", ingest: "Download", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
 const STEP: Record<string, string> = { entities: "names", disfluency: "disfluencies", scenes: "scene changes", overlays: "on-screen text" };
 
 export type Tone = "ok" | "run" | "warn" | "err";

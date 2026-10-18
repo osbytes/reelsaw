@@ -3,7 +3,7 @@
  * a unit of work (svc.tx) so the row change, its event and its job commit together.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { needsPrepare } from "./manual.js";
+import { needsPrepare, prepareModeOf } from "./manual.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -38,6 +38,43 @@ export async function requestRender(svc: Services, u: UnitOfWork, projectId: str
     });
   }
   return row!.gen;
+}
+
+export interface PrepareOptions {
+  /** "exact" keeps the bounds, "ai" searches inside them; defaults to the clip's origin */
+  mode?: "exact" | "ai";
+  /**
+   * true (a user or operator asked): cancel any queued/running prepare and render jobs and queue a fresh prepare.
+   * false (a worker or the reconciler found the clip unprepared): keep a prepare job that is already live.
+   */
+  restart?: boolean;
+  /** start (or join) a run with this reason; omit when the project is already rendering */
+  reason?: RunReason;
+}
+
+/**
+ * Send a clip (back) through clip.prepare: the one path for the "preparing" transition. The clip row is locked first
+ * (clip before project), the status flip happens under that lock so only the caller that changes it emits, and the job is
+ * enqueued in the same unit of work. clip.prepare renders the clip once its metadata and bounds exist.
+ * Returns false when the clip is gone.
+ */
+export async function requestPrepare(_svc: Services, u: UnitOfWork, projectId: string, clipId: string, o: PrepareOptions = {}): Promise<boolean> {
+  const c = schema.clips;
+  // locked, so the status read here is the one the update replaces: exactly one caller sees the flip and emits
+  const [clip] = await u.db.select({ origin: c.origin, status: c.status }).from(c).where(and(eq(c.id, clipId), eq(c.projectId, projectId))).for("update");
+  if (!clip) return false;
+  const restart = o.restart ?? true;
+  if (restart) {
+    await u.cancelLiveJobs(QUEUES.render, clipId);
+    await u.cancelLiveJobs(QUEUES.prepare, clipId);
+  }
+  const flipped = clip.status !== "preparing";
+  if (flipped || restart) await u.db.update(c).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(c.id, clipId));
+  const mode = o.mode ?? prepareModeOf(clip);
+  if (restart || !(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode });
+  if (o.reason) await startRun(u, projectId, { reason: o.reason, status: "rendering", stage: "render" });
+  if (flipped) await u.emit(projectId, "stage.started", { stage: "prepare", clipId, mode });
+  return true;
 }
 
 export interface RenderManyResult {

@@ -1,4 +1,6 @@
-import { eq, asc, sql } from "drizzle-orm";
+import { and, eq, asc, inArray, sql } from "drizzle-orm";
+import { lockProjectClips, requestPrepare } from "./lifecycle.js";
+import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "../db/index.js";
 import { StageContext, modelsUsed } from "./common.js";
@@ -224,8 +226,21 @@ export async function analyze(ctx: StageContext) {
   if (existingClips.length) {
     log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
     await svc.tx(async (u) => {
-      await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-      for (const c of existingClips) if (c.status !== "done") await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
+      // unprepared clips go through the one prepare path (which keeps a live prepare job); the rest re-queue their
+      // current generation. Clips are locked (id order) before the project row is touched.
+      await lockProjectClips(u, projectId);
+      for (const c of await listClips(u.db, projectId)) {
+        if (c.status === "done") continue;
+        if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });
+        else await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
+      }
+      // a conditional flip: only a project still in an earlier stage moves to rendering, and only that caller emits
+      const [moved] = await u.db
+        .update(schema.projects)
+        .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
+        .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
+        .returning({ id: schema.projects.id });
+      if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
     });
     return;
   }
