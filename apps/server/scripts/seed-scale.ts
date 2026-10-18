@@ -3,7 +3,7 @@
  * search and replay work can be measured at 1k projects / 50k clips before and after a change
  * (docs/specs/scale.md, docs/TROUBLESHOOTING.md "Measuring at scale").
  *
- *   SEED_SCALE=1 DATABASE_URL=postgres://reelsaw:reelsaw@localhost:3200/reelsaw \
+ *   SEED_SCALE=1 DATABASE_URL=postgres://reelsaw:reelsaw@localhost:5442/reelsaw \
  *     npx tsx scripts/seed-scale.ts [--users 20] [--projects 1000] [--clips 50] [--hours 2] [--events 600] [--clean]
  *
  * Refuses to run without SEED_SCALE=1 (it writes thousands of rows) and without an explicit

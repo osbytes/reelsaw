@@ -150,8 +150,8 @@ is that line, not the gap between events. A run still `running` with no live job
 
 To see how lists, search and event replay behave at 1,000 projects / 50,000 clips (plan:
 [specs/scale.md](specs/scale.md)), seed a **throwaway** database, never one you care about:
-`cd apps/server && SEED_SCALE=1 DATABASE_URL=postgres://<user>:<password>@localhost:3200/reelsaw npx tsx scripts/seed-scale.ts --users 20 --projects 1000 --clips 50 --hours 2`
-(3200 is the bench stack's Postgres; the script refuses without `SEED_SCALE=1` and has no default
+`cd apps/server && SEED_SCALE=1 DATABASE_URL=postgres://<user>:<password>@localhost:5442/reelsaw npx tsx scripts/seed-scale.ts --users 20 --projects 1000 --clips 50 --hours 2`
+(5442 is the bench stack's Postgres, the app is on 3200; the script refuses without `SEED_SCALE=1` and has no default
 URL). It writes 2-hour transcripts with realistic word arrays, ~600 events per project (75% progress ticks) and
 no media files, using only ids that start with `seed-`; take timings with `EXPLAIN (ANALYZE, BUFFERS)`
 and `select octet_length(...)`, sign in as a user created through the app and assign the seeded
