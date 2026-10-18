@@ -537,10 +537,10 @@ export const appRouter = router({
     users: router({
       /**
        * Keyset page of accounts: pending first, then newest first (`approved, created_at desc, id desc`), with each
-       * account's usage over `window` days from one grouped query per metric table (see `usageByUser`).
+       * account's all-time usage from one grouped query per metric table (see `usageByUser`).
        */
       list: adminProcedure
-        .input(z.object({ q: z.string().max(200).optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50), window: z.number().int().min(1).max(365).default(30) }).optional())
+        .input(z.object({ q: z.string().max(200).optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50) }).optional())
         .query(async ({ ctx, input }) => {
           const db = ctx.svc.database.db;
           const limit = input?.limit ?? 50;
@@ -578,7 +578,7 @@ export const appRouter = router({
           const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
           const ids = items.map((r) => r.id);
           const [usage, sessions] = await Promise.all([
-            usageByUser(db, input?.window ?? 30, ids),
+            usageByUser(db, null, ids),
             ids.length ? db.select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` }).from(schema.session).where(inArray(schema.session.userId, ids)).groupBy(schema.session.userId) : [],
           ]);
           const usageOf = new Map(usage.map((u) => [u.id, u]));

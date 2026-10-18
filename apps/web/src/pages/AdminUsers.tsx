@@ -5,7 +5,7 @@ import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, MoreButton, Select, Skeleton } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Skeleton } from "../components/ui";
 
 type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
 type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage };
@@ -17,7 +17,6 @@ const STATUS: Record<Row["status"], { glyph: string; tone: string; word: string 
   suspended: { glyph: "✕", tone: "text-err", word: "Suspended" },
 };
 
-const WINDOWS = [7, 30, 90, 365] as const;
 const PAGE = 50;
 
 /** `value`, but only after it has stopped changing for `ms`. */
@@ -56,16 +55,15 @@ export function AdminUsersPage() {
   const qc = useQueryClient();
   const me = useMe();
   const [search, setSearch] = useState("");
-  const [days, setDays] = useState<(typeof WINDOWS)[number]>(30);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
   const q = useDebounced(search.trim(), 200);
-  // server-side paging; each account carries its usage for the selected window, so there is no separate usage query
+  // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { q: q || undefined, window: days, limit: PAGE },
+      { q: q || undefined, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
     ),
   );
@@ -99,11 +97,11 @@ export function AdminUsersPage() {
   }, [loaded, sort]);
   const pending = rows.filter((r) => r.status === "pending").length;
 
-  const head = (k: SortKey, label: string, opts: { right?: boolean; className?: string } = {}) => (
+  const head = (k: SortKey, label: string, opts: { right?: boolean; className?: string; usage?: boolean } = {}) => (
     <th scope="col" className={`${TH} ${opts.right ? "text-right" : "text-left"} ${opts.className ?? ""}`} aria-sort={sort?.key === k ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
       <button
         type="button"
-        title="Sorts the loaded rows"
+        title={opts.usage ? "All time. Sorts the loaded rows" : "Sorts the loaded rows"}
         className={`inline-flex h-4 items-center gap-1 whitespace-nowrap align-middle leading-4 hover:text-ink ${opts.right ? "flex-row-reverse" : ""}`}
         onClick={() => setSort(sort?.key === k && sort.dir === -1 ? null : { key: k, dir: sort?.key === k ? -1 : k === "name" || k === "status" ? 1 : -1 })}
       >
@@ -124,7 +122,6 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Select className="w-[7.5rem]" ariaLabel="Usage window" value={String(days)} onValueChange={(v) => setDays(Number(v) as (typeof WINDOWS)[number])} options={WINDOWS.map((d) => ({ value: String(d), label: d === 365 ? "1 year" : `${d} days` }))} />
             <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
           </div>
         </div>
@@ -135,7 +132,7 @@ export function AdminUsersPage() {
           {(rows.length > 0 || list.isPending) && (
             <div className="rounded-[16px] border border-line bg-panel">
               <table className="w-full table-fixed border-separate border-spacing-0">
-                <caption className="sr-only">Accounts, with usage over the last {days} days</caption>
+                <caption className="sr-only">Accounts, with all-time usage</caption>
                 <colgroup>
                   <col />
                   <col className={`${COL} min-[900px]:w-28`} />
@@ -150,10 +147,10 @@ export function AdminUsersPage() {
                   <tr>
                     {head("name", "Account", { className: "rounded-tl-[16px]" })}
                     {head("status", "Status", { className: FULL })}
-                    {head("projects", "Projects", { right: true, className: FULL })}
-                    {head("sourceMinutes", "Minutes", { right: true, className: FULL })}
-                    {head("clipsRendered", "Clips", { right: true, className: FULL })}
-                    {head("storedBytes", "Stored", { right: true, className: FULL })}
+                    {head("projects", "Projects", { right: true, className: FULL, usage: true })}
+                    {head("sourceMinutes", "Minutes", { right: true, className: FULL, usage: true })}
+                    {head("clipsRendered", "Clips", { right: true, className: FULL, usage: true })}
+                    {head("storedBytes", "Stored", { right: true, className: FULL, usage: true })}
                     {head("lastActive", "Active", { className: FULL })}
                     <th scope="col" className={`${TH} rounded-tr-[16px] text-right`}>
                       <span className="sr-only">Actions</span>
@@ -186,7 +183,7 @@ export function AdminUsersPage() {
                     const self = r.id === me.data?.id;
                     const u = r.usage;
                     const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${bytes(u.storedBytes)}`;
-                    const model = `Last ${days} days: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
+                    const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
                     const cell = "border-t border-line px-3 align-middle";
                     const stateLabel = r.status === "pending" ? "Approve" : r.status === "suspended" ? "Reinstate" : "Suspend";
                     const stateOff = busy || (self && r.status === "active");

@@ -83,10 +83,11 @@ export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKe
  * stored bytes. One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
  * without ids it covers the first 500 accounts.
  */
-export async function usageByUser(db: Db, days: number, userIds?: string[]) {
+export async function usageByUser(db: Db, days: number | null, userIds?: string[]) {
   const ids = userIds ?? (await db.select({ id: schema.user.id }).from(schema.user).orderBy(schema.user.createdAt).limit(500)).map((u) => u.id);
   if (!ids.length) return [];
-  const since = sql`now() - make_interval(days => ${days}::int)`;
+  // null = all time
+  const since = days == null ? sql`'-infinity'::timestamptz` : sql`now() - make_interval(days => ${days}::int)`;
   const { projects: P, clips: C, uploads: U, llmUsage: L } = schema;
   const [proj, clip, up, llm] = await Promise.all([
     db
