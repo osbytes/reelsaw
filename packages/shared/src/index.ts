@@ -47,16 +47,18 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
  * center – static center crop
  * none   – keep the original aspect ratio
  */
-export const reframeModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center", "none"]);
+export const reframeModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center", "none"]).describe("Framing: auto (detect per section), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)");
 export type ReframeMode = z.infer<typeof reframeModeSchema>;
 
-export const captionStyleSchema = z.enum(["karaoke", "box", "plain", "none"]);
+export const captionStyleSchema = z.enum(["karaoke", "box", "plain", "none"]).describe("Caption look: karaoke (active word highlighted), box, plain, or none (no captions)");
 /** Legacy coarse position; new projects store captionX/captionY instead. */
 export const captionPositionSchema = z.enum(["bottom", "middle", "top"]);
 export type CaptionPosition = z.infer<typeof captionPositionSchema>;
 export type CaptionStyle = z.infer<typeof captionStyleSchema>;
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+/** Fraction of the 9:16 frame, 0 = left/top, 1 = right/bottom. */
+const frac = (what: string) => z.number().min(0).max(1).describe(`${what}, as a fraction of the 9:16 frame (0-1)`);
 
 /**
  * Everything that is burned into the picture besides the framing. Lives on the project (defaults for
@@ -65,25 +67,26 @@ const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
  */
 export const styleSchema = z.object({
   captions: captionStyleSchema.default("karaoke"),
-  captionSize: z.number().min(0.5).max(2).default(1),
-  captionX: z.number().min(0).max(1).default(0.5),
-  captionY: z.number().min(0).max(1).default(0.72),
+  captionSize: z.number().min(0.5).max(2).describe("Caption size multiplier (0.5-2, default 1)").default(1),
+  captionX: frac("Caption centre, horizontal").default(0.5),
+  captionY: frac("Caption centre, vertical (default 0.72)").default(0.72),
   /** Karaoke active-word colour. */
-  highlightColor: hexColor.default("#FFD700"),
+  highlightColor: hexColor.describe("Karaoke active-word colour, #RRGGBB (default #FFD700)").default("#FFD700"),
   /** Max words on screen at once (1 = one-word-at-a-time "Hormozi" style). */
-  wordsPerLine: z.number().int().min(1).max(8).default(4),
-  uppercase: z.boolean().default(false),
+  wordsPerLine: z.number().int().min(1).max(8).describe("Max caption words on screen at once (1-8, default 4)").default(4),
+  uppercase: z.boolean().describe("Captions in capitals").default(false),
   /** Colour the clip's key words (picked by the AI when scoring; editable per clip). */
-  emphasis: z.boolean().default(true),
-  emphasisColor: hexColor.default("#39FF14"),
-  showHook: z.boolean().default(true),
-  hookX: z.number().min(0).max(1).default(0.5),
-  hookY: z.number().min(0).max(1).default(0.16),
-  hookSeconds: z.number().min(0).max(15).default(3.5),
+  emphasis: z.boolean().describe("Colour the clip's key words (default true)").default(true),
+  emphasisColor: hexColor.describe("Colour of emphasised words, #RRGGBB (default #39FF14)").default("#39FF14"),
+  showHook: z.boolean().describe("Show the hook text at the start of the clip (default true)").default(true),
+  hookX: frac("Hook centre, horizontal").default(0.5),
+  hookY: frac("Hook centre, vertical (default 0.16)").default(0.16),
+  hookSeconds: z.number().min(0).max(15).describe("How long the hook shows, seconds (0-15, default 3.5)").default(3.5),
 });
 export type Style = z.infer<typeof styleSchema>;
-export const styleOverrideSchema = styleSchema.partial();
-export type StyleOverride = z.infer<typeof styleOverrideSchema>;
+/** Partial style without the defaults (`.partial()` would fill every unset field with its default). */
+export const styleOverrideSchema = withoutDefaults<Partial<Style>>(styleSchema.shape);
+export type StyleOverride = Partial<Style>;
 export const defaultStyle: Style = styleSchema.parse({});
 
 const LEGACY_CAPTION_Y: Record<CaptionPosition, number> = { top: 0.3, middle: 0.5, bottom: 0.74 };
@@ -102,16 +105,16 @@ export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosit
 }
 
 /** Framing modes a user can pick for a section of a clip. "auto" = let face detection decide. */
-export const sectionModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center"]);
+export const sectionModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center"]).describe("Framing for this section (same modes as the project's reframe, without none)");
 export type SectionMode = z.infer<typeof sectionModeSchema>;
 
 /** A user-forced framing for part of a clip, in absolute source seconds (survives retrims). */
 export const layoutSectionSchema = z.object({
-  start: z.number().min(0),
-  end: z.number().min(0),
+  start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
+  end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
   mode: sectionModeSchema,
   /** Manual re-centring: shifts the crop horizontally by this fraction of the source width. */
-  offsetX: z.number().min(-0.5).max(0.5).optional(),
+  offsetX: z.number().min(-0.5).max(0.5).optional().describe("Shift the crop sideways by this fraction of the source width (-0.5 to 0.5)"),
 });
 export type LayoutSection = z.infer<typeof layoutSectionSchema>;
 
@@ -143,7 +146,7 @@ export interface DetectedSegment {
  * Per-clip intro/outro choice. A missing key inherits the project's, `null` means none, a string is a
  * library asset id. Stored on the clip, so it survives pipeline re-runs.
  */
-export const bumperSecondsSchema = z.number().min(1).max(10);
+export const bumperSecondsSchema = z.number().min(1).max(10).describe("Seconds an image intro/outro shows (1-10); videos keep their own length");
 /** How long an image intro/outro is shown unless its card or a use says otherwise. */
 export const DEFAULT_IMAGE_BUMPER_SEC = 3;
 /** `introSec` / `outroSec` override how long an image shown in that slot lasts (videos keep their own length). */
@@ -193,34 +196,34 @@ export function rubricTotal(s: Pick<ClipScores, "hook" | "flow" | "value" | "sha
 
 export const projectSettingsSchema = styleSchema.extend({
   /** Upper bound on clips. Unset = the AI returns every moment that stands on its own. */
-  maxClips: z.number().int().min(1).max(50).optional(),
-  minClipSeconds: z.number().int().min(5).max(180).default(20),
-  maxClipSeconds: z.number().int().min(10).max(300).default(60),
+  maxClips: z.number().int().min(1).max(50).optional().describe("Most clips to pick (1-50); unset = every moment that stands on its own"),
+  minClipSeconds: z.number().int().min(5).max(180).describe("Shortest clip, seconds (5-180, default 20)").default(20),
+  maxClipSeconds: z.number().int().min(10).max(300).describe("Longest clip, seconds (10-300, default 60; must be above minClipSeconds)").default(60),
   /** Long pauses inside clips: shortened to 0.6 s (natural) / 0.35 s (tight) with jump cuts, or kept. */
-  pauses: z.enum(["off", "natural", "tight"]).default("natural"),
+  pauses: z.enum(["off", "natural", "tight"]).describe("Long pauses inside clips: natural (cut to 0.6 s, default), tight (0.35 s) or off").default("natural"),
   /** Text burned into the source (captions, logos): "hide" keeps it out of crops and masks the rest. */
   /**
    * Text already in the video: hide = blur detected captions/logos, except in presentations (slide
    * decks, screen shares) where on-screen text is the content; always = blur even then; keep = never.
    */
-  sourceText: z.enum(["hide", "keep", "always"]).default("hide"),
+  sourceText: z.enum(["hide", "keep", "always"]).describe("Text already in the video: hide (blur captions/logos except in slide decks, default), always (blur even then), keep").default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
   /** @deprecated use captionY */
-  captionPosition: captionPositionSchema.optional(),
-  language: z.string().max(10).optional(),
+  captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
+  language: z.string().max(10).optional().describe("Spoken language code (e.g. en); unset = detected"),
   /** "Find clips about …": restricts selection to this topic and adds a relevance score. */
-  focus: z.string().max(300).optional(),
-  instructions: z.string().max(2000).optional(),
+  focus: z.string().max(300).optional().describe("Only pick clips about this topic (max 300 chars)"),
+  instructions: z.string().max(2000).optional().describe("Free-text guidance for picking and titling clips (max 2000 chars)"),
   /** Names, brands and jargon the transcriber should spell correctly (comma separated). */
-  vocabulary: z.string().max(1000).optional(),
+  vocabulary: z.string().max(1000).optional().describe("Names, brands and jargon to spell correctly, comma separated (max 1000 chars)"),
   /**
    * Intro / outro video (bumper_assets ids) attached to every clip. Snapshotted from the user's
    * defaults when the project is created. Unset = none; null is reserved for "none, although my
    * default has one" (project override, phase 2).
    */
-  introAssetId: z.string().max(100).nullable().optional(),
-  outroAssetId: z.string().max(100).nullable().optional(),
+  introAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the intro (list_bumpers); null = none"),
+  outroAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the outro (list_bumpers); null = none"),
   /** How long an image intro / outro lasts in this project, overriding the library item's own length. */
   introSec: bumperSecondsSchema.optional(),
   outroSec: bumperSecondsSchema.optional(),
@@ -258,15 +261,18 @@ export type UserProjectDefaults = z.infer<typeof userProjectDefaultsSchema>;
  * so an unset field would come back as the built-in value and override the user's saved default.
  */
 export type ProjectSettingsPatch = Partial<ProjectSettings>;
-function withoutDefaults(shape: z.ZodRawShape): z.ZodType<ProjectSettingsPatch, ProjectSettingsPatch> {
+function withoutDefaults<T = ProjectSettingsPatch>(shape: z.ZodRawShape): z.ZodType<T, T> {
   const out: Record<string, z.ZodType> = {};
   for (const [k, v] of Object.entries(shape)) {
     const def = (v as { def?: { type?: string; innerType?: z.ZodType } }).def;
     out[k] = def?.type === "default" && def.innerType ? def.innerType : (v as z.ZodType);
   }
-  return z.object(out).partial() as unknown as z.ZodType<ProjectSettingsPatch, ProjectSettingsPatch>;
+  return z.object(out).partial() as unknown as z.ZodType<T, T>;
 }
 export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.shape);
+/** Optional settings a project update can reset to their default (unset). */
+export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary"] as const;
+export type ClearableSetting = (typeof CLEARABLE_SETTINGS)[number];
 
 export const createProjectInputSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -362,8 +368,12 @@ export const PROJECT_EVENT_TYPES = [
   /** soft delete and its undo (projects/service.ts); payload { days } = how long it stays restorable */
   "project.deleted",
   "project.restored",
-  /** a clip a re-analyze replaced was brought back */
+  /** a clip a re-analyze replaced (or that was deleted) was brought back */
   "clip.restored",
+  /** one clip soft-deleted (clips.delete / delete_clip); payload { clipId, index, title, days } */
+  "clip.deleted",
+  /** title or settings changed without re-running anything (projects.update / update_project); payload { changed } */
+  "project.updated",
   "project.done",
   "project.failed",
 ] as const;
