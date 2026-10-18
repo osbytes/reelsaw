@@ -31,7 +31,38 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @reelsaw/web build
       - run: pnpm --filter @reelsaw/server bundle
-      - run: pnpm --filter @reelsaw/server exec node --import tsx --test test/resources.test.ts
+      # every test file that does not import test/helpers.ts (no app, no Postgres); see docs/EVALS.md
+      - run: pnpm --filter @reelsaw/server test:unit
+      # the ONNX models behind the framing, pauses, alignment, speakers and overlays suites
+      # (same script the Dockerfile runs); cached so CI does not download ~100 MB per run
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: apps/server/models
+          key: onnx-models-${{ hashFiles('scripts/download-models.sh') }}
+      - run: pnpm --filter @reelsaw/server models:download
+      # model-free eval suites against the committed baselines; suites whose media is not in git
+      # skip themselves under --offline, and any regression fails the job
+      - run: pnpm --filter @reelsaw/server eval:offline
       # a PR that changes the app must say what changed (pnpm changeset); docs-only PRs add an empty one
       - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
         run: pnpm exec changeset status --since=origin/main
+
+  # TODO(stack tests): boot the compose stack, curl /api/health and run the stack tests (the test
+  # files that import test/helpers.ts). Not enabled because it has never run in CI; what has to be
+  # proven first is listed in docs/EVALS.md ("Stack tests in CI"). Sketch:
+  #
+  # stack:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 40
+  #   steps:
+  #     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  #     - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+  #     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+  #       with: { node-version: 24, cache: pnpm }
+  #     - run: pnpm install --frozen-lockfile
+  #     - name: throwaway .env (no real secrets)
+  #       run: printf 'BETTER_AUTH_SECRET=%s\nAPP_URL=http://localhost:3100\nPORT=3100\n' "$(openssl rand -base64 32)" > .env
+  #     - run: docker compose up -d --build --wait app   # Postgres is published on 127.0.0.1:5432
+  #     - run: curl -fsS http://localhost:3100/api/health
+  #     - run: pnpm --filter @reelsaw/server test
+  #       env: { REELSAW_URL: "http://localhost:3100" }

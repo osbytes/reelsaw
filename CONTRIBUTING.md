@@ -14,7 +14,12 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 
 - One change per PR, with a description of what and why.
 - Typecheck both apps, run `pnpm --filter @reelsaw/server test` against a local stack, and check
-  UI changes in the browser at phone width.
+  UI changes in the browser at phone width. CI runs only the stack-free tests
+  (`test:unit`) and `eval:offline` (all model-free eval suites against the baselines), so the stack
+  tests and `pnpm eval` with a model are on you.
+- `pnpm eval <suite> --update` refuses to record regressions; pass `--accept-regressions "<reason>"`
+  when a worse number is intended. Never read the `heldout` disfluency cases while tuning (see
+  `docs/EVALS.md`).
 - Keep docs current: `README.md`, `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
 
 ## Licensing and the Developer Certificate of Origin
