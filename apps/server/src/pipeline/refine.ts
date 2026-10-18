@@ -9,6 +9,7 @@ import { StageContext, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
+import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
 
 /**
@@ -64,6 +65,18 @@ function carryDecisions(prev: TranscriptFlag[], next: TranscriptFlag[]): Transcr
   });
 }
 
+const SKIP_LABEL: Partial<Record<RefineStep, string>> = { entities: "Name fixes", disfluency: "Filler and repeat removal" };
+function skipMessage(step: RefineStep, reason: string, language: string | null) {
+  return `${SKIP_LABEL[step] ?? step} skipped: ${reason}${language ? ` (the video was transcribed as ${language})` : ""}. Review the transcript by hand if you need it.`;
+}
+
+/** Steps whose rules and word lists only exist for some languages are skipped for others, not run blind. */
+const STEP_LANGUAGE_STAGE: Partial<Record<RefineStep, LanguageStage>> = { entities: "entityPhonetics", disfluency: "disfluencyRules" };
+function unsupportedLanguage(step: RefineStep, language: string | null): string | null {
+  const stage = STEP_LANGUAGE_STAGE[step];
+  return stage && !supports(stage, language) ? skipReason(language) : null;
+}
+
 /**
  * Apply a step's result under a row lock, recompute the derived transcript, and advance the
  * project when all steps are finished.
@@ -72,13 +85,18 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; artifact?: { data: unknown; models: Record<string, string> } },
+  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
 ) {
   // one unit: merged flags, step status, progress event and (if last) the hand-off to analyze
   await svc.tx(async (u) => {
     const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
     if (!t) return;
+    if (result.status === "failed" && result.error !== undefined) {
+      // a step that gave up: its stage.failed commits with the "failed" status it announces
+      const durationSec = await stageElapsed(tx, projectId, "refine");
+      await u.emit(projectId, "stage.failed", { stage: "refine", step, error: result.error.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
+    }
     if (result.artifact) await u.artifact(projectId, "refine", step, result.artifact.data, result.artifact.models);
     const raw = t.rawWords ?? t.words;
     let flags = t.flags;
@@ -118,6 +136,7 @@ export async function mergeRefine(
       .where(eq(schema.transcripts.projectId, projectId));
     const finished = REFINE_STEPS.filter((s) => refine[s] === "done" || refine[s] === "failed").length;
     await u.emit(projectId, "stage.progress", { stage: "refine", progress: finished / REFINE_STEPS.length, message: `${step} ${result.status}`, step, refine });
+    if (result.skipped) await u.emit(projectId, "stage.progress", { stage: "refine", step, skipped: { status: "skipped", reason: result.skipped }, message: skipMessage(step, result.skipped, t.language) });
     if (finished === REFINE_STEPS.length) await finishIfComplete(svc, projectId, u);
   });
 }
@@ -141,12 +160,15 @@ export async function finishIfComplete(svc: Services, projectId: string, u?: Uni
   await u.enqueue(QUEUES.analyze, { projectId });
 }
 
+/** The step's status and its event commit together (atomic jsonb merge, so no row lock is needed for the write). */
 async function markRunning(ctx: StageContext, step: RefineStep) {
-  await ctx.db
-    .update(schema.transcripts)
-    .set({ refine: sql`coalesce(${schema.transcripts.refine}, '{}'::jsonb) || ${JSON.stringify({ [step]: "running" })}::jsonb` })
-    .where(eq(schema.transcripts.projectId, ctx.projectId));
-  await ctx.svc.events.emit(ctx.projectId, "stage.progress", { stage: "refine", step, message: `${step} running` });
+  await ctx.svc.tx(async (u) => {
+    await u.db
+      .update(schema.transcripts)
+      .set({ refine: sql`coalesce(${schema.transcripts.refine}, '{}'::jsonb) || ${JSON.stringify({ [step]: "running" })}::jsonb` })
+      .where(eq(schema.transcripts.projectId, ctx.projectId));
+    await u.emit(ctx.projectId, "stage.progress", { stage: "refine", step, message: `${step} running` });
+  });
 }
 
 async function loadTranscript(ctx: StageContext) {
@@ -159,6 +181,11 @@ export async function refineEntities(ctx: StageContext) {
   const { svc } = ctx;
   const t = await loadTranscript(ctx);
   if (t.refine.entities === "done") return;
+  const skip = unsupportedLanguage("entities", t.language);
+  if (skip) {
+    ctx.log.info({ step: "entities", language: t.language, skipped: skip }, "refine step skipped");
+    return mergeRefine(svc, ctx.projectId, "entities", { status: "done", skipped: skip });
+  }
   await markRunning(ctx, "entities");
   const project = await ctx.project();
   const raw = t.rawWords ?? t.words;
@@ -209,6 +236,11 @@ export async function refineDisfluency(ctx: StageContext) {
   const { svc } = ctx;
   const t = await loadTranscript(ctx);
   if (t.refine.disfluency === "done") return;
+  const skip = unsupportedLanguage("disfluency", t.language);
+  if (skip) {
+    ctx.log.info({ step: "disfluency", language: t.language, skipped: skip }, "refine step skipped");
+    return mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", skipped: skip });
+  }
   await markRunning(ctx, "disfluency");
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
@@ -261,7 +293,5 @@ export async function refineScenes(ctx: StageContext) {
 export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   svc.log.child({ module: "refine", projectId }).error({ step, err }, "refine step gave up");
-  const durationSec = await stageElapsed(svc.database.db, projectId, "refine");
-  await svc.events.emit(projectId, "stage.failed", { stage: "refine", step, error: message.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
-  await mergeRefine(svc, projectId, step, { status: "failed" });
+  await mergeRefine(svc, projectId, step, { status: "failed", error: message });
 }

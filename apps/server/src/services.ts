@@ -9,6 +9,7 @@ import { createProviderSettings, type ProviderSettings } from "./ai/providers.js
 import { createModelCatalog, type ModelCatalog } from "./ai/catalog.js";
 import { createAsr, type Asr } from "./ai/asr.js";
 import { createLlmTracer, type LlmTracer } from "./ai/trace.js";
+import { createProviderGate } from "./ai/gate.js";
 import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
@@ -134,14 +135,19 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return t;
   });
 
-  // the environment's models and keys are checked at boot; what an admin saved (keys, model override)
-  // is loaded, and verified, once the database is up
+  // what an admin saved (keys, model override) is loaded once the database is up; the models and keys
+  // are then checked at boot against the EFFECTIVE models, so a dead local server does not block a
+  // deployment an admin has already switched to a cloud model
   const providers = createProviderSettings(config, log.child({ module: "providers" }));
+  // model calls in flight per provider; self-hosted = the compatible server or openai pointed at a base URL
+  const gate = await step("provider concurrency", () =>
+    createProviderGate(config.PROVIDER_CONCURRENCY, config.OPENAI_COMPATIBLE_NAME, (p) => (p === config.OPENAI_COMPATIBLE_NAME || p === "openai") && !!providers.get(p).baseUrl, log.child({ module: "ai" })),
+  );
   let models!: ReturnType<typeof createModelSettings>;
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
-    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers);
+    const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers, gate);
     models = createModelSettings(config, log.child({ module: "models" }), a.verify);
-    await a.check();
+    // reachability is checked below, against the models that will really run (after the admin override loads)
     return a;
   });
   const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
@@ -174,7 +180,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const asr = await step("asr cache", async () => {
-    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }));
+    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate);
     if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
     return a;
   });
@@ -212,6 +218,22 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
 
+  // the provider limits now hold across every process (ai/gate.ts)
+  gate.attach(database.pool);
+
+  await step(`ai model check (${models.get().language}, ${models.get().transcription})`, async () => {
+    const eff = models.get();
+    await ai.check(eff);
+    // an unreachable environment default only matters if it is what runs; with an override in force, warn
+    for (const [envVar, kind, envId, effId] of [
+      ["AI_MODEL", "language", config.AI_MODEL, eff.language],
+      ["TRANSCRIPTION_MODEL", "transcription", config.TRANSCRIPTION_MODEL, eff.transcription],
+    ] as const) {
+      if (envId === effId) continue;
+      await ai.verify(kind, envId).catch((err) => log.warn({ module: "models", envVar, model: envId, reason: (err as Error).message }, `${envVar} is not usable but an admin override is in force; fix it or clear the override before relying on the default`));
+    }
+  });
+
   // usage accounting: one row per model call, attributed to the project's owner
   llmTrace.onUsage = (u) => {
     const db = database.db;
@@ -227,8 +249,24 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
         outputTokens: u.outputTokens,
         ms: u.ms,
         ok: u.ok,
+        costUsd: u.costUsd ?? null,
       })
       .catch((err) => log.warn({ module: "llm", err }, "usage row failed"));
+  };
+  asr.onUsage = (u) => {
+    void database.db
+      .insert(schema.sttUsage)
+      .values({
+        userId: u.ctx.projectId ? sql`(select user_id from projects where id = ${u.ctx.projectId})` : null,
+        projectId: u.ctx.projectId ?? null,
+        stage: u.ctx.stage ?? null,
+        provider: u.provider,
+        model: u.model,
+        audioSec: u.audioSec,
+        ms: u.ms,
+        ok: u.ok,
+      })
+      .catch((err) => log.warn({ module: "asr", err }, "usage row failed"));
   };
 
   const events = await step("event bus", async () => {
@@ -251,7 +289,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
-  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
+  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), config);
   return { log, logLevel, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
 }
 

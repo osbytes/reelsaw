@@ -28,7 +28,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
       fetch: async (cur, size) => {
         const res = await svc.database.db.execute(sql`
           select id, source_key as "sourceKey", updated_at::text as at from projects
-          where source_key is not null and source_expired_at is null and updated_at < ${cutoff.toISOString()}::timestamptz and status in ('done', 'failed')
+          where source_key is not null and source_expired_at is null and deleted_at is null and updated_at < ${cutoff.toISOString()}::timestamptz and status in ('done', 'failed')
             ${cur ? sql`and (updated_at, id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           order by updated_at, id limit ${size}`);
         return res.rows as Array<{ id: string; sourceKey: string; at: string }>;
@@ -59,7 +59,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
       fetch: async (cur, size) => {
         const res = await svc.database.db.execute(sql`
           select id, project_id as "projectId", output_key as "outputKey", updated_at::text as at from clips
-          where output_key is not null and status = 'done' and updated_at < ${cutoff.toISOString()}::timestamptz
+          where output_key is not null and status = 'done' and deleted_at is null and updated_at < ${cutoff.toISOString()}::timestamptz
             ${cur ? sql`and (updated_at, id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           order by updated_at, id limit ${size}`);
         return res.rows as Array<{ id: string; projectId: string; outputKey: string; at: string }>;

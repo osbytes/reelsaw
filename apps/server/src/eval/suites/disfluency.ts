@@ -14,15 +14,23 @@ import path from "node:path";
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from "ai";
 import type { Word } from "@reelsaw/shared";
 import { detectDisfluencies } from "../../pipeline/disfluency.js";
-import { isUnavailable, type CaseResult, type EvalContext, type Suite } from "../framework.js";
+import { isUnavailable, type CaseResult, type EvalContext, type FixtureSource, type Suite, type SummaryMetric } from "../framework.js";
 import { evalAi } from "../asr.js";
+
+type Split = "dev" | "heldout";
 
 interface Case {
   id: string;
   expect: "cut" | "keep";
   kind: string;
+  /** dev cases may be read while tuning the rules/prompt; heldout cases must not be (docs/EVALS.md) */
+  split: Split;
+  /** where the window came from; unknown fields stay undefined */
+  source?: FixtureSource;
   target: { index: number; span: number };
   label: string;
+  /** the text alone does not settle the label: the case runs and prints, but never counts in precision/recall or as a regression */
+  uncertain?: boolean;
   words: Word[];
 }
 
@@ -41,8 +49,12 @@ export const disfluencySuite: Suite = {
   name: "disfluency",
   description: "disfluency detection precision/recall on reviewed real-transcript cases (rules + model)",
   needs: [],
+  offlineBaseline: true, // offline = rules only, which scores differently from rules + model
   async run(ctx) {
     const spec = JSON.parse(await fs.readFile(path.join(ctx.fixtures("disfluency"), "cases.json"), "utf8")) as { cases: Case[] };
+    const only = ctx.opt("split");
+    if (only && only !== "dev" && only !== "heldout") throw new Error(`--split must be dev or heldout, got ${only}`);
+    spec.cases = spec.cases.filter((c) => !only || c.split === only);
     let model: LanguageModel | null = null;
     let mode = "rules";
     if (!ctx.offline) {
@@ -66,12 +78,14 @@ export const disfluencySuite: Suite = {
         const others = flags.filter((f) => f !== hit).length;
         out.push({
           id: c.id,
-          pass,
+          pass: c.uncertain ? true : pass,
           metrics: {
             expect: c.expect,
             got: flagged ? `${hit!.subkind} ${Math.round(hit!.confidence * 100)}%${hit!.status === "auto" ? " auto" : ""}` : "-",
-            outcome: c.expect === "cut" ? (flagged ? "TP" : "FN") : flagged ? "FP" : "TN",
+            // "TP?" etc. for uncertain labels: shown, not scored
+            outcome: (c.expect === "cut" ? (flagged ? "TP" : "FN") : flagged ? "FP" : "TN") + (c.uncertain ? "?" : ""),
             mode,
+            split: c.split,
             otherFlags: others,
           },
           notes: `${c.kind} · ${c.label} · “…${c.words.slice(Math.max(0, a - 5), a).map((w) => w.text).join(" ")} [${c.words.slice(a, b + 1).map((w) => w.text).join(" ")}] ${c.words.slice(b + 1, b + 6).map((w) => w.text).join(" ")}…”`,
@@ -84,17 +98,27 @@ export const disfluencySuite: Suite = {
     return out;
   },
   summarize(results) {
-    const n = (o: string) => results.filter((r) => r.metrics?.outcome === o).length;
-    const tp = n("TP");
-    const fp = n("FP");
-    const fn = n("FN");
-    const autoFp = results.filter((r) => r.metrics?.outcome === "FP" && String(r.metrics?.got).endsWith("auto")).length;
-    return {
-      precision: { value: Number((tp / Math.max(1, tp + fp)).toFixed(2)), better: "higher", tolerance: 0.03 },
-      recall: { value: Number((tp / Math.max(1, tp + fn)).toFixed(2)), better: "higher", tolerance: 0.03 },
-      falsePositives: { value: fp, better: "lower" },
-      // wrong cuts applied without review are the costly ones
-      autoFalsePositives: { value: autoFp, better: "lower" },
+    const score = (rs: CaseResult[], prefix: string): Record<string, SummaryMetric> => {
+      const n = (o: string) => rs.filter((r) => r.metrics?.outcome === o).length;
+      const tp = n("TP");
+      const fp = n("FP");
+      const fn = n("FN");
+      const autoFp = rs.filter((r) => r.metrics?.outcome === "FP" && String(r.metrics?.got).endsWith("auto")).length;
+      return {
+        [`${prefix}precision`]: { value: Number((tp / Math.max(1, tp + fp)).toFixed(2)), better: "higher", tolerance: 0.03, ratio: { k: tp, n: tp + fp } },
+        [`${prefix}recall`]: { value: Number((tp / Math.max(1, tp + fn)).toFixed(2)), better: "higher", tolerance: 0.03, ratio: { k: tp, n: tp + fn } },
+        [`${prefix}falsePositives`]: { value: fp, better: "lower" },
+        // wrong cuts applied without review are the costly ones
+        [`${prefix}autoFalsePositives`]: { value: autoFp, better: "lower" },
+      };
     };
+    const bySplit = (s: Split) => results.filter((r) => r.metrics?.split === s);
+    const dev = bySplit("dev");
+    const held = bySplit("heldout");
+    // a `--split` run scores one split only; a full run reports the whole set and both splits
+    // separately, because dev cases informed the rules and prompt and heldout cases did not
+    if (!held.length) return score(dev, "dev.");
+    if (!dev.length) return score(held, "heldout.");
+    return { ...score(results, ""), ...score(dev, "dev."), ...score(held, "heldout.") };
   },
 };

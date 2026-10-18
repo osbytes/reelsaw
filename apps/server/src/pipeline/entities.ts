@@ -168,8 +168,9 @@ Respond with JSON {"names":[...]} using the exact spellings from the list.`,
   }
 }
 
-function norm(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+/** Letters and digits of any script, lowercased and without diacritics ("Zoë" matches "Zoe"). */
+export function norm(s: string) {
+  return s.normalize("NFKD").replace(/\p{M}+/gu, "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function levenshtein(a: string, b: string): number {

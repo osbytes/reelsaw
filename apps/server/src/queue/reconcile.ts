@@ -1,5 +1,7 @@
-import { inArray, eq, desc } from "drizzle-orm";
-import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
+import { and, inArray, eq, desc, isNull } from "drizzle-orm";
+import { purgeDeleted } from "../projects/service.js";
+import { needsPrepare } from "../pipeline/manual.js";
+import { requestPrepare } from "../pipeline/lifecycle.js";
 import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
@@ -27,26 +29,29 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
   const db = svc.database.db;
   let requeued = 0;
   const active = await db.query.projects.findMany({
-    where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]),
+    where: and(inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)),
     columns: { id: true, status: true }, // not the whole row (settings etc.): only these two are read
   });
   for (const p of active) {
     if (p.status === "rendering") {
-      const clips = await db.query.clips.findMany({ where: (t, { eq }) => eq(t.projectId, p.id) });
+      const clips = await db.query.clips.findMany({ where: (t, { and, eq, isNull }) => and(eq(t.projectId, p.id), isNull(t.deletedAt)) });
       for (const c of clips) {
         if (c.status === "done" || c.status === "failed") continue;
         if (needsPrepare(c)) {
           if (await svc.queue.hasLiveJob(QUEUES.prepare, c.id)) continue;
+          // restart: false re-checks for a live prepare job inside the transaction and keeps one that appeared meanwhile
           await svc.tx(async (u) => {
-            if (c.status !== "preparing") await u.db.update(schema.clips).set({ status: "preparing" }).where(eq(schema.clips.id, c.id));
             await u.cancelLiveJobs(QUEUES.render, c.id);
-            await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+            await requestPrepare(svc, u, p.id, c.id, { restart: false });
           });
           requeued++;
           continue;
         }
         if (await svc.queue.hasLiveJob(QUEUES.render, c.id)) continue;
-        // re-queue the clip's current generation (no bump: nothing about the clip changed)
+        // re-queue the clip's current generation (no bump: nothing about the clip changed). Outside a unit of work on
+        // purpose: no row changes here, and a duplicate is harmless only because pg-boss enqueues with
+        // singletonKey = clip id on an exclusive queue (one live job per clip), so a race with another enqueue is a
+        // no-op, and a render of a stale generation exits. Drop that singletonKey and this needs svc.tx + hasLiveJob.
         await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id, gen: c.renderGen });
         requeued++;
       }
@@ -60,6 +65,7 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
         const st = t.refine[step];
         if (st === "done" || st === "failed") continue;
         if (await svc.queue.hasLiveJob(REFINE_QUEUE[step], p.id)) continue;
+        // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
         await svc.queue.enqueue(REFINE_QUEUE[step], { projectId: p.id });
         requeued++;
       }
@@ -68,6 +74,7 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
     }
     const queue = statusQueue[p.status];
     if (!queue || (await svc.queue.hasLiveJob(queue, p.id))) continue;
+    // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
     await svc.queue.enqueue(queue, { projectId: p.id });
     requeued++;
   }
@@ -88,6 +95,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         lastSweep = Date.now();
         await sweepScratch(svc, { budgeted: true });
         await purgeBumperAssets(svc);
+        await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();
@@ -105,7 +113,7 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const db = svc.database.db;
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
-  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), columns: { id: true, status: true, updatedAt: true } });
+  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });

@@ -14,8 +14,21 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 
 - One change per PR, with a description of what and why.
 - Typecheck both apps, run `pnpm --filter @reelsaw/server test` against a local stack, and check
-  UI changes in the browser at phone width.
-- Keep docs current: `README.md`, `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
+  UI changes in the browser at phone width. CI runs only the stack-free tests
+  (`test:unit`) and `eval:offline` (all model-free eval suites against the baselines), so the stack
+  tests and `pnpm eval` with a model are on you.
+- `pnpm eval <suite> --update` refuses to record regressions; pass `--accept-regressions "<reason>"`
+  when a worse number is intended. Never read the `heldout` disfluency cases while tuning (see
+  `docs/EVALS.md`).
+- The consistency-core tests (`uow-atomic`, `render-gen`, `finalize-race`, `reopen-transitions`,
+  `reconcile-idempotent`) call `svc.tx`, the lifecycle functions and the reconciler in-process through
+  `test/lifecycle-harness.ts`, needing only Postgres (no models, no running app). They skip with a reason when
+  the database schema is older than the checkout (the running stack is an older build); to test newer code,
+  create a scratch database, run the migrations into it and set `TEST_DATABASE_URL` to it. Their jobs are held
+  an hour in the future and removed afterwards, so workers never touch the fake clips.
+- Changed an env var, a CLI command or an eval suite? Run `pnpm docs:gen` (CI runs `pnpm docs:check`):
+  `.env.example`, `docs/CONFIG.md` and the command/suite tables are generated from the code.
+- Keep docs current: `README.md`, `docs/CONFIG.md` (generated), `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
 
 ## Licensing and the Developer Certificate of Origin
 

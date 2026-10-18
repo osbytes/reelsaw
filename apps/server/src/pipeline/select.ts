@@ -7,8 +7,8 @@
  *  3. pool    – snap/dedupe in the caller
  *  4. score   – rubric (hook / flow / value / shareability [/ relevance]) 0-10 per criterion, k samples,
  *               median per criterion; also returns emphasis words for the captions
- *  5. rank    – one sliding pairwise pass over the top clips, each comparison asked twice with the
- *               positions swapped; disagreements count as ties (judge position bias)
+ *  5. rank    – K sliding pairwise passes over the top clips (K places the top K), each comparison
+ *               asked twice with the positions swapped; disagreements count as ties (judge position bias)
  */
 import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from "ai";
 import { z } from "zod";
@@ -386,17 +386,46 @@ async function compare(o: LlmOpts, a: ScoreInput, b: ScoreInput, c: SelectContex
   return 0;
 }
 
+/** Judgments K sliding passes over n items make at most: Σ_{p<K} (n-1-p) pairs, 2 calls each (position swap). */
+export function pairwiseCalls(n: number, passes: number) {
+  let pairs = 0;
+  for (let p = 0; p < Math.min(passes, n - 1); p++) pairs += n - 1 - p;
+  return pairs * 2;
+}
+
 /**
- * One backward sliding pass (Qin et al. 2024, PRP-Sliding): the best item bubbles to the top and
- * the rest move towards their place. Costs 2·(n-1) judgments. Returns the new order of ids.
+ * K backward sliding passes (Qin et al. 2024, PRP-Sliding-K): pass p bubbles the best of the
+ * remaining items up to position p, so K passes place the top K. One pass only guarantees the
+ * leader; users see the top 3 first, hence the default of 3. Each pair is judged once (memoised):
+ * a later pass that meets the same pair reuses the verdict. Costs at most `pairwiseCalls(n, K)`.
+ * Returns the new order of ids.
  */
-export async function pairwiseRank(o: LlmOpts, items: ScoreInput[], c: SelectContext, onProgress?: (done: number, total: number) => void): Promise<number[]> {
+export async function pairwiseRank(
+  o: LlmOpts,
+  items: ScoreInput[],
+  c: SelectContext,
+  onProgress?: (done: number, total: number) => void,
+  passes = 1,
+  /** the judge; injectable so the eval can check placement without a model */
+  judge: (a: ScoreInput, b: ScoreInput) => Promise<number> = (a, b) => compare(o, a, b, c),
+): Promise<number[]> {
   const order = [...items];
-  for (let i = order.length - 1; i > 0; i--) {
-    if (o.signal?.aborted) break;
-    const r = await compare(o, order[i]!, order[i - 1]!, c);
-    if (r === 1) [order[i - 1], order[i]] = [order[i]!, order[i - 1]!];
-    onProgress?.(order.length - i, order.length - 1);
+  const k = Math.max(1, Math.min(passes, order.length - 1));
+  const total = pairwiseCalls(order.length, k) / 2;
+  const seen = new Map<string, number>(); // "a|b" → verdict for (a before b)
+  let done = 0;
+  for (let p = 0; p < k; p++) {
+    for (let i = order.length - 1; i > p; i--) {
+      if (o.signal?.aborted) return order.map((it) => it.id);
+      const lo = order[i]!;
+      const hi = order[i - 1]!;
+      const key = `${lo.id}|${hi.id}`;
+      const back = seen.get(`${hi.id}|${lo.id}`);
+      const r = seen.get(key) ?? (back !== undefined ? -back : await judge(lo, hi));
+      seen.set(key, r);
+      if (r === 1) [order[i - 1], order[i]] = [lo, hi];
+      onProgress?.(++done, total);
+    }
   }
   return order.map((it) => it.id);
 }

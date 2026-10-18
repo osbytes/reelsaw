@@ -36,7 +36,8 @@ const only = argv("only", "");
 
 const config = loadConfig();
 const ai = createAi(config, createLogger({ LOG_LEVEL: config.LOG_LEVEL, LOG_FORMAT: config.LOG_FORMAT }, { role: "eval" }));
-const cases = (JSON.parse(await fs.readFile(casesPath, "utf8")) as Case[]).filter((c) => !only || c.id === only);
+// synthetic cases only: real-audio cases (with `source`) need materialised media, which the eval runner's suite handles
+const cases = (JSON.parse(await fs.readFile(casesPath, "utf8")) as Array<Case & { source?: unknown }>).filter((c) => !c.source && (!only || c.id === only));
 const audioDir = path.resolve(argv("audio", "../../eval/.cache/transcription-audio")); // eval/generate-audio.sh
 
 const normTokens = (s: string) =>

@@ -10,7 +10,8 @@
 # Options (environment variables):
 #   REELSAW_DIR=~/reelsaw                         where to install
 #   REELSAW_IMAGE=ghcr.io/osbytes/reelsaw:latest  image to run
-#   REELSAW_LLM=qwen2.5:14b                       Ollama model (~9 GB; qwen2.5:7b or gemma3:4b for less RAM)
+#   REELSAW_LLM=<model>                           Ollama model; default by RAM: >=24 GB qwen2.5:14b (~9 GB),
+#                                                 >=12 GB qwen2.5:7b (~5 GB), otherwise gemma3:4b (~3 GB)
 #   REELSAW_WHISPER=Systran/faster-whisper-small  speech-to-text model (downloaded on first boot)
 #   REELSAW_PORT=3000                             port for the web app
 #   REELSAW_PROJECT=reelsaw                       compose project name (containers/volumes prefix)
@@ -21,7 +22,6 @@ set -euo pipefail
 main() {
 DIR="${REELSAW_DIR:-$HOME/reelsaw}"
 IMAGE="${REELSAW_IMAGE:-ghcr.io/osbytes/reelsaw:latest}"
-LLM="${REELSAW_LLM:-qwen2.5:14b}"
 WHISPER="${REELSAW_WHISPER:-Systran/faster-whisper-small}"
 PORT="${REELSAW_PORT:-3000}"
 PROJECT="${REELSAW_PROJECT:-reelsaw}"
@@ -33,6 +33,19 @@ command -v docker >/dev/null || die "Docker is required: https://docs.docker.com
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required (included with Docker Desktop)"
 docker info >/dev/null 2>&1 || die "Docker is installed but not running: start Docker and run this again"
 command -v curl >/dev/null || die "curl is required"
+
+# ---- language model: the default follows the machine's RAM unless REELSAW_LLM says otherwise ----
+ram_gb() {
+  if [ "$(uname -s)" = "Darwin" ]; then echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  else echo $(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1048576 )); fi
+}
+RAM=$(ram_gb)
+if [ -n "${REELSAW_LLM:-}" ]; then LLM="$REELSAW_LLM"; WHY="from REELSAW_LLM"
+elif existing=$(sed -n 's/^AI_MODEL=compat://p' "$DIR/.env" 2>/dev/null | tail -1) && [ -n "$existing" ]; then LLM="$existing"; WHY="kept from the existing $DIR/.env"
+elif [ "$RAM" -ge 24 ]; then LLM="qwen2.5:14b"; WHY="detected ${RAM} GB RAM"
+elif [ "$RAM" -ge 12 ]; then LLM="qwen2.5:7b"; WHY="detected ${RAM} GB RAM"
+else LLM="gemma3:4b"; WHY="detected ${RAM} GB RAM (unknown or under 12 GB)"; fi
+say "Language model: $LLM ($WHY; set REELSAW_LLM to choose another)"
 
 # ---- Ollama: native on macOS (Metal GPU), native or in a container on Linux ----
 PROFILES=(--profile local-ai)
@@ -53,6 +66,22 @@ else
   PROFILES+=(--profile ollama)
 fi
 if [ "$OLLAMA_MODE" = host ]; then OLLAMA_URL="http://host.docker.internal:11434/v1"; else OLLAMA_URL="http://ollama:11434/v1"; fi
+
+# On Linux the container reaches the host through the docker bridge, but Ollama listens on 127.0.0.1
+# by default, which the container cannot see (the app would then exit at boot). Probe it the way the
+# app will: from inside a container. Docker Desktop (macOS) forwards host.docker.internal to loopback.
+if [ "$OLLAMA_MODE" = host ] && [ "$(uname -s)" != "Darwin" ]; then
+  say "Checking that containers can reach Ollama on this host"
+  if ! docker run --rm --add-host host.docker.internal:host-gateway busybox:1.36 wget -q -T 5 -O /dev/null http://host.docker.internal:11434/api/tags </dev/null >/dev/null 2>&1; then
+    die "Ollama runs on this host but only listens on 127.0.0.1, so the Reelsaw container can't reach it.
+  Make it listen on all interfaces, then run this again:
+    one-off:   OLLAMA_HOST=0.0.0.0 ollama serve
+    systemd:   sudo systemctl edit ollama   # add: [Service] Environment=\"OLLAMA_HOST=0.0.0.0\"
+               sudo systemctl restart ollama
+  (restrict port 11434 with your firewall if this host is reachable from other machines), or stop the host
+  Ollama and re-run to let the installer run Ollama in a container instead."
+  fi
+fi
 
 say "Installing into $DIR"
 mkdir -p "$DIR"
@@ -143,7 +172,7 @@ POSTGRES_PASSWORD=$(rand 24)
 APP_URL=http://localhost:$PORT
 PORT=$PORT
 REELSAW_IMAGE=$IMAGE
-ALLOW_SIGNUP=true
+SIGNUP_MODE=open
 
 # language model: Ollama ($OLLAMA_MODE)
 AI_MODEL=compat:$LLM
@@ -166,6 +195,7 @@ compose() { docker compose -p "$PROJECT" "${PROFILES[@]}" "$@"; }
 say "Pulling images (first run downloads a few GB)"
 compose pull --quiet --ignore-pull-failures </dev/null || true
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "couldn't pull $IMAGE: check the name, or 'docker login ghcr.io' if the image is private"
+say "Image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null || echo "$IMAGE (no registry digest)")"
 
 say "Pulling the language model $LLM (first run only; several GB)"
 if [ "$OLLAMA_MODE" = host ]; then
@@ -186,7 +216,7 @@ for _ in $(seq 1 120); do
     say "Reelsaw is running: http://localhost:$PORT"
     cat <<DONE
 
-  Create your account, then set ALLOW_SIGNUP=false in $DIR/.env and restart.
+  Create your account, then set SIGNUP_MODE=closed (or approval) in $DIR/.env and restart.
 
   cd $DIR
   docker compose -p $PROJECT ${PROFILES[*]} logs -f app   # logs

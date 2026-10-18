@@ -1,15 +1,20 @@
 {
-  "updatedAt": "2026-10-15T18:38:43.977Z",
+  "updatedAt": "2026-10-18T17:17:44.466Z",
   "cases": {
     "copia-budget": true,
     "brightline-coffee": true,
     "reelsaw-stack": true,
     "qwen-anthropic": true,
-    "podcast-names": true
+    "podcast-names": true,
+    "real-dwarkesh-tlaxcalans": false,
+    "real-dwarkesh-tlaxcalans-vocab": true,
+    "real-dwarkesh-conquistadors": false,
+    "real-stallman-freedoms": true,
+    "real-missing-semester-shells": true
   },
   "metrics": {
     "meanWer": {
-      "value": 0.043,
+      "value": 0.04,
       "better": "lower",
       "tolerance": 0.02
     },
@@ -19,6 +24,35 @@
       "tolerance": 0.05
     },
     "falseInsertions": {
+      "value": 0,
+      "better": "lower",
+      "tolerance": 0
+    },
+    "real.meanWer": {
+      "value": 0.14,
+      "better": "lower",
+      "tolerance": 0.02
+    },
+    "real.meanWerNormalised": {
+      "value": 0.139,
+      "better": "lower",
+      "tolerance": 0.02
+    },
+    "real.nameErrorRate": {
+      "value": 0.237,
+      "better": "lower",
+      "tolerance": 0.05,
+      "ratio": {
+        "k": 27,
+        "n": 114
+      }
+    },
+    "real.meanEntityRecall": {
+      "value": 0.758,
+      "better": "higher",
+      "tolerance": 0.05
+    },
+    "real.misheard": {
       "value": 0,
       "better": "lower",
       "tolerance": 0

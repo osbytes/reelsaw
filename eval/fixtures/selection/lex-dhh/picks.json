@@ -1,0 +1,71 @@
+{
+  "kind": "creator-picks",
+  "split": "dev",
+  "episode": {
+    "id": "vagyIcmIGOQ",
+    "url": "https://www.youtube.com/watch?v=vagyIcmIGOQ",
+    "title": "DHH: Future of Programming, AI, Ruby on Rails, Productivity & Parenting | Lex Fridman Podcast #474",
+    "uploadDate": "20250712",
+    "durationSec": 22128
+  },
+  "windows": [
+    [
+      13022.96,
+      14688.32
+    ]
+  ],
+  "negative": [
+    300,
+    1200
+  ],
+  "picks": [
+    {
+      "shortId": "upeawiM1Sag",
+      "hook": "DHH rant against Apple",
+      "url": "https://www.youtube.com/shorts/upeawiM1Sag",
+      "spans": [
+        [
+          13622.96,
+          13644.4
+        ],
+        [
+          13667.2,
+          13682.96
+        ],
+        [
+          13803.6,
+          13822.72
+        ],
+        [
+          13834.72,
+          13876.96
+        ],
+        [
+          13904.64,
+          14004.96
+        ],
+        [
+          14032.24,
+          14088.32
+        ]
+      ],
+      "hits": [
+        73,
+        29,
+        27,
+        103,
+        150,
+        110
+      ],
+      "pieces": [
+        1,
+        1,
+        2,
+        1,
+        1,
+        2
+      ]
+    }
+  ],
+  "note": "Labels: the creator's own shorts, located in the episode by 5-gram alignment of YouTube auto-captions (apps/server/src/eval/tools/creator-spans.ts, min 10 hits, offset gap 20 words, pieces ≤ 10 s apart merged). Transcript: the episode's auto en-orig track (no punctuation; segments are pause-split), kept only within ±600 s of the spans plus one 900 s stretch far from them. Re-check: run the tool again; spans should agree within ±2 s."
+}

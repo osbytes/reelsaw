@@ -71,7 +71,7 @@ export const prepareModeOf = (c: { origin: string }) => (c.origin === "manual-ai
 export async function prepareClip(ctx: StageContext, clipId: string, mode: "exact" | "ai") {
   const { svc, db, projectId } = ctx;
   const clip = await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId) });
-  if (!clip || !needsPrepare(clip)) return; // deleted, or already prepared before a crash
+  if (!clip || clip.deletedAt || !needsPrepare(clip)) return; // deleted, or already prepared before a crash
   const project = await ctx.project();
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   if (!transcript) throw new Error("Transcript missing");

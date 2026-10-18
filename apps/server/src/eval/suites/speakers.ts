@@ -1,16 +1,18 @@
 /**
  * speakers: active speaker detection on real two-person footage with known talkers.
- * Agreement = fraction of the segment where the chosen speaker matches the truth.
+ * Agreement = fraction of the labelled time where the chosen speaker matches the truth (unlabelled
+ * stretches, e.g. uncertain hand-overs, are not scored). A case with `expectUnsure` (more than two
+ * people in the shot) passes only when the detector declines to answer (no runs).
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadFaceDetector } from "../../vision/faces.js";
 import { loadVad, VAD_SR } from "../../audio/vad.js";
 import { activeSpeakers, speechAt, envelopeAt } from "../../pipeline/speaker.js";
-import { materialize, type CaseResult, type MediaSource, type Suite } from "../framework.js";
+import { materialize, MediaDriftError, type CaseResult, type MediaSource, type Suite } from "../framework.js";
 
 interface Spec {
-  cases: Array<{ id: string; source: MediaSource; segment: [number, number]; speakers: [number, number]; truth: Array<{ start: number; end: number; who: 0 | 1 }>; minAgreement: number }>;
+  cases: Array<{ id: string; source: MediaSource; segment: [number, number]; speakers: [number, number]; truth: Array<{ start: number; end: number; who: 0 | 1 }>; minAgreement: number; expectUnsure?: boolean }>;
 }
 
 export const speakersSuite: Suite = {
@@ -32,9 +34,9 @@ export const speakersSuite: Suite = {
       for (const c of spec.cases) {
         let media: string;
         try {
-          media = await materialize(ctx, c.source);
+          media = await materialize(ctx, { ...c.source, strictSha: true }); // speaking turns are sub-second labels
         } catch (err) {
-          out.push({ id: c.id, pass: false, skipped: (err as Error).message });
+          out.push(err instanceof MediaDriftError ? { id: c.id, pass: false, notes: (err as Error).message } : { id: c.id, pass: false, skipped: (err as Error).message });
           continue;
         }
         const [s0, s1] = c.segment;
@@ -55,11 +57,12 @@ export const speakersSuite: Suite = {
           if (got?.who === truth.who) agree++;
         }
         const agreement = total ? agree / total : 0;
+        const unsure = tl.runs.length === 0;
         out.push({
           id: c.id,
-          pass: agreement >= c.minAgreement,
-          metrics: { agreement: Number(agreement.toFixed(2)), confidence: tl.confidence, switches: Math.max(0, tl.runs.length - 1), ms },
-          notes: tl.runs.map((r) => `${r.who === 0 ? "L" : "R"} ${r.start}-${r.end}`).join(", "),
+          pass: c.expectUnsure ? unsure : agreement >= c.minAgreement,
+          metrics: { agreement: Number(agreement.toFixed(2)), confidence: tl.confidence, switches: Math.max(0, tl.runs.length - 1), unsure: unsure ? 1 : 0, ms },
+          notes: unsure ? "unsure (no runs)" : tl.runs.map((r) => `${r.who === 0 ? "A" : "B"} ${r.start}-${r.end}`).join(", "),
         });
       }
     } finally {

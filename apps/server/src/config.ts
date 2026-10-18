@@ -60,6 +60,8 @@ export const envSchema = z.object({
   // "auto" (default): renders start while CPU and memory allow (see resources.ts); a number pins it
   RENDER_CONCURRENCY: z.union([z.literal("auto"), z.coerce.number().int().min(1)]).default("auto"),
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
+  MAX_SOURCE_FILE_MB: z.coerce.number().int().min(1).default(8192), // yt-dlp --max-filesize for URL sources
+  ALLOW_PRIVATE_SOURCE_URLS: boolFalse, // true: URL sources may point at LAN/loopback addresses (e.g. a NAS)
 
   AI_MODEL: z.string().default("openai:gpt-4o-mini"),
   TRANSCRIPTION_MODEL: z.string().default("openai:whisper-1"),
@@ -70,10 +72,20 @@ export const envSchema = z.object({
   TRANSCRIBE_CONCURRENCY: z.coerce.number().int().min(0).max(8).default(0),
   /** Parallel LLM calls while finding/scoring moments. 0 = auto (1 for a self-hosted model, 4 for cloud). */
   ANALYZE_CONCURRENCY: z.coerce.number().int().min(0).max(16).default(0),
+  /** Model calls in flight per provider across every process ("ollama=2,openai=16"; 0 = unlimited). Unset: 2 for self-hosted (the compatible server, openai with a base URL), unlimited for cloud. See ai/gate.ts. */
+  PROVIDER_CONCURRENCY: z.string().default(""),
   /** Rubric samples per candidate (median is kept). 0 = auto (1 self-hosted, 3 cloud). */
   ANALYZE_SCORE_SAMPLES: z.coerce.number().int().min(0).max(7).default(0),
   /** Pairwise re-ranking of the top clips with position swapping. auto = on for cloud models only. */
   ANALYZE_PAIRWISE: z.enum(["auto", "on", "off"]).default("auto"),
+  /** Sliding pairwise passes over the top 10 (pass p places rank p; 3 = the top 3 the user sees first). Cost: Σ(n-1-p) pairs × 2 calls. */
+  ANALYZE_PAIRWISE_PASSES: z.coerce.number().int().min(1).max(9).default(3),
+  /** Auto-mode score gate. relative (default): drop below max(FLOOR, median − K·MAD) of the run's rubric totals, so the count does not depend on how generous the judge is; absolute: the old fixed 45. */
+  ANALYZE_SCORE_RULE: z.enum(["relative", "absolute"]).default("relative"),
+  ANALYZE_MIN_SCORE_FLOOR: z.coerce.number().min(0).max(100).default(25),
+  ANALYZE_SCORE_MAD_K: z.coerce.number().min(0).max(5).default(1),
+  /** provider:model that scores and compares candidates (default: the language model). A different model avoids self-preference. */
+  ANALYZE_JUDGE_MODEL: z.string().optional(),
   /** Feed entities from the video metadata (channel, title, description, tags) to the transcriber as vocabulary hints. */
   TRANSCRIPT_BIAS: boolTrue,
   /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). */
@@ -119,9 +131,13 @@ export const envSchema = z.object({
   MAX_PROJECTS_PER_USER: z.coerce.number().int().min(0).default(0),
   MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),
   MAX_NEW_PROJECTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
+  MAX_LIVE_JOBS_PER_USER: z.coerce.number().int().min(0).default(0), // queued + running jobs a user's own requests may add to (hosted: e.g. 12)
+  MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders and hand-made clips a user may ask for per hour
+  MAX_STORAGE_MB: z.coerce.number().int().min(0).default(0), // sources + uploads + renders + intros/outros per user; checked at upload and project creation
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  DELETED_RETENTION_DAYS: z.coerce.number().int().min(0).default(7), // deleted projects / replaced clips stay restorable this long, then rows and files go (0 = keep forever)
   // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),

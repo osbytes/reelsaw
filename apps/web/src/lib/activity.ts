@@ -1,6 +1,6 @@
 import { formatTime, type ProjectEvent } from "@reelsaw/shared";
 
-const STAGE: Record<string, string> = { ingest: "Download", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
+const STAGE: Record<string, string> = { prepare: "Clip preparation", ingest: "Download", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
 const STEP: Record<string, string> = { entities: "names", disfluency: "disfluencies", scenes: "scene changes", overlays: "on-screen text" };
 
 export type Tone = "ok" | "run" | "warn" | "err";
@@ -24,6 +24,7 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
           ? { text: `Transcript updated, re-rendering ${p.rerendered} clip${p.rerendered === 1 ? "" : "s"}`, tone: "run" }
           : { text: p.changed ? `Transcript updated (${p.changed} fix${p.changed === 1 ? "" : "es"})` : "Transcript updated", tone: "ok" };
       if (p.stage === "refine" && Array.isArray(p.steps)) return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
+      if (p.stage === "analyze" && p.repick && typeof p.kept === "number" && p.kept > 0) return { text: `Finding new moments. Kept ${p.kept} clip${p.kept === 1 ? "" : "s"} you made or edited`, tone: "run" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
     case "run.started": {
       const why = reasonLabel(p.reason);
@@ -57,6 +58,16 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
       return { text: `${p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
     case "clip.cut_unverified":
       return { text: `Applied your cut at ${formatTime(Number(p.at))} without a seam check: the audio around it couldn't be matched`, tone: "warn" };
+    case "project.deleted":
+      return { text: `Project deleted (restorable for ${p.days} days)`, tone: "warn" };
+    case "project.restored":
+      return { text: "Project restored", tone: "ok" };
+    case "clip.restored":
+      return { text: `${clip} restored${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
+    case "clip.deleted":
+      return { text: `${clip} deleted${p.title ? `: “${p.title}”` : ""} (restorable for ${p.days} days)`, tone: "warn" };
+    case "project.updated":
+      return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
     case "job.stalled":
       return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:

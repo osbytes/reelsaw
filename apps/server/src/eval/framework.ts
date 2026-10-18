@@ -37,6 +37,38 @@ export interface SummaryMetric {
   better: "higher" | "lower";
   /** allowed drift before it counts as a regression (absolute) */
   tolerance?: number;
+  /**
+   * Set when `value` is a ratio of counts (k successes out of n trials, e.g. precision = tp / (tp + fp)).
+   * The summary then prints a Wilson 95% interval next to it, so a 0.94 from 17 trials is not read as 0.94.
+   */
+  ratio?: { k: number; n: number };
+}
+
+/** Wilson score interval for k successes in n trials (default z = 1.96, 95%). Sound for small n and for k = 0 or k = n. */
+export function wilson(k: number, n: number, z = 1.96): [number, number] {
+  if (n <= 0) return [0, 1];
+  const p = k / n;
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const centre = (p + z2 / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  return [Math.max(0, centre - half), Math.min(1, centre + half)];
+}
+
+/** "95% CI [0.73, 0.99] n=17", or "" when the metric is not a ratio of counts. n < 10 is flagged as a smoke test. */
+export function describeInterval(m: SummaryMetric): string {
+  if (!m.ratio) return "";
+  const [lo, hi] = wilson(m.ratio.k, m.ratio.n);
+  return `95% CI [${lo.toFixed(2)}, ${hi.toFixed(2)}] n=${m.ratio.n}${m.ratio.n < 10 ? " (n<10: smoke test)" : ""}`;
+}
+
+/** Where a fixture came from, so a surprising label can be traced back to the decision that made it. */
+export interface FixtureSource {
+  url?: string;
+  projectId?: string;
+  userId?: string;
+  /** ISO date of the review decision (accept/reject) or hand label */
+  decidedAt?: string;
 }
 
 export interface Suite {
@@ -44,6 +76,11 @@ export interface Suite {
   description: string;
   /** what the suite needs at run time; `--offline` skips suites that need models or network */
   needs: Need[];
+  /**
+   * True when `--offline` changes what the suite measures (e.g. rules only instead of rules + model).
+   * Offline runs then use `baselines/<suite>.offline.json`, and are not compared when it is missing.
+   */
+  offlineBaseline?: boolean;
   run(ctx: EvalContext): Promise<CaseResult[]>;
   summarize?(results: CaseResult[]): Record<string, SummaryMetric>;
 }
@@ -132,6 +169,9 @@ export function findEvalRoot(): string {
 
 // ---------- media ----------
 
+/** Thrown when materialised media differs from the recorded sha256 and the source is `strictSha`: a hard failure, never a skip. */
+export class MediaDriftError extends Error {}
+
 /** A slice of a long source video that a fixture needs but that is too big for git. */
 export interface MediaSource {
   /** cache key; also the file name under .cache/media */
@@ -143,6 +183,14 @@ export interface MediaSource {
   sha256?: string;
   /** optional local copy of the full source (e.g. inside the app container) */
   localPath?: string;
+  /**
+   * The fixture's labels are sub-second (word boundaries, cut points, pauses): a re-encode that
+   * differs from `sha256` can shift them. A mismatch normally warns, because yt-dlp picks a
+   * different encode per machine, format availability and version (two runs on one laptop gave two
+   * hashes for the same section), while scene/turn tolerances of ≥0.25 s absorb that drift. Set
+   * `EVAL_STRICT_MEDIA=1` to make a mismatch a hard failure when re-labelling against the original encode.
+   */
+  strictSha?: boolean;
 }
 
 /**
@@ -172,7 +220,13 @@ export async function materialize(ctx: EvalContext, source: MediaSource): Promis
   }
   await fs.rename(tmp, out);
   const sha = crypto.createHash("sha256").update(await fs.readFile(out)).digest("hex");
-  if (source.sha256 && source.sha256 !== sha) ctx.log.warn({ media: source.id }, "materialised media differs from the fixture's recorded sha256 (encoder/version drift); results may shift slightly");
+  if (source.sha256 && source.sha256 !== sha) {
+    if (source.strictSha && process.env.EVAL_STRICT_MEDIA === "1") {
+      await fs.rm(out, { force: true });
+      throw new MediaDriftError(`media ${source.id} differs from the fixture's recorded sha256 (${sha.slice(0, 12)} vs ${source.sha256.slice(0, 12)}); sub-second labels are only valid for the original encode. Re-materialise where the fixture was made, or re-label and update the sha256`);
+    }
+    ctx.log.warn({ media: source.id }, "materialised media differs from the fixture's recorded sha256 (encoder/version drift); results may shift slightly");
+  }
   return out;
 }
 
@@ -180,6 +234,8 @@ export async function materialize(ctx: EvalContext, source: MediaSource): Promis
 
 export interface Baseline {
   updatedAt: string;
+  /** regressions someone chose to accept when recording this baseline (`--accept-regressions "<reason>"`) */
+  acceptedRegressions?: Array<{ id?: string; metric?: string; reason: string; at: string }>;
   cases: Record<string, boolean>;
   metrics: Record<string, SummaryMetric>;
 }

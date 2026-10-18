@@ -1,0 +1,221 @@
+{
+ "recordedAt": "2026-10-18T16:45:57.734Z",
+ "model": "compat:qwen2.5:14b",
+ "judge": "compat:qwen2.5:14b",
+ "samples": 1,
+ "pairwise": false,
+ "settings": {
+  "minSec": 20,
+  "maxSec": 60
+ },
+ "candidates": [
+  {
+   "startSec": 462.15,
+   "endSec": 500.11,
+   "title": "The Power of Horses",
+   "hook": "Horse Advantage",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 756.39,
+   "endSec": 800.91,
+   "title": "Cortés' Bold Move",
+   "hook": "Taking the emperor hostage",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 4093.99,
+   "endSec": 4118.99,
+   "title": "Aztecs' Strategic Mistake",
+   "hook": "Cortés Escapes Again!",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 655.43,
+   "endSec": 713.87,
+   "title": "Moctezuma's Fateful Decision",
+   "hook": "Empire's tipping point",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 4047.11,
+   "endSec": 4097.71,
+   "title": "Aztecs' Strategic Mistakes",
+   "hook": "Why did they lose?",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 5820.87,
+   "endSec": 5843,
+   "title": "The True Key to Conquest",
+   "hook": "Just Horses & Steel?",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 1083.19,
+   "endSec": 1138.91,
+   "title": "Tlaxcalans' Perspective on Cortés",
+   "hook": "Equal Partners?",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 5431.43,
+   "endSec": 5455.39,
+   "title": "The Aztecs & Incas Fall",
+   "hook": "Local Allies Betrayed",
+   "total": 62,
+   "scored": true
+  },
+  {
+   "startSec": 3371.67,
+   "endSec": 3418.03,
+   "title": "Spanish Conquistadors' Impact",
+   "hook": "No new wealth created",
+   "total": 50,
+   "scored": true
+  },
+  {
+   "startSec": 3854.31,
+   "endSec": 3913.15,
+   "title": "Spanish vs British Colonies",
+   "hook": "Quick Fix or Long Game?",
+   "total": 39,
+   "scored": true
+  },
+  {
+   "startSec": 4852.95,
+   "endSec": 4888.35,
+   "title": "Spanish Brutality",
+   "hook": "Innocent Victims",
+   "total": 94,
+   "scored": false
+  },
+  {
+   "startSec": 4609.83,
+   "endSec": 4660.91,
+   "title": "Spanish Shock at Aztec Sacrifice",
+   "hook": "Culture Clash",
+   "total": 92,
+   "scored": false
+  },
+  {
+   "startSec": 362.31,
+   "endSec": 409.87,
+   "title": "The Critical Edge of Steel",
+   "hook": "Steel vs Stone Weapons",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 874.79,
+   "endSec": 918.35,
+   "title": "Cortés Wins Over Spanish Forces",
+   "hook": "Diplomacy over Steel?",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 1020.39,
+   "endSec": 1073.31,
+   "title": "Battle of Otumba: Cortés' Victory",
+   "hook": "Horses vs. Aztecs",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 3521.43,
+   "endSec": 3576.27,
+   "title": "Silver's Role in Globalization",
+   "hook": "Global trade shift",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 4503.75,
+   "endSec": 4558.19,
+   "title": "Spanish Conquistadors' Motivation",
+   "hook": "Risk & Reward",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 4785.35,
+   "endSec": 4821.63,
+   "title": "Cortés' Greed for Gold",
+   "hook": "Gold Fever",
+   "total": 88,
+   "scored": false
+  },
+  {
+   "startSec": 527.75,
+   "endSec": 580.27,
+   "title": "Cortés' Standstill Against Tlaxcalans",
+   "hook": "Few Hundred vs Thousands",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 968.95,
+   "endSec": 1020.99,
+   "title": "Cortés' Escape During La Noche Triste",
+   "hook": "Night of Sadness",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 3635.03,
+   "endSec": 3690.91,
+   "title": "Spanish Silver Boom Backfires",
+   "hook": "Silver = Instant Riches?",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 3760.79,
+   "endSec": 3787.63,
+   "title": "Ming Dynasty's Silver Crisis",
+   "hook": "Silver = Empire's Downfall?",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 4348.71,
+   "endSec": 4381.71,
+   "title": "Why did Inca soldiers defect?",
+   "hook": "Defections & loyalty",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 5344.31,
+   "endSec": 5391.07,
+   "title": "Why the British Won in India",
+   "hook": "Bad Kings & Competent CEOs",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 5576.23,
+   "endSec": 5606.59,
+   "title": "The Power of Adaptability",
+   "hook": "Adapting to Local Circumstances",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 3290.55,
+   "endSec": 3339.39,
+   "title": "Atahualpa's Mistake",
+   "hook": "King betrayed by pirate",
+   "total": 75,
+   "scored": false
+  }
+ ]
+}

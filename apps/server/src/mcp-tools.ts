@@ -5,14 +5,18 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema } from "@reelsaw/shared";
-import { addBumperInput, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema } from "@reelsaw/shared";
+import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
-Workflow: create_project(sourceUrl) → wait_for_project (poll until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
-Clips can be edited (update_clip: title, hook, caption, hashtags, bounds, framing) and re-rendered. get_project returns only a transcript summary; get_transcript gives the timed transcript (optionally a time range) for picking your own moments with create_clip. search_clips finds clips and projects by words in their titles, hooks and captions.
-Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). get_project and get_clip show the effective intro/outro and where it comes from. Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
-All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
+Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
+Which tool when:
+- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why)
+- change: update_clip (one clip's text, bounds, framing, style), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
+- recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
+Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
+Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
+You only see and change your own projects and library. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses).");
 
@@ -39,161 +43,236 @@ export function fail(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true as const };
 }
 
+const projectId = (from = "list_projects, search_clips or create_project") => z.string().describe(`Project id (from ${from})`);
+const clipId = (what = "Clip id") => z.string().describe(`${what} (from get_project or search_clips)`);
+const assetIdInput = (from = "list_bumpers") => z.string().min(1).max(100).describe(`Library asset id (from ${from})`);
+
 export const TOOLS = {
   list_projects: {
     title: "List projects",
-    description: "Your projects, most recently updated first, with pipeline status and how many clips are rendered. Returns up to `limit` (default 24, max 100) plus `total`; when `nextCursor` is not null, pass it as `cursor` to get the next page.",
-    inputSchema: { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(24) },
+    description: "Your projects, most recently updated first. Returns { projects: [{ id, title, status, stage, clips: \"n/m rendered\", url }], total, nextCursor }; pass nextCursor as cursor for the next page. Use get_project for one project's clips, search_clips to find by words.",
+    inputSchema: {
+      cursor: z.string().optional().describe("nextCursor from the previous page; omit for the first page"),
+      limit: z.number().int().min(1).max(100).default(24).describe("Projects per page (1-100, default 24)"),
+      deleted: z.boolean().optional().describe("true = only deleted projects that restore_project can still bring back"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_project: {
     title: "Get project",
-    description: "A project with its clips (title, hook, bounds, score, status, download links) and settings. The transcript is only summarised (language, pending fixes); use get_transcript to read it.",
-    inputSchema: { id: z.string() },
+    description: "One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. Returns the project object. For one clip's full detail use get_clip, for the words get_transcript, for the pipeline history get_project_events.",
+    inputSchema: { id: projectId() },
     annotations: { readOnlyHint: true },
   },
   create_project: {
     title: "Create project",
-    description: "Start clipping a video from a URL (YouTube, Vimeo, a direct video link, anything yt-dlp can fetch). Intro/outro: by default your default intro/outro (list_bumpers) are used; pass introAssetId/outroAssetId (a library id, or null for none) to override. Returns immediately; the pipeline runs in the background. Follow with wait_for_project.",
+    description: "Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). Returns { id, title, status: \"queued\", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.",
     inputSchema: {
-      sourceUrl: z.url(),
-      title: z.string().min(1).max(200).optional(),
+      sourceUrl: z.url().describe("http(s) URL of the video"),
+      title: z.string().min(1).max(200).optional().describe("Project title (default: the video's own title)"),
       settings: settingsInput.optional(),
-      introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id for the intro of every clip; null = no intro; omitted = your default intro"),
+      introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id (list_bumpers) for the intro of every clip; null = no intro; omitted = your default intro"),
       outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
-      introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows"),
-      outroSec: z.number().min(1).max(10).optional(),
+      introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows (1-10)"),
+      outroSec: z.number().min(1).max(10).optional().describe("Seconds an outro image shows (1-10)"),
     },
+  },
+  update_project: {
+    title: "Update project",
+    description: "Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses); only the fields you pass change. Does not re-pick clips or re-render: reanalyze_project picks again with the new selection settings, rerender_clips applies style changes. Returns { changed, needsReanalyze, needsRerender, hint }.",
+    inputSchema: {
+      id: projectId(),
+      title: z.string().trim().min(1).max(200).optional().describe("New title"),
+      settings: projectSettingsPatchSchema.optional().describe("Settings to change; keys left out keep their value. Intro/outro go through set_project_bumpers"),
+      clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional().describe("Optional settings to reset to their default, e.g. maxClips (back to automatic) or focus"),
+    },
+    annotations: { idempotentHint: true },
   },
   wait_for_project: {
     title: "Wait for project",
-    description: "Block until the project is done or failed, or until timeoutSeconds (max 120) pass. Call again while status is not done/failed.",
-    inputSchema: { id: z.string(), timeoutSeconds: z.number().int().min(1).max(120).default(60) },
+    description: "Block until the project is done or failed, or timeoutSeconds pass. Returns { id, status, stage, stageProgress, error, clips: [{ id, title, status }] }; on timeout the same with hint \"Still running\": call it again. Use get_project instead for a non-blocking look with full clip details.",
+    inputSchema: {
+      id: projectId("create_project or list_projects"),
+      timeoutSeconds: z.number().int().min(1).max(120).default(60).describe("Longest to wait, seconds (1-120, default 60)"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_transcript: {
     title: "Get transcript",
-    description: "The project's transcript as timed sentences ([m:ss] text), optionally limited to a time range. Large transcripts are cut at maxChars; narrow the range to read the rest.",
-    inputSchema: { id: z.string(), fromSec: z.number().min(0).optional(), toSec: z.number().min(0).optional(), maxChars: z.number().int().min(1000).max(200_000).default(60_000) },
+    description: "The project's transcript as timed lines \"[m:ss] text\", optionally only a time range. Returns text; output longer than maxChars is cut with a note saying which fromSec to continue from. Use it to pick your own moments for create_clip.",
+    inputSchema: {
+      id: projectId(),
+      fromSec: z.number().min(0).optional().describe("Start of the range, seconds from the start of the video"),
+      toSec: z.number().min(0).optional().describe("End of the range, seconds"),
+      maxChars: z.number().int().min(1000).max(200_000).default(60_000).describe("Cut the output at this many characters (1000-200000, default 60000)"),
+    },
     annotations: { readOnlyHint: true },
   },
   search_clips: {
     title: "Search clips",
-    description: "Find clips and projects by words in their title, hook or caption (every word must match; case-insensitive and typo-tolerant: \"budgt\" finds \"Budgeting\"; best matches first). Returns at most 8 projects and `limit` clips, and says when more match (narrow the query).",
-    inputSchema: { q: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(15) },
+    description: "Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). Returns { projects (max 8), clips (max limit) with ids, bounds and links, truncated? }. Use list_projects to browse instead.",
+    inputSchema: {
+      q: z.string().min(1).max(200).describe("Words to find, e.g. \"budget tips\""),
+      limit: z.number().int().min(1).max(50).default(15).describe("Most clips to return (1-50, default 15)"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_project_events: {
     title: "Project activity",
-    description: "Recent pipeline events for a project (stage starts/completions, clip renders, failures with reasons). Newest first.",
-    inputSchema: { id: z.string(), limit: z.number().int().min(1).max(200).default(50) },
+    description: "The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. Returns [{ at, type, ...details }]. Use it to find out why something failed or is slow; get_project shows the current state.",
+    inputSchema: {
+      id: projectId(),
+      limit: z.number().int().min(1).max(200).default(50).describe("Most events to return (1-200, default 50)"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_clip: {
     title: "Get clip",
-    description: "Everything about one clip: metadata, bounds, scores, framing decisions, caption style, diagnostics and download links.",
-    inputSchema: { id: z.string() },
+    description: "Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
+    inputSchema: { id: clipId() },
     annotations: { readOnlyHint: true },
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit a clip's title, hook (the on-screen opening line), caption, hashtags, bounds (startSec/endSec, ≥3 s), framing override or style. Changes burned into the video re-render when rerender is true (default).",
+    description: "Edit one clip: only the fields you pass change; style and layoutSections replace the clip's whole value (null = back to the project's). Text-only edits (title, caption, hashtags) apply at once; bounds, hook, framing, style and emphasis are burned into the video and re-render in the background (~1 min) unless rerender is false. Returns the clip summary with its new status; poll get_clip until done.",
     inputSchema: {
-      id: z.string(),
-      title: z.string().min(1).max(120).optional(),
-      hook: z.string().max(80).optional(),
-      caption: z.string().max(300).optional(),
-      hashtags: z.array(z.string().min(1).max(40)).max(20).optional(),
-      startSec: z.number().min(0).optional(),
-      endSec: z.number().min(0).optional(),
+      id: clipId(),
+      title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
+      hook: z.string().max(80).optional().describe("On-screen opening line (max 80 chars)"),
+      caption: z.string().max(300).optional().describe("Post caption, not burned in (max 300 chars)"),
+      hashtags: z.array(z.string().min(1).max(40)).max(20).optional().describe("Hashtags without # (max 20); replaces the list"),
+      startSec: z.number().min(0).optional().describe("New start, seconds from the start of the source video"),
+      endSec: z.number().min(0).optional().describe("New end, seconds from the start of the source; clip must stay ≥3 s"),
       layoutOverride: reframeModeSchema.nullable().optional().describe("Framing for the whole clip; null = automatic"),
-      layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional(),
-      style: styleOverrideSchema.nullable().optional(),
-      emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions emphasise"),
-      rerender: z.boolean().default(true),
+      layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional().describe("Framing per time range (max 50), source seconds; replaces all sections; null or [] = automatic"),
+      style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
+      emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
+      rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
     },
   },
   create_clip: {
     title: "Create clip",
-    description: "Add a clip from a time range of the source. mode 'exact' keeps the bounds (3 s–10 min); mode 'ai' lets the model pick the best moment inside the range (≥8 s). The clip is prepared and rendered in the background.",
-    inputSchema: { projectId: z.string(), startSec: z.number().min(0), endSec: z.number().min(0), mode: z.enum(["exact", "ai"]).default("exact") },
+    description: "Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip { id, status: \"preparing\" }; it gets a title and renders in the background (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.",
+    inputSchema: {
+      projectId: projectId(),
+      startSec: z.number().min(0).describe("Range start, seconds from the start of the source video"),
+      endSec: z.number().min(0).describe("Range end, seconds"),
+      mode: z.enum(["exact", "ai"]).default("exact").describe("exact = these bounds (default); ai = best moment inside them"),
+    },
+  },
+  delete_clip: {
+    title: "Delete clip",
+    description: "Delete one clip of your project; a render in progress stops. Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Returns { changed, restorable }.",
+    inputSchema: { id: clipId() },
+    annotations: { destructiveHint: true, idempotentHint: true },
   },
   rerender_clip: {
     title: "Re-render clip",
-    description: "Render a clip again (after edits, or when it failed).",
-    inputSchema: { id: z.string() },
+    description: "Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). Async: the new video replaces the old when done (usually under a minute); poll get_clip. Returns { step: render | prepare } (prepare = it never got its AI title, which runs first). For several clips of a project use rerender_clips.",
+    inputSchema: { id: clipId("Clip id, not a project id") },
+    annotations: { idempotentHint: true },
   },
   rerender_clips: {
     title: "Re-render clips",
-    description: "Render several clips of a project again in one step (after edits, or when they failed). Finished and failed clips are queued; clips still rendering are skipped. Returns how many were queued and skipped.",
-    inputSchema: { projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200) },
+    description: "Queue several clips of one project for rendering again in one step (after edits or failures). Finished and failed clips are queued, clips still rendering are skipped; each new video replaces the old when done. Returns { requested, rerendered, skipped }; poll get_project or wait_for_project. For a single clip rerender_clip is enough.",
+    inputSchema: {
+      projectId: projectId(),
+      clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
+    },
+    annotations: { idempotentHint: true },
   },
   export_project: {
     title: "Export clips",
-    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Pass clipIds to export only those clips (they must belong to the project and be rendered); the manifest then says it is a subset. The link needs the same sign-in as the web app.",
-    inputSchema: { id: z.string(), clipIds: z.array(z.string()).max(200).optional() },
+    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Returns { url, clips, notRendered }; the link needs the same Authorization header as this server.",
+    inputSchema: {
+      id: projectId(),
+      clipIds: z.array(z.string()).max(200).optional().describe("Only these clips (max 200; must be rendered clips of the project); omitted = every rendered clip"),
+    },
     annotations: { readOnlyHint: true },
   },
   retry_project: {
     title: "Retry project",
-    description: "Resume a failed project from its furthest completed stage.",
-    inputSchema: { id: z.string() },
+    description: "Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. Finished clips, the transcript and the source are kept. Returns { queue } (the stage restarted); then wait_for_project. To pick different clips use reanalyze_project instead.",
+    inputSchema: { id: projectId() },
   },
   reanalyze_project: {
     title: "Re-analyze project",
-    description: "Keep the transcript, pick clips again, optionally with new settings (focus topic, instructions, clip length, maxClips).",
-    inputSchema: { id: z.string(), settings: settingsInput.optional() },
+    description: "Pick clips again from the existing transcript (needs one), optionally with new settings. Clips you created or edited are kept; untouched AI picks are replaced and restorable with restore_clip for a while. Returns { kept, replaced } at once; the picking runs in the background, so follow with wait_for_project. To only save settings use update_project; to resume a failure use retry_project.",
+    inputSchema: { id: projectId(), settings: settingsInput.optional() },
   },
 
   // ── intro / outro library ────────────────────────────────────────────────
 
   list_bumpers: {
     title: "List intros and outros",
-    description: "Your intro/outro library: id, name, kind (video/image), length, size, whether each is your default intro or outro, how many projects use it, thumbnail. Removed items (restorable for 30 days) are listed separately.",
+    description: "Your intro/outro library. Returns { assets: [{ id, name, kind, durationSec, isDefaultIntro, isDefaultOutro, usedBy, thumbnailUrl }], removed: [...] } (removed items stay restorable for 30 days). Use the ids with set_project_bumpers, set_clip_bumpers or set_default_bumper.",
     annotations: { readOnlyHint: true },
   },
   add_bumper: {
     title: "Add intro/outro",
-    description: "Add a video (MP4/MOV/WebM, at most 10 s, 50 MB) or image (PNG/JPG, at most 20 MB) to your library, from a public http(s) url the server downloads, or from an existing uploadId. Images show for imageSeconds (default per server, 1-10 s). setDefault also makes it your default intro or outro for NEW projects; existing projects are unchanged until set_project_bumpers. name applies to url downloads.",
+    description: "Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. Returns { id, name, kind, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default for NEW projects only; existing ones change with set_project_bumpers.",
     inputSchema: addBumperInput,
+  },
+  rename_bumper: {
+    title: "Rename intro/outro",
+    description: "Rename one of your library items (removed ones too). Only the label changes; nothing re-renders. Returns { id, name, previousName }.",
+    inputSchema: { assetId: assetIdInput(), name: bumperNameSchema.describe("New name (1-120 chars)") },
+    annotations: { idempotentHint: true },
   },
   set_default_bumper: {
     title: "Set default intro/outro",
-    description: "Make a library item your default intro or outro for new projects (assetId null clears the default). Existing projects keep what they have.",
-    inputSchema: { slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() },
+    description: "Make a library item your default intro or outro for projects you create from now on (assetId null clears it). Existing projects keep theirs; to change one use set_project_bumpers. Returns { ok }.",
+    inputSchema: {
+      slot: z.enum(["intro", "outro"]).describe("Which default to set"),
+      assetId: z.string().min(1).max(100).nullable().describe("Library asset id (list_bumpers), or null for no default"),
+    },
+    annotations: { idempotentHint: true },
   },
   remove_bumper: {
     title: "Remove intro/outro",
-    description: "Remove an item from your library and clear it from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_bumper within 30 days.",
-    inputSchema: { assetId: z.string().min(1).max(100) },
+    description: "Remove an item from your library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_bumper within 30 days; check bumper_usage first. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput() },
     annotations: { destructiveHint: true },
   },
   restore_bumper: {
     title: "Restore intro/outro",
-    description: "Bring a removed intro/outro back into the library.",
-    inputSchema: { assetId: z.string().min(1).max(100) },
+    description: "Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. It does not become a default again. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput("list_bumpers → removed") },
+    annotations: { idempotentHint: true },
   },
   bumper_usage: {
     title: "Where an intro/outro is used",
-    description: "The projects and clips that use a library item, and whether through the project's setting or the clip's own choice. Check before removing one.",
-    inputSchema: { assetId: z.string().min(1).max(100) },
+    description: "The projects and clips that use a library item. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via }] }] }, via saying whether through the project or the clip's own choice. Check before removing one.",
+    inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },
   set_project_bumpers: {
     title: "Set a project's intro/outro",
-    description: "Choose the intro and/or outro for a project: \"default\" (your current default), \"none\", or a library asset id; a slot left out is untouched. introSec/outroSec set how long an image shows. Takes effect on the next render of each clip; rerender: true re-renders the project's finished clips now (clips with their own choice for a slot keep it).",
+    description: "Set one project's intro and/or outro: \"default\" (your current default), \"none\", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. Clips with their own choice (set_clip_bumpers) keep it. Applies on each clip's next render; rerender: true re-renders finished clips now. Returns { rerendered }. set_default_bumper changes future projects instead.",
     inputSchema: setProjectBumpersInput,
   },
   set_clip_bumpers: {
     title: "Set clips' intro/outro",
-    description: "Override the intro and/or outro of one or many clips of a project: \"inherit\" (follow the project), \"none\", or a library asset id; a slot left out is untouched. rerender: true re-renders only these clips now.",
+    description: "Override the intro and/or outro of up to 200 clips of one project: \"inherit\" (follow the project), \"none\", or a library asset id; a slot left out is untouched. rerender: true re-renders only these clips. Returns { updated, rerendered }.",
     inputSchema: setClipBumpersInput,
   },
   delete_project: {
     title: "Delete project",
-    description: "Delete a project and all its clips. Cannot be undone.",
-    inputSchema: { id: z.string() },
-    annotations: { destructiveHint: true },
+    description: "Delete one of your projects and all its clips; work in progress stops. Reversible: restore_project brings it back for DELETED_RETENTION_DAYS (7 days by default), then it and its files are removed for good. Returns { changed, restorable, message }.",
+    inputSchema: { id: projectId() },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  restore_project: {
+    title: "Restore project",
+    description: "Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. A project that was processing comes back failed: retry_project resumes it. Returns { changed, status }.",
+    inputSchema: { id: projectId("list_projects with deleted: true") },
+    annotations: { idempotentHint: true },
+  },
+  restore_clip: {
+    title: "Restore clip",
+    description: "Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. Returns { changed, status, needsRerender }; needsRerender means it never finished, so call rerender_clip.",
+    inputSchema: { id: z.string().describe("Clip id (from get_project → replacedClips)") },
+    annotations: { idempotentHint: true },
   },
 };
 

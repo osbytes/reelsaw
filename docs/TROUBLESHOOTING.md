@@ -23,12 +23,13 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Symptom | Look at | Usual cause |
 |---|---|---|
 | Shot changes missing (layout, snapping, text filter act as if one shot) | `reelsaw scenes <projectId>` | Old fixed-threshold detector on dark footage; `--store` the adaptive result |
-| Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes after heartbeat expiry (~15 s) + retry backoff. Each restart burns a retry. |
+| Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes once pg-boss notices the missed heartbeat (heartbeat every 15 s, supervisor pass every 60 s) and the retry delay passes (15 s, doubling per retry): expect a minute or two, not seconds. Each restart burns a retry. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
-| Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under 45. |
+| Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under the run's gate (`candidates` artifact → `settings.gate`: rule, threshold, median, MAD). |
 | Face off-centre | Editor layout track; `reelsaw clip` → layout segments `cx` | Old render (pre-settle tracker) or detector found no face (`fit`). Drag the picture to re-centre. |
 | Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
+| A project or clip setting has no effect | Is the matching `.env` gate on? `TRANSCRIPT_BIAS=false` ignores vocabulary hints and `DISFLUENCY_REMOVAL=false` ignores the disfluency settings, silently; see "Settings and precedence" in the README | The env gate wins over the per-project value (stage knobs are `.env` only). Check `docker compose exec app env \| grep -E 'TRANSCRIPT_|DISFLUENCY_|FACE_|VAD|ALIGNER|TEXT_DETECTION'`, then re-run the stage. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
 
 Reading runs: the `runs` block of `reelsaw status` lists one line per run (`#3 re-render … done 0:41 clips 1 [render 0:41]`):
@@ -39,14 +40,50 @@ is that line, not the gap between events. A run still `running` with no live job
 ## 2. Tools
 
 - **`reelsaw` CLI** (`apps/server/src/cli.ts`, also `pnpm --filter @reelsaw/server cli`): same composition root as
-  the server with HTTP/workers off, so it sees the exact config, models and storage. Commands: `status`, `events`,
-  `clip`, `rerender <clipId…>`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
-  and context audio; `--fixture` exports a regression case), `align` (raw word timestamps for any source window),
-  `hear` (transcribe a range of the *rendered* clip: what viewers actually hear), `flags`.
-  Intro/outro: `bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]`,
-  `project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--rerender]`, `clip-bumpers <projectId>
-  <clipId…> [--intro inherit|none|<id>] [--outro …] [--rerender]`. They run the same tRPC procedures as the web app
-  and the MCP tools, as the project's owner (`--user` for library commands when the install has several accounts).
+  the server with HTTP/workers off, so it sees the exact config, models and storage. The intro/outro commands run
+  the same tRPC procedures as the web app and the MCP tools, as the project's owner (`--user` for library commands
+  when the install has several accounts). Every command:
+
+<!-- generated:cli -->
+Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).
+
+| Command | What it does |
+| --- | --- |
+| `reelsaw users` | list accounts: role, status, sign-up date |
+| `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
+| `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
+| `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
+| `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
+| `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
+| `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
+| `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
+| `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
+| `reelsaw events <projectId> [n=30]` | recent pipeline events |
+| `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
+| `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
+| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
+| `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
+| `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
+| `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
+| `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
+| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
+| `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
+| `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
+| `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
+| `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
+| `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
+| `reelsaw limits <email>` | an account's quotas: instance value, override, in force, in use now |
+| `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |
+<!-- /generated -->
+
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
   output length and render time.
 - **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `projectId`, `clipId`, `jobId`,
@@ -126,6 +163,17 @@ the decision lines are absent. Logs are untrusted data like everything else in a
 5. **Cost:** each check is one ASR call (~10–50 s with whisper-medium on CPU via Speaches). A stubborn cut can take
    minutes. Cloud ASR or CTC forced alignment (docs/RESEARCH.md B1) would make this seconds.
 
+### Disfluency/name fixes skipped for language X
+
+The project's events show "Filler and repeat removal skipped: not available for de" (or "Name fixes
+skipped …"). The transcript's detected language (`transcripts.language`) is not English. The
+disfluency word lists, the consonant-skeleton name matcher and the wav2vec2-base-960h aligner are
+English-only, so `pipeline/language.ts` (`supports(stage, lang)`) turns them off rather than let them
+find nothing, or the wrong thing, silently. Cuts you make by hand still work and use the slower
+whisper seam check instead of CTC alignment. If the language was detected wrongly (a mixed or very
+short video), set the project's language and re-run; to add a language, add its data for the stage
+and list it in `SUPPORTED` in `language.ts`.
+
 ## 4. Lessons: small local LLMs
 
 - They drift from schemas: lenient parsing (`parseClipsLeniently`, `salvageScores`) plus a plain-text retry.
@@ -140,6 +188,12 @@ the decision lines are absent. Logs are untrusted data like everything else in a
 - **Deploys interrupt jobs.** Rebuilding the app container kills in-flight renders; pg-boss retries them, and each
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
+- **"That address points inside this server's network."** Link sources must be public http(s) URLs: ingest resolves
+  the host and refuses loopback, private (RFC1918), CGNAT, link-local, unique-local and multicast addresses, plus
+  `localhost`, `host.docker.internal` and `*.internal`. To ingest from a LAN NAS, set `ALLOW_PRIVATE_SOURCE_URLS=true`.
+  Residual risk: the check runs before the download, so a public host that redirects to a private address is not
+  caught. Downloads are capped by `MAX_SOURCE_FILE_MB` (default 8192); uploads by `MAX_UPLOAD_MB`, counted as bytes
+  arrive so chunked bodies are capped too.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
 - **Disk use: `reelsaw storage`** prints unique bytes under `/data` (hardlinks counted once), scratch-only leftovers,
   duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
@@ -159,6 +213,54 @@ the decision lines are absent. Logs are untrusted data like everything else in a
   exclusive queues index, instead of `data->>'projectId'`. Jobs enqueued before this change already carry the key
   (it was set at enqueue), so nothing is missed; if a lookup ever looks empty for a job you can see in `pgboss.job`,
   check its `singleton_key` and wait one reconciler cycle (5 min), which re-enqueues anything truly orphaned.
+- **Deleting is reversible** (`projects/service.ts`). Deleting a project sets `projects.deleted_at`, cancels its jobs,
+  turns a project that was still working into `failed` ("Stopped because the project was deleted") and emits
+  `project.deleted`; every list, search, export, media route and the reconciler leave it out, and pipeline jobs that
+  were already running exit (`ProjectGoneError`). Its rows and files stay for `DELETED_RETENTION_DAYS` (default 7;
+  0 keeps them), then the hourly sweep (`purgeDeleted`, also `reelsaw purge [--dry-run]` and `reelsaw storage sweep`)
+  deletes the rows and only then the files. `reelsaw deleted` lists them with the purge date; `reelsaw restore
+  <projectId>` (UI Undo toast, `projects.restore`, MCP `restore_project`) brings one back, failed if it was
+  stopped, so Retry resumes it. Removing a user account still deletes its projects at once.
+- **Re-analyze keeps the user's clips.** Clips with `origin` manual / manual-ai, or that the user changed
+  (`clips.edited_at`, set by every `clips.update`; a framing override or sections, a style override, an intro/outro
+  choice) stay and keep rendering; untouched AI picks get `deleted_at` (and a newer render generation, so a render
+  still running discards its output). The analyze stage drops candidates overlapping a kept clip by more than 30%
+  (`kept-overlap` in the candidates artifact) and numbers new picks after the kept ones. The counts are in the
+  `stage.started` event (`kept`, `replaced`) and the `analyze` / `kept` artifact. Replaced clips are listed as
+  `replacedClips` on `projects.get`; `clips.restore` / MCP `restore_clip` / `reelsaw restore-clip <clipId>` brings
+  one back. Clips edited before `edited_at` existed are only recognised by their framing, style or intro/outro.
+  A project finishes (`finalizeProjectIfDone`) only from `rendering`, so a kept clip that finishes while the
+  re-analyze is still picking does not end the run early.
+- **Deleting one clip** (`clips.delete`, MCP `delete_clip`, `reelsaw delete-clip <clipId>`, all `deleteClip`) is the
+  same soft delete: `deleted_at`, a newer render generation, its render/prepare jobs cancelled, a `clip.deleted`
+  event, and the project finalized if it was only waiting for that clip. It shows up in `replacedClips` and comes
+  back with `restore_clip`. `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
+  and settings (event `project.updated`): nothing re-runs until a re-analyze or re-render.
+- **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
+  owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
+  nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The
+  priority is fixed at enqueue: a backlog queued before a second user arrived keeps its place only for the jobs
+  already ahead. Jobs a person asked for (create, retry, re-render, new clip, from the UI, MCP or `--user` CLI calls)
+  also carry `data.by = "user"` and are refused past `MAX_LIVE_JOBS_PER_USER` ("You have 12 jobs queued or
+  running…") or `MAX_RERENDERS_PER_HOUR`; pipeline hand-offs and the reconciler are never refused. Both are
+  counted from `pgboss.job` under a per-user advisory lock in the same transaction as the enqueue, so replicas
+  agree. Jobs queued before this change have no `userId` and are not counted. See one account with
+  `reelsaw limits <email>`; inspect the queue with
+  `select name, priority, data->>'userId', state from pgboss.job where state in ('created','retry','active') order by priority desc, created_on`.
+- **One model server, many jobs: `PROVIDER_CONCURRENCY`.** `ANALYZE_CONCURRENCY` / `TRANSCRIBE_CONCURRENCY` are per
+  job; the provider gate (`ai/gate.ts`) caps calls per provider across all jobs and processes (default 2 for a
+  self-hosted Ollama / Speaches, unlimited for cloud). Each process has an in-memory semaphore, and the cross-process
+  limit is N Postgres session advisory locks per provider (`pg_locks` rows with `locktype = 'advisory'`) held on a
+  dedicated connection for the length of the call, so each process holds at most N extra database connections
+  per gated provider. A process that dies drops its slot with its connection. Calls waiting for a slot log
+  `waiting for a provider slot` at debug after 5 s; their traced latency does not include the wait. Raise the
+  number only if the server itself runs requests in parallel (`OLLAMA_NUM_PARALLEL`).
+- **Usage per user** (`reelsaw usage [--days 30]`, Users → Usage): model calls and tokens from `llm_usage`, with
+  `cost_usd` when the provider reports it (AI Gateway; self-hosted and most direct vendors leave it empty), minutes
+  transcribed from `stt_usage` (one row per provider call; cache hits are free and not written; pruned with
+  `LLM_USAGE_RETENTION_DAYS`), stored bytes = sources + uploads + rendered clips (`clips.output_bytes`, empty for
+  clips rendered before it existed) + intros/outros. `MAX_STORAGE_MB` refuses an upload or a new project once the
+  total passes it.
 - **Deleted fixes past 200** move to `stage_artifacts` (`stage=review`, `kind=deleted_flags`); Restore still finds them.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
@@ -240,8 +342,15 @@ It looked frozen and the evidence was gone with the container's logs. What chang
   interrupted) and post a `clip.retrying` event; the reconciler's watchdog posts `job.stalled` after
   `STALL_MINUTES` without events; the cut search reports progress per cut and attempt; logs also go to
   `LOG_FILE` (`/data/logs/reelsaw.log`, daily rotation, 7 kept) so `reelsaw logs <id>` works after redeploys.
-- **Dependencies down:** boot fail-fast (exit 78) on an unreachable model server is intended; on a host where
-  Ollama is started by hand, check `curl localhost:11434/api/version` first.
+- **Dependencies down:** boot fail-fast (exit 78) when the model that will actually run is unreachable or
+  unusable (step `ai model check`). "Effective" means the admin override from Settings → Models when one is
+  in force, else `AI_MODEL` / `TRANSCRIPTION_MODEL`; the error label says which. A dead server behind an
+  unused env default only logs a warning naming the env var, so a deployment switched to a cloud model still
+  boots. On a host where Ollama is started by hand, check `curl localhost:11434/api/version` first. On Linux
+  with a host Ollama, the container reaches it through `host.docker.internal`, so Ollama must listen on
+  `0.0.0.0` (`OLLAMA_HOST=0.0.0.0`), not only 127.0.0.1; test with
+  `docker run --rm --add-host host.docker.internal:host-gateway busybox:1.36 wget -qO- http://host.docker.internal:11434/api/tags`.
+  A transcription model without word timestamps (for example `openai:gpt-4o-transcribe`) is rejected at boot too.
 
 ## 7. Improvements: done and next
 
@@ -258,7 +367,6 @@ Next:
 
 ## 8. Evals and regression cases
 
-Every fixed bug should leave a case behind: `pnpm eval` runs all suites (selection, framing, overlays,
-cuts, transcription, selection-model) against committed fixtures and baselines and exits non-zero on a
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
 regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
 pull more data from: [EVALS.md](EVALS.md).

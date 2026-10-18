@@ -199,7 +199,7 @@ export function ModelsSection() {
               Discard
             </button>
           )}
-          <button type="button" className="btn-primary" disabled={!dirty.length || save.isPending} onClick={() => save.mutate(Object.fromEntries(dirty.map(({ kind }) => [kind, draft[kind]!])))}>
+          <button type="button" className="btn-primary min-w-[6.5rem]" disabled={!dirty.length || save.isPending} onClick={() => save.mutate(Object.fromEntries(dirty.map(({ kind }) => [kind, draft[kind]!])))}>
             {save.isPending ? "Checking…" : "Save"}
           </button>
         </span>

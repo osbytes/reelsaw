@@ -1,0 +1,39 @@
+{
+  "kind": "shots",
+  "note": "J. Kenji Lopez-Alt YouTube short (standard licence: referenced by url and time only, no frames committed), source 0:00-0:39.7, already 9:16 (yt-dlp served 480x854). Food close-ups with a 'Maillard reaction' label (0-6 s), Kenji at the counter (6-13, 15-21.5, 29-33 s, face around x 0.5), the pan (13-15, 21.5-29, 33-39.7 s). Frames viewed at 2 fps over the whole clip. Whatever the layout, reframing should be near the identity: face / centre / fit all keep the full width of a 9:16 source, a split or stack would not.",
+  "source": {
+    "id": "kenji-short-0-40",
+    "url": "https://www.youtube.com/watch?v=YvlINdshm6Q",
+    "start": 0,
+    "end": 40,
+    "sha256": "82b596912ee453f4edcc678752a2d6ea49e94772a960021ae49c36dca4fd5b66"
+  },
+  "start": 0,
+  "end": 39.7,
+  "srcW": 480,
+  "srcH": 854,
+  "sceneCuts": [
+    6.089,
+    13.055,
+    15.015,
+    21.688,
+    28.987,
+    33.242
+  ],
+  "expect": {
+    "minAgreement": 0.95,
+    "minCropWidth": 0.98,
+    "windows": [
+      {
+        "from": 0,
+        "to": 39.7,
+        "layout": [
+          "face",
+          "center",
+          "fit",
+          "none"
+        ]
+      }
+    ]
+  }
+}

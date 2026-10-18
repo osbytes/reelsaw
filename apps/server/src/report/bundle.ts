@@ -144,6 +144,25 @@ ${fence}
 `;
 }
 
+/** Every provider API key in force (environment or admin-entered) plus credentials embedded in base URLs. */
+function providerSecrets(svc: Services): string[] {
+  const out: string[] = [];
+  for (const d of svc.providers.describe()) {
+    const { apiKey, baseUrl } = svc.providers.get(d.provider);
+    if (apiKey) out.push(apiKey);
+    if (baseUrl) {
+      try {
+        const u = new URL(baseUrl);
+        if (u.password) out.push(decodeURIComponent(u.password));
+        if (u.username) out.push(decodeURIComponent(u.username));
+      } catch {
+        /* not a url */
+      }
+    }
+  }
+  return out;
+}
+
 export async function createReportZip(
   svc: Services,
   userId: string,
@@ -151,7 +170,7 @@ export async function createReportZip(
   req: ReportRequest,
 ): Promise<{ stream: Readable; filename: string } | null> {
   const db = svc.database.db;
-  const redact = makeRedactor(svc.config);
+  const redact = makeRedactor(svc.config, providerSecrets(svc));
   const project = projectId ? await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)) }) : null;
   if (projectId && !project) return null;
 

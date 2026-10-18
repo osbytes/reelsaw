@@ -3,7 +3,7 @@
  * single grouped query over the page's ids (never all of the user's clips), plus the header stats and the
  * light "what is running" query that keeps running cards live.
  */
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { ProjectStatus } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
@@ -29,16 +29,17 @@ async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Fact
       overrides: sql<Facts["overrides"]>`coalesce(jsonb_agg(${C.bumpers} order by ${C.index}) filter (where ${C.bumpers} is not null), '[]'::jsonb)`,
     })
     .from(C)
-    .where(inArray(C.projectId, projectIds))
+    .where(and(inArray(C.projectId, projectIds), isNull(C.deletedAt)))
     .groupBy(C.projectId);
   return new Map(rows.map((r) => [r.projectId, r]));
 }
 
-export type ListInput = { cursor?: string; limit: number; status?: ProjectStatus };
+/** `deleted: true` lists only deleted (still restorable) projects; otherwise deleted ones are left out. */
+export type ListInput = { cursor?: string; limit: number; status?: ProjectStatus; deleted?: boolean };
 
 export async function listProjectsPage(db: Db, userId: string, input: ListInput) {
   const P = schema.projects;
-  const conds: SQL[] = [eq(P.userId, userId)];
+  const conds: SQL[] = [eq(P.userId, userId), input.deleted ? isNotNull(P.deletedAt) : isNull(P.deletedAt)];
   if (input.status) conds.push(eq(P.status, input.status));
   const base = and(...conds);
   if (input.cursor) {
@@ -81,6 +82,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
         clipThumbs: (f?.clipThumbIds ?? []).map((id) => `/media/clips/${p.id}/${id}.jpg`),
         bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
         thumbnailUrl: f?.firstThumbId ? `/media/clips/${p.id}/${f.firstThumbId}.jpg` : sourceThumb,
+        deletedAt: p.deletedAt?.toISOString() ?? null,
       };
     }),
     nextCursor,
@@ -94,12 +96,12 @@ export async function projectStats(db: Db, userId: string) {
     db
       .select({ total: sql<number>`count(*)::int`, running: sql<number>`(count(*) filter (where ${inArray(schema.projects.status, [...ACTIVE_STATUSES])}))::int` })
       .from(schema.projects)
-      .where(eq(schema.projects.userId, userId)),
+      .where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt))),
     db
       .select({ clipsDone: sql<number>`count(*)::int` })
       .from(schema.clips)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
-      .where(and(eq(schema.projects.userId, userId), eq(schema.clips.status, "done"))),
+      .where(and(eq(schema.projects.userId, userId), eq(schema.clips.status, "done"), isNull(schema.projects.deletedAt), isNull(schema.clips.deletedAt))),
   ]);
   return { total: a!.total, running: a!.running, clipsDone: b!.clipsDone };
 }
@@ -110,7 +112,7 @@ export async function activeProjects(db: Db, userId: string) {
   return db
     .select({ id: P.id, status: P.status, stage: P.stage, stageProgress: P.stageProgress, updatedAt: P.updatedAt })
     .from(P)
-    .where(and(eq(P.userId, userId), inArray(P.status, [...ACTIVE_STATUSES])))
+    .where(and(eq(P.userId, userId), inArray(P.status, [...ACTIVE_STATUSES]), isNull(P.deletedAt)))
     .orderBy(desc(P.updatedAt))
     .limit(100);
 }

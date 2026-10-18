@@ -13,6 +13,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { LanguageModelMiddleware } from "ai";
 import type { Logger } from "../log.js";
+import { reportedCost } from "../eval/meter.js";
 
 export interface LlmContext {
   projectId?: string;
@@ -39,6 +40,8 @@ export interface LlmUsage {
   outputTokens: number;
   ms: number;
   ok: boolean;
+  /** USD the provider reported (AI Gateway), else undefined */
+  costUsd?: number;
 }
 export interface LlmTracer {
   sinks: TraceSink[];
@@ -104,7 +107,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
         const output = res.content.map((p) => (p.type === "text" ? p.text : `[${p.type}]`)).join("");
         const usage = { input: res.usage.inputTokens.total ?? 0, output: res.usage.outputTokens.total ?? 0 };
         const ms = Date.now() - startTime.getTime();
-        tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: usage.input, outputTokens: usage.output, ms, ok: true });
+        tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: usage.input, outputTokens: usage.output, ms, ok: true, costUsd: reportedCost(res.providerMetadata) });
         // tokens and latency per call are in llm_usage (and the AI SDK spans); a cut-off answer is in neither
         const fr = res.finishReason as unknown;
         const finish = typeof fr === "string" ? fr : (fr as { unified?: string } | undefined)?.unified;

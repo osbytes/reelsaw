@@ -14,6 +14,8 @@ import { ProjectPageSkeleton } from "../components/PageSkeletons";
 import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
+import { ShortcutSheet } from "../components/ShortcutSheet";
+import { useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { BatchBar } from "../components/BatchBar";
@@ -52,6 +54,7 @@ export function ProjectPage() {
   const reanalyze = useMutation(trpc.projects.reanalyze.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
+  const restore = useMutation(trpc.projects.restore.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const rerenderMany = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
@@ -268,6 +271,10 @@ export function ProjectPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay]);
+
+  useShortcuts("Project page", [["Play / pause the source video", "Space"]]);
+  const [keysOpen, setKeysOpen] = useState(false);
+  useSheetKey(() => setKeysOpen((o) => !o));
 
   if (q.isLoading) return <ProjectPageSkeleton compact={compact} width={width} />;
   if (q.error || !p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
@@ -521,7 +528,7 @@ export function ProjectPage() {
 
   const alert =
     p.status === "failed" && p.error ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err bg-err-soft px-4 py-3 sm:mx-5">
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err bg-err-soft px-4 py-3 shadow-pop sm:mx-5">
         <span className="font-mono text-lg leading-6 text-err">▲</span>
         <div className="min-w-0 flex-[1_1_320px]">
           <b>{STAGE_LABEL[p.stage ?? ""] ?? "Processing"} failed.</b>
@@ -533,7 +540,7 @@ export function ProjectPage() {
         </button>
       </div>
     ) : stalled ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn bg-warn-soft px-4 py-3 sm:mx-5">
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn bg-warn-soft px-4 py-3 shadow-pop sm:mx-5">
         <span className="font-mono text-lg leading-6 text-warn">◷</span>
         <div className="min-w-0 flex-[1_1_320px] text-[13px]">
           <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b> {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
@@ -588,12 +595,12 @@ export function ProjectPage() {
         )}
         {p.sourceVideoUrl ? (
           !playing && (
-            <button onClick={togglePlay} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-[#1c1c1e] shadow-pop">
+            <button onClick={togglePlay} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop">
               ▶
             </button>
           )
         ) : (
-          <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-[#b9b9c0]">
+          <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-film-text">
             {active ? (
               "downloading…"
             ) : p.sourceExpiredAt ? (
@@ -672,6 +679,12 @@ export function ProjectPage() {
         ))}
       </div>
     </div>
+  );
+  // built once: the phone and desktop layouts share one element
+  const transcriptBody = transcriptStage ? tq.isLoading ? transcriptSkeleton : (
+    <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+  ) : (
+    waiting
   );
 
   const clipsList = (
@@ -764,10 +777,14 @@ export function ProjectPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
-      {alert}
+      {/* overlaid under the header: a banner arriving mid-session must not push the source and transcript down */}
+      <div className="relative z-20 h-0 shrink-0">
+        <div className="absolute inset-x-0 top-0">{alert}</div>
+      </div>
       {compact ? (
         <>
-          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-2">
+          <ScrollArea className="shrink-0 border-b border-line">
+          <div className="flex w-max gap-1 px-3 py-2">
             {(
               [
                 ["transcript", "Transcript"],
@@ -780,14 +797,11 @@ export function ProjectPage() {
               </button>
             ))}
           </div>
+          </ScrollArea>
           {mtab === "transcript" && (
             <div className="flex min-h-0 flex-1 flex-col">
               {source}
-              {transcriptStage ? (
-                tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
-              ) : (
-                waiting
-              )}
+              {transcriptBody}
             </div>
           )}
           {mtab === "clips" && (
@@ -807,11 +821,7 @@ export function ProjectPage() {
         <main className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `minmax(0,1fr) ${drawer ? (width < 1100 ? 320 : width < 1280 ? 360 : 400) : 56}px` }}>
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
-            {transcriptStage ? (
-              tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
-            ) : (
-              waiting
-            )}
+            {transcriptBody}
           </section>
           <aside className="flex min-h-0 flex-col border-l border-line bg-sunk">
             {drawer ? (
@@ -854,13 +864,19 @@ export function ProjectPage() {
         </Dialog.Portal>
       </Dialog.Root>
 
+      <ShortcutSheet open={keysOpen} onOpenChange={setKeysOpen} />
       <ConfirmDialog
         open={confirm === "repick"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Re-pick moments?"
-        body="The clips found so far will be replaced. The transcript and refine results are kept."
+        body="The AI picks you haven’t touched are replaced. Clips you made or edited stay, and the transcript and refine results are kept."
         confirm="Replace clips"
-        onConfirm={() => reanalyze.mutateAsync({ id }).then(invalidate)}
+        onConfirm={() =>
+          reanalyze.mutateAsync({ id }).then((r) => {
+            invalidate();
+            if (r.kept) toast(`Kept ${r.kept} clip${r.kept === 1 ? "" : "s"} you made or edited`);
+          })
+        }
       />
       <ConfirmDialog
         open={confirm === "refine"}
@@ -874,10 +890,21 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The source video, transcript and every clip are removed. This can’t be undone."
+        body="The project, its transcript and every clip are removed. Work in progress stops. You can undo this for a few days."
         confirm="Delete project"
         danger
-        onConfirm={() => del.mutateAsync({ id }).then(() => nav("/"))}
+        onConfirm={() =>
+          del.mutateAsync({ id }).then((r) => {
+            nav("/"); // leave first, so this page never refetches the project it just deleted
+            void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
+            const title = q.data?.title ?? "Project";
+            toast(`Deleted ${title}`, {
+              description: `Restorable ${r.restorable}`,
+              duration: 8000,
+              action: { label: "Undo", onClick: () => void restore.mutateAsync({ id }).then(() => (void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() }), nav(`/p/${id}`)), (err: Error) => toast.error(err.message.slice(0, 120))) },
+            });
+          })
+        }
       />
       <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} introSec={p.settings.introSec} outroSec={p.settings.outroSec} />
     </div>

@@ -1,8 +1,9 @@
 /**
  * Helpers for driving the intro/outro ("bumper") library from outside the web app (MCP tools, CLI).
  *
- * The state changes themselves are NOT re-implemented here: callers go through the `bumpers.*`,
- * `projects.setBumpers` and `clips.setBumpersMany` tRPC procedures (one path per transition). This file holds
+ * Most state changes are not re-implemented here: callers go through the `bumpers.*`, `projects.setBumpers` and
+ * `clips.setBumpersMany` tRPC procedures (one path per transition). `updateBumperAsset` (rename, image length) is the
+ * service function behind `bumpers.update`, the rename_bumper tool and `reelsaw bumpers rename`. This file also holds
  * what those procedures do not: mapping agent-friendly input onto them, the bounded URL download that
  * stands in for the browser upload, and the read-side view of which intro/outro a clip really gets.
  */
@@ -23,6 +24,7 @@ import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { BUMPER_MAX_BYTES, BUMPER_VIDEO_EXTS, BUMPER_IMAGE_EXTS, BUMPER_IMAGE_SEC, resolveClipBumpers } from "../pipeline/bumpers.js";
 import { and, eq, inArray } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
 import { bumperCoverage, countBumperUsage, type BumperCoverage, type SlotCoverage } from "./summary.js";
 
@@ -38,26 +40,26 @@ export const projectChoiceSchema = z.union([z.enum(["default", "none"]), assetId
 export const clipChoiceSchema = z.union([z.enum(["inherit", "default", "none"]), assetId]).describe('"inherit" (alias "default") = follow the project, "none" = no bumper on this clip, or a library asset id');
 
 export const setProjectBumpersInput = {
-  projectId: z.string(),
+  projectId: z.string().describe("Project id (list_projects or create_project)"),
   intro: projectChoiceSchema.optional(),
   outro: projectChoiceSchema.optional(),
-  introSec: bumperSecondsSchema.optional().describe("Seconds to show an intro image (1-10); videos keep their own length"),
-  outroSec: bumperSecondsSchema.optional(),
+  introSec: bumperSecondsSchema.optional().describe("Seconds an intro image shows in this project (1-10); videos keep their own length. Saved with the project"),
+  outroSec: bumperSecondsSchema.optional().describe("Seconds an outro image shows in this project (1-10). Saved with the project"),
   rerender: z.boolean().describe("true = re-render the project's finished clips now; false = apply on their next render"),
 };
 export const setClipBumpersInput = {
-  projectId: z.string(),
-  clipIds: z.array(z.string()).min(1).max(200),
+  projectId: z.string().describe("Project the clips belong to (list_projects)"),
+  clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200 per call"),
   intro: clipChoiceSchema.optional(),
   outro: clipChoiceSchema.optional(),
-  introSec: bumperSecondsSchema.optional(),
-  outroSec: bumperSecondsSchema.optional(),
-  rerender: z.boolean().describe("true = re-render only these clips now"),
+  introSec: bumperSecondsSchema.optional().describe("Seconds an intro image shows on these clips (1-10)"),
+  outroSec: bumperSecondsSchema.optional().describe("Seconds an outro image shows on these clips (1-10)"),
+  rerender: z.boolean().describe("true = re-render only these clips now; false = apply on their next render"),
 };
 export const addBumperInput = {
   url: z.url().optional().describe("http(s) link to an MP4/MOV/WebM (max 10 s) or PNG/JPG; the server downloads it (max 50 MB, 60 s)"),
   uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
-  name: z.string().min(1).max(120).optional(),
+  name: z.string().min(1).max(120).optional().describe("Library name (url only; default: the file name). rename_bumper changes it later"),
   imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional().describe("How long an image shows (1-10 s)"),
   setDefault: z.enum(["intro", "outro"]).optional().describe("Also make it your default intro or outro for new projects"),
 };
@@ -71,6 +73,29 @@ export function projectBumpersCall(i: z.infer<z.ZodObject<typeof setProjectBumpe
 export function clipBumpersCall(i: z.infer<z.ZodObject<typeof setClipBumpersInput>>) {
   const fix = (v: string | undefined) => (v === "default" ? "inherit" : v);
   return { ...i, intro: fix(i.intro), outro: fix(i.outro) };
+}
+
+/** A library item's display name. */
+export const bumperNameSchema = z.string().trim().min(1).max(120);
+
+/**
+ * Rename a library item and/or change how long an image lasts (one of the user's own, removed ones included).
+ * Assets are otherwise immutable; the normalised file is named by its seconds, so projects pick up a new length on
+ * their next render. A name is only a label: nothing re-renders.
+ */
+export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number }) {
+  if (patch.name === undefined && patch.imageSeconds === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name or imageSeconds" });
+  return svc.tx(async (u) => {
+    const [a] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, id), eq(schema.bumperAssets.userId, userId))).for("update");
+    if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
+    const name = patch.name?.trim();
+    await u.db
+      .update(schema.bumperAssets)
+      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}) })
+      .where(eq(schema.bumperAssets.id, a.id));
+    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, previousName: a.name };
+  });
 }
 
 export function requireOneSource(i: { url?: string; uploadId?: string }) {

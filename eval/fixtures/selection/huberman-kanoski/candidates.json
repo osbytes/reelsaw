@@ -1,0 +1,157 @@
+{
+ "recordedAt": "2026-10-18T17:00:13.701Z",
+ "model": "compat:qwen2.5:14b",
+ "judge": "compat:qwen2.5:14b",
+ "samples": 1,
+ "pairwise": false,
+ "settings": {
+  "minSec": 20,
+  "maxSec": 60
+ },
+ "candidates": [
+  {
+   "startSec": 6397.35,
+   "endSec": 6449.39,
+   "title": "Rewiring Cravings",
+   "hook": "Change Your Taste?",
+   "total": 78,
+   "scored": true
+  },
+  {
+   "startSec": 366.95,
+   "endSec": 422.43,
+   "title": "Micro Dosing GLP-1",
+   "hook": "Micro Dosing Trend",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 5802.79,
+   "endSec": 5832.11,
+   "title": "Gut Microbiome's Impact on Brain Health",
+   "hook": "Your gut affects your brain!",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 6772.15,
+   "endSec": 6793.55,
+   "title": "Sugar Lobby's Influence",
+   "hook": "In Bed With Industry?",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 946.63,
+   "endSec": 981.31,
+   "title": "Vagus Nerve's Role in Hunger",
+   "hook": "The Vagus Secret?",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 6643.91,
+   "endSec": 6690.59,
+   "title": "The Controversy Over Food Addiction",
+   "hook": "Is There Such Thing?",
+   "total": 64,
+   "scored": true
+  },
+  {
+   "startSec": 5972.79,
+   "endSec": 6005.07,
+   "title": "Why Gut Health Matters",
+   "hook": "Gut health 101",
+   "total": 60,
+   "scored": true
+  },
+  {
+   "startSec": 6924.87,
+   "endSec": 6963.55,
+   "title": "Michael Pollan's Balanced View",
+   "hook": "Pollan on Health Policy",
+   "total": 59,
+   "scored": true
+  },
+  {
+   "startSec": 6543.83,
+   "endSec": 6591.47,
+   "title": "Conditioned Taste Aversion Experiment",
+   "hook": "Dopamine Response to Sucrose",
+   "total": 58,
+   "scored": true
+  },
+  {
+   "startSec": 6272.15,
+   "endSec": 6307.23,
+   "title": "Dopamine and Food Cravings",
+   "hook": "Crave Healthy Foods?",
+   "total": 58,
+   "scored": true
+  },
+  {
+   "startSec": 841.03,
+   "endSec": 898.19,
+   "title": "GLP-1's Mechanism",
+   "hook": "Satiety Through Paracrine?",
+   "total": 46,
+   "scored": true
+  },
+  {
+   "startSec": 6022.79,
+   "endSec": 6056.67,
+   "title": "The Obesity Drug Crisis",
+   "hook": "Heart Attacks & Fenfluramine",
+   "total": 40,
+   "scored": true
+  },
+  {
+   "startSec": 563.83,
+   "endSec": 616.51,
+   "title": "GLP-1 Drugs & Brain Entry",
+   "hook": "Controversial Brain Penetration?",
+   "total": 36,
+   "scored": true
+  },
+  {
+   "startSec": 6844.71,
+   "endSec": 6880.27,
+   "title": "The Sugar Lobby's Influence",
+   "hook": "Sugar Industry Tactics",
+   "total": 28,
+   "scored": true
+  },
+  {
+   "startSec": 6084.15,
+   "endSec": 6115.87,
+   "title": "Obesity Epidemic Growth",
+   "hook": "40% of US Adults Obese?",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 503.27,
+   "endSec": 560.27,
+   "title": "GLP-1 Drugs Side Effects",
+   "hook": "Side Effects of GLP-1 Drugs",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 459.75,
+   "endSec": 519.71,
+   "title": "GLP-1 in the Brain",
+   "hook": "GLP-1 & Brain Health",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 6462.87,
+   "endSec": 6506.59,
+   "title": "Milkshake Aversion",
+   "hook": "Sweet but Unappealing?",
+   "total": 75,
+   "scored": false
+  }
+ ]
+}

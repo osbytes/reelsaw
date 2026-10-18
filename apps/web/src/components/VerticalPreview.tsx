@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -268,7 +268,7 @@ function cropFraction(f: Framing, srcW: number, srcH: number, W: number, H: numb
     const botH = H - (W * srcH) / srcW;
     return speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }).w / srcW;
   }
-  return Math.min(1, (srcH * 9) / 16 / srcW);
+  return verticalCrop(srcW, srcH).w / srcW;
 }
 
 // ---------- canvas painter, mirrors layoutFilter() in apps/server/src/pipeline/render.ts ----------
@@ -303,10 +303,10 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
     raw(sx, sy, sw, sh, dx, dy, dw, dh);
     const prevFilter = ctx.filter;
     for (const o of overlays) {
-      const ox1 = Math.max(sx, o.x1 * srcW - 0.01 * srcW);
-      const oy1 = Math.max(sy, o.y1 * srcH - 0.012 * srcH);
-      const ox2 = Math.min(sx + sw, o.x2 * srcW + 0.01 * srcW);
-      const oy2 = Math.min(sy + sh, o.y2 * srcH + 0.012 * srcH);
+      const ox1 = Math.max(sx, o.x1 * srcW - OVERLAY_PAD_X * srcW);
+      const oy1 = Math.max(sy, o.y1 * srcH - OVERLAY_PAD_Y * srcH);
+      const ox2 = Math.min(sx + sw, o.x2 * srcW + OVERLAY_PAD_X * srcW);
+      const oy2 = Math.min(sy + sh, o.y2 * srcH + OVERLAY_PAD_Y * srcH);
       if (ox2 <= ox1 || oy2 <= oy1) continue;
       const kx = dw / sw;
       const ky = dh / sh;
@@ -381,8 +381,7 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
     }
     default: {
       // face / center: full-height 9:16 window
-      const cropW = Math.min(srcW, (srcH * 9) / 16);
-      const cropH = Math.min(srcH, (srcW * 16) / 9);
+      const { w: cropW, h: cropH } = verticalCrop(srcW, srcH);
       const cx = f.cx;
       const x = clamp(cx * srcW - cropW / 2, 0, srcW - cropW);
       draw(x, (srcH - cropH) / 2, cropW, cropH, 0, 0, W, H);

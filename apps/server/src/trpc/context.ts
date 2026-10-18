@@ -5,6 +5,7 @@ import { requester, type Requester } from "../auth.js";
 import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
+import { asUserRequest } from "../uow.js";
 
 export type Context = {
   svc: Services;
@@ -43,7 +44,8 @@ export const signedInProcedure = t.procedure.use(({ ctx, next }) => {
 /** An approved, not suspended account: everything that touches user data. */
 export const protectedProcedure = signedInProcedure.use(({ ctx, next }) => {
   if (ctx.who.blocked) throw new TRPCError({ code: "FORBIDDEN", message: ctx.who.blocked.reason });
-  return next({ ctx });
+  // jobs this call enqueues for the user's own projects are their requests: fair-share limits apply (uow.ts)
+  return asUserRequest(ctx.who.user.id, () => next({ ctx }));
 });
 
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {

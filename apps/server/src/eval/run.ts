@@ -8,7 +8,9 @@
  *
  * Prints a table per suite, writes eval/reports/<timestamp>.{json,md}, compares with
  * eval/baselines/<suite>.json and exits 1 on regressions. `--update` accepts the current results as
- * the new baseline.
+ * the new baseline, but refuses while there are regressions unless `--accept-regressions "<reason>"`
+ * is given (the reason is stored in the baseline). `--split dev|heldout` selects a subset in suites
+ * that have one (disfluency); such runs never update baselines.
  *
  * A matrix run repeats the selected suites once per profile (a named set of env overrides such as
  * AI_MODEL / TRANSCRIPTION_MODEL), meters every model call (latency, tokens, cost, failures) and
@@ -21,7 +23,7 @@ import path from "node:path";
 import { loadConfig, type Config } from "../config.js";
 import { createLogger } from "../log.js";
 import { createAi } from "../ai/registry.js";
-import { compare, exec, findEvalRoot, fmt, makeCache, type Baseline, type CaseResult, type EvalContext, type SummaryMetric } from "./framework.js";
+import { compare, describeInterval, exec, findEvalRoot, fmt, makeCache, type Baseline, type CaseResult, type EvalContext, type SummaryMetric } from "./framework.js";
 import { createMeter, meteredModel, type MeterSummary } from "./meter.js";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { suites } from "./suites/index.js";
@@ -78,6 +80,9 @@ async function main() {
   }
   const offline = has("offline");
   const update = has("update");
+  const acceptReason = valueOf("accept-regressions")?.trim() || undefined;
+  if (has("accept-regressions") && !acceptReason) throw new Error('--accept-regressions needs a reason: --accept-regressions "why these regressions are fine"');
+  if (acceptReason && !update) throw new Error("--accept-regressions only makes sense with --update");
   const noCache = has("no-cache");
   const selected = positional.length ? suites.filter((s) => positional.includes(s.name)) : suites;
   const unknown = positional.filter((p) => !suites.some((s) => s.name === p));
@@ -131,27 +136,48 @@ async function main() {
       try {
         results = await s.run(ctx);
       } catch (err) {
-        results = [{ id: "(suite)", pass: false, notes: `suite crashed: ${(err as Error).message}` }];
+        const msg = (err as Error).message;
+        // a missing tool (ffmpeg, ffprobe, yt-dlp not installed where the evals run) measured nothing: skip, don't fail
+        const missingTool = /spawn (\S+) ENOENT/.exec(msg)?.[1];
+        results = missingTool ? [{ id: "(suite)", pass: false, skipped: `needs ${missingTool} on PATH (${msg})` }] : [{ id: "(suite)", pass: false, notes: `suite crashed: ${msg}` }];
       }
       const ms = Date.now() - t0;
-      const metrics = s.summarize ? s.summarize(results.filter((r) => !r.skipped)) : {};
+      // a suite whose every case was skipped measured nothing: no metrics, so nothing to "regress"
+      const ran = results.filter((r) => !r.skipped);
+      const metrics = s.summarize && ran.length ? s.summarize(ran) : {};
       const meterSummary = { llm: meter.summary("llm"), stt: meter.summary("stt") };
       // baselines describe the default configuration only
-      const basePath = path.join(root, "baselines", `${s.name}.json`);
+      const basePath = path.join(root, "baselines", `${s.name}${offline && s.offlineBaseline ? ".offline" : ""}.json`);
       const baseline = !matrix && existsSync(basePath) ? (JSON.parse(await fs.readFile(basePath, "utf8")) as Baseline) : null;
       const cmp = compare(baseline, results, metrics);
       printTable(results);
-      for (const [k, m] of Object.entries(metrics)) console.log(`  ${k.padEnd(28)} ${fmt(m.value)}${baseline?.metrics[k] ? `  (baseline ${fmt(baseline.metrics[k]!.value)})` : ""}`);
+      for (const [k, m] of Object.entries(metrics)) {
+        const ci = describeInterval(m);
+        console.log(`  ${k.padEnd(28)} ${fmt(m.value)}${ci ? `  ${ci}` : ""}${baseline?.metrics[k] ? `  (baseline ${fmt(baseline.metrics[k]!.value)})` : ""}`);
+      }
       const calls = describeMeter(meterSummary);
       if (calls) console.log(`  ${"calls".padEnd(28)} ${calls}`);
       for (const r of cmp.regressions) console.log(`  ✗ REGRESSION ${r}`);
       for (const r of cmp.improvements) console.log(`  ✓ improved ${r}`);
       if (!baseline && !matrix) console.log(`  (no baseline yet; run with --update to record one)`);
       console.log(`  ${(ms / 1000).toFixed(1)}s`);
-      if (cmp.regressions.length) failed = true;
-      if (update) {
+      const accepting = update && cmp.regressions.length > 0 && acceptReason !== undefined;
+      if (cmp.regressions.length && !accepting) failed = true;
+      if (update && cmp.regressions.length && !accepting) {
+        console.log(`  ✗ baseline NOT updated: ${cmp.regressions.length} regression(s) above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`);
+      } else if (update && has("split")) {
+        console.log("  baseline NOT updated: --split runs score a subset; rerun without --split to update");
+      } else if (update && !ran.length) {
+        console.log("  baseline NOT updated: every case was skipped");
+      } else if (update) {
+        const at = new Date().toISOString();
+        const accepted = cmp.regressions.map((r) => {
+          const m = /^case (\S+)/.exec(r);
+          return m ? { id: m[1]!, reason: acceptReason!, at } : { metric: r.split(" ")[0]!, reason: acceptReason!, at };
+        });
         const next: Baseline = {
-          updatedAt: new Date().toISOString(),
+          updatedAt: at,
+          ...(accepted.length || baseline?.acceptedRegressions?.length ? { acceptedRegressions: [...(baseline?.acceptedRegressions ?? []), ...accepted] } : {}),
           // skipped cases keep their previous state so an offline run never erases them
           cases: { ...(baseline?.cases ?? {}), ...Object.fromEntries(results.filter((r) => !r.skipped && r.id !== "(suite)").map((r) => [r.id, r.pass])) },
           metrics: { ...(baseline?.metrics ?? {}), ...metrics },
@@ -183,7 +209,7 @@ async function main() {
   const jsonOut = valueOf("json");
   if (jsonOut) await fs.writeFile(path.resolve(jsonOut), json);
   console.log(`\nreport: ${path.relative(process.cwd(), path.join(repDir, `${stamp}.md`))}`);
-  if (failed && !update) {
+  if (failed) {
     console.log("✗ regressions found");
     process.exitCode = 1;
   }
@@ -267,7 +293,7 @@ function markdown(report: SuiteReport[], profiles: Profile[], matrix: boolean) {
     out.push(`## ${matrix ? `${r.profile} · ` : ""}${r.suite}${r.skipped ? ` (skipped: ${r.skipped})` : ""}`, "");
     if (r.regressions.length) out.push(...r.regressions.map((x) => `- ✗ ${x}`), "");
     if (r.improvements.length) out.push(...r.improvements.map((x) => `- ✓ ${x}`), "");
-    if (Object.keys(r.metrics).length) out.push("| metric | value |", "|---|---|", ...Object.entries(r.metrics).map(([k, m]) => `| ${k} | ${fmt(m.value)} |`), "");
+    if (Object.keys(r.metrics).length) out.push("| metric | value | 95% interval |", "|---|---|---|", ...Object.entries(r.metrics).map(([k, m]) => `| ${k} | ${fmt(m.value)} | ${describeInterval(m).replace("95% CI ", "")} |`), "");
     const calls = describeMeter(r.meter);
     if (calls) out.push(`Calls: ${calls}`, "");
     if (r.results.length) {

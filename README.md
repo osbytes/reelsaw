@@ -43,14 +43,15 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Pipeline**
 
 - **Any AI vendor** – language model, transcription model and caption-alignment model are each a `provider:model` string: OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI, Vercel AI Gateway, or any OpenAI-compatible server (Ollama, vLLM, LM Studio, local Whisper servers). Fully local with no API keys is supported.
-- **Research-backed clip selection** – map → pool → rank: the transcript is chunked at long pauses with 20% overlap (no "lost in the middle" on long videos), every standalone moment is collected per chunk in parallel, candidates are snapped/deduped, then scored on a rubric (hook / value / flow / shareability, plus relevance with a focus) as the median of k samples, and the top clips get a pairwise head-to-head pass with positions swapped to cancel judge bias. No target count: weak picks (< 45) are dropped; optional "at most N" cap, and "Find clips about …" keeps only on-topic moments. Click a clip's score for the breakdown. `ANALYZE_CONCURRENCY`, `ANALYZE_SCORE_SAMPLES`, `ANALYZE_PAIRWISE` tune cost (auto: 1 call at a time, 1 sample, no pairwise for self-hosted models; 4 / 3 / on for cloud).
+- **Research-backed clip selection** – map → pool → rank: the transcript is chunked at long pauses with 20% overlap (no "lost in the middle" on long videos), every standalone moment is collected per chunk in parallel, candidates are snapped/deduped, then scored on a rubric (hook / value / flow / shareability, plus relevance with a focus) as the median of k samples, and the top 10 get K sliding pairwise head-to-head passes (PRP-Sliding-K; `ANALYZE_PAIRWISE_PASSES`, default 3 so the top 3 you see first are placed reliably) with positions swapped to cancel judge bias. Cost: at most Σ(n−1−p) pairs × 2 calls, i.e. 48 calls for the top 10 with 3 passes (18 with 1); pairs met twice are judged once. No target count: in auto mode weak picks are dropped by a gate relative to the run, not a fixed number, because pointwise scores do not transfer between judge models: a clip is dropped below max(`ANALYZE_MIN_SCORE_FLOOR` = 25, median − `ANALYZE_SCORE_MAD_K` = 1 × MAD) of the pooled rubric totals, and the best clip is always kept (`ANALYZE_SCORE_RULE=absolute` restores the old fixed 45). The threshold and its median/MAD are in the project's `candidates` artifact. Candidates whose scoring failed are never compared with rubric totals; they only fill in when fewer than 3 scored clips survive. Optional "at most N" cap, and "Find clips about …" keeps only on-topic moments. Click a clip's score for the breakdown. `ANALYZE_JUDGE_MODEL` lets a different model score and compare (less self-preference than judging its own hooks). `ANALYZE_CONCURRENCY`, `ANALYZE_SCORE_SAMPLES`, `ANALYZE_PAIRWISE` tune cost (auto: 1 call at a time, 1 sample, no pairwise for a self-hosted judge; 4 / 3 / on for cloud).
 - **Clean transcripts** – names are fixed from vocabulary hints and a constrained LLM correction, and fillers, repetitions and false starts are cut with jump cuts. Every cut is located by forced alignment and checked by listening to the seam, so karaoke highlights land on the syllable. Each fix shows inline in the transcript with accept/reject, and long pauses can be shortened (details below).
 - **Smart 9:16 reframing** – UltraFace (1.2 MB ONNX, CPU, ~7 ms/frame via `onnxruntime-node`) samples each clip at 4 fps and picks a layout per segment (clips are split at scene cuts and face-presence changes, so a picture-in-picture intro can be "fit" and the talking head after it "face"): **face** (crop follows the speaker with "heavy tripod" smoothing: dead zone, capped pan speed, instant snap at scene cuts), **split** (two speakers stacked), **stack** (slides/screen on top, zoomed webcam below), or **fit** (whole frame over a blurred background when there is no face, e.g. graphics and b-roll). With two people in a wide shot the crop follows whoever is talking (mouth motion correlated with the audio envelope, minimum 2.5 s per shot), falling back to a split when detection isn't confident. Override per project or per clip. Reference for every layout, its triggers, caveats and fixtures: [docs/LAYOUTS.md](docs/LAYOUTS.md).
-- **Captions** – AI-picked key words per clip coloured and enlarged (editable in the editor), readability limits (≈2 short lines, comma/sentence breaks, 0.7 s minimum on screen), ASS karaoke word highlight (any colour), boxed, or outlined; size, words on screen (1 = one word at a time), uppercase; hook overlay with its own duration. Caption and hook positions are free x/y set by dragging on a live 9:16 preview that uses the renderer's crop math and font metrics, with a platform safe-zone overlay. Project-wide defaults, per-clip overrides. Burned in with ffmpeg + libass.
+- **Captions** – AI-picked key words per clip coloured and enlarged (editable in the editor), readability limits (≈2 short lines, comma/sentence breaks, a line stays up long enough to read: at least 0.7 s, 0.3 s per word and 20 characters per second), ASS karaoke word highlight (any colour), boxed, or outlined; size, words on screen (1 = one word at a time), uppercase; hook overlay with its own duration. Caption and hook positions are free x/y set by dragging on a live 9:16 preview that uses the renderer's crop math and font metrics, with a platform safe-zone overlay. Project-wide defaults, per-clip overrides. Burned in with ffmpeg + libass.
 
 **Editing**
 
 - **Workspace and clip editor** – source player and clickable transcript on the left, clips streaming in on the right as they render, with score, layout badge, post caption + hashtags copy and download. The editor has a live preview of the source with the clip's framing and captions and a multi-lane timeline (ruler, transcript words, clip range, layout track) with zoom, snapping to words/scene cuts/playhead, nudge buttons, typed timestamps and I/O keys for frame-accurate trims. Split the layout track (⌘/Ctrl+B, the Split button, a double-click or the right-click menu) into sections that are Auto or forced to face/split/stack/fit/centre; drag the picture to re-centre a section; add, drag and remove transitions; ⌘/Ctrl+Z / ⇧⌘Z undo and redo every edit.
+- **Deletes can be undone** – deleting a project stops its work and hides it, with an Undo in the toast; it stays restorable for `DELETED_RETENTION_DAYS` (7) before its files are removed. Re-picking moments keeps every clip you made or edited (text, bounds, framing, style, intro/outro) and only replaces untouched AI picks, which can be restored too. Single clips can be deleted and restored the same way. The same through MCP (`delete_clip`, `restore_project`, `restore_clip`) and the CLI (`reelsaw deleted`, `restore`, `delete-clip`, `restore-clip`, `purge`).
 - **Command palette and bulk export** – ⌘K searches projects and clips with status, length and age, opens a row's actions (open, export, resume, retry failed clips, re-run refine, re-render, download, delete), takes pasted links (one project each, or opens the existing one) and offers retry-all shortcuts. "Export all" zips every rendered clip with platform-ready metadata: a paste-ready `.txt` (title, description, tags, caption), a `.youtube.json` (YouTube Data API v3 `videos.insert` body, private by default) and a `.tiktok.json` (Content Posting API `post_info`, `SELF_ONLY`) per clip, plus `manifest.json`, `clips.csv` (with rendered duration) and a README. Descriptions carry a timestamped link to the exact moment in the parent video.
 
 **Intros and outros**
@@ -61,7 +62,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Agents and automation**
 
 - **MCP server** – `/api/mcp` (Streamable HTTP) lets Claude Code, Claude Desktop, Cursor or a script create projects, wait for them, read timed transcripts, edit, create and re-render clips, manage the intro/outro library and download the results. Authenticate with an API key from Settings, or with `MCP_OAUTH=true` so claude.ai and Claude Desktop connectors sign in through the browser.
-- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more.
+- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
 
 **Hosting and accounts**
 
@@ -70,7 +71,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 **Operations**
 
-- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; heartbeats re-queue jobs from dead workers within seconds and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
+- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; a worker that stops heartbeating (every 15 s) has its job re-queued by pg-boss within about a minute or two, and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
 - **Storage and install** – local volume or `s3` (AWS S3, MinIO, Cloudflare R2, Backblaze B2…); superseded renders, expired sources and orphaned files are swept hourly (`reelsaw storage` reports, `reelsaw storage sweep` runs it). One-line installers for macOS/Linux (bash) and Windows (PowerShell), and **Report an issue** saves a zip of a project's data, decisions and logs, with secrets left out.
 - **Observable and fail-fast** – every service is built in `main` and self-checks, so the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable or the DB is down. `LLM_TRACE=logs` or `langfuse` captures every prompt/response (tokens, latency, project/clip/stage), and `OTEL_ENABLED=true` turns on OTLP traces and metrics for HTTP, Postgres, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp and each stage.
 
@@ -98,7 +99,7 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
-the model (`qwen2.5:14b`, ~9 GB; `REELSAW_LLM=qwen2.5:7b` for less RAM), starts everything and waits
+the model (chosen by RAM: `qwen2.5:14b`, ~9 GB, on 24 GB or more; `qwen2.5:7b` from 12 GB; `gemma3:4b` below that; the script prints its choice and `REELSAW_LLM=<model>` overrides it), starts everything and waits
 until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
 The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
 they are served from `main` (see [docs/RELEASING.md](docs/RELEASING.md)).
@@ -135,8 +136,10 @@ The language model and the transcription model are independent; mix vendors free
 
 | Env | Example values |
 |---|---|
-| `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:llama3.1` |
-| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `openai:gpt-4o-transcribe`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+| `AI_MODEL` | `openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:qwen2.5:14b` |
+| `TRANSCRIPTION_MODEL` | `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo` |
+
+The transcription model must return word timestamps (captions and cuts need them), so `openai:gpt-4o-transcribe`, which returns none, is not supported.
 
 ### Fully local (no API keys)
 
@@ -145,13 +148,13 @@ Ollama only serves language models; it has no speech-to-text. So the local stack
 ```bash
 docker compose --profile local-ai up -d            # Speaches; use your native Ollama (macOS: Metal GPU)
 docker compose --profile local-ai --profile ollama up -d   # Linux: also run Ollama in a container
-ollama pull llama3.1:8b                            # or: docker compose exec ollama ollama pull llama3.1:8b
+ollama pull qwen2.5:14b                            # or: docker compose exec ollama ollama pull qwen2.5:14b
 ```
 
 `.env`:
 
 ```
-AI_MODEL=compat:llama3.1:8b
+AI_MODEL=compat:qwen2.5:14b            # qwen2.5:7b or gemma3:4b on less RAM
 OPENAI_COMPATIBLE_BASE_URL=http://host.docker.internal:11434/v1   # native Ollama; http://ollama:11434/v1 for the container
 OPENAI_COMPATIBLE_API_KEY=ollama
 TRANSCRIPTION_MODEL=openai:Systran/faster-whisper-small
@@ -159,7 +162,7 @@ OPENAI_BASE_URL=http://speaches:8000/v1
 OPENAI_API_KEY=local
 ```
 
-Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; llama3.1 8b, qwen2.5 14b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
+Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; qwen2.5 14b (the installer's default on 24 GB or more), llama3.1 8b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
 
 ### What to expect: processing time
 
@@ -177,7 +180,7 @@ Rule of thumb: **a vendor stack finishes a video in about a fifth of its length;
 
 ¹ Apple-silicon laptop, `qwen2.5:14b` on Ollama + `faster-whisper-small` on Speaches (CPU), 20-minute podcast: download 15 s, transcribe 4.9 min, refine 10 min, find moments 4 min, render 47 s; 20 min in all. On a local 14B model the disfluency verifier (one call per candidate, ~40 s each) is the bottleneck, not transcription; a smaller model or `DISFLUENCY_LLM=false` cuts refine to a fraction. ² Same video through the Vercel AI Gateway, `whisper-1` + `claude-haiku-4.5`: download 13 s, transcribe 77 s, refine 31 s, find moments 24 s, render 56 s; 3.4 min in all. Gemini 2.5 Flash took 5 min (long "thinking" outputs), Sonnet 4.5 about 4. Mixing a vendor LLM with a *local* `TRANSCRIPT_ALIGN_MODEL` makes render the slowest stage (5–9 min: every cut is re-aligned on the CPU); keep alignment on the same vendor as transcription. Full numbers in `eval/bench/results/`.
 
-These factors are only the starting point. The app learns from its own finished projects: each stage's expected time is the median over your recent projects that ran with the same models, shown next to the elapsed time on the project page while it runs, in the activity feed when a stage finishes (`Transcribe finished in 4:50 (expected ~4:00)`), and as a per-stage expected vs actual table under Settings → Machine. There is no calibration step; the runs are the calibration.
+These factors are only the starting point. The app learns from its own finished projects: each stage's expected time is the median over your recent projects that ran with the same models, shown next to the elapsed time on the project page while it runs, in the activity feed when a stage finishes (`Transcribe finished in 4:50 (expected ~4:00)`), and as a per-stage expected vs actual table under Settings → System → Machine. There is no calibration step; the runs are the calibration.
 
 ### Switching models without a restart
 
@@ -204,7 +207,7 @@ projects and settings only. `SIGNUP_MODE` decides who gets in:
 | --- | --- |
 | `open` (default) | Anyone can sign up and use the app at once. Right for a single-user box. |
 | `approval` | New accounts wait on a "Waiting for approval" page until an admin approves them (Users page, or `reelsaw approve <email>`). Admins get an email when `EMAIL_DRIVER` is set. |
-| `closed` | No sign-ups. `ALLOW_SIGNUP=false` still works as an alias. |
+| `closed` | No sign-ups. (The older `ALLOW_SIGNUP=false` is still read as `closed`; use `SIGNUP_MODE`.) |
 
 Every user has **Settings → Project defaults** (vocabulary, instructions, language, clip length,
 pauses, caption style…) applied to each new project they or their agents start; the new-project
@@ -270,18 +273,114 @@ container) and `REELSAW_API_KEY`:
 { "mcpServers": { "reelsaw": { "command": "docker", "args": ["exec", "-i", "-e", "REELSAW_API_KEY=rs_…", "reelsaw-app-1", "reelsaw", "mcp"] } } }
 ```
 
-Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
-`get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
-`update_clip`, `create_clip`, `rerender_clip`, `rerender_clips` (several at once), `export_project` (zip link, optionally only some `clipIds`), `retry_project`, `reanalyze_project`,
-`delete_project`. Intro/outro ("bumper") tools: `list_bumpers`, `add_bumper` (from a URL or an
-upload id), `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`,
-`set_project_bumpers`, `set_clip_bumpers` (one clip or many; `rerender: true` re-renders only those
-clips); `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
+The tools (generated from `apps/server/src/mcp-tools.ts`; each tool's full description and input
+schema say what it returns, whether it runs in the background and which neighbour to use instead):
+
+<!-- generated:mcp-tools -->
+| Tool | What it does |
+| --- | --- |
+| `list_projects` | Your projects, most recently updated first. |
+| `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
+| `create_project` | Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). |
+| `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses); only the fields you pass change. |
+| `wait_for_project` | Block until the project is done or failed, or timeoutSeconds pass. |
+| `get_transcript` | The project's transcript as timed lines "[m:ss] text", optionally only a time range. |
+| `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
+| `get_project_events` | The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. |
+| `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. |
+| `update_clip` | Edit one clip: only the fields you pass change; style and layoutSections replace the clip's whole value (null = back to the project's). |
+| `create_clip` | Add a clip from a time range of the source (needs a transcript). |
+| `delete_clip` | Delete one clip of your project; a render in progress stops. |
+| `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
+| `rerender_clips` | Queue several clips of one project for rendering again in one step (after edits or failures). |
+| `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. |
+| `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
+| `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
+| `list_bumpers` | Your intro/outro library. |
+| `add_bumper` | Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. |
+| `rename_bumper` | Rename one of your library items (removed ones too). |
+| `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
+| `remove_bumper` | Remove an item from your library and from your defaults. |
+| `restore_bumper` | Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. |
+| `bumper_usage` | The projects and clips that use a library item. |
+| `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
+| `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
+| `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
+| `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
+| `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
+<!-- /generated -->
+
+`get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
 They call the same tRPC procedures as the web app, so ownership checks and
 validation are identical (`apps/server/src/mcp.ts`; the catalogue both transports advertise is
 `apps/server/src/mcp-tools.ts`). The same key also authenticates tRPC
 (`/api/trpc/*`), uploads and media downloads, so an agent can fetch the rendered clips. Keys are
 hashed at rest (`@better-auth/api-key`); revoke them from Settings.
+
+## Operator CLI
+
+`docker compose exec app reelsaw <command>` (see [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) for when to reach for which). Generated from the header of `apps/server/src/cli.ts`.
+
+<!-- generated:cli -->
+Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).
+
+| Command | What it does |
+| --- | --- |
+| `reelsaw users` | list accounts: role, status, sign-up date |
+| `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
+| `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
+| `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
+| `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
+| `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
+| `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
+| `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
+| `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
+| `reelsaw events <projectId> [n=30]` | recent pipeline events |
+| `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
+| `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
+| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
+| `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
+| `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
+| `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
+| `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
+| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
+| `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
+| `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
+| `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
+| `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
+| `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
+| `reelsaw limits <email>` | an account's quotas: instance value, override, in force, in use now |
+| `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |
+<!-- /generated -->
+
+## Settings and precedence
+
+Where a value comes from, from the weakest source to the strongest (a later link overrides an earlier one):
+
+| What | Chain |
+| --- | --- |
+| Models (language, transcription, alignment) | `.env` (`AI_MODEL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPT_ALIGN_MODEL`) then the admin's runtime override (Settings → System → Models, stored in `instance_settings`). A stage already running keeps the model it started with. |
+| Provider keys and URLs | `.env` then the encrypted keys admins enter in Settings. |
+| Stage knobs (`TRANSCRIPT_BIAS`, `TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
+| A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |
+| A clip's style | the project's style, then the clip's own override (`clips.style`). `updateStyle` clears clip overrides unless told to keep them. |
+| Framing | `auto` (face detection decides), then the project's `reframe`, then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i].mode`). |
+| Quotas | `.env` `MAX_*` (0 = unlimited), then a per-user limit set by an admin on the Users page. |
+
+Two things to know:
+
+- **An env gate wins silently.** `TRANSCRIPT_BIAS=false` ignores the project's vocabulary hints and `DISFLUENCY_REMOVAL=false` skips the disfluency settings; neither tells the user. If a project setting seems to do nothing, check the gate first ([TROUBLESHOOTING](docs/TROUBLESHOOTING.md), "A project or clip setting has no effect").
+- **Existing projects keep their frozen settings.** Changing your Project defaults affects new projects only.
+
+Code: `apps/server/src/pipeline/settings.ts` (project), `resolveStyle` in `packages/shared/src/index.ts` (style), `apps/server/src/pipeline/render.ts` (framing), `apps/server/src/ai/models.ts` (models), `apps/server/src/quota.ts` (quotas).
 
 ## Architecture
 
@@ -291,17 +390,7 @@ apps/server   Hono + tRPC + Better Auth + Drizzle (Postgres) + pg-boss workers +
 packages/shared  zod schemas and types shared by both
 ```
 
-Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot output looks like:
-
-```
-[boot] config ok
-[boot] media tools (ffmpeg, ffprobe, yt-dlp) ok
-[boot] ai models (anthropic:claude-sonnet-4-5, deepgram:nova-3) ok
-[boot] storage (s3:reelsaw) ok
-...
-[boot] startup failed at step "ai models (anthropic:claude-sonnet-4-5, anthropic:whisper)":
-  TRANSCRIPTION_MODEL: provider "anthropic" has no transcription models ("anthropic:whisper"). Use e.g. openai:whisper-1, deepgram:nova-3, ...
-```
+Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
 
 Pipeline (each box is a pg-boss queue; each stage emits events and enqueues the next):
 
@@ -320,7 +409,7 @@ Durability model:
 - `pgboss.job` is the source of truth for "what should run". `projects.status` / `clips.status` is the source of truth for "what happened".
 - Each stage checks for existing output first (source file in storage, transcript chunk rows, clip rows, rendered clip in storage) and skips work that is done.
 - Queues use `policy: exclusive` + `singletonKey` so a stage can never run twice concurrently for the same project/clip.
-- `heartbeatSeconds` on every queue: if a worker dies, pg-boss fails the job within ~30 s and retries it elsewhere (with backoff).
+- `heartbeatSeconds` (15 s) on every queue: if a worker dies, pg-boss notices the missed heartbeat on its next supervisor pass (every 60 s), fails the job and retries it elsewhere after a 15 s delay that doubles per retry. Budget a minute or two, not seconds; each interruption uses one retry.
 - On boot and every 5 minutes a reconciler re-enqueues any in-progress project or clip that has no live job.
 - Manual **Retry** resumes from the furthest completed stage; **Re-analyze** keeps the transcript and picks new clips.
 
@@ -346,7 +435,7 @@ pnpm dev               # server on :3000 (tsx watch), web on :5173 (vite, proxie
 
 Requires ffmpeg, ffprobe and yt-dlp on your PATH for local dev. Schema changes: edit `apps/server/src/db/schema.ts`, then `pnpm db:generate`; migrations run automatically on boot.
 
-Tests run against the local stack (they create and delete their own users and data):
+Most tests run against the local stack (they create and delete their own users and data); CI runs only the ones that need no stack, so run the ones you touched against yours:
 
 ```bash
 pnpm --filter @reelsaw/server test
@@ -385,7 +474,7 @@ work on one. Spec: [docs/specs/distribution-and-issue-reports.md](docs/specs/dis
 
 ## Environment reference
 
-See [`.env.example`](.env.example) for every variable with comments.
+Every variable, with its default and meaning, is in [docs/CONFIG.md](docs/CONFIG.md) (generated from `apps/server/src/config.ts`; `pnpm docs:gen` refreshes it). [`.env.example`](.env.example) and [`deploy/.env.example`](deploy/.env.example) are generated from the same source.
 
 ## Observability
 
@@ -405,13 +494,15 @@ Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optio
 2. **Constrained LLM correction** (`TRANSCRIPT_CORRECTION=true`): transcript spans that sound like a known entity become candidates; the language model confirms each one in context with a confidence score. Only candidates can change, so the model cannot rewrite the transcript, and word timestamps are kept.
 3. **Review in the UI**: corrections at or above `TRANSCRIPT_AUTO_FIX_CONFIDENCE` (0.85) are applied automatically and shown as "auto-fixed"; the rest appear under the transcript line with the confidence and accept/reject buttons. Applying decisions re-renders only the clips whose captions overlap the change.
 
+> **Language:** the filler/repeat rules, the sound-alike name search and the CTC cut aligner are English-only. For a transcript detected as any other language those steps are skipped with a plain-language event ("not available for de") instead of running blind; the language-model checks and the whisper-based cut search still work.
+
 ### Disfluencies
 
 Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Long pauses are shortened too (project setting **Pauses**: natural 0.6 s, tight 0.35 s, or keep), detected with Silero VAD on the clip audio. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is first located by CTC forced alignment (wav2vec2, exact word boundaries at 20 ms from the audio plus the known words, ~0.2 s on CPU) and verified with one transcription of the seam; only if that fails is it re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
 
 ### Eval
 
-Regression evals live in one runner with pluggable suites (transcription, cuts, overlays, framing, selection); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
+Regression evals live in one runner with pluggable suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
 
 ```bash
 pnpm eval                 # all suites
@@ -444,7 +535,7 @@ OPENAI_BASE_URL=http://localhost:4545/v1 OPENAI_API_KEY=mock AI_MODEL=openai:moc
 
 ## Troubleshooting
 
-Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the CLI (`status`, `events`, `clip`, `rerender`, `cuts`, `align`, `hear`, `flags`, `storage`, `bumpers`), structured logs, diagnostics and evals.
+Start with `docker compose exec app reelsaw status <projectId>`; see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the CLI, structured logs, diagnostics and evals, including a "setting has no effect" checklist.
 
 ## Roadmap
 
