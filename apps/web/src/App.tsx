@@ -8,6 +8,7 @@ import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
 import { useTheme } from "./lib/theme";
+import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage } from "./pages/Login";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
@@ -239,6 +240,11 @@ function AppToaster() {
 }
 
 export function App() {
+  useShortcuts("Everywhere", [
+    ["Search, jump or run an action", `${MOD}K`],
+    ["Report an issue", "!"],
+    ["Show this list", "?"],
+  ]);
   return (
     <UploadsProvider>
     <CommandPaletteProvider>

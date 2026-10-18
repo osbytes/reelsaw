@@ -15,6 +15,8 @@ import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
+import { useShortcuts } from "../lib/shortcuts";
+import { ShortcutSheet } from "./ShortcutSheet";
 import {
   defaultStyle,
   formatTime,
@@ -1268,11 +1270,10 @@ export function ClipEditor(props: Props) {
     ["Remove selected transition", "Delete"],
     ["Undo / redo", `${MOD}Z  ⇧${MOD}Z`],
     ["Save", `${MOD}S`],
-    ["Report an issue", "!"],
     ["Disable snapping while dragging", "hold Alt"],
     ["Zoom timeline", `${MOD} + scroll`],
-    ["This sheet", "?"],
   ];
+  useShortcuts("Clip editor", keyList);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1328,16 +1329,7 @@ export function ClipEditor(props: Props) {
           </button>
         </div>
       </Modal>
-      <Modal open={keysOpen} onOpenChange={setKeysOpen} title="Keyboard shortcuts" width={460}>
-        <div className="flex flex-col gap-2 text-[13px]">
-          {keyList.map(([a, b]) => (
-            <div key={a} className="flex items-center justify-between gap-4">
-              <span className="text-ink2">{a}</span>
-              <Kbd>{b}</Kbd>
-            </div>
-          ))}
-        </div>
-      </Modal>
+      <ShortcutSheet open={keysOpen} onOpenChange={setKeysOpen} />
     </div>
   );
 }

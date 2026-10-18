@@ -6,6 +6,7 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useLocation } from "react-router";
 import { readHash, writeHash, linkWith } from "../lib/hash";
+import { useShortcuts } from "../lib/shortcuts";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import type { Playback } from "../lib/playback";
@@ -396,6 +397,14 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     jumpToFlag(next >= 0 ? next : orderedFlags.findIndex(isP));
   };
   const decide = (id: string, d: Decision | null) => setDecisions((x) => (d ? { ...x, [id]: d } : Object.fromEntries(Object.entries(x).filter(([key]) => key !== id))));
+  useShortcuts("Transcript fixes", [
+    ["Jump to the next fix to review", "N"],
+    ["Accept the pinned fix", "A"],
+    ["Reject the pinned fix", "R"],
+    ["Play the pinned fix in context", "P"],
+    ["Previous / next fix", "↑ ↓"],
+    ["Unpin", "Esc"],
+  ]);
   // N next fix · A accept · R reject · ↑/↓ previous/next while a fix is pinned
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

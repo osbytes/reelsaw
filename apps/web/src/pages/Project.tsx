@@ -14,6 +14,8 @@ import { ProjectPageSkeleton } from "../components/PageSkeletons";
 import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
+import { ShortcutSheet } from "../components/ShortcutSheet";
+import { useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { BatchBar } from "../components/BatchBar";
@@ -268,6 +270,10 @@ export function ProjectPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay]);
+
+  useShortcuts("Project page", [["Play / pause the source video", "Space"]]);
+  const [keysOpen, setKeysOpen] = useState(false);
+  useSheetKey(() => setKeysOpen((o) => !o));
 
   if (q.isLoading) return <ProjectPageSkeleton compact={compact} width={width} />;
   if (q.error || !p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
@@ -857,6 +863,7 @@ export function ProjectPage() {
         </Dialog.Portal>
       </Dialog.Root>
 
+      <ShortcutSheet open={keysOpen} onOpenChange={setKeysOpen} />
       <ConfirmDialog
         open={confirm === "repick"}
         onOpenChange={(o) => !o && setConfirm(null)}
