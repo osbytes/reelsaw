@@ -26,6 +26,7 @@ import { loadVad, type Vad } from "./audio/vad.js";
 import { loadAligner, type Aligner } from "./audio/align.js";
 import { createLogger, type Logger } from "./log.js";
 import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
+import { createUpdateChecker, type UpdateChecker } from "./updates.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
@@ -57,6 +58,8 @@ export interface Services {
   auth: Auth;
   email: Email;
   resources: ResourceGovernor;
+  /** is a newer release published (updates.ts); checked by the http process, shown to admins */
+  updates: UpdateChecker;
   /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
   aligner: Aligner | null;
   /** null when VAD=false; then pauses are never trimmed. */
@@ -208,6 +211,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const logLevel = createLogLevelSettings(log, { listen: env.REELSAW_CLI !== "1" });
+  const updates = createUpdateChecker(config, log.child({ module: "updates" }));
   await step("log level settings", async () => {
     await logLevel.attach(database.db, config.DATABASE_URL);
   });
@@ -290,11 +294,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
   const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), config);
-  return { log, logLevel, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
+  return { log, logLevel, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, updates, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
   s.logLevel.stop();
+  s.updates.stop();
   s.models.stop();
   s.providers.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));

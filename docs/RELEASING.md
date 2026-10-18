@@ -42,6 +42,11 @@ says so; otherwise downgrading one minor is supported by pinning `REELSAW_IMAGE`
 4. Pull the published image on a real install (`docker compose pull && docker compose up -d`) and
    watch the boot log for the migration and the health check.
 
+Installs learn about the release from GitHub's `releases/latest` (`apps/server/src/updates.ts`):
+within `UPDATE_CHECK_HOURS` (6 by default) every admin's Settings shows it with the upgrade
+command. A pre-release is never "latest" there, so beta installs are told about the next final
+release only, and a release that must not be announced can stay a GitHub pre-release.
+
 By hand, without the workflow: `pnpm release:version` on `main`, commit, `pnpm release:tag`.
 
 ## Pre-releases

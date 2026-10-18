@@ -23,6 +23,9 @@ either; `pnpm docs:check` fails when this file is stale.
 | `REELSAW_VERSION` | `dev` | Release version baked into the image at build time (`dev` from source). |
 | `REELSAW_COMMIT` | `unknown` | Git commit baked into the image at build time. |
 | `REELSAW_BUILT_AT` | `unknown` | Build timestamp baked into the image. |
+| `UPDATE_CHECK` | `true` | Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub. |
+| `UPDATE_CHECK_URL` | `https://api.github.com/repos/osbytes/reelsaw/releases/latest` | Releases endpoint the check asks (GitHub's `releases/latest` of this repository); change it for a fork or a mirror. |
+| `UPDATE_CHECK_HOURS` | `6` | Hours between update checks (1–168). "Check now" in Settings asks at most once a minute. |
 | `DATABASE_URL` | `x` | Postgres connection string. Compose sets it; set it yourself when running from source. |
 | `BETTER_AUTH_SECRET` | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` | 32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable. |
 | `DATA_DIR` | `./data` | Working directory for uploads, per-project scratch files, the local storage driver and caches. |

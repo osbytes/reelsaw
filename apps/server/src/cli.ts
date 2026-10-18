@@ -8,6 +8,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   pnpm --filter @reelsaw/server cli <command> [...args]          (dev)
  *
  * Commands
+ *   version [--json]                        running version, latest published release, how to upgrade
  *   users                                   list accounts: role, status, sign-up date
  *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
  *   make-admin <email>                      promote an account to admin (approves it first if needed)
@@ -130,6 +131,18 @@ async function sourcePath(svc: Services, projectId: string) {
 }
 
 const commands: Record<string, (svc: Services) => Promise<void>> = {
+  /** Running version against the latest GitHub release (updates.ts), with the upgrade command. */
+  async version(svc) {
+    const s = await svc.updates.check({ force: true });
+    if (args.includes("--json")) return void console.log(JSON.stringify({ ...s, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT }, null, 2));
+    console.log(`running   ${s.current}  (${svc.config.REELSAW_COMMIT}, built ${svc.config.REELSAW_BUILT_AT})`);
+    if (!s.enabled) return void console.log("latest    not checked (UPDATE_CHECK=false)");
+    if (!s.latest) return void console.log(`latest    unknown: ${s.error ?? "no answer"}`);
+    console.log(`latest    ${s.latest.version}  published ${s.latest.publishedAt?.slice(0, 10) ?? "-"}  ${s.latest.url}${s.error ? `  (stale: ${s.error})` : ""}`);
+    if (s.available === null) console.log(`\nNot a release build, so the two cannot be compared. To update: ${s.upgrade.command}`);
+    else if (s.available) console.log(`\nUpdate available. ${s.upgrade.note}\n  ${s.upgrade.command}\nSee ${s.upgrade.docsUrl}`);
+    else console.log("\nUp to date.");
+  },
   /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
   async users(svc) {
     const rows = await svc.database.db.query.user.findMany({ orderBy: schema.user.createdAt });
@@ -707,7 +720,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

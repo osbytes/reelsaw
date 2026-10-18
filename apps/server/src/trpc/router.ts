@@ -553,6 +553,18 @@ export const appRouter = router({
       resources: await ctx.svc.resources.snapshot(),
       limits: { maxCpuPercent: ctx.svc.config.MAX_CPU_PERCENT, minFreeMemMB: ctx.svc.config.MIN_FREE_MEM_MB, minFreeDiskMB: ctx.svc.config.MIN_FREE_DISK_MB },
     })),
+    /**
+     * Is a newer Reelsaw published? (updates.ts). `get` is what is known (and starts the first check
+     * when none ran yet; the state then says `checking`); `check` asks GitHub again now.
+     */
+    updates: router({
+      get: adminProcedure.query(({ ctx }) => {
+        const s = ctx.svc.updates.state();
+        if (s.enabled && !s.checkedAt && !s.checking) void ctx.svc.updates.check();
+        return ctx.svc.updates.state();
+      }),
+      check: adminProcedure.mutation(({ ctx }) => ctx.svc.updates.check({ force: true })),
+    }),
     users: router({
       /**
        * Keyset page of accounts: pending first, then newest first (`approved, created_at desc, id desc`), with each

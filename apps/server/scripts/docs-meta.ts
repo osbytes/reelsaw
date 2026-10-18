@@ -52,6 +52,9 @@ export const DOCS: Record<string, [GroupId, string]> = {
   CAPTCHA_SITE_KEY: ["accounts", "Public captcha key."],
   CAPTCHA_SECRET_KEY: ["accounts", "Secret captcha key."],
   MCP_OAUTH: ["accounts", "MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work."],
+  UPDATE_CHECK: ["core", "Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub."],
+  UPDATE_CHECK_URL: ["core", "Releases endpoint the check asks (GitHub's `releases/latest` of this repository); change it for a fork or a mirror."],
+  UPDATE_CHECK_HOURS: ["core", "Hours between update checks (1–168). \"Check now\" in Settings asks at most once a minute."],
   HEALTH_DETAILS: ["accounts", "Include machine numbers in `GET /api/health` for anonymous callers (private networks only). Admins always get them."],
 
   AI_MODEL: ["models", "Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models."],

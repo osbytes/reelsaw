@@ -42,6 +42,7 @@ async function main() {
       log.fatal({ err, port: config.PORT }, "cannot listen");
       process.exit(1);
     });
+    svc.updates.start();
   }
   if (config.RUN_WORKERS) {
     await startWorkers(svc);

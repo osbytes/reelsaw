@@ -274,6 +274,12 @@ export const TOOLS = {
     inputSchema: { id: z.string().describe("Clip id (from get_project → replacedClips)") },
     annotations: { idempotentHint: true },
   },
+  check_for_update: {
+    title: "Check for update",
+    description: "Admins only: is a newer Reelsaw published? Returns { current, latest: { version, url, publishedAt }, available, checkedAt, error, upgrade: { command, note, docsUrl } }; available is null when the running build is not a release (from source). The server checks every few hours; refresh: true asks GitHub again now.",
+    inputSchema: { refresh: z.boolean().default(false).describe("true = ask GitHub now instead of returning the last answer (at most once a minute)") },
+    annotations: { readOnlyHint: true },
+  },
 };
 
 export type ToolName = keyof typeof TOOLS;
