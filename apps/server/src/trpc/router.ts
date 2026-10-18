@@ -8,7 +8,8 @@ import { router, protectedProcedure, publicProcedure, signedInProcedure, adminPr
 import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -140,7 +141,9 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
 /**
  * Read-modify-write on a project's transcript flags, as one unit of work: ownership check, the
  * transcript row locked FOR UPDATE (so a concurrent edit or refine merge waits instead of being
- * overwritten), then the change, its re-renders and its event commit together.
+ * overwritten), then the change, its re-renders and its event commit together. The row is still read
+ * whole (words are one jsonb value); writes go through writeTranscript, which sends only changed columns.
+ * Chunked transcript storage, so an edit touches only the window it changes, is Phase 2 (docs/specs/scale.md).
  */
 async function withTranscript<T>(svc: Services, userId: string, projectId: string, fn: (u: UnitOfWork, p: schema.Project, t: schema.Transcript) => Promise<T>): Promise<T> {
   return svc.tx(async (u) => {
@@ -158,8 +161,19 @@ function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string)
   if (!f) return { flags, deletedFlags: deleted };
   return {
     flags: flags.flatMap((x) => (x.id === id ? restoreAbsorbed(x) : [x])).sort((a, b) => a.wordIndex - b.wordIndex),
-    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }].slice(-500),
+    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }], // the live list is capped (and the overflow archived) when saved, see saveFlags
   };
+}
+
+/**
+ * Write back only the transcript columns that changed (rawWords and often words stay as they are), after
+ * moving deleted flags beyond the live cap into the archive in the same transaction.
+ */
+async function writeTranscript(u: UnitOfWork, projectId: string, t: schema.Transcript, next: { words: Word[]; rawWords: Word[]; flags: TranscriptFlag[]; deletedFlags: DeletedFlag[]; segments: ReturnType<typeof toSentences>; text: string }) {
+  const { keep, overflow } = splitDeleted(next.deletedFlags);
+  await archiveDeletedFlags(u.db, projectId, overflow);
+  const patch = changedColumns<Record<string, unknown>>({ words: t.words, rawWords: t.rawWords ?? undefined, flags: t.flags, deletedFlags: t.deletedFlags ?? [], segments: t.segments, text: t.text }, { ...next, deletedFlags: keep });
+  if (Object.keys(patch).length) await u.db.update(schema.transcripts).set(patch).where(eq(schema.transcripts.projectId, projectId));
 }
 
 /** Persist new flag lists, rebuild the cleaned words, re-render clips whose words changed around `f`. */
@@ -168,7 +182,7 @@ async function saveFlags(svc: Services, u: UnitOfWork, p: schema.Project, t: sch
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
   const segments = toSentences(words);
-  await db.update(schema.transcripts).set({ words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") }).where(eq(schema.transcripts.projectId, p.id));
+  await writeTranscript(u, p.id, t, { words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") });
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
   const rerendered = rerender && changed ? await rerenderOverlapping(svc, u, p, [{ start: f.start, end: f.end }]) : 0;
@@ -987,10 +1001,7 @@ export const appRouter = router({
         for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected")) ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
         const words = applyFlags(raw, live);
         const segments = toSentences(words);
-        await db
-          .update(schema.transcripts)
-          .set({ words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") })
-          .where(eq(schema.transcripts.projectId, p.id));
+        await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
         const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
         await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
         return { ok: true, changed: changed.length, rerendered };
@@ -1022,7 +1033,8 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) =>
         withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
         const svc = ctx.svc;
-        const d = t.deletedFlags?.find((x) => x.id === input.flagId);
+        // past the live cap (200) deleted fixes live in the archive (stage_artifacts); taking one from there removes it from there
+        const d = t.deletedFlags?.find((x) => x.id === input.flagId) ?? (await takeArchivedFlag<DeletedFlag>(u.db, p.id, input.flagId));
         if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
         const { deletedAt: _deletedAt, ...flag } = d;
         void _deletedAt;

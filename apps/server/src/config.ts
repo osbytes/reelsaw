@@ -108,6 +108,10 @@ export const envSchema = z.object({
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
+  EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
+  LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
+  ADMIN_EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   // bot protection on sign-up / sign-in (Better Auth captcha plugin)
   CAPTCHA_PROVIDER: z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).optional(),
   CAPTCHA_SITE_KEY: z.string().optional(),
