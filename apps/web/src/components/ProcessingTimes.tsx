@@ -96,7 +96,7 @@ export function ProcessingTimes() {
                     const v = r.stages[s.stage];
                     return (
                       <td key={s.stage} className={`py-1.5 text-right ${v && v.actualSec > v.expectedSec * 1.5 ? "text-warn" : ""}`}>
-                        {v ? `${formatTime(v.actualSec)} / ~${formatTime(v.expectedSec)}` : "—"}
+                        {v && v.actualSec > v.expectedSec * 1.5 ? "▲ " : ""}{v ? `${formatTime(v.actualSec)} / ~${formatTime(v.expectedSec)}` : "—"}
                       </td>
                     );
                   })}

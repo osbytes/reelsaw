@@ -23,6 +23,8 @@
   --shadow: 0 10px 30px rgba(20, 20, 25, 0.12), 0 2px 6px rgba(20, 20, 25, 0.06);
   --film: #2a2a2e;
   --film2: #323237;
+  --film-ink: #1c1c1e; /* on the film surface: dark glyph on the white play button */
+  --film-text: #b9b9c0; /* on the film surface: muted caption text */
   --snap: #ff5cc8;
   color-scheme: light;
 }
@@ -48,6 +50,8 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   --film: #202023;
   --film2: #28282c;
+  --film-ink: #1c1c1e;
+  --film-text: #b9b9c0;
   color-scheme: dark;
 }
 
@@ -73,6 +77,8 @@
   --color-err: var(--err);
   --color-err-soft: var(--err-soft);
   --color-film: var(--film);
+  --color-film-ink: var(--film-ink);
+  --color-film-text: var(--film-text);
   --color-snap: var(--snap);
   --shadow-pop: var(--shadow);
 }

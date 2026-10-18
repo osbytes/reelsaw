@@ -544,7 +544,8 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   return (
     <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
       {/* one scrollable row on phones, wraps on wider screens */}
-      <div className="flex shrink-0 items-center gap-x-3 gap-y-2 overflow-x-auto border-y border-line bg-panel px-4 py-2.5 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible sm:px-5">
+      <ScrollArea className="shrink-0 border-y border-line bg-panel">
+      <div className="flex w-max items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:w-auto sm:flex-wrap sm:px-5">
         <h2 className="shrink-0 text-[15px] font-bold">Transcript</h2>
         {language && <span className="font-mono text-[11px] text-ink3">{language}</span>}
         {orderedFlags.length > 0 && (
@@ -585,6 +586,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
           <span><b className="font-mono text-[10px] text-warn">?</b> review</span>
         </div>
       </div>
+      </ScrollArea>
       <div className="relative flex min-h-0 flex-1">
       <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={viewportRef}>
         <div ref={contentRef} className="mx-auto max-w-[760px] px-5 pb-28 pt-4" onMouseUp={() => setTimeout(readSelection, 0)} onTouchEnd={() => setTimeout(readSelection, 50)} onKeyUp={readSelection}>
@@ -779,7 +781,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
           <button className="btn-ghost" onClick={() => setDecisions({})}>
             Discard
           </button>
-          <button className="btn-primary" disabled={review.isPending} onClick={submit}>
+          <button className="btn-primary min-w-[11.5rem] justify-center" disabled={review.isPending} onClick={submit}>
             {review.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Apply {nDecided} {affected.length ? "& re-render" : ""}
           </button>
         </div>

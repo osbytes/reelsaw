@@ -521,7 +521,7 @@ export function ProjectPage() {
 
   const alert =
     p.status === "failed" && p.error ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err bg-err-soft px-4 py-3 sm:mx-5">
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err bg-err-soft px-4 py-3 shadow-pop sm:mx-5">
         <span className="font-mono text-lg leading-6 text-err">▲</span>
         <div className="min-w-0 flex-[1_1_320px]">
           <b>{STAGE_LABEL[p.stage ?? ""] ?? "Processing"} failed.</b>
@@ -533,7 +533,7 @@ export function ProjectPage() {
         </button>
       </div>
     ) : stalled ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn bg-warn-soft px-4 py-3 sm:mx-5">
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn bg-warn-soft px-4 py-3 shadow-pop sm:mx-5">
         <span className="font-mono text-lg leading-6 text-warn">◷</span>
         <div className="min-w-0 flex-[1_1_320px] text-[13px]">
           <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b> {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
@@ -588,12 +588,12 @@ export function ProjectPage() {
         )}
         {p.sourceVideoUrl ? (
           !playing && (
-            <button onClick={togglePlay} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-[#1c1c1e] shadow-pop">
+            <button onClick={togglePlay} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop">
               ▶
             </button>
           )
         ) : (
-          <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-[#b9b9c0]">
+          <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-film-text">
             {active ? (
               "downloading…"
             ) : p.sourceExpiredAt ? (
@@ -770,10 +770,14 @@ export function ProjectPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
-      {alert}
+      {/* overlaid under the header: a banner arriving mid-session must not push the source and transcript down */}
+      <div className="relative z-20 h-0 shrink-0">
+        <div className="absolute inset-x-0 top-0">{alert}</div>
+      </div>
       {compact ? (
         <>
-          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-2">
+          <ScrollArea className="shrink-0 border-b border-line">
+          <div className="flex w-max gap-1 px-3 py-2">
             {(
               [
                 ["transcript", "Transcript"],
@@ -786,6 +790,7 @@ export function ProjectPage() {
               </button>
             ))}
           </div>
+          </ScrollArea>
           {mtab === "transcript" && (
             <div className="flex min-h-0 flex-1 flex-col">
               {source}

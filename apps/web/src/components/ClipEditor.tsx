@@ -1007,13 +1007,15 @@ export function ClipEditor(props: Props) {
 
   const inspector = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-2">
+      <ScrollArea className="shrink-0 border-b border-line">
+      <div className="flex w-max gap-1 px-3 py-2">
         {tabs.map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} className={`rounded-[8px] px-3 py-[7px] text-[13px] font-semibold whitespace-nowrap ${activeTab === k ? "bg-sunk text-ink" : "text-ink2 hover:text-ink"}`}>
             {l}
           </button>
         ))}
       </div>
+      </ScrollArea>
       {activeTab === "transcript" ? (
         transcript
       ) : (
@@ -1245,13 +1247,14 @@ export function ClipEditor(props: Props) {
       </button>
       <ThemeToggle className="hidden sm:inline-flex" />
       <button
-        className="btn-primary sm:min-w-[148px]"
+        className="btn-primary min-w-[5.5rem] justify-center sm:min-w-[148px]"
         disabled={busy || (!changed && clip.status !== "failed")}
         onClick={() => void save(needsRender || (!changed && clip.status === "failed"))}
         title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don't need a re-render (${MOD}S)`}
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-        {!changed && clip.status === "failed" ? "Retry render" : needsRender ? (styleScope === "all" && styleChanged ? "Save & re-render all" : "Save & re-render") : "Save"}
+        <span className="sm:hidden">{!changed && clip.status === "failed" ? "Retry" : "Save"}</span>
+        <span className="hidden sm:inline">{!changed && clip.status === "failed" ? "Retry render" : needsRender ? (styleScope === "all" && styleChanged ? "Save & re-render all" : "Save & re-render") : "Save"}</span>
       </button>
     </header>
   );
