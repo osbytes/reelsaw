@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -201,16 +202,20 @@ export const userSettings = pgTable("user_settings", {
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;
 
-export const uploads = pgTable("uploads", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  filename: text("filename").notNull(),
-  storageKey: text("storage_key").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const uploads = pgTable(
+  "uploads",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    storageKey: text("storage_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("uploads_user_id_idx").on(t.userId)],
+);
 
 /**
  * A user's intro/outro video. Immutable: replacing one is a new row, so a cache keyed by id is
@@ -239,7 +244,10 @@ export const bumperAssets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash)],
+  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash),
+    // the hourly purge looks for removed assets across all users
+    index("bumper_assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
+  ],
 );
 export type BumperAsset = typeof bumperAssets.$inferSelect;
 
@@ -276,7 +284,15 @@ export const projects = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("projects_user_id_idx").on(t.userId, t.createdAt)],
+  (t) => [
+    index("projects_user_id_idx").on(t.userId, t.createdAt),
+    // searchIndex and "recently updated" lists
+    index("projects_user_updated_idx").on(t.userId, t.updatedAt),
+    // the reconciler and the stall watchdog look up projects by `status in (<working states>)`
+    index("projects_status_idx").on(t.status),
+    // source retention (every reconciler tick when enabled)
+    index("projects_source_retention_idx").on(t.updatedAt).where(sql`${t.sourceKey} is not null and ${t.sourceExpiredAt} is null`),
+  ],
 );
 
 export const transcriptChunks = pgTable(
@@ -363,7 +379,11 @@ export const clips = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("clips_project_id_idx").on(t.projectId, t.index)],
+  (t) => [
+    index("clips_project_id_idx").on(t.projectId, t.index),
+    // clip retention (every reconciler tick when enabled)
+    index("clips_retention_idx").on(t.updatedAt).where(sql`${t.outputKey} is not null and ${t.status} = 'done'`),
+  ],
 );
 
 export const projectEvents = pgTable(

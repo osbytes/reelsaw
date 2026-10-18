@@ -133,6 +133,18 @@ is that line, not the gap between events. A run still `running` with no live job
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
 
+## Measuring at scale
+
+To see how lists, search and event replay behave at 1,000 projects / 50,000 clips (plan:
+[specs/scale.md](specs/scale.md)), seed a **throwaway** database, never one you care about:
+`cd apps/server && SEED_SCALE=1 DATABASE_URL=postgres://<user>:<password>@localhost:3200/reelsaw npx tsx scripts/seed-scale.ts --users 20 --projects 1000 --clips 50 --hours 2`
+(3200 is the bench stack's Postgres; the script refuses without `SEED_SCALE=1` and has no default
+URL). It writes 2-hour transcripts with realistic word arrays, ~600 events per project (75% progress ticks) and
+no media files, using only ids that start with `seed-`; take timings with `EXPLAIN (ANALYZE, BUFFERS)`
+and `select octet_length(...)`, sign in as a user created through the app and assign the seeded
+projects to it with `update projects set user_id = '<id>' where id like 'seed-%'` to try the UI, and
+remove everything with the same command plus `--clean`.
+
 ## Investigating an issue report
 
 1. Import it into the local stack (never a production instance; released images refuse):

@@ -91,6 +91,50 @@ project already hit the problem it prevents.
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
 
+### Scale
+
+Findings and the fix plan: [docs/specs/scale.md](specs/scale.md). Today's data is small, so
+nothing below hurts yet; every rule exists because a query or screen we already ship would.
+
+- **Every list is paginated or bounded, and the UI says so.** A list endpoint takes a `limit` and
+  a keyset `cursor` (ordered by an indexed column plus `id`) and returns `{ items, nextCursor,
+  total }`. The screen shows "Showing 50 of 1,204" and a way to load more. A bare `findMany` on a
+  table that grows with usage is a bug, and so is a magic `limit: 500` nobody can see.
+- **A hard limit is never silent.** If a cap cuts data off (an index, a replay, a jsonb array,
+  a batch), the response says it was truncated and the UI or CLI says so in a sentence. Silent
+  `slice(-500)` loses user data without anyone noticing; `get_transcript` ("truncated at 4:12,
+  call again with fromSec") is the model.
+- **Search and filtering happen in the database.** Matching runs in SQL against an index
+  (`ILIKE` with `pg_trgm`, or `tsvector`), scoped by `user_id`, and returns a page. The client
+  may narrow what it already fetched (Fuse over 20 results), never fetch everything to search it.
+  Debounce typing, keep the previous results while the next page loads.
+- **Payload shape follows the screen.** List rows carry list fields; detail queries carry detail
+  fields; heavy blobs (transcript words, diagnostics, settings) have their own query. An event
+  invalidates the smallest query that changed (a clip event refetches clips, not the project and
+  its 5 MB transcript). Estimate the bytes at 1,000 projects before adding a field to a list.
+- **Anything that grows with time has a retention rule.** Event and usage tables prune what no
+  screen shows (progress ticks are not history) and roll the rest up. jsonb arrays that grow
+  with usage get a cap *and* an archive path (`stage_artifacts`), not `slice(-500)`. Decide the
+  rule when the column is added, not after the table is large.
+- **Don't rewrite big rows for small edits.** A value over about 100 KB (transcript words) is
+  stored in ranges or chunks, read by range, and changed by patch, so an edit moves kilobytes
+  and holds a lock for milliseconds.
+- **Background loops work per batch with a stable cursor, never "all rows".** A sweep, retention
+  or reconcile step selects a bounded batch ordered by an indexed key, remembers where it
+  stopped, and cannot be starved by rows that never qualify. No `inArray` over an unbounded id
+  list (Postgres stops at 65,535 parameters); no per-row query inside the loop when one grouped
+  query does it; no directory walk without a bound on concurrency.
+- **Per-tenant resources are enforced in the database.** Quotas, rate limits, job concurrency
+  and stream counts are counted from rows in the transaction that consumes them, keyed by
+  `user_id`, so they hold across replicas. A process-local counter is a per-process limit, not a
+  tenant limit. One user's burst queues behind others instead of ahead of them.
+- **Every query a hot path runs has an index.** New predicate or sort on a growing table means an
+  index in the same migration (`user_id` first, then the sort column). jsonb `->>` filters on
+  big tables are a smell: promote the key to a column. Check with `EXPLAIN (ANALYZE, BUFFERS)`.
+- **Measure with realistic data before and after.** Performance work states its numbers (rows
+  scanned, payload bytes, ms) from `apps/server/scripts/seed-scale.ts` at 1,000 projects / 50,000
+  clips, and the change keeps them in its description.
+
 ### Quality
 
 - **Measure before and after.** Model-facing or heuristic behaviour (selection, cuts, framing,
