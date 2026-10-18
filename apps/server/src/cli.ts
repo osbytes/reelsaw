@@ -42,6 +42,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --rerender re-renders only the affected clips
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
+ *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
+ *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
+ *   limits  <email>                         an account's quotas: instance value, override, in force, in use now
  */
 import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
@@ -55,6 +58,7 @@ import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
+import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser } from "./quota.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
@@ -127,6 +131,33 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!u.approvedAt) await approveUser(svc, null, u.id);
     const r = await setUserRole(svc, null, u.id, "admin");
     console.log(r.changed ? `${u.email} is now an admin` : `${u.email} was already an admin`);
+  },
+  /** Usage per account over the last --days (default 30); stored bytes are all time. */
+  async usage(svc) {
+    const days = Number(flag("days") ?? 30);
+    const rows = await usageByUser(svc.database.db, Number.isFinite(days) && days > 0 ? days : 30);
+    const emails = new Map((await svc.database.db.query.user.findMany({ columns: { id: true, email: true } })).map((u) => [u.id, u.email]));
+    console.log(`last ${days} days${rows.length >= 500 ? " (first 500 accounts only)" : ""}`);
+    table(
+      rows.map((u) => ({
+        email: emails.get(u.id) ?? u.id,
+        projects: u.projects,
+        "source min": u.sourceMinutes,
+        clips: u.clipsRendered,
+        "llm calls": u.llmCalls,
+        "tokens in/out": `${Math.round(u.llmInputTokens / 1000)}k/${Math.round(u.llmOutputTokens / 1000)}k`,
+        "llm $": u.llmCostUsd == null ? "-" : u.llmCostUsd.toFixed(2),
+        "stt min": u.sttMinutes,
+        stored: formatBytes(u.storedBytes),
+      })),
+    );
+  },
+  /** One account's quotas (0 = unlimited). Change them in Users → Limits. */
+  async limits(svc) {
+    const u = await userByEmail(svc, pos[0]);
+    const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true } });
+    const [effective, used] = await Promise.all([limitsFor(svc.database.db, svc.config, u.id), limitUsage(svc.database.db, u.id)]);
+    table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.config[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
   },
   async status(svc) {
     const db = svc.database.db;
@@ -598,7 +629,7 @@ async function userByEmail(svc: Services, email: string | undefined) {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|usage|limits|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

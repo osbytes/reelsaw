@@ -319,11 +319,14 @@ export function AdminUsersPage() {
   );
 }
 
-type LimitKey = "MAX_PROJECTS_PER_USER" | "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_NEW_PROJECTS_PER_HOUR";
+type LimitKey = "MAX_PROJECTS_PER_USER" | "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_NEW_PROJECTS_PER_HOUR" | "MAX_LIVE_JOBS_PER_USER" | "MAX_RERENDERS_PER_HOUR" | "MAX_STORAGE_MB";
 const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string }> = [
   { key: "MAX_PROJECTS_PER_USER", label: "Projects kept", window: "all projects the account has now", unit: "projects" },
   { key: "MAX_SOURCE_MINUTES_PER_DAY", label: "Minutes of video per day", window: "since 00:00 UTC today", unit: "minutes" },
   { key: "MAX_NEW_PROJECTS_PER_HOUR", label: "New projects per hour", window: "the last 60 minutes", unit: "projects" },
+  { key: "MAX_LIVE_JOBS_PER_USER", label: "Jobs at once", window: "queued or running now", unit: "jobs" },
+  { key: "MAX_RERENDERS_PER_HOUR", label: "Renders asked for per hour", window: "re-renders and new clips, the last 60 minutes", unit: "renders" },
+  { key: "MAX_STORAGE_MB", label: "Storage", window: "sources, uploads, renders and intros/outros kept now", unit: "MB" },
 ];
 
 /** Per-user quota overrides, each next to what the account has used. Empty = the instance setting (0 = unlimited). */
