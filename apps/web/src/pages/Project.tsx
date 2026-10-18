@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronRight, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Link2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
@@ -15,7 +15,8 @@ import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ClipCard, type ClipView } from "../components/ClipCard";
-import { BulkBumpersBar, ProjectBumpersModal } from "../components/BumperField";
+import { ProjectBumpersModal } from "../components/BumperField";
+import { BatchBar } from "../components/BatchBar";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
@@ -52,6 +53,7 @@ export function ProjectPage() {
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
+  const rerenderMany = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
@@ -476,7 +478,7 @@ export function ProjectPage() {
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">
               {failedClips.length > 0 && (
-                <DropdownMenu.Item className="menu-item block" onSelect={() => Promise.all(failedClips.map((c) => rerender.mutateAsync({ id: c.id }))).then(() => (invalidate(), toast(`Retrying ${failedClips.length} failed clip${failedClips.length === 1 ? "" : "s"}`)))}>
+                <DropdownMenu.Item className="menu-item block" onSelect={() => rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`)))}>
                   Retry failed clips <span className="text-ink3">({failedClips.length})</span>
                 </DropdownMenu.Item>
               )}
@@ -692,18 +694,6 @@ export function ProjectPage() {
           )}
         </div>
       )}
-      {/* always present, so selecting never shifts the list */}
-      {sortedClips.length > 1 && (
-        <div className="flex h-9 items-center gap-3 px-4 text-xs text-ink2">
-          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={sel.length === sortedClips.length} onClick={() => setSel(sortedClips.map((c) => c.id))}>
-            Select all
-          </button>
-          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={!sel.length} onClick={() => setSel([])}>
-            Clear
-          </button>
-          <span className="font-mono text-ink3">{sel.length ? `${sel.length} selected` : ""}</span>
-        </div>
-      )}
       <div className="flex flex-col gap-3 p-3">
         {sortedClips.map((c) => (
           <ClipCard
@@ -729,27 +719,45 @@ export function ProjectPage() {
         ))}
       </div>
       {sel.length > 0 && (
-        <BulkBumpersBar
+        <BatchBar
           projectId={p.id}
-          clipIds={sel}
-          rerenderable={sortedClips.filter((c) => sel.includes(c.id) && (c.status === "done" || c.status === "failed")).length}
-          projectIntroId={p.settings.introAssetId}
-          projectOutroId={p.settings.outroAssetId}
-          onDone={() => setSel([])}
+          selected={sortedClips.filter((c) => sel.includes(c.id))}
+          introId={p.settings.introAssetId}
+          outroId={p.settings.outroAssetId}
+          onClear={() => setSel([])}
+          onChanged={invalidate}
         />
       )}
     </>
   );
 
-  const drawerHeader = (
-    <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
-      <b>Clips</b>
-      <span className="rounded-full bg-panel px-2 py-px font-mono text-xs">{sortedClips.length}</span>
-      {active && sortedClips.length > 0 && <span className="text-xs text-ink3">· streaming in</span>}
+  /** Sticky above the list: the count, the selection controls (fixed widths, so nothing moves as the count changes) and, in the drawer, the collapse toggle. */
+  const clipsHeader = (
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4">
+      {!compact && <b>Clips</b>}
+      <span className="rounded-full bg-panel px-2 py-px font-mono text-xs" title={active && sortedClips.length > 0 ? "More clips are streaming in" : undefined}>
+        {sortedClips.length}
+      </span>
       <div className="flex-1" />
-      <button className="btn-quiet px-2 py-1" onClick={() => setDrawer(false)} aria-label="Collapse clips" title="Collapse">
-        <PanelRightClose className="h-4 w-4" />
-      </button>
+      {sortedClips.length > 1 && (
+        <div className="flex items-center gap-2.5 text-xs">
+          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={sel.length === sortedClips.length} onClick={() => setSel(sortedClips.map((c) => c.id))}>
+            Select all
+          </button>
+          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={!sel.length} onClick={() => setSel([])}>
+            Clear
+          </button>
+          <span className={`inline-flex h-6 w-[3.25rem] items-center justify-center gap-1 rounded-full bg-acc-soft font-mono tabular-nums text-acc-text ${sel.length ? "" : "invisible"}`} title={`${sel.length} selected`} aria-label={`${sel.length} selected`}>
+            <Check className="h-3 w-3" aria-hidden />
+            {sel.length}
+          </span>
+        </div>
+      )}
+      {!compact && (
+        <button className="btn-quiet px-2 py-1" onClick={() => setDrawer(false)} aria-label="Collapse clips" title="Collapse">
+          <PanelRightClose className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 
@@ -782,7 +790,12 @@ export function ProjectPage() {
               )}
             </div>
           )}
-          {mtab === "clips" && <ScrollArea className="min-h-0 flex-1 bg-sunk">{clipsList}</ScrollArea>}
+          {mtab === "clips" && (
+            <div className="flex min-h-0 flex-1 flex-col bg-sunk">
+              {clipsHeader}
+              <ScrollArea className="min-h-0 flex-1">{clipsList}</ScrollArea>
+            </div>
+          )}
           {mtab === "activity" && textNotice && <div className="shrink-0 px-4 pt-3">{textNotice}</div>}
           {mtab === "activity" && (
             <ScrollArea className="min-h-0 flex-1">
@@ -803,7 +816,7 @@ export function ProjectPage() {
           <aside className="flex min-h-0 flex-col border-l border-line bg-sunk">
             {drawer ? (
               <>
-                {drawerHeader}
+                {clipsHeader}
                 <ScrollArea className="min-h-0 flex-1">{clipsList}</ScrollArea>
               </>
             ) : (

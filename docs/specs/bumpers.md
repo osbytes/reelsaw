@@ -29,7 +29,7 @@ another editor. Today branding is added by hand. Appetite: about 3 days for phas
   None, or a library asset. This replaces the earlier all-or-nothing opt-out, so "only an intro, only
   on these clips" is expressible. The choice is stored on the clip (`clips.bumpers`), so it survives
   pipeline re-runs. Set it in the editor (two selects under the transport), from the clip card's
-  "Intro / outro..." popover, or for many clips at once with the project page's multi-select bar
+  ⋯ menu ("Intro / outro..." dialog), or for many clips at once from the selection bar's "Intro/outro..." popover
   (`#sel=id1,id2` in the hash, `clips.setBumpersMany`). Each goes through Save / Save & re-render.
 
 ### Accepted assets and limits
