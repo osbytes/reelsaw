@@ -1,5 +1,49 @@
 # @reelsaw/server
 
+## 0.7.0
+
+### Minor Changes
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`c6fe768`](https://github.com/osbytes/reelsaw/commit/c6fe768e6f515ce16c5412412528e0e027500005) Thanks [@dillonstreator](https://github.com/dillonstreator)! - MCP tools say what they return, whether they run in the background and which neighbouring tool to use instead, every input is described, and three new tools (with tRPC and CLI twins) fill gaps: `delete_clip` (restorable with `restore_clip`), `update_project` (title and settings without re-running anything) and `rename_bumper`; a partial caption style on a clip or project no longer resets the other style fields to their defaults.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`dda5789`](https://github.com/osbytes/reelsaw/commit/dda5789d01bc791e3c1bc5396e8777ab4094554f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Deleting a project can be undone for 7 days, and re-picking moments keeps every clip you made or edited, replacing only untouched AI picks (which can be restored too); the same through MCP (`restore_project`, `restore_clip`) and the CLI (`reelsaw deleted`, `restore`, `restore-clip`, `purge`).
+  
+  **Upgrade:** deleted projects now keep their files for `DELETED_RETENTION_DAYS` (default 7; 0 keeps them forever) before the hourly sweep removes them, so disk is freed a week after a delete instead of at once; lower the setting to free it sooner. The migration adds `deleted_at` to projects and clips and `edited_at` to clips. Clips edited before this release are only recognised as edited by their framing, style or intro/outro choice.
+
+### Patch Changes
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`e76241c`](https://github.com/osbytes/reelsaw/commit/e76241ce41181383359991e5630cc748aaa6a666) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Boot checks the models that will actually run (including an admin override), rejects transcription models without word timestamps, and the installer picks the language model by RAM, verifies the container can reach a host Ollama, and the image pins yt-dlp and every model weight by checksum.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`0b3fefb`](https://github.com/osbytes/reelsaw/commit/0b3fefb14d446e4886e56900577ce711178a8db7) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Evals: real-speech transcription cases graded against human captions (raw and normalised WER, names-only error rate) and 48 disfluency cases from caption diffs, with a caption-diff tool to make more.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`8589266`](https://github.com/osbytes/reelsaw/commit/8589266810bb065ff02001e7f51c62eb14be2e51) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Caption lines now stay up long enough to read (0.3 s per word, 20 characters per second), face-size thresholds adapt to non-16:9 sources, and the renderer and preview share one crop and font definition.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`57087ee`](https://github.com/osbytes/reelsaw/commit/57087eea86f8425ed363ffecd1f431c77eb7515e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - CI now runs every stack-free test and the offline eval suites, and `eval --update` refuses to record regressions without a stated reason.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`8b64662`](https://github.com/osbytes/reelsaw/commit/8b646628ba8a021cbbd82dc386c5357f39b5bb86) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Jobs are served fairly between accounts (someone with nothing in flight goes ahead of another account's backlog), model calls are capped per provider across all processes (`PROVIDER_CONCURRENCY`, self-hosted default 2), new per-user limits `MAX_LIVE_JOBS_PER_USER`, `MAX_RERENDERS_PER_HOUR` and `MAX_STORAGE_MB`, and usage now shows reported LLM cost, minutes transcribed and rendered-clip storage (`reelsaw usage`, `reelsaw limits <email>`).
+  
+  **Upgrade:** migration adds `llm_usage.cost_usd`, `clips.output_bytes` and the `stt_usage` table; the new limits default to 0 (unlimited), so a single-operator install behaves as before. Jobs already queued carry no owner and are not counted toward the new limits. A self-hosted model now serves at most 2 calls at once across all workers unless `PROVIDER_CONCURRENCY` says otherwise.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`93084c7`](https://github.com/osbytes/reelsaw/commit/93084c7195bab2937b6f2e6d73ab84d161ee8835) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The framing eval now scores non-podcast sources (multi-camera talk show, screencast with a corner webcam, 4:3 interview, hands-only POV, vertical short) against hand-labelled shot windows.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`527c02e`](https://github.com/osbytes/reelsaw/commit/527c02e941cedf754dff51be0090f64dac5758a0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Docs: every environment variable, operator CLI command and eval suite is now documented from generated tables (docs/CONFIG.md, both .env.example files; `pnpm docs:check`), with a "Settings and precedence" section and corrected install, heartbeat and boot-check notes.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`d3fb6f7`](https://github.com/osbytes/reelsaw/commit/d3fb6f7f5a1d09e30ee941715ceff4c1f51a1ba8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Harden ingress: streamed uploads are size-capped, link sources must be public http(s) URLs, the first sign-up race cannot create two admins, and admin-entered provider keys are scrubbed from issue reports.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`abca9fe`](https://github.com/osbytes/reelsaw/commit/abca9fef6d3cd50f5235092b92285f7f2ff29ff0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Changing a project's style, intro/outro or source-text setting while clips finish rendering no longer risks a stalled or failed request, and project limits now hold when several projects are created at once.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`8870362`](https://github.com/osbytes/reelsaw/commit/88703621943f8ab340a4b3970507abc4e5e60723) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Add overlay and active-speaker eval fixtures from talk-show, street-interview, screencast, sport, podcast and news sources.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`bb8a613`](https://github.com/osbytes/reelsaw/commit/bb8a6133226731545f4bbd2a87e1aab693761170) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Auto mode now drops weak clips relative to the run's own scores (median − MAD, floor 25) instead of a fixed 45, so switching the judge model no longer empties projects or keeps every clip; the pairwise pass places the top 3 reliably and a separate judge model can be set.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`5a52f25`](https://github.com/osbytes/reelsaw/commit/5a52f25398e0d3baf22c269d779a15f9420b1e11) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The scenes eval now covers bright football highlights, a news package and a multi-camera studio show, and can exclude dissolves and wipes from the hard-cut metric.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`d744ee1`](https://github.com/osbytes/reelsaw/commit/d744ee1e053becb6ea24855d11f5c2ab5e8b8404) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The selection eval now measures whether clip picking finds the moments podcast creators cut their own shorts from (creator-picks cases, labelled with the new `creator-spans` tool).
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`6f61191`](https://github.com/osbytes/reelsaw/commit/6f611913bc24ec1e5eb8b974ea3c59c697854b73) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Filler removal, name fixes and CTC cut alignment now skip with a plain-language notice for non-English transcripts instead of running silently, and text matching and sentence splitting understand non-Latin scripts.
+
+- [#29](https://github.com/osbytes/reelsaw/pull/29) [`4ad75e2`](https://github.com/osbytes/reelsaw/commit/4ad75e2c868227f02b294ca713d8fce423eab00a) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The web app loads faster and plays smoother: pages and the command palette load on demand, the clip editor and transcript no longer re-render every frame during playback, and the interface follows the layout-shift, loading-state and scrolling rules more closely.
+
 ## 0.6.0
 
 ### Minor Changes
