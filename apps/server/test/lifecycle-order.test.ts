@@ -24,7 +24,7 @@ import { db } from "./helpers.js";
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const noQueue ={ enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false } as unknown as Queue;
+const noQueue = { enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false, admission: async () => ({ userId: null, live: 0, userRendersLastHour: 0 }) } as unknown as Queue;
 
 describe("lock order of API mutations against render completions", () => {
   let pool: pg.Pool;
