@@ -1,0 +1,41 @@
+{
+  "kind": "creator-picks",
+  "split": "heldout",
+  "episode": {
+    "id": "PXHRYbr3mp4",
+    "url": "https://www.youtube.com/watch?v=PXHRYbr3mp4",
+    "title": "How Food Choices Shape Memory, Cognition & Cravings | Dr. Scott Kanoski",
+    "uploadDate": "20261012",
+    "durationSec": 7326
+  },
+  "windows": [
+    [
+      5775.76,
+      7014.32
+    ]
+  ],
+  "negative": [
+    300,
+    1200
+  ],
+  "picks": [
+    {
+      "shortId": "xZAsG5MShnk",
+      "hook": "How to Rewire Your Brain to Crave Healthy Foods",
+      "url": "https://www.youtube.com/shorts/xZAsG5MShnk",
+      "spans": [
+        [
+          6375.76,
+          6414.32
+        ]
+      ],
+      "hits": [
+        107
+      ],
+      "pieces": [
+        1
+      ]
+    }
+  ],
+  "note": "Labels: the creator's own shorts, located in the episode by 5-gram alignment of YouTube auto-captions (apps/server/src/eval/tools/creator-spans.ts, min 10 hits, offset gap 20 words, pieces ≤ 10 s apart merged). Transcript: the episode's auto en-orig track (no punctuation; segments are pause-split), kept only within ±600 s of the spans plus one 900 s stretch far from them. Re-check: run the tool again; spans should agree within ±2 s."
+}

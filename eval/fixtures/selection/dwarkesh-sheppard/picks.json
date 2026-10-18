@@ -1,0 +1,97 @@
+{
+  "kind": "creator-picks",
+  "split": "dev",
+  "episode": {
+    "id": "LwQQ7nBCGSs",
+    "url": "https://www.youtube.com/watch?v=LwQQ7nBCGSs",
+    "title": "How did a few hundred Spanish soldiers topple two empires? – Si Sheppard",
+    "uploadDate": "20261001",
+    "durationSec": 5843
+  },
+  "windows": [
+    [
+      3266.16,
+      4899.64
+    ],
+    [
+      5030.52,
+      5843
+    ]
+  ],
+  "negative": [
+    300,
+    1200
+  ],
+  "picks": [
+    {
+      "shortId": "B6FAMw8FgX4",
+      "hook": "Why Guns Didn’t Conquer the Aztecs - Si Sheppard",
+      "url": "https://www.youtube.com/shorts/B6FAMw8FgX4",
+      "spans": [
+        [
+          5630.52,
+          5675.64
+        ],
+        [
+          5689.68,
+          5731.6
+        ]
+      ],
+      "hits": [
+        101,
+        131
+      ],
+      "pieces": [
+        1,
+        1
+      ]
+    },
+    {
+      "shortId": "hjhJQXlQ6HQ",
+      "hook": "How Spain Got Rich and Fell Behind - Si Sheppard",
+      "url": "https://www.youtube.com/shorts/hjhJQXlQ6HQ",
+      "spans": [
+        [
+          3866.16,
+          3990.16
+        ]
+      ],
+      "hits": [
+        305
+      ],
+      "pieces": [
+        1
+      ]
+    },
+    {
+      "shortId": "_hH7vnTWnq8",
+      "hook": "Why the Aztecs Refused to Kill Cortés - Si Sheppard",
+      "url": "https://www.youtube.com/shorts/_hH7vnTWnq8",
+      "spans": [
+        [
+          4075.68,
+          4095.52
+        ],
+        [
+          4157.36,
+          4217.08
+        ],
+        [
+          4257.96,
+          4299.64
+        ]
+      ],
+      "hits": [
+        46,
+        124,
+        80
+      ],
+      "pieces": [
+        1,
+        1,
+        2
+      ]
+    }
+  ],
+  "note": "Labels: the creator's own shorts, located in the episode by 5-gram alignment of YouTube auto-captions (apps/server/src/eval/tools/creator-spans.ts, min 10 hits, offset gap 20 words, pieces ≤ 10 s apart merged). Transcript: the episode's manual en track, kept only within ±600 s of the spans plus one 900 s stretch far from them. Re-check: run the tool again; spans should agree within ±2 s."
+}
