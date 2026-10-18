@@ -42,7 +42,7 @@ export class StageContext {
 
   async project(): Promise<Project> {
     const p = await this.db.query.projects.findFirst({ where: eq(schema.projects.id, this.projectId) });
-    if (!p) throw new ProjectGoneError(this.projectId);
+    if (!p || p.deletedAt) throw new ProjectGoneError(this.projectId); // deleted: its jobs stop (restore, then Retry, resumes)
     return p;
   }
 

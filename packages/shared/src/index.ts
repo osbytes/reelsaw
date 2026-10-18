@@ -359,6 +359,11 @@ export const PROJECT_EVENT_TYPES = [
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
   "source.expired",
   "clips.expired",
+  /** soft delete and its undo (projects/service.ts); payload { days } = how long it stays restorable */
+  "project.deleted",
+  "project.restored",
+  /** a clip a re-analyze replaced was brought back */
+  "clip.restored",
   "project.done",
   "project.failed",
 ] as const;

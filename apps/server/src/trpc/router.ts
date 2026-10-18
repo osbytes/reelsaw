@@ -5,7 +5,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
-import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
+import { approveUser, banUser, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
+import { deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
 import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
@@ -248,10 +249,13 @@ async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | nu
 }
 
 async function ownedProject(db: Db, userId: string, projectId: string) {
-  const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)) });
+  // a deleted project is gone for every procedure until it is restored (projects.restore)
+  const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)) });
   if (!p) throw new TRPCError({ code: "NOT_FOUND" });
   return p;
 }
+
+const actorOf = (user: { id: string; role?: string | null }): Actor => ({ id: user.id, admin: user.role === "admin" });
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 
@@ -761,9 +765,9 @@ export const appRouter = router({
   projects: router({
     /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
     list: protectedProcedure
-      .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional() }).optional())
+      .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional(), deleted: z.boolean().optional().describe("true = only deleted projects that can still be restored") }).optional())
       .query(async ({ ctx, input }) => {
-        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status });
+        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status, deleted: input?.deleted });
         ctx.log.debug({ limit: input?.limit ?? 24, cursor: !!input?.cursor, status: input?.status ?? null, items: page.rows.length, hasMore: !!page.nextCursor, total: page.total }, "projects page");
         return {
           items: page.rows.map(({ p, ...card }) => ({ ...publicProject(p), ...card })),
@@ -787,7 +791,9 @@ export const appRouter = router({
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
-      return { ...publicProject(p), clips: clips.map(publicClip), transcript, estimates, bumpers };
+      // clips a re-analyze replaced, restorable with clips.restore until the purge
+      const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
+      return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers };
     }),
 
     create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
@@ -974,39 +980,16 @@ export const appRouter = router({
         return { ok: true, rerendered };
       }),
 
-    reanalyze: protectedProcedure.input(z.object({ id: z.string(), settings: projectSettingsPatchSchema.optional() })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      const db = svc.database.db;
-      const p = await ownedProject(db, ctx.user.id, input.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
-      if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
-      const settings = projectSettingsSchema.parse({ ...p.settings, ...(input.settings ?? {}) });
-      await svc.tx(async (u) => {
-        for (const c of await listClips(u.db, p.id)) {
-          await u.cancelLiveJobs(QUEUES.render, c.id);
-          await u.cancelLiveJobs(QUEUES.prepare, c.id);
-        }
-        await u.cancelLiveJobs(QUEUES.analyze, p.id);
-        await u.db.delete(schema.clips).where(eq(schema.clips.projectId, p.id));
-        await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
-        await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true });
-        await u.enqueue(QUEUES.analyze, { projectId: p.id });
-        // files go only once the rows that point at them are gone for good
-        u.afterCommit(async () => {
-          await fs.rm(`${svc.paths.project(p.id)}/clips`, { recursive: true, force: true });
-          await svc.storage.deletePrefix(`${keys.projectPrefix(p.id)}/clips`);
-        });
-      });
-      return { ok: true };
-    }),
+    /** Pick moments again on the same transcript. Clips the user made or edited stay; untouched AI picks are replaced (restorable). */
+    reanalyze: protectedProcedure
+      .input(z.object({ id: z.string(), settings: projectSettingsPatchSchema.optional() }))
+      .mutation(({ ctx, input }) => reanalyzeProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input.settings)),
 
-    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-      const { svc } = ctx;
-      const db = svc.database.db;
-      const p = await ownedProject(db, ctx.user.id, input.id);
-      await svc.tx((u) => deleteProject(svc, u, p.id));
-      return { ok: true };
-    }),
+    /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. */
+    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+
+    /** Undo a delete (the owner, or an admin for anyone's project). */
+    restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),
 
     /**
      * SSE stream of project events. It replays the newest `EVENT_REPLAY_LIMIT` non-progress events (after
@@ -1178,7 +1161,7 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         const db = svc.database.db;
-        const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, input.id) });
+        const c = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, input.id), isNull(schema.clips.deletedAt)) }); // a replaced clip is restored before it is edited
         if (!c) throw new TRPCError({ code: "NOT_FOUND" });
         const p = await ownedProject(db, ctx.user.id, c.projectId);
         const startSec = input.startSec ?? c.startSec;
@@ -1216,6 +1199,7 @@ export const appRouter = router({
             ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
+            editedAt: new Date(), // a clip the user touched survives a re-analyze
             updatedAt: new Date(),
           })
           .where(eq(schema.clips.id, c.id))
@@ -1304,7 +1288,7 @@ export const appRouter = router({
     rerender: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
       const db = svc.database.db;
-      const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, input.id) });
+      const c = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, input.id), isNull(schema.clips.deletedAt)) }); // a replaced clip is restored before it is edited
       if (!c) throw new TRPCError({ code: "NOT_FOUND" });
       const p = await ownedProject(db, ctx.user.id, c.projectId);
       return svc.tx(async (u) => {
@@ -1321,6 +1305,9 @@ export const appRouter = router({
         return { ok: true, step: "render" as const };
       });
     }),
+
+    /** Bring back a clip a re-analyze replaced (listed as replacedClips on projects.get). */
+    restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreClip(ctx.svc, actorOf(ctx.user), input.id)),
 
     /**
      * Re-render several clips of a project at once (the selection bar, "Retry failed"). One transaction, one run:

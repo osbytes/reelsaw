@@ -156,7 +156,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const project = await ctx.project();
   const clip = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId)) });
   const log = ctx.log.child({ clipId });
-  if (!clip) return; // deleted; nothing to do
+  if (!clip || clip.deletedAt) return; // deleted (or replaced by a re-analyze); nothing to do
   // the generation this job renders; jobs from before generations existed render the current one
   const gen = jobGen ?? clip.renderGen;
   if (gen !== clip.renderGen) {

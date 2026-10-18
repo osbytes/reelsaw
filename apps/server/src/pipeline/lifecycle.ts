@@ -2,7 +2,7 @@
  * Transactional state transitions shared by the API, workers and the reconciler. Each runs inside
  * a unit of work (svc.tx) so the row change, its event and its job commit together.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { needsPrepare } from "./manual.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -19,8 +19,8 @@ import { removeScratchClip } from "../storage/sweep.js";
  * transaction (e.g. new bounds). Superseded output files are deleted after commit.
  */
 export async function requestRender(svc: Services, u: UnitOfWork, projectId: string, clipId: string, patch: Partial<typeof schema.clips.$inferInsert> = {}, reason: RunReason = "rerender"): Promise<number | null> {
-  const [prev] = await u.db.select({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId))).for("update");
-  if (!prev) return null;
+  const [prev] = await u.db.select({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt))).for("update");
+  if (!prev) return null; // gone, or soft-deleted (restore it first)
   const [row] = await u.db
     .update(schema.clips)
     .set({ ...patch, status: "pending", error: null, outputKey: null, thumbnailKey: null, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
@@ -58,7 +58,7 @@ export async function requestRenders(svc: Services, u: UnitOfWork, projectId: st
   const rows = await u.db
     .select({ id: schema.clips.id, status: schema.clips.status, origin: schema.clips.origin, reasoning: schema.clips.reasoning, scores: schema.clips.scores })
     .from(schema.clips)
-    .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)))
+    .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids), isNull(schema.clips.deletedAt)))
     .orderBy(schema.clips.id)
     .for("update");
   if (rows.length !== ids.length) throw new RenderManyMissing();
@@ -134,8 +134,10 @@ export async function lockProjectClips(u: UnitOfWork, projectId: string): Promis
  */
 export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projectId: string) {
   const [project] = await u.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
-  if (!project || project.status === "done" || project.status === "failed") return;
-  const clips = await u.db.select({ status: schema.clips.status }).from(schema.clips).where(eq(schema.clips.projectId, projectId));
+  // only a rendering project finishes here: while a re-analyze is still picking (the clips it kept go on rendering),
+  // the analyze hand-off moves it to rendering and the last render finalizes
+  if (!project || project.status !== "rendering") return;
+  const clips = await u.db.select({ status: schema.clips.status }).from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
   if (!clips.length || !clips.every((c) => c.status === "done" || c.status === "failed")) return;
   const doneCount = clips.filter((c) => c.status === "done").length;
   if (doneCount === 0) {

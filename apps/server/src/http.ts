@@ -9,7 +9,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Services } from "./services.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
@@ -215,7 +215,8 @@ export function createApp(svc: Services) {
     const { projectId, file } = c.req.param();
     const clipId = file.replace(/\.(mp4|jpg)$/, "");
     const clip = await db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), eq(schema.clips.projectId, projectId)) });
-    const project = clip && (await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id)) }));
+    // a replaced clip's files still play (to decide whether to restore it); a deleted project's do not
+    const project = clip && (await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) }));
     if (!clip || !project) return c.text("not found", 404);
     const key = file.endsWith(".jpg") ? clip.thumbnailKey : clip.outputKey;
     if (!key) return c.text("not ready", 404);
@@ -231,10 +232,10 @@ export function createApp(svc: Services) {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
     const projectId = c.req.param("projectId");
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id)) });
+    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
     if (!project) return c.text("not found", 404);
     const [clips, transcript] = await Promise.all([
-      db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) }),
+      db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) }),
       db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { language: true } }),
     ]);
     const ids = parseClipIds(c.req.query("clips"));
@@ -316,7 +317,7 @@ export function createApp(svc: Services) {
   app.get("/media/source/:projectId", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id)) });
+    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, c.req.param("projectId")), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
     if (!project?.sourceKey) return c.text("not found", 404);
     const loc = await storage.resolve(project.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
