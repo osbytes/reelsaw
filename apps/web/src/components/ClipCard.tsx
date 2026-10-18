@@ -2,10 +2,13 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
-import { ProgressBar, StatusText } from "./ui";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Modal, MoreButton, ProgressBar, StatusText } from "./ui";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
-import { ClipBumpersPopover } from "./BumperField";
+import { ClipBumpersDialog } from "./BumperField";
+import { clipMeta, clipText } from "../lib/clipMeta";
 import { MODE_LABEL } from "./Timeline";
 
 export interface ClipView {
@@ -42,40 +45,6 @@ const RUBRIC: Array<{ key: keyof ClipScores; label: string }> = [
   { key: "relevance", label: "Relevance" },
 ];
 
-function framingText(c: ClipView) {
-  const segs = c.layoutSegments ?? [];
-  const forced = (c.layoutSections?.length ?? 0) > 0 || (c.layoutOverride && c.layoutOverride !== "auto");
-  if (!segs.length) return c.layout ? `${forced ? "" : "Auto · "}${MODE_LABEL[c.layout] ?? c.layout}` : "Decided at render";
-  const names: string[] = [];
-  for (const s of segs) {
-    const n = MODE_LABEL[s.layout] ?? s.layout;
-    if (names.at(-1) !== n) names.push(n);
-  }
-  return `${forced ? "" : "Auto · "}${names.join(" → ")}${forced ? " (set)" : ""}`;
-}
-
-function cutsNote(d: ClipDiagnostics | null | undefined) {
-  if (!d) return "Shown after the first render";
-  const a = d.cuts.applied.length;
-  const k = d.cuts.skipped.length;
-  const parts: string[] = [];
-  if (a || k) parts.push(`${a} cut${a === 1 ? "" : "s"}${k ? `; ${k} kept because removal couldn’t be verified` : ""}`);
-  if (d.pauses?.cuts) parts.push(`${d.pauses.removedSec.toFixed(1)}s of pauses trimmed`);
-  return parts.length ? parts.join(" · ") : "No disfluencies found";
-}
-
-/** What the last render attached: lengths, none, or which part was skipped (glyph plus word, never colour alone), and whose choice it was. */
-function bumpersNote(d: ClipDiagnostics | null | undefined): { text: string; skipped: boolean; title?: string } {
-  if (!d) return { text: "Shown after the first render", skipped: false };
-  const b = d.bumpers;
-  const who = b?.fromClip?.length ? "set for this clip" : "project default";
-  if (!b) return { text: "None", skipped: false };
-  const skipped = (b.skipped ?? []).map((s) => (s.startsWith("outro") ? "Outro" : "Intro"));
-  const parts = [b.introSec ? `+ intro ${b.introSec.toFixed(0)} s` : "", b.outroSec ? `+ outro ${b.outroSec.toFixed(0)} s` : ""].filter(Boolean);
-  if (skipped.length) return { text: `▲ ${[...new Set(skipped)].join(" and ")} skipped${parts.length ? ` · kept ${parts.join(", ")}` : ""}`, skipped: true, title: (b.skipped ?? []).join("; ") };
-  return { text: parts.length ? `${parts.join(" · ")} · ${who}` : b.fromClip?.length ? "None · set for this clip" : "None", skipped: false };
-}
-
 export function ClipCard({
   clip,
   projectId,
@@ -110,18 +79,17 @@ export function ClipCard({
 }) {
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
-  const [whyOpen, setWhy] = useState(false);
+  const [bumpersOpen, setBumpersOpen] = useState(false);
   const done = clip.status === "done";
   const working = clip.status === "rendering" || clip.status === "preparing";
   const pct = Math.round((progress ?? 0) * 100);
   const tags = clip.hashtags.map((h) => `#${h}`).join(" ");
-  const copy = () =>
+  const copy = (): Promise<void> =>
     navigator.clipboard
-      .writeText([clip.title, clip.caption, tags].filter(Boolean).join("\n\n"))
-      .then(() => toast("Caption + hashtags copied"))
-      .catch(() => toast.error("Couldn’t copy"));
-  const skipped = clip.diagnostics?.cuts.skipped ?? [];
-  const bumpers = bumpersNote(clip.diagnostics);
+      .writeText(clipText(clip))
+      .then(() => void toast("Title, caption + hashtags copied"))
+      .catch(() => void toast.error("Couldn’t copy"));
+  const meta = clipMeta(clip, { modeLabel: MODE_LABEL, projectHasIntro: !!projectIntroId, projectHasOutro: !!projectOutroId });
   const detail =
     clip.status === "failed"
       ? { text: clip.error ?? "Render failed", cls: "bg-err-soft" }
@@ -132,7 +100,7 @@ export function ClipCard({
           : null;
   const statusLabel = clip.status === "rendering" ? `Rendering ${pct}%` : clip.status === "failed" ? "Render failed" : clip.status === "pending" ? "Queued" : undefined;
   const statusKey = clip.status === "pending" ? "queued" : clip.status;
-  const ghost = "rounded-[8px] px-2.5 py-1.5 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
+  const ghost = "inline-flex h-8 w-[5.25rem] items-center justify-center rounded-[8px] text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
     <article data-clip={clip.id} className={`group relative scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
@@ -207,88 +175,80 @@ export function ClipCard({
         </div>
       )}
 
-      {clip.status !== "preparing" && (
-        <dl className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-1 text-xs">
-          <dt className="text-ink3">Framing</dt>
-          <dd className="text-ink">{framingText(clip)}</dd>
-          <dt className="text-ink3">Intro/outro</dt>
-          <dd className={bumpers.skipped ? "font-semibold text-warn" : "text-ink"} title={bumpers.title}>
-            {bumpers.text}
-          </dd>
-          <dt className="text-ink3">Cuts</dt>
-          <dd className="text-ink">
-            {cutsNote(clip.diagnostics)}{" "}
-            {skipped.length > 0 && (
-              <button className="font-semibold text-acc-text" onClick={() => setWhy(!whyOpen)}>
-                {whyOpen ? "Hide" : "Why?"}
-              </button>
-            )}
-          </dd>
-          <dt className="text-ink3">Post</dt>
-          <dd>
-            <button className="font-semibold text-acc-text" aria-expanded={postOpen} onClick={() => setPost(!postOpen)}>
-              {postOpen ? "Hide caption & hashtags" : "Show caption & hashtags"}
-            </button>
-          </dd>
-        </dl>
-      )}
-      {whyOpen && (
-        <div className="rounded-[8px] bg-warn-soft px-2.5 py-1.5 text-xs leading-snug">
-          The removal couldn’t be verified, so the audio was kept. Captions still drop the word.
-          {skipped.map((s, i) => (
-            <p key={i} className="mt-1 line-clamp-3 font-mono text-[10px] text-ink2" title={s.reason}>
-              {formatTime(s.start)} · {s.reason}
-            </p>
-          ))}
-        </div>
-      )}
-      {postOpen && (
-        <div className="flex flex-col gap-1 rounded-[10px] bg-sunk p-2.5 text-[13px] leading-snug">
-          <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
-          {tags && <div className="text-xs text-acc-text">{tags}</div>}
-        </div>
-      )}
+      {/* one line, always present so the card keeps its height; the full facts are in the tooltip */}
+      <p className={`h-4 truncate text-xs leading-4 ${meta.warn ? "text-warn" : "text-ink3"}`} title={meta.title || undefined}>
+        {clip.status === "preparing" ? "" : meta.text}
+      </p>
 
-      <div className="-mx-1 flex flex-wrap items-center gap-0.5">
+      <div className="-mx-1 flex h-8 items-center gap-0.5">
         {clip.status === "failed" && (
-          <>
-            <button className="btn-ink mr-1 px-2.5 py-1.5 text-xs" disabled={busy} onClick={onRerender}>
-              ↻ Retry render
-            </button>
-            <button className="rounded-[8px] px-2.5 py-1.5 text-xs font-semibold text-err hover:bg-err-soft" onClick={() => openReport({ projectId, clipId: clip.id })}>
-              Report
-            </button>
-          </>
-        )}
-        <Link
-          to={`/p/${projectId}/clips/${clip.id}`}
-          aria-disabled={clip.status === "preparing"}
-          className={`rounded-[8px] px-2.5 py-1.5 text-xs font-semibold text-acc-text no-underline hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}
-        >
-          Edit
-        </Link>
-        <button className={ghost} onClick={copy}>
-          Copy text
-        </button>
-        {onCopyLink && (
-          <button className={ghost} onClick={onCopyLink} title="Copy a link that opens this clip">
-            Link
+          <button className="btn-ink mr-1 h-8 px-2.5 text-xs" disabled={busy} onClick={onRerender}>
+            ↻ Retry
           </button>
         )}
+        <Link to={`/p/${projectId}/clips/${clip.id}`} aria-disabled={clip.status === "preparing"} className={`${ghost} text-acc-text hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}>
+          Edit
+        </Link>
         {done && clip.videoUrl ? (
-          <a className={`${ghost} no-underline`} href={`${clip.videoUrl}?download`}>
+          <a className={`${ghost} text-ink hover:bg-sunk`} href={`${clip.videoUrl}?download`}>
             Download
           </a>
         ) : (
-          <button className={ghost} disabled>
+          <button className={`${ghost} text-ink`} disabled title="Available once the clip is rendered">
             Download
           </button>
         )}
-        <button className={ghost} disabled={working || busy} onClick={onRerender}>
-          Re-render
-        </button>
-        <ClipBumpersPopover clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className={ghost} />
+        <div className="flex-1" />
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <MoreButton aria-label={`More actions for clip ${clip.index + 1}`} />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[220px]">
+              <DropdownMenu.Item className="menu-item" onSelect={() => void copy()}>
+                Copy text
+              </DropdownMenu.Item>
+              {onCopyLink && (
+                <DropdownMenu.Item className="menu-item" onSelect={onCopyLink}>
+                  Copy link
+                </DropdownMenu.Item>
+              )}
+              <DropdownMenu.Item className="menu-item" disabled={working || busy || clip.status === "preparing"} onSelect={onRerender}>
+                Re-render
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setBumpersOpen(true)}>
+                Intro / outro…
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" onSelect={() => setPost(true)}>
+                Caption &amp; hashtags…
+              </DropdownMenu.Item>
+              {clip.status === "failed" && (
+                <DropdownMenu.Item className="menu-item text-err" onSelect={() => openReport({ projectId, clipId: clip.id })}>
+                  Report an issue…
+                </DropdownMenu.Item>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
+
+      <Modal open={postOpen} onOpenChange={setPost} title={`Clip ${clip.index + 1}: caption & hashtags`} width={440}>
+        <Dialog.Description className="sr-only">The caption and hashtags to post with this clip.</Dialog.Description>
+        <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-3 text-[13px] leading-snug">
+          <div className="font-semibold">{clip.title}</div>
+          <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
+          {tags && <div className="text-xs text-acc-text">{tags}</div>}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="btn-ghost" onClick={() => setPost(false)}>
+            Close
+          </button>
+          <button className="btn-ink" onClick={() => void copy().then(() => setPost(false))}>
+            Copy
+          </button>
+        </div>
+      </Modal>
+      <ClipBumpersDialog open={bumpersOpen} onOpenChange={setBumpersOpen} clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
     </article>
   );
 }

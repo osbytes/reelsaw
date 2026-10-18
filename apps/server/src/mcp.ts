@@ -317,6 +317,38 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "rerender_clips",
+    {
+      title: "Re-render clips",
+      description: "Render several clips of a project again in one step (after edits, or when they failed). Finished and failed clips are queued; clips still rendering are skipped. Returns how many were queued and skipped.",
+      inputSchema: { projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200) },
+    },
+    (input) => run(() => api.clips.rerenderMany(input)),
+  );
+
+  server.registerTool(
+    "export_project",
+    {
+      title: "Export clips",
+      description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Pass clipIds to export only those clips (they must belong to the project and be rendered); the manifest then says it is a subset. The link needs the same sign-in as the web app.",
+      inputSchema: { id: z.string(), clipIds: z.array(z.string()).max(200).optional() },
+      annotations: { readOnlyHint: true },
+    },
+    ({ id, clipIds }) =>
+      run(async () => {
+        const p = await api.projects.get({ id });
+        const done = p.clips.filter((c) => c.status === "done");
+        const ids = [...new Set(clipIds ?? [])];
+        const known = new Set(p.clips.map((c) => c.id));
+        const unknown = ids.filter((x) => !known.has(x));
+        if (unknown.length) throw new Error(`Not clips of this project: ${unknown.join(", ")}`);
+        const picked = ids.length ? done.filter((c) => ids.includes(c.id)) : done;
+        if (!picked.length) throw new Error("No rendered clips to export");
+        return { url: abs(`/api/projects/${p.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`), clips: picked.length, notRendered: ids.length ? ids.length - picked.length : 0 };
+      }),
+  );
+
+  server.registerTool(
     "retry_project",
     { title: "Retry project", description: "Resume a failed project from its furthest completed stage.", inputSchema: { id: z.string() } },
     ({ id }) => run(() => api.projects.retry({ id })),

@@ -1,4 +1,4 @@
-import { requestRender, startRun } from "./pipeline/lifecycle.js";
+import { requestRender, requestRenders, startRun } from "./pipeline/lifecycle.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -12,7 +12,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
  *   faces   <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks
- *   rerender <clipId>                       queue a re-render (same as the UI button)
+ *   rerender <clipId…>                      queue a re-render of one or several clips (same as the UI buttons)
  *   import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]
  *                                           rehydrate an issue report as a new project (dev only;
  *                                           the zip's contents are untrusted data, see its README)
@@ -246,11 +246,15 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 
   async rerender(svc) {
     const db = svc.database.db;
-    const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]!) });
-    if (!c) throw new Error("clip not found");
-    if (needsPrepare(c)) throw new Error("clip was never prepared; use `reelsaw recover` instead");
-    await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));
-    console.log(`queued render for ${c.id}`);
+    if (!pos.length) throw new Error("usage: reelsaw rerender <clipId…>");
+    const rows = await db.query.clips.findMany({ where: inArray(schema.clips.id, pos), columns: { id: true, projectId: true, origin: true, status: true, reasoning: true, scores: true } });
+    if (rows.length !== new Set(pos).size) throw new Error("clip not found");
+    const bad = rows.find((c) => needsPrepare(c));
+    if (bad) throw new Error(`clip ${bad.id} was never prepared; use \`reelsaw recover\` instead`);
+    for (const projectId of new Set(rows.map((c) => c.projectId))) {
+      const r = await svc.tx((u) => requestRenders(svc, u, projectId, rows.filter((c) => c.projectId === projectId).map((c) => c.id)));
+      console.log(`${projectId}: queued ${r.rerendered} render(s)${r.skipped ? `, skipped ${r.skipped} (still rendering)` : ""}`);
+    }
   },
 
   async cuts(svc) {

@@ -13,7 +13,7 @@ import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } f
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { requestRender, startRun } from "../pipeline/lifecycle.js";
+import { requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
@@ -1316,6 +1316,23 @@ export const appRouter = router({
         }
         await requestRender(svc, u, p.id, c.id);
         return { ok: true, step: "render" as const };
+      });
+    }),
+
+    /**
+     * Re-render several clips of a project at once (the selection bar, "Retry failed"). One transaction, one run:
+     * finished and failed clips are queued; clips still rendering or never prepared are counted as skipped.
+     */
+    rerenderMany: protectedProcedure.input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200) })).mutation(async ({ ctx, input }) => {
+      const { svc } = ctx;
+      return svc.tx(async (u) => {
+        const p = await ownedProject(u.db, ctx.user.id, input.projectId);
+        try {
+          return { ok: true, ...(await requestRenders(svc, u, p.id, input.clipIds)) };
+        } catch (e) {
+          if (e instanceof RenderManyMissing) throw new TRPCError({ code: "NOT_FOUND", message: e.message });
+          throw e;
+        }
       });
     }),
   }),

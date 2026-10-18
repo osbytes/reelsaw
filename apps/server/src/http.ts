@@ -16,7 +16,7 @@ import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
-import { createExportZip } from "./export.js";
+import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
@@ -237,8 +237,12 @@ export function createApp(svc: Services) {
       db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) }),
       db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { language: true } }),
     ]);
-    if (!clips.some((cl) => cl.status === "done" && cl.outputKey)) return c.text("no rendered clips yet", 409);
-    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project, clips, language: transcript?.language ?? null });
+    const ids = parseClipIds(c.req.query("clips"));
+    if (!ids) return c.text("bad clips list", 400);
+    const picked = pickExportClips(clips, ids);
+    if (picked.unknown.length) return c.text("some of those clips are not in this project", 404);
+    if (!picked.clips.some((cl) => cl.status === "done" && cl.outputKey)) return c.text("no rendered clips yet", 409);
+    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset });
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     c.header("Cache-Control", "no-store");

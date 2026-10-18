@@ -2,7 +2,8 @@
  * Transactional state transitions shared by the API, workers and the reconciler. Each runs inside
  * a unit of work (svc.tx) so the row change, its event and its job commit together.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { needsPrepare } from "./manual.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -37,6 +38,42 @@ export async function requestRender(svc: Services, u: UnitOfWork, projectId: str
     });
   }
   return row!.gen;
+}
+
+export interface RenderManyResult {
+  requested: number;
+  /** clips queued for a fresh render */
+  rerendered: number;
+  /** left alone: still rendering/queued, or never prepared (those go through clip.prepare) */
+  skipped: number;
+}
+
+/**
+ * Re-render a set of clips of one project in the caller's transaction: finished and failed clips go through
+ * `requestRender` (so the first one starts the run and emits `run.started` once; the rest see it already running).
+ * The rows are locked in id order so two overlapping batches can't deadlock. Shared by the API, MCP and CLI.
+ */
+export async function requestRenders(svc: Services, u: UnitOfWork, projectId: string, clipIds: string[]): Promise<RenderManyResult> {
+  const ids = [...new Set(clipIds)].sort();
+  const rows = await u.db
+    .select({ id: schema.clips.id, status: schema.clips.status, origin: schema.clips.origin, reasoning: schema.clips.reasoning, scores: schema.clips.scores })
+    .from(schema.clips)
+    .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)))
+    .orderBy(schema.clips.id)
+    .for("update");
+  if (rows.length !== ids.length) throw new RenderManyMissing();
+  let rerendered = 0;
+  for (const c of rows) {
+    if ((c.status !== "done" && c.status !== "failed") || needsPrepare(c)) continue;
+    if ((await requestRender(svc, u, projectId, c.id)) !== null) rerendered++;
+  }
+  return { requested: ids.length, rerendered, skipped: ids.length - rerendered };
+}
+
+export class RenderManyMissing extends Error {
+  constructor() {
+    super("Some of those clips no longer exist");
+  }
 }
 
 export interface StartRunOptions {

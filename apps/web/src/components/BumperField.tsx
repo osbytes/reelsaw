@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { Ban, Equal, Loader2, Pencil, Star, Trash2, Upload, X } from "lucide-react";
@@ -649,13 +649,17 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
   );
 }
 
-/** "Intro / outro…" on a clip card: this clip's own choice without opening the editor. */
-export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId, className }: { clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null; className: string }) {
+/** "Intro / outro…" from a clip card's ⋯ menu: this clip's own choice without opening the editor. */
+export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId }: { open: boolean; onOpenChange: (o: boolean) => void; clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
   const update = useMutation(trpc.clips.update.mutationOptions());
+  // start from what the clip has each time the dialog opens
+  useEffect(() => {
+    if (open) setV(choicesFrom(bumpers));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   const dirty = JSON.stringify(clipBumpersFrom(v)) !== JSON.stringify(clipBumpersFrom(choicesFrom(bumpers)));
   const save = (rerender: boolean) =>
     update.mutate(
@@ -664,40 +668,35 @@ export function ClipBumpersPopover({ clipId, projectId, bumpers, rendered, proje
         onSuccess: () => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
           toast(rerender ? "Saved · re-rendering this clip" : "Saved for this clip");
-          setOpen(false);
+          onOpenChange(false);
         },
         onError: (e) => toast.error(e.message),
       },
     );
   return (
-    <Popover.Root open={open} onOpenChange={(o) => (o && setV(choicesFrom(bumpers)), setOpen(o))}>
-      <Popover.Trigger asChild>
-        <button className={className} title="Choose an intro and outro for just this clip">
-          Intro / outro…
+    <Modal open={open} onOpenChange={onOpenChange} title="Intro and outro for this clip" width={400}>
+      <Dialog.Description className="sr-only">Choose an intro and outro for just this clip.</Dialog.Description>
+      <BumperSelects value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
+      <div className="flex justify-end gap-2">
+        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => onOpenChange(false)}>
+          Cancel
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
-          <b className="text-[13px]">Intro and outro for this clip</b>
-          <BumperSelects value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
-          <div className="flex justify-end gap-2">
-            <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
-              Save
-            </button>
-            <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
-              Save & re-render
-            </button>
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+        <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
+          Save
+        </button>
+        <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
+          Save & re-render
+        </button>
+      </div>
+    </Modal>
   );
 }
 
-/** Applies an intro and/or outro to every selected clip (project page). Slots left on "Leave as it is" are untouched. */
-export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void }) {
+/** Applies an intro and/or outro to every selected clip (the selection bar's "Intro / outro…"). Slots left on "Leave as it is" are untouched. */
+export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void; className: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [v, setV] = useState<SlotChoices>({ intro: "keep", outro: "keep" });
   const many = useMutation(trpc.clips.setBumpersMany.mutationOptions());
   const nothing = v.intro === "keep" && v.outro === "keep";
@@ -718,26 +717,36 @@ export function BulkBumpersBar({ projectId, clipIds, rerenderable, projectIntroI
           const what = [v.intro !== "keep" ? "intro" : "", v.outro !== "keep" ? "outro" : ""].filter(Boolean).join(" and ");
           toast(`Updated the ${what} on ${r.updated} clip${r.updated === 1 ? "" : "s"}${r.rerendered ? ` · re-rendering ${r.rerendered}` : ""}`);
           setV({ intro: "keep", outro: "keep" });
+          setOpen(false);
           onDone();
         },
         onError: (e) => toast.error(e.message),
       },
     );
   return (
-    <div className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-line bg-panel p-3 shadow-pop">
-      <b className="text-[13px]">
-        {clipIds.length} clip{clipIds.length === 1 ? "" : "s"} selected
-      </b>
-      <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} className="max-w-[28rem]" />
-      <div className="flex flex-wrap justify-end gap-2">
-        <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
-          Apply
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button className={className} title={`Set the intro and outro of ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`}>
+          Intro/outro…
         </button>
-        <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} onClick={() => apply(true)}>
-          {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
-        </button>
-      </div>
-    </div>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+          <b className="text-[13px]">
+            Intro and outro for {clipIds.length} clip{clipIds.length === 1 ? "" : "s"}
+          </b>
+          <BumperSelects keep value={v} onChange={setV} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
+              Apply
+            </button>
+            <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} title={rerenderable ? undefined : "None of the selected clips is rendered yet"} onClick={() => apply(true)}>
+              {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
