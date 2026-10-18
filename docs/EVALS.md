@@ -147,6 +147,10 @@ blind, fixed judge model), and gold labels from user decisions once the decision
 |---|---|---|
 | `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md) |
 | `framing` | nothing (committed face samples) | split crops centre each speaker and stay clear of burned-in caption bands; tripod camera settles on the face, no fast pans; a speaker beside an app screen or title card is a `stack` with the panel on top (`panel` cases commit face boxes, text boxes and a divider probe per frame) |
+
+Framing track tolerances are fractions of the source width (`maxErrFrac`, `maxPanFracPerSec` in `case.json`; 0.015625 and 0.625 equal 30 px and 1200 px/s on a 1920 px source), so a case means the same on any source size. The legacy `maxErrPx` / `maxPanPxPerSec` keys (1920 px pixels) still load and are converted. Face-size thresholds in the layout code are relative to the shorter source side, which is identical to the old height fractions for landscape input.
+
+Scene-cut defaults (`SCENE_FLOOR`, `SCENE_RATIO` in `pipeline/scenes.ts`) were tuned on one dark podcast. The `scenes` suite needs a bright, high-motion fixture (sport, vlog, screencast) before they are retuned; until then treat them as unvalidated outside dark talking-head footage.
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |
 | `transcription` | STT + LLM, macOS `say` for audio | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction |

@@ -6,5 +6,5 @@
   "end": 21.4,
   "srcW": 1920,
   "srcH": 1080,
-  "expect": { "settleSec": 2, "maxErrPx": 30, "maxPanPxPerSec": 1200 }
+  "expect": { "settleSec": 2, "maxErrFrac": 0.015625, "maxPanFracPerSec": 0.625 }
 }
