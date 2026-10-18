@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
+import { supports } from "./language.js";
 
 const SR = 16000;
 const FRAME = 80; // 5 ms at 16 kHz
@@ -50,6 +51,8 @@ export interface CutDeps {
   /** CTC forced alignment (16 kHz float PCM + known words → spans relative to the PCM start) */
   align?: (pcm: Float32Array, words: string[]) => Promise<Array<{ text: string; start?: number; end?: number; score?: number }>>;
   signal?: AbortSignal;
+  /** spoken language of the transcript; the English-only CTC aligner is skipped for any other */
+  language?: string | null;
 }
 
 function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
@@ -307,7 +310,7 @@ export async function refineCuts(
     // 0. CTC forced alignment: exact word boundaries from the audio + the words we know are there
     //    (20 ms resolution, ~0.2 s, no transcription call). One or two verified candidates usually
     //    settle it; otherwise fall through to the whisper-based search below.
-    if (deps.align && opts.verify !== false) {
+    if (deps.align && supports("ctcAlign", deps.language) && opts.verify !== false) {
       try {
         const ctc = await ctcBoundaries(deps, source, clipStart, duration, words, deleted, prev, next);
         if (ctc) {

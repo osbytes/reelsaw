@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-16T02:32:05.115Z",
+  "updatedAt": "2026-10-18T17:04:23.091Z",
   "cases": {
     "frame-30s": true,
     "frame-112s": true,
@@ -10,7 +10,25 @@
     "aggregate-apollo-100-220": true,
     "mask-residual": true,
     "aggregate-chia-demo": true,
-    "aggregate-webinar-slides": true
+    "aggregate-webinar-slides": true,
+    "frame-sistercircle-0.8s": true,
+    "frame-sistercircle-8s": true,
+    "frame-sistercircle-32s": true,
+    "frame-sistercircle-260s": true,
+    "frame-oxford-70s": true,
+    "frame-oxford-88.5s": true,
+    "frame-oxford-144s": true,
+    "frame-oxford-177.5s": true,
+    "frame-valsorda-600s": true,
+    "frame-bradford-20s": false,
+    "frame-bradford-56s": false,
+    "frame-rpodcast-930s": true,
+    "aggregate-sistercircle-0-300": false,
+    "aggregate-oxford-60-180": true,
+    "aggregate-valsorda-540-660": true,
+    "aggregate-bradford-0-120": false,
+    "aggregate-rpodcast-900-960": false,
+    "aggregate-voa-ships-0-150": false
   },
   "metrics": {
     "captionCoverage": {
@@ -33,8 +51,18 @@
       "better": "higher"
     },
     "aggregatePass": {
-      "value": 3,
+      "value": 5,
       "better": "higher"
+    },
+    "overlayRecall": {
+      "value": 0.87,
+      "better": "higher",
+      "tolerance": 0.03
+    },
+    "rawPrecision": {
+      "value": 0.37,
+      "better": "higher",
+      "tolerance": 0.05
     }
   }
 }

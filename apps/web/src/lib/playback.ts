@@ -1,4 +1,36 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+
+/**
+ * A playhead position that changes every frame while playing. It lives outside React state so only
+ * the components that draw it (timeline playhead, preview) re-render at frame rate; everything else
+ * reads it on demand or follows a coarser state.
+ */
+export interface Clock {
+  get: () => number;
+  set: (t: number) => void;
+  subscribe: (l: () => void) => () => void;
+}
+
+export function createClock(initial: number): Clock {
+  let t = initial;
+  const ls = new Set<() => void>();
+  return {
+    get: () => t,
+    set: (next) => {
+      if (next === t) return;
+      t = next;
+      for (const l of ls) l();
+    },
+    subscribe: (l) => {
+      ls.add(l);
+      return () => ls.delete(l);
+    },
+  };
+}
+
+export function useClock(clock: Clock): number {
+  return useSyncExternalStore(clock.subscribe, clock.get);
+}
 
 export interface LoopSpec {
   /** what is looping (e.g. a transcript fix id) */

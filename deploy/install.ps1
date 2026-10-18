@@ -10,7 +10,8 @@
 # Options (environment variables, set before running, e.g. $env:REELSAW_LLM = "qwen2.5:7b"):
 #   REELSAW_DIR=$HOME\reelsaw                     where to install
 #   REELSAW_IMAGE=ghcr.io/osbytes/reelsaw:latest  image to run
-#   REELSAW_LLM=qwen2.5:14b                       Ollama model (~9 GB; qwen2.5:7b or gemma3:4b for less RAM)
+#   REELSAW_LLM=<model>                           Ollama model. Default by RAM: 24 GB+ qwen2.5:14b (~9 GB),
+#                                                 12 GB+ qwen2.5:7b, otherwise gemma3:4b
 #   REELSAW_WHISPER=Systran/faster-whisper-small  speech-to-text model (downloaded on first boot)
 #   REELSAW_PORT=3000                             port for the web app
 #   REELSAW_PROJECT=reelsaw                       compose project name (containers/volumes prefix)
@@ -22,7 +23,11 @@ $ErrorActionPreference = 'Continue'   # native commands are checked through $LAS
 function Opt($name, $default) { $v = [Environment]::GetEnvironmentVariable($name); if ($v) { $v } else { $default } }
 $Dir     = Opt 'REELSAW_DIR' (Join-Path $HOME 'reelsaw')
 $Image   = Opt 'REELSAW_IMAGE' 'ghcr.io/osbytes/reelsaw:latest'
-$Llm     = Opt 'REELSAW_LLM' 'qwen2.5:14b'
+# model by RAM, like install.sh: bigger is better, but it has to fit next to the app
+$RamGb = 0
+try { $RamGb = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB) } catch { }
+$AutoLlm = if ($RamGb -ge 24) { 'qwen2.5:14b' } elseif ($RamGb -ge 12) { 'qwen2.5:7b' } else { 'gemma3:4b' }
+$Llm     = Opt 'REELSAW_LLM' $AutoLlm
 $Whisper = Opt 'REELSAW_WHISPER' 'Systran/faster-whisper-small'
 $Port    = Opt 'REELSAW_PORT' '3000'
 $Project = Opt 'REELSAW_PROJECT' 'reelsaw'
@@ -158,7 +163,7 @@ POSTGRES_PASSWORD=$(Rand 24)
 APP_URL=http://localhost:$Port
 PORT=$Port
 REELSAW_IMAGE=$Image
-ALLOW_SIGNUP=true
+SIGNUP_MODE=open
 
 # language model: Ollama ($OllamaMode)
 AI_MODEL=compat:$Llm
@@ -183,6 +188,7 @@ Say 'Pulling images (first run downloads a few GB)'
 Compose pull --quiet --ignore-pull-failures 2>&1 | Out-Null
 if (-not (Ok { docker image inspect $Image })) { Die "couldn't pull ${Image}: check the name, or 'docker login ghcr.io' if the image is private" }
 
+if (-not [Environment]::GetEnvironmentVariable('REELSAW_LLM') -and $RamGb -gt 0) { Say "$RamGb GB RAM detected: using $Llm (set REELSAW_LLM to choose another)" }
 Say "Pulling the language model $Llm (first run only; several GB)"
 if ($OllamaMode -eq 'host') {
   if (Has ollama) {
@@ -212,7 +218,7 @@ for ($i = 0; $i -lt 120; $i++) {
     Say "Reelsaw is running: http://localhost:$Port"
     Write-Host @"
 
-  Create your account, then set ALLOW_SIGNUP=false in $Dir\.env and restart.
+  Create your account, then set SIGNUP_MODE=closed (or approval) in $Dir\.env and restart.
 
   cd $Dir
   docker compose -p $Project $p logs -f app   # logs

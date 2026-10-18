@@ -53,6 +53,7 @@ export function planPruneBatch(rows: PruneRow[], cursor: number, cutoff: Date, s
 const TABLES = {
   events: { table: "project_events", typed: true, days: (c: Services["config"]) => c.EVENT_RETENTION_DAYS },
   llm: { table: "llm_usage", typed: false, days: (c: Services["config"]) => c.LLM_USAGE_RETENTION_DAYS },
+  stt: { table: "stt_usage", typed: false, days: (c: Services["config"]) => c.LLM_USAGE_RETENTION_DAYS },
   admin: { table: "admin_events", typed: false, days: (c: Services["config"]) => c.ADMIN_EVENT_RETENTION_DAYS },
 } as const;
 type Which = keyof typeof TABLES;

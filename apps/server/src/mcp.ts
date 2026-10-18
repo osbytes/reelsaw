@@ -18,6 +18,7 @@ import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./bumpers/service.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
+import { restorableFor } from "./projects/service.js";
 
 function mmss(s: number) {
   const m = Math.floor(s / 60);
@@ -65,6 +66,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     durationSec: p.durationSec,
     clips: `${p.clipsDone}/${p.clipCount} rendered`,
     createdAt: p.createdAt,
+    ...(p.deletedAt ? { deletedAt: p.deletedAt } : {}),
     url: abs(`/p/${p.id}`),
   });
   const clipSummary = (c: Awaited<ReturnType<typeof api.projects.get>>["clips"][number]) => ({
@@ -92,9 +94,9 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool(
     "list_projects",
     TOOLS.list_projects,
-    ({ cursor, limit }) =>
+    ({ cursor, limit, deleted }) =>
       run(async () => {
-        const page = await api.projects.list({ cursor, limit });
+        const page = await api.projects.list({ cursor, limit, deleted });
         return { projects: page.items.map(projectSummary), total: page.total, nextCursor: page.nextCursor };
       }),
   );
@@ -213,7 +215,8 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
         const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id), columns: { projectId: true } });
         if (!c) throw new TRPCError({ code: "NOT_FOUND" });
         const p = await api.projects.get({ id: c.projectId });
-        const clip = p.clips.find((x) => x.id === id)!;
+        const clip = p.clips.find((x) => x.id === id);
+        if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `A re-analyze replaced this clip. restore_clip brings it back (possible ${restorableFor(svc)} after it was replaced).` });
         return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsById()) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
       }),
   );
@@ -332,6 +335,18 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "delete_project",
     TOOLS.delete_project,
     ({ id }) => run(() => api.projects.delete({ id })),
+  );
+
+  server.registerTool(
+    "restore_project",
+    TOOLS.restore_project,
+    ({ id }) => run(() => api.projects.restore({ id })),
+  );
+
+  server.registerTool(
+    "restore_clip",
+    TOOLS.restore_clip,
+    ({ id }) => run(() => api.clips.restore({ id })),
   );
 
   return server;

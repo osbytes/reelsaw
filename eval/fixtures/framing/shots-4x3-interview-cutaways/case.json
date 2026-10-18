@@ -1,0 +1,78 @@
+{
+  "kind": "shots",
+  "note": "VOA Obama interview, source 1:40-2:20 (4:3, 640x480): the president's close-up (x ~0.39), a wide two-shot of both chairs (Obama x 0.15, interviewer x 0.82, faces ~0.12 tall), the interviewer's close-up (x ~0.61), the wide shot again, the president again. Shot changes are media.detectScenes' cuts, checked on 2 fps contact sheets over 40-80 s; grid frames at 50, 65 and 70 s. The wide two-shots are `uncertain` (fit the room or split the pair).",
+  "source": {
+    "id": "voa-obama-60-180",
+    "url": "https://www.youtube.com/watch?v=LK5W9zjuBWk",
+    "start": 60,
+    "end": 180,
+    "sha256": "15cebb23a51b746c0c03c87664818e9f97af8addcc8b24da1fa37d4910af6a49"
+  },
+  "start": 40,
+  "end": 80,
+  "srcW": 640,
+  "srcH": 480,
+  "sceneCuts": [
+    3.777,
+    7.047,
+    23.43,
+    27.367,
+    36.776
+  ],
+  "expect": {
+    "minAgreement": 0.8,
+    "faceTol": 0.08,
+    "windows": [
+      {
+        "from": 0,
+        "to": 3.78,
+        "layout": "face",
+        "faces": [
+          0.39
+        ]
+      },
+      {
+        "from": 3.78,
+        "to": 7.05,
+        "layout": [
+          "fit",
+          "split"
+        ],
+        "uncertain": true
+      },
+      {
+        "from": 7.05,
+        "to": 23.43,
+        "layout": "face",
+        "faces": [
+          0.39
+        ]
+      },
+      {
+        "from": 23.43,
+        "to": 27.37,
+        "layout": "face",
+        "faces": [
+          0.61
+        ]
+      },
+      {
+        "from": 27.37,
+        "to": 36.78,
+        "layout": [
+          "fit",
+          "split"
+        ],
+        "uncertain": true
+      },
+      {
+        "from": 36.78,
+        "to": 40,
+        "layout": "face",
+        "faces": [
+          0.39
+        ]
+      }
+    ]
+  }
+}

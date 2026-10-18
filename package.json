@@ -11,6 +11,8 @@
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
     "start": "pnpm --filter @reelsaw/server start",
     "mock-ai": "node scripts/mock-ai.mjs",
+    "docs:gen": "pnpm --filter @reelsaw/server docs:gen",
+    "docs:check": "pnpm --filter @reelsaw/server docs:check",
     "eval": "pnpm --filter @reelsaw/server eval",
     "models:download": "sh scripts/download-models.sh apps/server/models",
     "changeset": "changeset",

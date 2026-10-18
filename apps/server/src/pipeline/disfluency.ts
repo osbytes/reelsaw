@@ -1,6 +1,6 @@
 /**
  * Disfluency detection: fillers ("um"), repetitions ("the the"), and repairs / false starts
- * ("your pay actual pay dates"). Every result is a TranscriptFlag with an empty `suggested`
+ * ("my gym new gym schedule"). Every result is a TranscriptFlag with an empty `suggested`
  * (= delete), so the review UI, applyFlags and re-render all work unchanged.
  *
  * Shape (after Shriberg's reparandum → interruption point → repair):
@@ -38,7 +38,8 @@ const EMPHATIC = new Set("very really so much many more most too way far long bi
 const NEVER_CLAUSE_FINAL = new Set("i we they he she and but or nor so because if when while although though the a an my your our their his its of to in at on for with from into onto than as".split(" "));
 const DISCOURSE = new Set(["like", "you know", "i mean", "you know like", "like you know"]);
 const classOf = (w: string) => (PREPOSITIONS.has(w) ? "prep" : DETERMINERS.has(w) ? "det" : null);
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9']+/g, "");
+/** Letters and digits of any script plus apostrophes; diacritics are kept ("über" stays "über"). */
+export const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[’‘]/g, "'").replace(/[^\p{L}\p{N}']+/gu, "");
 /** Short closed-class word: deleting one is only safe when the repair repeats or replaces it right away. */
 const FUNCTION_WORDS = new Set([...PREPOSITIONS, ...DETERMINERS, ..."to like and or but so that this these those it i you we they he she me him her us them is was are were be been am do did does have has had will would can could just then than as if what which who how".split(" ")]);
 export const isFunctionWord = (w: string) => FUNCTION_WORDS.has(norm(w)) || FILLERS.has(norm(w));
@@ -153,7 +154,7 @@ function rewritePrompt(original: string) {
   return `Remove speech disfluencies from this transcript excerpt so it reads cleanly:
 - fillers: um, uh, er, hmm
 - repetitions: a word or phrase said twice in a row by accident ("the the", "I think I think" → keep one)
-- false starts / repairs: an abandoned word or phrase the speaker immediately replaces ("your pay actual pay dates" → "your actual pay dates"; "on Tuesday, no, Wednesday" → "Wednesday")
+- false starts / repairs: an abandoned word or phrase the speaker immediately replaces ("my gym new gym schedule" → "my new gym schedule"; "on Monday, no, Thursday" → "Thursday")
 Do NOT remove: words the grammar needs, intentional emphasis ("very, very", "really, really"), quoted speech, list items, or discourse words that carry meaning.
 Rules: only delete words. Never add, reorder, reword or fix grammar. Keep punctuation and capitalization of the words you keep. When in doubt, keep the word. If nothing needs removing, return the text unchanged.
 
@@ -216,7 +217,7 @@ export function roughCopy(words: Word[], i: number, span: number): { ok: boolean
     if (swap) return { ok: true, prior: 0.55, subkind: "repair" };
     return { ok: false, prior: 0, subkind: "repair" };
   }
-  // content words must come back right away: "your pay actual pay dates"
+  // content words must come back right away: "my gym new gym schedule"
   const restated = content.every((t) => next.includes(t));
   return restated ? { ok: true, prior: 0.8, subkind: "repair" } : { ok: false, prior: 0, subkind: "repair" };
 }

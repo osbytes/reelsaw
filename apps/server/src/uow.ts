@@ -11,12 +11,26 @@
  * each other's changes.
  */
 import pg from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
 import type { ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
-import type { Queue, QueueName, JobData } from "./queue/boss.js";
+import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
+import type { Config } from "./config.js";
+import { checkJobLimits, limitsFor } from "./quota.js";
+
+/**
+ * Who asked for the work running now. Set around every approved user's tRPC call (protectedProcedure, which MCP
+ * and the CLI's acting-as-user calls go through too); absent in workers, the reconciler and operator CLI commands.
+ * Jobs a unit enqueues for that user's own projects are their requests: tagged `by: "user"` and admitted against
+ * MAX_LIVE_JOBS_PER_USER / MAX_RERENDERS_PER_HOUR. Pipeline hand-offs are never refused.
+ */
+const requestedBy = new AsyncLocalStorage<{ userId: string }>();
+export function asUserRequest<T>(userId: string, fn: () => T): T {
+  return requestedBy.run({ userId }, fn);
+}
 
 export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
@@ -43,6 +57,9 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "stage.failed": "warn",
   "project.done": "info",
   "project.failed": "error",
+  "project.deleted": "info",
+  "project.restored": "info",
+  "clip.restored": "info",
   "clip.done": "info",
   "clip.failed": "error",
   "clip.retrying": "warn",
@@ -70,7 +87,7 @@ export function isRetryableTxError(err: unknown): boolean {
 
 const TX_ATTEMPTS = 3;
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, config?: Config): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -88,7 +105,26 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
         },
-        enqueue: (q, data) => queue.enqueue(q, data, exec),
+        async enqueue(q, data) {
+          let a = await queue.admission(data, exec);
+          const who = requestedBy.getStore();
+          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a });
+          if (config) {
+            const limits = await limitsFor(db, config, a.userId);
+            if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
+              // one admission at a time per user, counted again under the lock, so two requests can't both take the last slot
+              await client.query("select pg_advisory_xact_lock(hashtext($1))", [`jobs:${a.userId}`]);
+              a = await queue.admission(data, exec);
+              try {
+                checkJobLimits(limits, a, USER_RENDER_QUEUES.includes(q));
+              } catch (err) {
+                log.warn({ userId: a.userId, queue: q, live: a.live, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
+                throw err;
+              }
+            }
+          }
+          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a });
+        },
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {

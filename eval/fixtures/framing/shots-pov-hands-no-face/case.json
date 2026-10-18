@@ -1,0 +1,79 @@
+{
+  "kind": "shots",
+  "note": "J. Kenji Lopez-Alt head-mounted POV cooking video (CC BY), source 0:00-2:04: hands, pans, stove, fridge and fast camera swings; no face at any point (every frame at 2 fps over the whole 124 s viewed on contact sheets). Expected: no face lock anywhere (fit or centre), and the detector must not invent faces: at most 5% of sampled frames may hold a face box (the true count is zero). Known failure (a finding): UltraFace returns boxes in 38% of frames, mostly round stainless pans seen from above with scores up to 0.99 (t16.jpg, t35.jpg: the pan in the sink at 14-18 s, the pot and pan at 35 s), so about a fifth of the clip gets a face crop on cookware.",
+  "source": {
+    "id": "kenji-pov-0-124",
+    "url": "https://www.youtube.com/watch?v=6IJiah55k4k",
+    "start": 0,
+    "end": 124,
+    "sha256": "bd490bbac952f2b6f00067bbd0107a076a3abd7c06a96009476f81bc404b53cb"
+  },
+  "start": 0,
+  "end": 124,
+  "srcW": 1920,
+  "srcH": 1080,
+  "sceneCuts": [
+    3.971,
+    7.508,
+    9.676,
+    12.913,
+    15.482,
+    18.385,
+    21.188,
+    22.823,
+    24.091,
+    25.225,
+    27.16,
+    29.229,
+    32.199,
+    34.668,
+    36.637,
+    39.773,
+    42.442,
+    46.013,
+    48.148,
+    51.218,
+    52.786,
+    54.688,
+    57.19,
+    59.693,
+    60.894,
+    64.031,
+    66.3,
+    67.567,
+    69.303,
+    71.171,
+    72.806,
+    74.841,
+    75.709,
+    79.413,
+    83.65,
+    88.989,
+    90.691,
+    93.527,
+    96.463,
+    98.765,
+    102.669,
+    105.105,
+    108.141,
+    109.343,
+    111.945,
+    115.349,
+    119.052,
+    121.555
+  ],
+  "expect": {
+    "minAgreement": 0.9,
+    "maxFaceFrames": 0.05,
+    "windows": [
+      {
+        "from": 0,
+        "to": 124,
+        "layout": [
+          "fit",
+          "center"
+        ]
+      }
+    ]
+  }
+}

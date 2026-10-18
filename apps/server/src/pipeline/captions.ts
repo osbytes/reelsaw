@@ -1,4 +1,4 @@
-import { lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
 
 export interface CaptionOptions {
   width: number;
@@ -36,10 +36,10 @@ import { groupCaptionLines as groupLines } from "@reelsaw/shared";
 
 /** Caption font size in output pixels for a frame of the given height (mirrors the web preview). */
 export function captionFontPx(height: number, size: number) {
-  return Math.round(68 * (height / 1920) * size);
+  return Math.round(CAPTION_FONT_FRAC * height * size);
 }
 export function hookFontPx(height: number) {
-  return Math.round(60 * (height / 1920));
+  return Math.round(HOOK_FONT_FRAC * height);
 }
 
 /**

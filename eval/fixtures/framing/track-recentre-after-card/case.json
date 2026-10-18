@@ -7,5 +7,5 @@
   "srcW": 1920,
   "srcH": 1080,
   "sceneCuts": [],
-  "expect": { "settleSec": 2, "maxErrPx": 30, "maxPanPxPerSec": 1200, "recentre": { "at": 12.8, "within": 0.25 } }
+  "expect": { "settleSec": 2, "maxErrFrac": 0.015625, "maxPanFracPerSec": 0.625, "recentre": { "at": 12.8, "within": 0.25 } }
 }

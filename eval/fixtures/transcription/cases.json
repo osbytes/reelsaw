@@ -99,5 +99,154 @@
       "Kestrel Robotics"
     ],
     "text": "Today I am joined by Priyanka Venkatesh, who runs Lumora, and Tomasz Zieli\u0144ski from Kestrel Robotics. Priyanka, let us start with you. How did Lumora make its first ten hires? And Tomasz, Kestrel Robotics grew from four people to forty in a year. What did Kestrel Robotics get right that most startups get wrong?"
+  },
+  {
+    "id": "real-dwarkesh-tlaxcalans",
+    "source": {
+      "id": "transcription-LwQQ7nBCGSs-310-430",
+      "url": "https://www.youtube.com/watch?v=LwQQ7nBCGSs",
+      "start": 310,
+      "end": 430,
+      "sha256": "5eab0168442779a2b399e9337e22bed2a50703f9eceb02b7e2aa0f6fa822b51b"
+    },
+    "meta": {
+      "title": "How did a few hundred Spanish soldiers topple two empires? \u2013 Si Sheppard",
+      "uploader": "Dwarkesh Patel"
+    },
+    "entities": [
+      "Tlaxcalans",
+      "Cort\u00e9s",
+      "Totonacs",
+      "Toledo"
+    ],
+    "corrections": [
+      {
+        "heard": "Lash Collins",
+        "expected": "Tlaxcalans"
+      },
+      {
+        "heard": "Cortez",
+        "expected": "Cort\u00e9s"
+      }
+    ],
+    "text": "had been imposed on them. Having established this relationship with the Totonacs, Cort\u00e9s begins to march inland, and he enters the territory of the Tlaxcalans, who, like an autoimmune system, immediately rallied to defeat him, to expel him from their territory. But he fights them to a standstill for such a period of time that the Tlaxcalans and he arrive at a new kind of arrangement. The Tlaxcalans again appreciate his strength, his power, his potential. They swing over to his side and will henceforward serve as guides and reinforcements for his expedition deeper into the interior. Can we pause here and talk about the numbers? How many men had Cort\u00e9s brought with him? Even the Tlaxcalans had much larger numbers than Cort\u00e9s did. So even the standstill is an impressive military achievement, especially because he\u2019s fighting without native support. What are the numbers even at this point? A few hundred on Cort\u00e9s\u2019 side and multiple thousands on the Tlaxcalans\u2019 side. It\u2019s at this point that the critical technological differentials from the Old and New World really begin to come into effect. The classic text which got me invested in this whole scenario in the first place is Jared Diamond\u2019s book, Guns, Germs, and Steel. He enumerates in the title those critical advantages that the Spaniards had. Guns in reality weren\u2019t so significant. Once the Native peoples got over the shock value, they appreciated, given the very slow reloading times involved in firearms at that time, that they weren\u2019t so significant as assets on the battlefield. But steel was critical. Local weapons were carved from wood and from stone and from obsidian, that volcanic glass which is razor sharp when honed to a point and quite dangerous as a slashing weapon. But against the steel armor, and especially the steel helmets that the conquistadors were wearing, it was much less effective. The conquistadors were drawing on military traditions of the Old World that went back generations, incorporating long Toledo steel sword blades. They used those as thrusting weapons to take out indigenous warriors who were coming in with cut-and-slash",
+    "note": "Reference = the video's human (manual, clean-verbatim) English caption track, only the words whose time falls in the window: `npx tsx src/eval/tools/caption-diff.ts LwQQ7nBCGSs --ref 310-430` (word times snapped to the ASR track where the two align). Edge words may be cut mid-word by the slice. Standard YouTube licence: url + time only. Name-dense: in this window YouTube's ASR track (en-orig) writes \"Tlaxcalans\" as \"Lash Collins\" 3 times (right twice) and \"Cort\u00e9s\" as \"Cortez\" 4 times; it also hears \"like an autoimmune system\" as \"like and what do you mean system\". Those are the `corrections`. Metadata is the real title and uploader only (no description), so nothing tells the vocabulary step about the Tlaxcalans: compare with real-dwarkesh-tlaxcalans-vocab. First run (faster-whisper-small, 2026-10-18): Whisper writes \"Lashkarlands\" / \"Talashkarlands\" for Tlaxcalans and \"Totonax\" for Totonacs; recall 4/11 fails the case. A true finding, not a bad label."
+  },
+  {
+    "id": "real-dwarkesh-tlaxcalans-vocab",
+    "source": {
+      "id": "transcription-LwQQ7nBCGSs-310-430",
+      "url": "https://www.youtube.com/watch?v=LwQQ7nBCGSs",
+      "start": 310,
+      "end": 430,
+      "sha256": "5eab0168442779a2b399e9337e22bed2a50703f9eceb02b7e2aa0f6fa822b51b"
+    },
+    "meta": {
+      "title": "How did a few hundred Spanish soldiers topple two empires? \u2013 Si Sheppard",
+      "uploader": "Dwarkesh Patel"
+    },
+    "vocabulary": "Tlaxcalans, Totonacs, Cort\u00e9s",
+    "entities": [
+      "Tlaxcalans",
+      "Cort\u00e9s",
+      "Totonacs",
+      "Toledo"
+    ],
+    "corrections": [
+      {
+        "heard": "Lash Collins",
+        "expected": "Tlaxcalans"
+      },
+      {
+        "heard": "Cortez",
+        "expected": "Cort\u00e9s"
+      }
+    ],
+    "text": "had been imposed on them. Having established this relationship with the Totonacs, Cort\u00e9s begins to march inland, and he enters the territory of the Tlaxcalans, who, like an autoimmune system, immediately rallied to defeat him, to expel him from their territory. But he fights them to a standstill for such a period of time that the Tlaxcalans and he arrive at a new kind of arrangement. The Tlaxcalans again appreciate his strength, his power, his potential. They swing over to his side and will henceforward serve as guides and reinforcements for his expedition deeper into the interior. Can we pause here and talk about the numbers? How many men had Cort\u00e9s brought with him? Even the Tlaxcalans had much larger numbers than Cort\u00e9s did. So even the standstill is an impressive military achievement, especially because he\u2019s fighting without native support. What are the numbers even at this point? A few hundred on Cort\u00e9s\u2019 side and multiple thousands on the Tlaxcalans\u2019 side. It\u2019s at this point that the critical technological differentials from the Old and New World really begin to come into effect. The classic text which got me invested in this whole scenario in the first place is Jared Diamond\u2019s book, Guns, Germs, and Steel. He enumerates in the title those critical advantages that the Spaniards had. Guns in reality weren\u2019t so significant. Once the Native peoples got over the shock value, they appreciated, given the very slow reloading times involved in firearms at that time, that they weren\u2019t so significant as assets on the battlefield. But steel was critical. Local weapons were carved from wood and from stone and from obsidian, that volcanic glass which is razor sharp when honed to a point and quite dangerous as a slashing weapon. But against the steel armor, and especially the steel helmets that the conquistadors were wearing, it was much less effective. The conquistadors were drawing on military traditions of the Old World that went back generations, incorporating long Toledo steel sword blades. They used those as thrusting weapons to take out indigenous warriors who were coming in with cut-and-slash",
+    "note": "Same audio and reference as real-dwarkesh-tlaxcalans, with the names a user would type into the project vocabulary. Measures whether bias + correction fix what the plain run gets wrong."
+  },
+  {
+    "id": "real-dwarkesh-conquistadors",
+    "source": {
+      "id": "transcription-LwQQ7nBCGSs-5620-5740",
+      "url": "https://www.youtube.com/watch?v=LwQQ7nBCGSs",
+      "start": 5620,
+      "end": 5740,
+      "sha256": "a252afbeb36fa4250d7b28ab050012c382080ba35ffa569cde97d7936b33eb9d"
+    },
+    "meta": {
+      "title": "How did a few hundred Spanish soldiers topple two empires? \u2013 Si Sheppard",
+      "uploader": "Dwarkesh Patel"
+    },
+    "entities": [
+      "Aztec",
+      "Spanish",
+      "Europe"
+    ],
+    "text": "from very risky ventures. Maybe to close us off, the thing I find really remarkable in these stories\u2026 We\u2019ve talked about how lopsided these battles have been, how quickly this conquest proceeded. In the grand scheme of things, the technological advantages that the conquistadors had over these empires are not that shockingly big. As you mentioned, guns at this time are not good enough to actually be that helpful during battle, so it\u2019s basically horses and steel weapons. In fact, I don\u2019t know if we\u2019ve talked about this, but towards the ends of these conquests, or the middles of these conquests, the metal is weighing them down and it\u2019s really hot and stuff. So they\u2019re even reverting to the cotton armor that the natives are using. So it\u2019s not even the armor. It\u2019s really just that they had better metal swords instead of obsidian blades, and that they had horses. That\u2019s enough to let a couple hundred men take over entire empires. You can draw analogies to what might happen in the future. We don\u2019t even have to go there. I just find it remarkable how little it took for them to be so dominant. They could win battles. They could not have won the war, though, at the end without the support of those indigenous allies. So those are all the numbers. Yes, you\u2019re actually right. They would almost keep the helmets to protect the head, but many of them were ditching the metal armor in favor of the local stuff because that was good enough as protection against local weapons. They would not have done that and carried it back to Europe. That would have made them too vulnerable. But here you adapt to the circumstances. You have more freedom of mobility. It\u2019s less exhausting wearing cotton than it is to wear metal. They would make that adaptation. They would even sometimes, for very prized allies, again as a way of integrating them into the Spanish coalition, provide local chiefs and warlords with Spanish weapons, just to emphasize, \"You\u2019re so special to me.\" This was effective in binding them together. They were very, very clever in identifying the local sub-chiefs beneath the Aztec layer of authority",
+    "note": "Reference = the video's human (manual, clean-verbatim) English caption track, only the words whose time falls in the window: `npx tsx src/eval/tools/caption-diff.ts LwQQ7nBCGSs --ref 5620-5740` (word times snapped to the ASR track where the two align). Edge words may be cut mid-word by the slice. Standard YouTube licence: url + time only. The span of the creator's own short B6FAMw8FgX4. Two speakers, fast and disfluent (the human track drops 24 runs of ASR words here: 3 um/uh, repeats, restarts, \"like, you know\"), so the gap between raw and normalised WER is large. Few names: the names in this episode (Tlaxcalans, Moctezuma, Tenochtitlan) are elsewhere. First run (faster-whisper-small, 2026-10-18): WER 0.29 because Whisper skipped about 25 s of speech near the start of the slice (\"Maybe to close this off ... I don't know if we've talked about this, but\" is missing from its output). A true finding (a dropped stretch), not a bad reference."
+  },
+  {
+    "id": "real-stallman-freedoms",
+    "source": {
+      "id": "transcription-Ag1AKIl_2GM-120-240",
+      "url": "https://www.youtube.com/watch?v=Ag1AKIl_2GM",
+      "start": 120,
+      "end": 240,
+      "sha256": "5d5d093f55b1eb2321e09d65d1a916b37f45dab58d7a0e413a6376ffc83fe273"
+    },
+    "meta": {
+      "title": "Free software, free society: Richard Stallman at TEDxGeneva 2014",
+      "uploader": "TEDx Talks",
+      "tags": [
+        "GNU",
+        "Free Software",
+        "richard stallman",
+        "TEDxGeneva"
+      ]
+    },
+    "entities": [],
+    "text": "purpose. Freedom one is the freedom to study the source code of the program and change it, so it does the computing you want it to do. But what is the source code? Every program typically will have two forms. There's the form that you can read, and you can understand if you know the programming language. That's the source. That's what programmers write and change. Then, there's the executable, which is a bunch of numbers which even a programmer can't figure out. If all you get is the executable, it's a horrible pain in the neck to the figure out what it does, and even harder to change it. So, to give you the real possibility to study and change it, they've got to give you the source code. That's a requirement. With those two freedoms, each user separately can make a copy and start changing it and make it do what she wants. That's individual control. But what if you're not a programmer? You look at the source code, and you don't understand it. Individual control isn't enough. We also need collective control, which means any group of users are free to work together to adapt the program to what they want. Of course, in the group, some of them are programmers. They're the ones who actually write the changes, but they're doing it as part of the group for what the group wants. Of course, the group doesn't have to be everybody. Others can use it some other way. They're all free to do that. Collective control requires two more essential freedoms. Freedom two is the freedom to redistribute exact copies, to make the copies and then give them away or sell them when you wish. Freedom three is similar, but it's for your modified versions. You're free to make copies, and then give them or sell them when you wish. If you do have these freedoms, then it's free software, the users control the program. But if any of those freedoms is missing, then the users don't control the program. Instead,",
+    "note": "Reference = the video's human (manual, clean-verbatim) English caption track, only the words whose time falls in the window: `npx tsx src/eval/tools/caption-diff.ts Ag1AKIl_2GM --ref 120-240` (word times snapped to the ASR track where the two align; this video has no en-orig ASR track, so word times are spread over each caption line and the window edges are good to about 1 s). Edge words may be cut mid-word by the slice. CC BY (claimed by the uploader). Accented English, deliberate pace, no names in the window (the four freedoms of free software). The human track itself has a slip (\"a horrible pain in the neck to the figure out\"), counted against every model alike."
+  },
+  {
+    "id": "real-missing-semester-shells",
+    "source": {
+      "id": "transcription-MSgoeuMqUmU-600-720",
+      "url": "https://www.youtube.com/watch?v=MSgoeuMqUmU",
+      "start": 600,
+      "end": 720,
+      "sha256": "f6f7ef7655eabeb019ff77e726e60cc166c6fe609e6a73cbf287cd59883f8cd8"
+    },
+    "meta": {
+      "title": "Lecture 1: Course Overview + Introduction to the Shell",
+      "uploader": "Missing Semester",
+      "tags": [
+        "mit",
+        "lecture",
+        "tools",
+        "command-line"
+      ]
+    },
+    "entities": [
+      "Bash",
+      "Zsh",
+      "PowerShell",
+      "WSL",
+      "Linux",
+      "Windows"
+    ],
+    "corrections": [
+      {
+        "heard": "bornagain",
+        "expected": "Bourne Again"
+      },
+      {
+        "heard": "zish",
+        "expected": "Zsh"
+      }
+    ],
+    "text": "movement and selection. But apart from that, most of the interesting stuff here is going to happen in the shell. The shell that is most commonly used across the board is the Bourne Again SHell or bash. Bash is what you're going to get on Linux usually when you start a terminal. On Mac OS it also used to be bash, these days it's something called Zsh or ZSH. This is also now the default on some Linux distributions as well. Zsh is a bash compatible shell. So things that are valid in Bash are usually valid in Zsh, and Zsh has a bunch of other ergonomic improvements and feature improvements that make it easier to interface with. You'll find that there are actually a lot of different shells that are often built for different purposes. And in fact, there are some that, like, Bash is pretty old and has not seen significant new feature expansion since then. Zsh does have a lot of ergonomics improvements, but there are also shells like fish that are intended to be... written by humans on the command line rather than by programs or in programs. And you'll find that if you talk to the instructors, like all of us use different shells for different reasons. And this is also something where you could choose to explore your own shell down the line. But for the initial sort of investigation and for everything we cover in this class, we're going to be focusing on bash and sort of by extension also Zsh. On Windows, you will not get a bash compatible prompt. You will get either batch, B-A-T-C-H or you will get PowerShell, the newer version of the shell for Windows. These have similar concepts, so what you find in Bash and similar shells, but they are kind of different. Their syntax is kind of different, the way you invoke programs is kind of different. We will not cover those in this class. If you're on Windows I recommend you install either the Windows subsystem for Linux, WSL, or you install a Linux virtual machine that lets you get access to a proper shell. PowerShell is also very good, but for very different reasons. But in this class, we'll focus entirely on Bash and its derivatives. Now, why",
+    "note": "Reference = the video's human (manual, clean-verbatim) English caption track, only the words whose time falls in the window: `npx tsx src/eval/tools/caption-diff.ts MSgoeuMqUmU --ref 600-720` (word times snapped to the ASR track where the two align). Edge words may be cut mid-word by the slice. CC BY (claimed by the uploader). Lecture on shells: in this window YouTube's ASR track writes \"Bourne Again SHell\" as \"bornagain shell\", \"Zsh\" as \"zish\" / \"ze\" / \"Z\", and \"B-A-T-C-H\" as \"bat t um\". The human track spells a letter sequence (B-A-T-C-H), which tokenises into five one-letter words."
   }
 ]

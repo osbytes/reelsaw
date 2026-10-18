@@ -1,5 +1,5 @@
 {
-  "note": "Shot cuts verified by eye (frames 0.3 s either side). Times are relative to the section start. Low-contrast, desaturated footage: hard cuts score 0.17-0.28 vs ~0.0015 for ordinary frames, so a fixed 0.35 threshold finds none.",
+  "note": "Shot cuts verified by eye (frames 0.3 s either side). Times are relative to the section start. Low-contrast, desaturated footage: hard cuts score 0.17-0.28 vs ~0.0015 for ordinary frames, so a fixed 0.35 threshold finds none. `gradual` lists [from, to] windows (dissolves, wipes, graphic transitions) that are not hard cuts: a detection inside one (plus the tolerance) is neither a hit nor a false positive. Labels for the cases after apollo were made from a 4 fps contact sheet of the whole graded window, then frames at -0.3/-0.1/+0.1/+0.3 s around each candidate; the detector output was not used as a label source. A cut time is the midpoint of the 0.2 s gap between the last old-shot frame and the first new-shot frame, so it is good to +-0.1 s.",
   "cases": [
     {
       "id": "apollo-dark-podcast",
@@ -14,6 +14,54 @@
       "gradeUntil": 60,
       "expectCuts": [0.367, 13.733, 18.333, 21.1, 39.433, 51.967, 54.967],
       "tolerance": 0.25
+    },
+    {
+      "id": "bradford-highlights-bright",
+      "license": "CC BY (uploader-set flag, Bradford City AFC official channel); no frames committed",
+      "source": {
+        "id": "bradford-0-120",
+        "url": "https://www.youtube.com/watch?v=F_FQy5Syc3A",
+        "start": 0,
+        "end": 120,
+        "sha256": "b23b86331e77be1c7d99c08096dc3144f1cd7109b0f23d4430b605874583ac65"
+      },
+      "gradeUntil": 120,
+      "expectCuts": [26.85, 45.85, 48.7, 60.05, 72.5, 88.8, 90.75, 99.8, 117.25],
+      "gradual": [[0, 14.6], [28.9, 29.6], [50.8, 51.3], [61.9, 62.3], [77.8, 78.3], [93.5, 93.9], [104.0, 104.4]],
+      "tolerance": 0.25,
+      "note": "Bright football highlights, high-motion pans, score bug. 0-14.6 s is a sponsor ident and club ident built from motion graphics (green wipes, white swipes, logo build) where frame-to-frame changes are not shot boundaries I could label confidently, so it is one `gradual` window (not graded; includes the wipe into the match that ends at ~14.5). 29.0-29.5, 51.0, 62.0, 78.0, 93.7 and 104.2 are 0.3-0.5 s cross-dissolves into/out of replays (frames at -0.3/-0.1/+0.1/+0.3 viewed: both shots visible mid-transition). Hard cuts confirmed with 4-frame strips around 26.9, 45.9, 48.7, 60.1, 72.5, 88.8, 90.75, 99.8, 117.25. Candidates checked and rejected as continuous pans/zooms inside one shot: 36.0, 38.0, 40.0, 44.0, 52.0, 73.8, 96.0, 106.0, 112.0 (only the score bug changes), 118.0. Not labelled: any hard cut hidden inside the ident or a second cut within 0.25 s of another."
+    },
+    {
+      "id": "voa-news-package",
+      "license": "YouTube standard licence (VOA output with AP footage): reference by url + time only, no frames committed",
+      "source": {
+        "id": "voa-ships-0-150",
+        "url": "https://www.youtube.com/watch?v=AK0A6L6-agU",
+        "start": 0,
+        "end": 150,
+        "sha256": "68ec5f3e80345a635d2a4247643f862e0f6f3b7b9b17d799448e29119e99d57b"
+      },
+      "gradeUntil": 150,
+      "expectCuts": [4.9, 7.8, 9.6, 11.4, 14.8, 19.8, 24.6, 26.8, 29.1, 32.8, 35.8, 38.9, 41.8, 44.1, 46.6, 53.1, 59.4, 61.4, 64.3, 70.9, 77.4, 79.9, 84.4, 86.6, 91.4, 94.9, 100.3, 102.6, 104.9, 110.4, 124.3, 126.1, 129.3, 135.4, 139.1, 143.3, 148.3],
+      "gradual": [],
+      "tolerance": 0.25,
+      "note": "News package: b-roll, outdoor and studio interviews, a chart animation (64.3-70.9 s: bars grow, not a cut), logo bug. All cuts are hard cuts. Labelled from a 4 fps contact sheet of 0-150 s, then 4-frame strips (-0.3/-0.1/+0.1/+0.3 s) around every candidate; all 37 candidates confirmed. Not labelled: slow zoom/pan inside shots (e.g. 15-19.5, 36-38.5, 87-91)."
+    },
+    {
+      "id": "sister-circle-studio",
+      "license": "CC BY (uploader-set flag, Sister Circle channel); no frames committed",
+      "source": {
+        "id": "sistercircle-0-300",
+        "url": "https://www.youtube.com/watch?v=uYFjIHelrH0",
+        "start": 0,
+        "end": 300,
+        "sha256": "a5335185b8acaeb4cec237d0e7288bac7d2f864ba9411f8dfe4f565e0849bc94"
+      },
+      "gradeUntil": 120,
+      "expectCuts": [18.1, 19.9, 23.4, 25.8, 27.3, 30.4, 34.1, 42.1, 45.6, 51.6, 55.4, 59.4, 62.1, 67.3, 71.3, 72.8, 74.3, 76.1, 80.3, 82.4, 100.9, 103.3, 109.1, 111.4, 114.1, 115.1, 116.1, 118.1],
+      "gradual": [[97.5, 98.0]],
+      "tolerance": 0.25,
+      "note": "Bright multi-camera studio talk show (host two-shot, guest close-up, wide). Graded 0-120 s; 0-18 s is one locked two-shot (the lower third fades out at ~1.8 s, not a cut). Labelled from a 4 fps sheet of 0-128 s then 4-frame strips around 30 candidates; 115.9 was rejected (same shot, small camera drift). 97.5-98.0 is a dissolve from the social-media graphic back to the guest."
     }
   ]
 }

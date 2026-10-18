@@ -211,6 +211,20 @@
       "when": 1792294875620,
       "tag": "0029_user_trgm",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792339282363,
+      "tag": "0030_soft_delete_projects_clips",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792339893430,
+      "tag": "0031_usage_cost",
+      "breakpoints": true
     }
   ]
 }

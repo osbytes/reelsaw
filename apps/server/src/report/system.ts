@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Instance context for issue reports: versions, machine resources, on-device models, queue state,
  * usage and recent errors. Self-hosted installs have no crash reporting service, so the instance's
@@ -46,7 +47,12 @@ export async function queueInfo(svc: Services, projectIds: string[]) {
           where state = 'failed' and data->>'projectId' in (${sql.join(projectIds.map((id) => sql`${id}`), sql`, `)})
           order by completed_on desc nulls last limit 50`)
       : { rows: [] };
-    return { counts: counts.rows, recentFailures: failed.rows };
+    // job data carries the owner's user id (fair scheduling); the bundle pseudonymises it like project.json's ownerHash
+    const hashed = failed.rows.map((r) => {
+      const d = r.data as Record<string, unknown> | null;
+      return d && typeof d.userId === "string" ? { ...r, data: { ...d, userId: undefined, ownerHash: createHash("sha256").update(d.userId).digest("hex").slice(0, 12) } } : r;
+    });
+    return { counts: counts.rows, recentFailures: hashed };
   } catch (err) {
     return { error: (err as Error).message };
   }

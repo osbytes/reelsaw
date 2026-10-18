@@ -1,0 +1,165 @@
+{
+ "recordedAt": "2026-10-18T17:15:16.070Z",
+ "model": "compat:qwen2.5:14b",
+ "judge": "compat:qwen2.5:14b",
+ "samples": 1,
+ "pairwise": false,
+ "settings": {
+  "minSec": 20,
+  "maxSec": 60
+ },
+ "candidates": [
+  {
+   "startSec": 564.15,
+   "endSec": 614.19,
+   "title": "DHH's Teenage Bulletin Board System",
+   "hook": "14-year-old Hacker",
+   "total": 80,
+   "scored": true
+  },
+  {
+   "startSec": 14091.83,
+   "endSec": 14115.87,
+   "title": "Epic Games' $100M Victory Over Apple",
+   "hook": "$100M Win",
+   "total": 78,
+   "scored": true
+  },
+  {
+   "startSec": 761.27,
+   "endSec": 815.95,
+   "title": "Demo Scene Party",
+   "hook": "CRT Monitors Galore",
+   "total": 72,
+   "scored": true
+  },
+  {
+   "startSec": 13591.27,
+   "endSec": 13629.07,
+   "title": "Apple's App Store Toll Booth",
+   "hook": "The rot inside Apple",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 13852.31,
+   "endSec": 13905.71,
+   "title": "Hey Email Launch Struggles",
+   "hook": "Rejected by Apple",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 14410.47,
+   "endSec": 14458.67,
+   "title": "Apple's Mistake with Vision Pro",
+   "hook": "Vision Pro Flop",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 14164.95,
+   "endSec": 14218.67,
+   "title": "The Price of Defying Apple",
+   "hook": "$100M Battle",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 14469.67,
+   "endSec": 14518.51,
+   "title": "Apple's Unreasonable Demands",
+   "hook": "30% Take",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 1045.83,
+   "endSec": 1087.23,
+   "title": "The '90s Web Development Ideal",
+   "hook": "Easiest Way to Code!",
+   "total": 68,
+   "scored": true
+  },
+  {
+   "startSec": 832.55,
+   "endSec": 856.91,
+   "title": "DHH's First Encounter with the Internet",
+   "hook": "First Blink Tag Moment!",
+   "total": 58,
+   "scored": true
+  },
+  {
+   "startSec": 14140.71,
+   "endSec": 14165.55,
+   "title": "Epic's Audacious Fight Against Apple",
+   "hook": "Tim Sells Out?",
+   "total": 57,
+   "scored": true
+  },
+  {
+   "startSec": 14226.55,
+   "endSec": 14280.59,
+   "title": "Apple's Unexpected Loss",
+   "hook": "Hilarious Win?",
+   "total": 56,
+   "scored": true
+  },
+  {
+   "startSec": 941.51,
+   "endSec": 966.99,
+   "title": "The Simplicity of PHP",
+   "hook": "PHP Changed Everything!",
+   "total": 54,
+   "scored": true
+  },
+  {
+   "startSec": 14596.71,
+   "endSec": 14636.67,
+   "title": "Apple's Future Uncertainty",
+   "hook": "Mirage of Success",
+   "total": 46,
+   "scored": true
+  },
+  {
+   "startSec": 13383.99,
+   "endSec": 13443.71,
+   "title": "Why DHH Turned on Apple?",
+   "hook": "Toll Booth Blues",
+   "total": 90,
+   "scored": false
+  },
+  {
+   "startSec": 49.75,
+   "endSec": 74.35,
+   "title": "My Favorite Computer: Amiga",
+   "hook": "The sexy Amiga",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 13307.67,
+   "endSec": 13360.83,
+   "title": "DHH On Apple's Shift",
+   "hook": "From Glory to Greed?",
+   "total": 85,
+   "scored": false
+  },
+  {
+   "startSec": 14279.99,
+   "endSec": 14338.99,
+   "title": "Direct Billing Relationship",
+   "hook": "No More 30%",
+   "total": 75,
+   "scored": false
+  },
+  {
+   "startSec": 652.63,
+   "endSec": 703.47,
+   "title": "Piracy in Europe",
+   "hook": "Piracy Was Normal",
+   "total": 70,
+   "scored": false
+  }
+ ]
+}

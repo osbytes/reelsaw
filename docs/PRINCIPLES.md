@@ -17,6 +17,12 @@ project already hit the problem it prevents.
 - **Plain language.** Events, errors and notices are sentences a user understands ("No clean cut
   after 8 tries: it clipped the next word"), with the raw detail one click away. Say
   "disfluencies", not "stutters".
+- **One precedence chain per setting, written down.** Models and provider keys: `.env`, then the
+  admin's runtime override; stage knobs (`TRANSCRIPT_BIAS`, `DISFLUENCY_*`, detectors): `.env` only,
+  and an off gate silently disables the matching per-project setting; a project: shared defaults,
+  the user's defaults, the create input, frozen into `projects.settings`; style: project, then clip;
+  framing: auto, project, clip, section; quotas: `.env`, then per-user limits. A new setting says
+  where it sits in this chain (README, "Settings and precedence").
 
 ## Backend
 
@@ -74,7 +80,7 @@ project already hit the problem it prevents.
   self-check at boot, and fail fast with a readable reason. Config comes from the environment and
   nothing else.
 - **One path per transition.** Shared transitions live in `pipeline/lifecycle.ts`
-  (`requestRender`, `startRun`, `finalizeProjectIfDone`). API routes, workers, the
+  (`requestRender`, `requestPrepare`, `startRun`, `finalizeProjectIfDone`). API routes, workers, the
   reconciler and the CLI call them instead of re-implementing them.
 - **Runs are explicit.** A run is one stretch of work on a project, from leaving idle (created,
   or done / failed) until it is done / failed again. It starts in exactly one place,

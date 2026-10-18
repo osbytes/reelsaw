@@ -1,4 +1,4 @@
-import { requestRender, requestRenders, startRun } from "./pipeline/lifecycle.js";
+import { requestPrepare, requestRender, requestRenders } from "./pipeline/lifecycle.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -8,6 +8,14 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   pnpm --filter @reelsaw/server cli <command> [...args]          (dev)
  *
  * Commands
+ *   users                                   list accounts: role, status, sign-up date
+ *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
+ *   make-admin <email>                      promote an account to admin (approves it first if needed)
+ *   retention                               run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS)
+ *   deleted                                 deleted projects that can still be restored, with their purge date
+ *   restore <projectId>                     undo a project delete (same as projects.restore and the restore_project tool)
+ *   restore-clip <clipId>                   bring back a clip a re-analyze replaced
+ *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
@@ -37,11 +45,16 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           the intro/outro library. The user is --user, else the only account
  *                                           on this install; otherwise pass --user
  *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
+ *                                           a project's intro/outro: the library default, none or a specific item
  *   clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
- *                                           per project / per clip choice; acts as the project's owner;
+ *                                           a clip's own choice (inherit the project's, none or an item);
+ *                                           both act as the project's owner;
  *                                           --rerender re-renders only the affected clips
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
+ *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
+ *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
+ *   limits  <email>                         an account's quotas: instance value, override, in force, in use now
  *   mcp                                     the MCP server over stdio for clients that launch a command:
  *                                           same tools as /api/mcp, forwarded to REELSAW_URL with
  *                                           REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts)
@@ -49,7 +62,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
 import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
 import { eq, desc, and, inArray } from "drizzle-orm";
-import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
+import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
 import { sampleClipText } from "./pipeline/overlays.js";
@@ -58,11 +71,11 @@ import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
+import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser } from "./quota.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
-import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
 import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
@@ -72,6 +85,7 @@ import { formatTime } from "@reelsaw/shared";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
 import { runMcpStdio } from "./mcp-stdio.js";
+import { deletedProjects, purgeDeleted, restoreClip, restoreProject } from "./projects/service.js";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -126,11 +140,61 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await sweepRetention(svc);
     console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${svc.config.CLIP_RETENTION_DAYS})`);
   },
+  /** Deleted projects that can still be restored, with the date the purge removes them (DELETED_RETENTION_DAYS). */
+  async deleted(svc) {
+    const rows = await deletedProjects(svc);
+    table(rows.map((r) => ({ id: r.id, title: r.title, owner: r.email, status: r.status, deleted: r.deletedAt!.toISOString().slice(0, 16), purged: r.purgeAt?.toISOString().slice(0, 10) ?? "never" })));
+  },
+  /** Undo a delete: `reelsaw restore <projectId>`. Same function as projects.restore and the restore_project tool. */
+  async restore(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw restore <projectId>   (reelsaw deleted lists them)");
+    const r = await restoreProject(svc, null, pos[0]);
+    console.log(r.changed ? `restored ${pos[0]} (${r.status}${r.status === "failed" ? "; Retry resumes it" : ""})` : `${pos[0]} was not deleted`);
+  },
+  /** Bring back a clip a re-analyze replaced: `reelsaw restore-clip <clipId>`. */
+  async "restore-clip"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw restore-clip <clipId>");
+    const r = await restoreClip(svc, null, pos[0]);
+    console.log(r.changed ? `restored clip ${pos[0]}${r.needsRerender ? " (it never finished rendering: re-render it)" : ""}` : `${pos[0]} was not deleted`);
+  },
+  /** Remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now (the storage sweep does this hourly). */
+  async purge(svc) {
+    const dry = args.includes("--dry-run");
+    const r = await purgeDeleted(svc, { dryRun: dry });
+    console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
+  },
   "make-admin": async (svc) => {
     const u = await userByEmail(svc, pos[0]);
     if (!u.approvedAt) await approveUser(svc, null, u.id);
     const r = await setUserRole(svc, null, u.id, "admin");
     console.log(r.changed ? `${u.email} is now an admin` : `${u.email} was already an admin`);
+  },
+  /** Usage per account over the last --days (default 30); stored bytes are all time. */
+  async usage(svc) {
+    const days = Number(flag("days") ?? 30);
+    const rows = await usageByUser(svc.database.db, Number.isFinite(days) && days > 0 ? days : 30);
+    const emails = new Map((await svc.database.db.query.user.findMany({ columns: { id: true, email: true } })).map((u) => [u.id, u.email]));
+    console.log(`last ${days} days${rows.length >= 500 ? " (first 500 accounts only)" : ""}`);
+    table(
+      rows.map((u) => ({
+        email: emails.get(u.id) ?? u.id,
+        projects: u.projects,
+        "source min": u.sourceMinutes,
+        clips: u.clipsRendered,
+        "llm calls": u.llmCalls,
+        "tokens in/out": `${Math.round(u.llmInputTokens / 1000)}k/${Math.round(u.llmOutputTokens / 1000)}k`,
+        "llm $": u.llmCostUsd == null ? "-" : u.llmCostUsd.toFixed(2),
+        "stt min": u.sttMinutes,
+        stored: formatBytes(u.storedBytes),
+      })),
+    );
+  },
+  /** One account's quotas (0 = unlimited). Change them in Users → Limits. */
+  async limits(svc) {
+    const u = await userByEmail(svc, pos[0]);
+    const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true } });
+    const [effective, used] = await Promise.all([limitsFor(svc.database.db, svc.config, u.id), limitUsage(svc.database.db, u.id)]);
+    table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.config[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
   },
   async status(svc) {
     const db = svc.database.db;
@@ -139,6 +203,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!p) throw new Error("project not found");
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
     if (p.error) console.log(`  error: ${p.error}`);
+    if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
     console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
@@ -149,7 +214,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       clips.map((c) => ({
         "#": c.index + 1,
         id: c.id.slice(0, 8),
-        status: c.status,
+        status: c.deletedAt ? `${c.status}, replaced` : c.status,
         origin: c.origin,
         range: `${formatTime(c.startSec)}-${formatTime(c.endSec)}`,
         score: Math.round(c.score),
@@ -347,6 +412,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
       console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) removed over 30 days ago and used nowhere`);
+      const del = await purgeDeleted(svc, { dryRun: dry });
+      console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
       return;
     }
     const r = await storageReport(svc);
@@ -395,13 +462,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id) });
     if (c) {
       if (needsPrepare(c)) {
-        await svc.tx(async (u) => {
-          await u.cancelLiveJobs(QUEUES.render, c.id);
-          await u.cancelLiveJobs(QUEUES.prepare, c.id);
-          await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-          await u.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
-          await startRun(u, c.projectId, { reason: "retry", status: "rendering", stage: "render" });
-        });
+        await svc.tx((u) => requestPrepare(svc, u, c.projectId, c.id, { reason: "retry" }));
         return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
       }
       await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));
@@ -604,7 +665,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

@@ -270,7 +270,7 @@ export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.
 
 export const createProjectInputSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  sourceUrl: z.url().optional(),
+  sourceUrl: z.url({ protocol: /^https?$/, message: "Use a link that starts with http:// or https://" }).optional(),
   uploadId: z.string().optional(),
   settings: projectSettingsPatchSchema.optional(),
 });
@@ -359,6 +359,11 @@ export const PROJECT_EVENT_TYPES = [
   /** retention removed the stored source / rendered clips (rows stay; Retry or re-render brings them back) */
   "source.expired",
   "clips.expired",
+  /** soft delete and its undo (projects/service.ts); payload { days } = how long it stays restorable */
+  "project.deleted",
+  "project.restored",
+  /** a clip a re-analyze replaced was brought back */
+  "clip.restored",
   "project.done",
   "project.failed",
 ] as const;
@@ -435,19 +440,30 @@ export function groupCaptionLines<W extends { text: string; start: number; end: 
 /** Character budget per caption chunk (≈ two short lines), shrinking as the font grows. */
 export const captionMaxChars = (size: number) => Math.max(10, Math.min(40, Math.round(28 / size)));
 
-/** Minimum time a caption line stays up (unless the next line starts sooner). */
+/** Floor for a caption line's display time (1-2 word lines). */
 export const MIN_LINE_SECONDS = 0.7;
+/** Reading pace: BBC subtitle guidance is about 0.3 s per word, Netflix caps at 20 characters per second. */
+export const MIN_SECONDS_PER_WORD = 0.3;
+export const MAX_CHARS_PER_SECOND = 20;
+
+/** Minimum time a line of these words must stay up so it can be read: max(floor, words x 0.3 s, chars / 20). */
+export function lineMinSeconds(line: Array<{ text?: string }>): number {
+  const chars = line.reduce((n, w, i) => n + (w.text?.length ?? 0) + (i ? 1 : 0), 0);
+  return Math.max(MIN_LINE_SECONDS, line.length * MIN_SECONDS_PER_WORD, chars / MAX_CHARS_PER_SECOND);
+}
+
 /**
- * Display end for line i: hold short lines up to MIN_LINE_SECONDS, and never past the next line's
- * start. Word timestamps often overlap (the last word ends after the next line's first begins), so
- * without the cap two lines are drawn on top of each other at the same position.
+ * Display end for line i: hold short lines up to `lineMinSeconds` (reading pace), and never past
+ * the next line's start (a line is never delayed or shrunk to make room). Word timestamps often
+ * overlap (the last word ends after the next line's first begins), so without the cap two lines are
+ * drawn on top of each other at the same position.
  */
-export function lineDisplayEnd<W extends { start: number; end: number }>(lines: W[][], i: number): number {
+export function lineDisplayEnd<W extends { start: number; end: number; text?: string }>(lines: W[][], i: number): number {
   const line = lines[i]!;
   const start = line[0]!.start;
   const end = line[line.length - 1]!.end;
   const next = lines[i + 1]?.[0]?.start ?? Infinity;
-  return Math.min(next, Math.max(end, start + MIN_LINE_SECONDS));
+  return Math.min(next, Math.max(end, start + lineMinSeconds(line)));
 }
 
 /** Words in spoken order with non-decreasing starts and positive durations (captions assume it). */
@@ -465,6 +481,18 @@ export const CAPTION_FONT_FRAC = 68 / 1920;
 export const HOOK_FONT_FRAC = 60 / 1920;
 /** Default max line seconds for a given words-per-line setting. */
 export const lineSecondsFor = (wordsPerLine: number) => (wordsPerLine <= 2 ? 1.0 : 1.8);
+
+/**
+ * The 9:16 window cut from a source frame: full height and 9:16 wide, or the full width when the
+ * source is already narrower. One definition for the renderer's crop and the editor preview.
+ */
+export function verticalCrop(srcW: number, srcH: number): { w: number; h: number } {
+  return { w: Math.min(srcW, (srcH * 9) / 16), h: Math.min(srcH, (srcW * 16) / 9) };
+}
+
+/** Padding around detected text boxes before they are blurred, as fractions of source width / height. */
+export const OVERLAY_PAD_X = 0.01;
+export const OVERLAY_PAD_Y = 0.012;
 
 // ---------- burned-in text + crop geometry (shared by the renderer and the editor preview) ----------
 
