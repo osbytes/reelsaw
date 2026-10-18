@@ -68,10 +68,16 @@ export function scoreGate(totals: number[], o: ScoreGateOpts): ScoreGate {
   const leader = totals.indexOf(best);
   if (o.rule === "absolute") return { rule: "absolute", threshold: AUTO_MIN_SCORE, n, median: null, mad: null, floor: o.floor, k: o.k, keep: totals.map((t, i) => i === leader || t >= AUTO_MIN_SCORE) };
   const med = median(totals);
-  const mad = median(totals.map((t) => Math.abs(t - med)));
+  // Rubric totals cluster on a few values (a local judge gives most candidates the same total), so the
+  // MAD can be 0 and the threshold would collapse to the median, dropping half of an evenly good
+  // pool. A floor on the spread keeps ties together: MIN_MAD is one rubric step on the 0-100 total.
+  const mad = Math.max(median(totals.map((t) => Math.abs(t - med))), MIN_MAD);
   const threshold = Number(Math.max(o.floor, med - o.k * mad).toFixed(1));
   return { rule: "relative", threshold, n, median: med, mad, floor: o.floor, k: o.k, keep: totals.map((t, i) => i === leader || t >= threshold) };
 }
+
+/** Smallest spread the relative gate assumes (one rubric step on the 0-100 total): see scoreGate. */
+const MIN_MAD = 5;
 
 /** When fewer than this many scored clips survive the gate, unscored candidates may fill in. */
 const TINY_POOL = 3;
