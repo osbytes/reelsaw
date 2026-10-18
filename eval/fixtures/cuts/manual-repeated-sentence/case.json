@@ -1,0 +1,148 @@
+{
+  "source": {
+    "projectId": "0d8a64e2-ad5f-445f-8408-d0eddb3d2714",
+    "clipId": "9a843f72-6542-45b2-918c-e1ea5e468037",
+    "at": 423.82000732421875
+  },
+  "range": {
+    "start": 2.47,
+    "end": 5.01
+  },
+  "deleted": [
+    "Step",
+    "seven",
+    "is",
+    "to",
+    "check",
+    "in",
+    "once",
+    "a",
+    "month"
+  ],
+  "manual": true,
+  "expect": "applied",
+  "tolerance": 0.15,
+  "note": "The user cut the first of two identical sentences (\"Step seven is to check in once a month\", said twice). The seam check re-heard \"Step 7 ... month Step 7 ... month\", could not find \"seven\" (7) between its neighbours and silently dropped the cut. A cut the user made must be applied at their bounds, verified or not.",
+  "words": [
+    {
+      "text": "The",
+      "start": 0.05,
+      "end": 0.25
+    },
+    {
+      "text": "last",
+      "start": 0.25,
+      "end": 0.51
+    },
+    {
+      "text": "one",
+      "start": 0.51,
+      "end": 1.19
+    },
+    {
+      "text": "Step",
+      "start": 2.47,
+      "end": 2.47
+    },
+    {
+      "text": "seven",
+      "start": 2.47,
+      "end": 2.79
+    },
+    {
+      "text": "is",
+      "start": 2.79,
+      "end": 2.97
+    },
+    {
+      "text": "to",
+      "start": 2.97,
+      "end": 3.15
+    },
+    {
+      "text": "check",
+      "start": 3.15,
+      "end": 3.43
+    },
+    {
+      "text": "in",
+      "start": 3.43,
+      "end": 4.29
+    },
+    {
+      "text": "once",
+      "start": 4.29,
+      "end": 4.61
+    },
+    {
+      "text": "a",
+      "start": 4.61,
+      "end": 4.83
+    },
+    {
+      "text": "month",
+      "start": 4.83,
+      "end": 5.01
+    },
+    {
+      "text": "Step",
+      "start": 5.23,
+      "end": 5.79
+    },
+    {
+      "text": "seven",
+      "start": 5.79,
+      "end": 6.07
+    },
+    {
+      "text": "is",
+      "start": 6.07,
+      "end": 6.25
+    },
+    {
+      "text": "to",
+      "start": 6.25,
+      "end": 6.45
+    },
+    {
+      "text": "check",
+      "start": 6.45,
+      "end": 6.61
+    },
+    {
+      "text": "in",
+      "start": 6.61,
+      "end": 6.83
+    },
+    {
+      "text": "once",
+      "start": 6.83,
+      "end": 7.03
+    },
+    {
+      "text": "a",
+      "start": 7.03,
+      "end": 7.31
+    },
+    {
+      "text": "week",
+      "start": 7.31,
+      "end": 7.33
+    },
+    {
+      "text": "for",
+      "start": 7.33,
+      "end": 7.59
+    },
+    {
+      "text": "10",
+      "start": 7.59,
+      "end": 7.83
+    },
+    {
+      "text": "minutes",
+      "start": 7.83,
+      "end": 8.09
+    }
+  ]
+}

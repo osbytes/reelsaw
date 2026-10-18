@@ -11,7 +11,7 @@ export interface MetaClip {
   bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null;
   diagnostics?: {
     pauses?: { cuts: number; removedSec: number };
-    cuts: { applied: unknown[]; skipped: Array<{ start: number; reason: string }> };
+    cuts: { applied: Array<unknown>; skipped: Array<{ start: number; reason: string }> };
     bumpers?: { introSec: number; outroSec: number; skipped?: string[] };
   } | null;
 }
@@ -80,6 +80,7 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
   if (d) {
     const cuts = d.cuts.applied.length;
     const kept = d.cuts.skipped.length;
+    const unverified = d.cuts.applied.flatMap((a) => (a && typeof a === "object" && (a as { verified?: boolean }).verified === false ? [String((a as { reason?: string }).reason ?? "")] : []));
     const trimmed = d.pauses?.cuts ? d.pauses.removedSec : 0;
     if (trimmed > 0) {
       parts.push(`${trimmed.toFixed(1)} s trimmed`);
@@ -88,6 +89,11 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
     if (cuts) {
       parts.push(`${cuts} cut${cuts === 1 ? "" : "s"}`);
       long.push(`Cuts: ${cuts} applied`);
+    }
+    if (unverified.length) {
+      parts.push(`▲ ${unverified.length} cut${unverified.length === 1 ? "" : "s"} unverified`);
+      long.push(`Applied where you set ${unverified.length === 1 ? "it" : "them"}, without a seam check (the audio around ${unverified.length === 1 ? "it" : "them"} couldn’t be matched):`, ...unverified.map((r) => `  ${r}`));
+      warn = true;
     }
     if (kept) {
       parts.push(`▲ ${kept} cut${kept === 1 ? "" : "s"} kept`);

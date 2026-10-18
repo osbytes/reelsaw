@@ -10,22 +10,34 @@
  *   3. verify: render only the seam audio with the cut applied, transcribe it, and require that
  *      both neighbours are still heard and the deleted words are not. If the deleted word is
  *      still audible, retry with wider candidate seams (up to the neighbours) before giving up.
- * Any step that fails drops that cut. A leftover "pay" in the audio beats an amputated "against".
+ * Any step that fails drops an automatic cut. A leftover "pay" in the audio beats an amputated "against".
+ * A cut the user made is different: it is never dropped. The seams may move by MANUAL_NUDGE to reach a
+ * clean boundary; if the search cannot confirm any seam it is applied at the word timings the user set,
+ * marked `verified: false` with the reason.
  */
 import { spawn } from "node:child_process";
-import type { Word } from "@reelsaw/shared";
+import { normalizeToken, normalizeTokens, normalizeWithSpans, type Word } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 
 const SR = 16000;
 const FRAME = 80; // 5 ms at 16 kHz
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9']+/g, "");
+const norm = normalizeToken;
+/** How far a manual cut's seams may move from where the user set them to reach a clean boundary. */
+export const MANUAL_NUDGE = 0.12;
 
 export interface CutRange {
   start: number;
   end: number;
+  /** the user made this cut: it is applied, never dropped (see refineCuts) */
+  manual?: boolean;
+}
+/** A cut that will be applied. `verified: false` means the seam could not be checked against the audio; `reason` says why. */
+export interface AppliedCut extends CutRange {
+  verified: boolean;
+  reason?: string;
 }
 export interface RefineResult {
-  cuts: CutRange[];
+  cuts: AppliedCut[];
   skipped: Array<{ range: CutRange; reason: string }>;
 }
 export interface CutDeps {
@@ -139,30 +151,80 @@ function quietest(samples: Int16Array, lo: number, hi: number) {
   return { t: z / SR, level, local };
 }
 
-/** Find `deleted` tokens inside `aligned`, anchored by prev/next when available. Returns aligned indices. */
-function locate(aligned: Word[], prev: Word | undefined, deleted: Word[], next: Word | undefined): { from: number; to: number; prevIdx?: number; nextIdx?: number } | null {
-  const al = aligned.map((w) => norm(w.text));
-  const del = deleted.map((w) => norm(w.text));
+export interface Located {
+  /** aligned word indices of the first and last deleted word */
+  from: number;
+  to: number;
+  prevIdx?: number;
+  nextIdx?: number;
+  /** tokens that differ from the expected words (0 = exact) */
+  drift: number;
+}
+
+function tokenDistance(a: string[], b: string[]) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length]![b.length]!;
+}
+
+/**
+ * Find the `deleted` words inside the re-heard `aligned` words, by position first: among the
+ * stretches that read like the expected words (numbers, case and punctuation ignored; one word of
+ * drift allowed in a phrase of four or more, a third of it for a manual cut) the one whose time overlaps or sits closest to `range`
+ * wins, so a phrase the speaker said twice cannot send the cut to the wrong occurrence. Neighbours
+ * (`prev`/`next`) are a second signal. An automatic cut must also be anchored by a neighbour
+ * ("could be another occurrence" otherwise); a manual one is placed by its position alone.
+ * `aligned` times and `range` share one time base.
+ */
+export function locate(aligned: Word[], prev: Word | undefined, deleted: Word[], next: Word | undefined, range?: { start: number; end: number }, opts: { manual?: boolean; maxDistance?: number } = {}): Located | null {
+  const al = normalizeWithSpans(aligned.map((w) => w.text));
+  const del = normalizeTokens(deleted.map((w) => w.text));
+  if (!del.length) return null;
   const p = prev ? norm(prev.text) : null;
   const n = next ? norm(next.text) : null;
-  let best: { from: number; to: number; prevIdx?: number; nextIdx?: number; score: number } | null = null;
-  for (let i = 0; i + del.length <= al.length; i++) {
-    if (!del.every((t, k) => al[i + k] === t)) continue;
-    let score = 0;
-    let prevIdx: number | undefined;
-    let nextIdx: number | undefined;
-    if (p !== null && i > 0 && al[i - 1] === p) {
-      score++;
-      prevIdx = i - 1;
+  // a recogniser mishears a word or two of a phrase; for a manual cut the position vouches for the rest
+  const allowed = del.length < 4 ? 0 : opts.manual ? Math.floor(del.length / 3) : del.length >= 10 ? 2 : 1;
+  const maxDistance = opts.maxDistance ?? 0.9;
+  type Cand = Located & { score: number; fit: number };
+  let best: Cand | null = null;
+  for (let i = 0; i < al.length; i++) {
+    for (const len of allowed ? [del.length, del.length - 1, del.length + 1] : [del.length]) {
+      if (len < 1 || i + len > al.length) continue;
+      const win = al.slice(i, i + len).map((t) => t.token);
+      const drift = tokenDistance(win, del);
+      if (drift > allowed) continue;
+      const first = al[i]!;
+      const last = al[i + len - 1]!;
+      const from = first.from;
+      const to = last.from + last.count - 1;
+      let score = 0;
+      let prevIdx: number | undefined;
+      let nextIdx: number | undefined;
+      if (p !== null && i > 0 && al[i - 1]!.token === p) {
+        score++;
+        prevIdx = al[i - 1]!.from + al[i - 1]!.count - 1;
+      }
+      if (n !== null && i + len < al.length && al[i + len]!.token === n) {
+        score++;
+        nextIdx = al[i + len]!.from;
+      }
+      if (!opts.manual && score === 0 && (p !== null || n !== null)) continue; // unanchored match: could be another occurrence
+      let fit = 0; // seconds the stretch overlaps the cut; negative = the gap between them
+      if (range) {
+        const ws = aligned[from]!.start;
+        const we = aligned[to]!.end;
+        fit = Math.min(we, range.end) - Math.max(ws, range.start);
+        if (fit < -maxDistance) continue; // another occurrence somewhere else in the window
+      }
+      const c: Cand = { from, to, prevIdx, nextIdx, drift, score, fit };
+      const nearer = c.fit > (best?.fit ?? -Infinity) + 1e-6;
+      const level = !!best && Math.abs(c.fit - best.fit) <= 1e-6;
+      const better = !best || (opts.manual ? nearer || (level && (c.drift < best.drift || (c.drift === best.drift && c.score > best.score))) : c.score > best.score || (c.score === best.score && (c.drift < best.drift || (c.drift === best.drift && nearer))));
+      if (better) best = c;
     }
-    if (n !== null && al[i + del.length] === n) {
-      score++;
-      nextIdx = i + del.length;
-    }
-    if (score === 0 && (p !== null || n !== null)) continue; // unanchored match: could be another occurrence
-    if (!best || score > best.score) best = { from: i, to: i + del.length - 1, prevIdx, nextIdx, score };
   }
-  return best;
+  return best ? { from: best.from, to: best.to, prevIdx: best.prevIdx, nextIdx: best.nextIdx, drift: best.drift } : null;
 }
 
 export async function refineCuts(
@@ -176,25 +238,45 @@ export async function refineCuts(
 ): Promise<RefineResult> {
   const quietRatio = opts.quietRatio ?? 0.6;
   const minCut = opts.minCut ?? 0.05;
-  const cuts: CutRange[] = [];
+  const cuts: AppliedCut[] = [];
   const skipped: RefineResult["skipped"] = [];
   for (const [ri, r] of ranges.entries()) {
     deps.onProgress?.(ri, ranges.length, 1);
     const deleted = words.filter((w) => w.start >= r.start - 0.02 && w.end <= r.end + 0.02);
     const prev = words.filter((w) => w.end <= r.start + 0.02 && w.start < r.start).sort((a, b) => b.end - a.end)[0];
     const next = words.filter((w) => w.start >= r.end - 0.02 && w.end > r.end).sort((a, b) => a.start - b.start)[0];
+    const manual = r.manual === true;
+    const verifiedFlag = opts.verify !== false;
+    // An automatic cut that cannot be confirmed is dropped (a leftover word beats an amputated one).
+    // A cut the user made is never dropped: it is applied where they set it, marked unverified.
+    const giveUp = (reason: string) => {
+      if (!manual) {
+        skipped.push({ range: r, reason });
+        return;
+      }
+      cuts.push({ start: r.start, end: r.end, manual: true, verified: false, reason });
+      deps.log?.warn({ span: [r.start, r.end], reason }, "manual cut applied without a seam check");
+    };
+    // a manual cut's seams may only move a little from where the user set them
+    const within = (c: CutRange): CutRange => {
+      if (!manual) return c;
+      const start = Math.min(r.start + MANUAL_NUDGE, Math.max(r.start - MANUAL_NUDGE, c.start));
+      const end = Math.min(r.end + MANUAL_NUDGE, Math.max(r.end - MANUAL_NUDGE, c.end));
+      return { start: Number(start.toFixed(4)), end: Number(end.toFixed(4)) };
+    };
+    const accept = (c: CutRange) => cuts.push({ start: c.start, end: c.end, ...(manual ? { manual: true } : {}), verified: verifiedFlag });
     if (!deleted.length) {
-      skipped.push({ range: r, reason: "no words inside the span" });
+      giveUp("no words inside the span");
       continue;
     }
     let accepted: CutRange | null = null;
     const reasons: string[] = [];
-    const del = deleted.map((w) => norm(w.text));
+    const del = normalizeTokens(deleted.map((w) => w.text));
     type Verdict = { ok: boolean; prevOk: boolean; nextOk: boolean; partial: boolean };
     let attempt = 0;
     const verify = async (cut: CutRange): Promise<Verdict> => {
       deps.onProgress?.(ri, ranges.length, ++attempt);
-      const heard = (await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => norm(w.text));
+      const heard = normalizeTokens((await deps.transcribe(await seamMp3(deps, source, clipStart + Math.max(0, cut.start - 1.2), clipStart + cut.start, clipStart + cut.end, clipStart + Math.min(duration, cut.end + 1.2)))).map((w) => w.text));
       const stillThere = del.length === 1 ? heard.includes(del[0]!) && !(prev && norm(prev.text) === del[0]) && !(next && norm(next.text) === del[0]) : del.every((t, k) => heard.indexOf(t) >= 0 && (k === 0 || heard.indexOf(t) > heard.indexOf(del[k - 1]!)));
       const prevOk = !prev || heard.includes(norm(prev.text));
       const nextOk = !next || heard.includes(norm(next.text));
@@ -212,7 +294,7 @@ export async function refineCuts(
       // own, IS the deleted word(s), the cut is right.
       let removed: string[] = [];
       if (prevOk && nextOk && stillThere && !leftover) {
-        removed = (await deps.transcribe(await pieceMp3(deps, source, clipStart + cut.start, cut.end - cut.start))).map((w) => norm(w.text)).filter(Boolean);
+        removed = normalizeTokens((await deps.transcribe(await pieceMp3(deps, source, clipStart + cut.start, cut.end - cut.start))).map((w) => w.text));
         if (del.every((t) => soundsLike(removed, t))) {
           deps.log?.info({ span: [r.start, r.end], seamHeard: heard.join(" "), removedHeard: removed.join(" ") }, "seam check fooled by language model; removed audio confirms the cut");
           return { ok: true, prevOk, nextOk, partial: false };
@@ -237,7 +319,7 @@ export async function refineCuts(
           const qe = ctc.nextStart - ctc.dEnd > 0.02 ? quietest(samples, ctc.dEnd - 0.02 - a0, ctc.nextStart - a0) : null;
           const ctcCand: CutRange[] = [];
           const push = (st: number, en: number) => {
-            const c = { start: Number(st.toFixed(4)), end: Number(en.toFixed(4)) };
+            const c = within({ start: Number(st.toFixed(4)), end: Number(en.toFixed(4)) });
             if (c.end - c.start >= minCut && !ctcCand.some((x) => Math.abs(x.start - c.start) < 0.012 && Math.abs(x.end - c.end) < 0.012)) ctcCand.push(c);
           };
           push(qs ? qs.t + a0 : ctc.dStart, qe ? qe.t + a0 : ctc.dEnd); // quiet points beside the aligned word
@@ -257,7 +339,7 @@ export async function refineCuts(
       }
       if (accepted) {
         deps.log?.debug({ span: [r.start, r.end], cut: [accepted.start, accepted.end], tries: attempt }, "cut accepted via ctc alignment");
-        cuts.push(accepted);
+        accept(accepted);
         continue;
       }
     }
@@ -269,12 +351,13 @@ export async function refineCuts(
     try {
       aligned = (await deps.transcribe(await mp3(deps, source, clipStart + w0, w1 - w0))).map((w) => ({ ...w, start: w.start + w0, end: w.end + w0 }));
     } catch (err) {
-      skipped.push({ range: r, reason: `re-alignment failed: ${(err as Error).message.slice(0, 80)}` });
+      if (deps.signal?.aborted) throw err;
+      giveUp(`re-alignment failed: ${(err as Error).message.slice(0, 80)}`);
       continue;
     }
-    const loc = locate(aligned, prev, deleted, next);
+    const loc = locate(aligned, prev, deleted, next, r, { manual });
     if (!loc) {
-      skipped.push({ range: r, reason: `re-alignment could not find "${deleted.map((w) => w.text).join(" ")}" between its neighbours (heard: ${aligned.map((w) => w.text).join(" ")})` });
+      giveUp(`re-alignment could not find "${deleted.map((w) => w.text).join(" ")}" ${manual ? "where you cut it" : "between its neighbours"} (heard: ${aligned.map((w) => w.text).join(" ")})`);
       continue;
     }
     const dStart = aligned[loc.from]!.start;
@@ -289,7 +372,7 @@ export async function refineCuts(
       const v0 = Math.max(0, r.start - 0.7);
       const v1 = Math.min(duration, r.end + 2.2);
       const aligned2 = (await deps.transcribe(await mp3(deps, source, clipStart + v0, v1 - v0))).map((w) => ({ ...w, start: w.start + v0, end: w.end + v0 }));
-      const loc2 = locate(aligned2, prev, deleted, next);
+      const loc2 = locate(aligned2, prev, deleted, next, r, { manual });
       if (loc2)
         alt = {
           dStart: aligned2[loc2.from]!.start,
@@ -309,7 +392,7 @@ export async function refineCuts(
     const qs = sLo < sHi ? quietest(samples, sLo - w0, sHi - w0) : null;
     const qe = eLo < eHi ? quietest(samples, eLo - w0, eHi - w0) : null;
     if (!qs || !qe) {
-      skipped.push({ range: r, reason: "no room between neighbouring words" });
+      giveUp("no room between neighbouring words");
       continue;
     }
     // no quiet gap on a side (words run together): fall back to the re-aligned word boundary there;
@@ -335,7 +418,7 @@ export async function refineCuts(
     }
     const cand: CutRange[] = [];
     const add = (st: number, en: number) => {
-      const c = { start: Number(Math.max(loBound, st).toFixed(4)), end: Number(Math.min(hiBound, en).toFixed(4)) };
+      const c = within({ start: Number(Math.max(loBound, st).toFixed(4)), end: Number(Math.min(hiBound, en).toFixed(4)) });
       if (c.end - c.start < minCut) return;
       if (cand.some((x) => Math.abs(x.start - c.start) < 0.012 && Math.abs(x.end - c.end) < 0.012)) return;
       cand.push(c);
@@ -381,22 +464,22 @@ export async function refineCuts(
       const hardHi = Math.max(nextStart, alt ? alt.dEnd : 0) + 0.35;
       for (let k = 0; !accepted && partial && k < 6; k++) {
         const cut = { start: partial.start, end: Number((partial.end + 0.05).toFixed(4)) };
-        if (cut.end > hardHi || cut.end > duration) break;
+        if (cut.end > hardHi || cut.end > duration || (manual && cut.end > r.end + MANUAL_NUDGE)) break;
         const v = await verify(cut);
         if (v.ok) accepted = cut;
         else if (!v.nextOk) break;
         partial = cut;
       }
     } catch (err) {
+      if (deps.signal?.aborted) throw err;
       reasons.push(`verification error: ${(err as Error).message.slice(0, 80)}`);
     }
     if (!accepted) {
-      skipped.push({ range: r, reason: `verification failed after ${reasons.length} attempt(s): ${reasons.join("; ")}` });
+      giveUp(`verification failed after ${reasons.length} attempt(s): ${reasons.join("; ")}`);
       continue;
     }
     deps.log?.debug({ span: [r.start, r.end], cut: [accepted.start, accepted.end], via: cand.includes(accepted) ? `candidate ${cand.indexOf(accepted) + 1}` : "directed walk", tries: reasons.length + 1 }, "cut accepted");
-    const cut = accepted;
-    cuts.push(cut);
+    accept(accepted);
   }
   return { cuts, skipped };
 }
