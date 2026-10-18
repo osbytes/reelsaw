@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.9.0
+
+### Minor Changes
+
+- [#35](https://github.com/osbytes/reelsaw/pull/35) [`21cc500`](https://github.com/osbytes/reelsaw/commit/21cc5006a428ec4b56247f6865f579ab38ca8390) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Admins can change instance settings without a restart: sign-up mode, email verification, captcha, legal links, per-account quotas, upload limits, retention, the stall watchdog, the update check and whether /api/health shows machine numbers. The environment stays the default; what an admin saves under Settings → System, with `reelsaw settings` or the `set_instance_settings` MCP tool overrides it for every process within seconds, is validated as a whole and audited. The Settings page is split into Account and System tabs, and project cards keep one height whatever the title length.
+
 ## 0.8.0
 
 ### Minor Changes
