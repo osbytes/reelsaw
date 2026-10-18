@@ -22,6 +22,7 @@ export async function transcribe(ctx: StageContext) {
 
   const existing = await ctx.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { projectId: true } });
   if (existing) {
+    ctx.log.info("transcript exists, moving on to refine");
     await enqueueRefine(svc, projectId);
     return;
   }
@@ -72,6 +73,7 @@ export async function transcribe(ctx: StageContext) {
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
   const pending = chunkFiles.map((_, i) => i).filter((i) => !doneIdx.has(i));
   let completed = chunkFiles.length - pending.length;
+  ctx.log.info({ model: transcriptionModel, provider, selfHosted, chunks: chunkFiles.length, alreadyDone: completed, concurrency, chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS, audioSec: Math.round(acc), biasHints: entities.length }, "transcribe start");
   const worker = async () => {
     for (;;) {
       const i = pending.shift();
@@ -92,6 +94,7 @@ export async function transcribe(ctx: StageContext) {
         })
         .onConflictDoNothing();
       completed++;
+      ctx.log.debug({ chunk: i, offsetSec: offsets[i], language: result.language, empty: result.text.trim().length === 0 }, "chunk transcribed");
       await ctx.progress(0.1 + (0.85 * completed) / chunkFiles.length, `Transcribed chunk ${completed}/${chunkFiles.length}`);
     }
   };

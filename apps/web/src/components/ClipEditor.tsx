@@ -11,6 +11,7 @@ import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSec
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, effectiveAsset, effectiveSeconds, useBumperLibrary } from "./BumperField";
 import { ThemeToggle } from "../App";
+import { reportClientError } from "../lib/diagnostics";
 import { useHistory } from "../lib/history";
 import {
   defaultStyle,
@@ -370,7 +371,7 @@ export function ClipEditor(props: Props) {
     if (!v) return;
     if (v.paused) {
       if (v.currentTime < range[0] - 0.05 || v.currentTime >= range[1] - 0.05) v.currentTime = range[0];
-      v.play().catch((err) => console.warn("[editor] play rejected", err));
+      v.play().catch((err) => reportClientError("error", err));
     } else v.pause();
   };
   const setIn = (t: number) => setRange([Math.min(t, range[1] - 1), range[1]]);

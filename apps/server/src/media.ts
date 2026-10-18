@@ -1,4 +1,5 @@
 import { spawn, execFile } from "node:child_process";
+import { llmContext } from "./ai/trace.js";
 import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
@@ -84,9 +85,30 @@ function runRaw(bin: string, args: string[], opts: RunOptions = {}): Promise<Run
   });
 }
 
+/** argv for the log: long values cut, the proxy URL (may carry credentials) and cookies path masked. */
+export function loggableArgv(args: string[]): string[] {
+  return args.slice(0, 120).map((a, i) => (["--proxy", "--cookies"].includes(args[i - 1] ?? "") ? "[redacted]" : a.length > 400 ? `${a.slice(0, 400)}…` : a));
+}
+
 export function createMediaTools(config: Config, log: Logger): MediaTools {
-  const run: MediaTools["run"] = (bin, args, opts) =>
-    withSpan(`exec ${bin.split("/").pop()}`, { "process.command": bin, "process.args_count": args.length }, () => runRaw(bin, args, opts));
+  const run: MediaTools["run"] = (bin, args, opts) => {
+    const tool = bin.split("/").pop()!;
+    // which project/clip/job this belongs to comes from the job's async context (workers set it)
+    const ids = () => {
+      const { projectId, clipId, jobId } = llmContext();
+      return { projectId, clipId, jobId };
+    };
+    return withSpan(`exec ${tool}`, { "process.command": bin, "process.args_count": args.length }, () => runRaw(bin, args, opts)).then(
+      (res) => {
+        log.debug({ ...ids(), tool, argv: loggableArgv(args) }, "exec");
+        return res;
+      },
+      (err: unknown) => {
+        log.debug({ ...ids(), tool, argv: loggableArgv(args), code: err instanceof CommandError ? err.code : undefined }, "exec failed");
+        throw err;
+      },
+    );
+  };
 
   const ffmpeg: MediaTools["ffmpeg"] = (args, opts = {}) =>
     run(config.FFMPEG_PATH, ["-hide_banner", "-nostdin", "-y", ...args], {

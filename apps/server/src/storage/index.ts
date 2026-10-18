@@ -4,6 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Config, Paths } from "../config.js";
+import type { Logger } from "../log.js";
 
 /**
  * Durable artifact store. Everything ffmpeg touches lives in DATA_DIR (local scratch);
@@ -208,9 +209,31 @@ async function fileExists(file: string) {
   }
 }
 
-export function createStorage(config: Config, paths: Paths): Storage {
-  if (config.STORAGE_DRIVER === "s3") return new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "");
-  return new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
+/** Log a failed write, fetch or delete at warn with its key; behaviour is unchanged. Successes are not logged (bytes are in the rows, timing in spans). */
+export function withStorageLogging(inner: Storage, log: Logger): Storage {
+  const timed = async <T>(op: string, key: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      log.warn({ err, op, key, driver: inner.driver }, "storage operation failed");
+      throw err;
+    }
+  };
+  return {
+    driver: inner.driver,
+    check: () => inner.check(),
+    putFile: (key, localPath, contentType) => timed("put", key, () => inner.putFile(key, localPath, contentType)),
+    ensureLocal: (key, localPath) => timed("ensureLocal", key, () => inner.ensureLocal(key, localPath)),
+    exists: (key) => inner.exists(key),
+    resolve: (key, opts) => inner.resolve(key, opts),
+    delete: (key) => timed("delete", key, () => inner.delete(key)),
+    deletePrefix: (prefix) => timed("deletePrefix", prefix, () => inner.deletePrefix(prefix)),
+  };
+}
+
+export function createStorage(config: Config, paths: Paths, log?: Logger): Storage {
+  const inner: Storage = config.STORAGE_DRIVER === "s3" ? new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "") : new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
+  return log ? withStorageLogging(inner, log) : inner;
 }
 
 // ---------- key helpers ----------

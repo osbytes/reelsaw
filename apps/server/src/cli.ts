@@ -28,7 +28,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
- *   logs    <id> [n=60]                     log lines mentioning a project/clip/job id from LOG_FILE (survives redeploys)
+ *   logs    <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]
+ *                                           log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys)
+ *   log-level [<level|module=level,...>|reset] [--for 15m]
+ *                                           show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s
  *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
  *   bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]
  *                                           the intro/outro library. The user is --user, else the only account
@@ -58,6 +61,8 @@ import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
 import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
+import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
+import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
 import { formatTime } from "@reelsaw/shared";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
@@ -387,28 +392,47 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 
   async logs(svc) {
-    const id = pos[0]!;
+    const id = pos[0];
+    if (!id) throw new Error("usage: reelsaw logs <projectId|clipId|jobId|requestId> [n=60] [--since 2h] [--level debug] [--module render] [--raw]");
     const n = Number(pos[1] ?? 60);
     const file = svc.config.LOG_FILE;
     if (!file) throw new Error("LOG_FILE is not set; container logs: docker compose logs app | grep " + id);
-    const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    const dir = path.dirname(file);
-    const base = path.basename(file).replace(/\.log$/, "");
-    const files = (await fs.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith(base)).sort();
-    const hits: string[] = [];
-    for (const f of files) for (const line of (await fs.readFile(path.join(dir, f), "utf8")).split("\n")) if (line.includes(id)) hits.push(line);
-    for (const line of hits.slice(-n)) {
+    const sinceMs = flag("since") ? parseDuration(flag("since")!) : undefined;
+    if (flag("since") && sinceMs === undefined) throw new Error("--since takes a duration like 90s, 15m, 2h");
+    const level = flag("level");
+    if (level && !(level in LEVEL_NUM)) throw new Error(`--level is one of ${Object.keys(LEVEL_NUM).join(", ")}`);
+    const { lines, files } = await readLogLines(file, { ids: [id], since: sinceMs ? new Date(Date.now() - sinceMs) : undefined, minLevel: level as keyof typeof LEVEL_NUM | undefined, module: flag("module"), limit: n });
+    for (const line of lines) {
+      if (args.includes("--raw")) {
+        console.log(line);
+        continue;
+      }
       try {
-        const d = JSON.parse(line) as Record<string, unknown> & { time: string; level: number; msg: string; err?: { message?: string } };
-        const lvl = ({ 20: "DBG", 30: "INF", 40: "WRN", 50: "ERR", 60: "FTL" } as Record<number, string>)[d.level] ?? String(d.level);
-        const { time, level: _l, msg, app: _a, role: _r, pid: _p, hostname: _h, err, ...rest } = d;
-        console.log(`${time.slice(5, 19).replace("T", " ")} ${lvl} ${msg} ${JSON.stringify(rest).slice(0, 220)}${err?.message ? `\n    err: ${err.message.slice(0, 300)}` : ""}`);
+        const d = JSON.parse(line) as Record<string, unknown> & { time: string; level: number; msg: string; module?: string; err?: { message?: string } };
+        const { time, level: lv, msg, app: _a, role: _r, pid: _p, hostname: _h, err, module: mod, projectId: _pid, ...rest } = d;
+        console.log(`${time.slice(5, 23).replace("T", " ")} ${LEVEL_LABEL[lv] ?? String(lv)} ${mod ? `[${mod}] ` : ""}${msg} ${JSON.stringify(rest).slice(0, 260)}${err?.message ? `\n    err: ${err.message.slice(0, 300)}` : ""}`);
       } catch {
         console.log(line.slice(0, 300));
       }
     }
-    if (!hits.length) console.log(`no lines mention ${id} in ${files.join(", ") || file}`);
+    if (!lines.length) console.log(`no lines mention ${id} in ${files.join(", ") || file}`);
+  },
+
+  async "log-level"(svc) {
+    const { parseLogLevels, formatLogLevels } = await import("./log.js");
+    const env = parseLogLevels(process.env.LOG_LEVEL || "info");
+    const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>>) => {
+      const effective = st.override ? mergeLogLevels(env, st.override.spec) : env;
+      console.log(`effective   ${formatLogLevels(effective)}`);
+      console.log(`environment ${formatLogLevels(env)}  (LOG_LEVEL)`);
+      console.log(st.override ? `override    ${st.override.spec} until ${st.override.until} (set by ${st.override.by ?? "?"}); every process applies it within ~5 s` : "override    none");
+    };
+    const spec = pos[0];
+    if (!spec) return show(await svc.logLevel.refresh());
+    if (spec === "reset" || spec === "off") return show(await svc.logLevel.set(null, "cli"));
+    const forMs = flag("for") ? parseDuration(flag("for")!) : DEFAULT_LOG_OVERRIDE_MS;
+    if (forMs === undefined) throw new Error("--for takes a duration like 90s, 15m, 2h (max 24h)");
+    show(await svc.logLevel.set(spec, "cli", forMs));
   },
 
   async scenes(svc) {
@@ -542,7 +566,7 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
   if (!user) throw new Error("user not found");
   console.error(`acting as ${user.email}`);
   const req = new Request(svc.config.APP_URL);
-  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", session: null, blocked: null }, req }) };
+  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
 }
 
 async function userByEmail(svc: Services, email: string | undefined) {
@@ -555,7 +579,7 @@ async function userByEmail(svc: Services, email: string | undefined) {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

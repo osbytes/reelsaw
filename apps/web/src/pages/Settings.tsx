@@ -7,6 +7,7 @@ import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
 import { ModelsSection } from "../components/ModelsSection";
+import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 
 function gb(mb: number) {
@@ -158,6 +159,7 @@ export function SettingsPage() {
           </section>
         )}
         {isAdmin && <ModelsSection />}
+        {isAdmin && <LogLevelSection />}
         <div className="grid gap-4 sm:grid-cols-2">
           {cfg.map((sec) => (
             <section key={sec.title} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">

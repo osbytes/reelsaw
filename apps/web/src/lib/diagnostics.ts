@@ -18,6 +18,29 @@ function safeJson(v: unknown) {
   }
 }
 
+let sentAt: number[] = [];
+/**
+ * Record a caught error for issue reports and, with `send`, tell the server (POST /api/client-log, a
+ * warn line with the user and route) so a problem seen in the browser shows up in the server logs.
+ * At most 5 a minute from this tab; the server limits per user as well. Failures are swallowed.
+ */
+export function reportClientError(kind: "render" | "error" | "unhandledrejection" | "network", err: unknown, opts: { send?: boolean } = {}) {
+  push(`app.${kind}`, err);
+  if (!opts.send) return;
+  const now = Date.now();
+  sentAt = sentAt.filter((t) => now - t < 60_000);
+  if (sentAt.length >= 5) return;
+  sentAt.push(now);
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : safeJson(err);
+  void fetch("/api/client-log", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, message: message.slice(0, 500), stack: err instanceof Error ? err.stack?.slice(0, 2048) : undefined, route: location.pathname }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 let installed = false;
 export function installDiagnostics() {
   if (installed) return;

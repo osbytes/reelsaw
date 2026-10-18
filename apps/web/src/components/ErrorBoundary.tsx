@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { reportClientError } from "../lib/diagnostics";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -6,7 +7,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     return { error };
   }
   componentDidCatch(error: Error) {
-    console.error("[ui] render error", error);
+    reportClientError("render", error, { send: true });
   }
   render() {
     if (!this.state.error) return this.props.children;

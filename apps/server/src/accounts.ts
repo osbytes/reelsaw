@@ -33,6 +33,11 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   });
 }
 
+/** The admin event is the record; this is the same fact in the log, written once the change has committed. */
+function audit(svc: Services, u: UnitOfWork, action: string, actorId: string | null, userId: string) {
+  u.afterCommit(() => svc.log.child({ module: "accounts", userId }).info({ action, actorId }, "admin action"));
+}
+
 async function lockedUser(u: UnitOfWork, id: string) {
   const [row] = await u.db.select().from(schema.user).where(eq(schema.user.id, id)).for("update");
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
@@ -50,6 +55,7 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     if (user.approvedAt) return { ok: true, changed: false };
     await u.db.update(schema.user).set({ approvedAt: new Date(), updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.db.insert(schema.adminEvents).values({ type: "user.approved", actorId, userId, email: user.email, payload: {} });
+    audit(svc, u, "user.approved", actorId, userId);
     u.afterCommit(() => svc.email.send({ to: user.email, ...templates.approved(svc.config.APP_URL) }));
     return { ok: true, changed: true };
   });
@@ -63,6 +69,7 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
     if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.db.insert(schema.adminEvents).values({ type: "user.role_changed", actorId, userId, email: user.email, payload: { from: user.role, to: role } });
+    audit(svc, u, "user.role_changed", actorId, userId);
     return { ok: true, changed: true };
   });
 }
@@ -76,6 +83,7 @@ export async function banUser(svc: Services, actorId: string, userId: string, re
     // their browser sessions end now; API keys fail at the next request (requester reads the row)
     await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
     await u.db.insert(schema.adminEvents).values({ type: "user.banned", actorId, userId, email: user.email, payload: { reason } });
+    audit(svc, u, "user.banned", actorId, userId);
     return { ok: true };
   });
 }
@@ -85,6 +93,7 @@ export async function unbanUser(svc: Services, actorId: string, userId: string) 
     const user = await lockedUser(u, userId);
     await u.db.update(schema.user).set({ banned: false, banReason: null, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.db.insert(schema.adminEvents).values({ type: "user.unbanned", actorId, userId, email: user.email, payload: {} });
+    audit(svc, u, "user.unbanned", actorId, userId);
     return { ok: true };
   });
 }
@@ -99,6 +108,7 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     for (const p of projects) await deleteProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
     await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
+    audit(svc, u, "user.removed", actorId, userId);
     return { ok: true, projects: projects.length };
   });
 }
@@ -121,6 +131,7 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
       })
       .returning({ limits: schema.userSettings.limits });
     await u.db.insert(schema.adminEvents).values({ type: "user.limits_changed", actorId, userId, email: user.email, payload: { limits: row!.limits } });
+    audit(svc, u, "user.limits_changed", actorId, userId);
     return { ok: true, overrides: row!.limits };
   });
 }

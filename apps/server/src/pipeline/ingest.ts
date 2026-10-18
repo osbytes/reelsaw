@@ -82,13 +82,18 @@ export async function ingest(ctx: StageContext) {
     await svc.storage.putFile(sourceKey, sourcePath);
   }
   if (!sourcePath || !(await exists(sourcePath))) throw new Error("Source file missing after ingest");
+  ctx.log.debug({ sourceType: project.sourceType, reusedStoredSource: !!project.sourceKey && sourceKey === project.sourceKey, ytdlp: project.sourceType === "url" ? { title: meta.title, uploader: meta.uploader, duration: meta.duration, ext: meta.ext } : undefined }, "source fetched");
 
   await ctx.progress(0.9, "Probing media");
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
   const over = await sourceMinutesExceeded(ctx.db, svc.config, project.userId, projectId, probe.durationSec);
-  if (over) throw new Error(over);
+  if (over) {
+    ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "daily source-minutes limit reached");
+    throw new Error(over);
+  }
+  ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;

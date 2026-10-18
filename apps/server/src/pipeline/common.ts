@@ -20,16 +20,24 @@ export class StageContext {
     readonly projectId: string,
     readonly stage: PipelineStage,
     readonly signal: AbortSignal,
+    /** extra ids carried on every line of ctx.log: jobId, runSeq, clipId, queue */
+    readonly ids: Record<string, string | number> = {},
   ) {}
+
+  /** A context whose logger also carries the job id and the project's current run sequence. */
+  static async open(svc: Services, projectId: string, stage: PipelineStage, signal: AbortSignal, ids: Record<string, string | number> = {}): Promise<StageContext> {
+    const [r] = await svc.database.db.select({ seq: schema.projects.runSeq }).from(schema.projects).where(eq(schema.projects.id, projectId));
+    return new StageContext(svc, projectId, stage, signal, { ...(r ? { runSeq: r.seq } : {}), ...ids });
+  }
 
   get db() {
     return this.svc.database.db;
   }
 
   private _log?: Logger;
-  /** child logger carrying stage + projectId on every line */
+  /** child logger carrying module (= the stage), projectId, jobId and runSeq on every line; add more with `.child()` */
   get log(): Logger {
-    return (this._log ??= this.svc.log.child({ stage: this.stage, projectId: this.projectId }));
+    return (this._log ??= this.svc.log.child({ module: this.stage, stage: this.stage, projectId: this.projectId, ...this.ids }));
   }
 
   async project(): Promise<Project> {

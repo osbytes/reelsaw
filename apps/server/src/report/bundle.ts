@@ -8,6 +8,7 @@
  * an import reproduces it exactly.
  */
 import path from "node:path";
+import { readLogLines } from "../log-read.js";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
@@ -72,15 +73,9 @@ export async function reportPreview(svc: Services, userId: string, projectId: st
 async function logLines(svc: Services, ids: string[], redact: (s: string) => string): Promise<string[]> {
   const file = svc.config.LOG_FILE;
   if (!file || !ids.length) return [];
-  const dir = path.dirname(file);
-  const base = path.basename(file).replace(/\.log$/, "");
-  const files = (await fsp.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith(base)).sort();
-  const hits: string[] = [];
-  for (const f of files) {
-    const text = await fsp.readFile(path.join(dir, f), "utf8").catch(() => "");
-    for (const line of text.split("\n")) if (line && ids.some((id) => line.includes(id))) hits.push(redact(line));
-  }
-  return hits.slice(-MAX_LOG_LINES);
+  // the files kept by rotation are the last 7 days
+  const { lines } = await readLogLines(file, { ids, since: new Date(Date.now() - 7 * 86400_000) });
+  return lines.slice(-MAX_LOG_LINES).map(redact);
 }
 
 function readme(m: Pick<ReportManifest, "kind" | "app" | "projectId">): string {
@@ -222,6 +217,7 @@ export async function createReportZip(
           const lines = await logLines(svc, [project.id, ...clips.map((c) => c.id)], redact);
           addJsonl("logs.jsonl", lines);
           if (!svc.config.LOG_FILE) manifest.notes.push("LOG_FILE is not set on this instance, so no logs could be included.");
+          else manifest.notes.push(`logs.jsonl holds the last 7 days of lines mentioning this project or its clips, at the log level in force (${svc.logLevel.state().effective}); debug lines are only there if that level included them.`);
           if (svc.config.LLM_TRACE?.includes("logs") !== true) manifest.notes.push("LLM_TRACE does not include logs: model prompts/responses are not in logs.jsonl.");
         }
         if (req.include.previews) for (const c of clips) if (c.thumbnailKey) await addStored(`media/thumbnails/${String(c.index + 1).padStart(2, "0")}-${c.id}.jpg`, c.thumbnailKey).catch(() => manifest.notes.push(`thumbnail of clip ${c.index + 1} missing`));
@@ -245,7 +241,7 @@ export async function createReportZip(
       if (req.include.system) {
         const own = (await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.userId, userId))).map((p) => p.id);
         const ownClips = own.length ? (await db.select({ id: schema.clips.id }).from(schema.clips).where(inArray(schema.clips.projectId, own))).map((c) => c.id) : [];
-        addJson("system.json", await systemInfo(svc));
+        addJson("system.json", { ...(await systemInfo(svc)), logLevel: svc.logLevel.state() });
         addJson("queue.json", JSON.parse(redact(JSON.stringify(await queueInfo(svc, project ? [project.id] : own)))));
         addJson("usage.json", await usageInfo(svc, userId));
         addJsonl("errors.jsonl", await recentErrors(svc, { projectIds: own, clipIds: ownClips }, redact));
