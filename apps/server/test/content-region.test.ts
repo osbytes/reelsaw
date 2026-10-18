@@ -5,7 +5,8 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { detectSidePanel, panelReason, frameVote, type PBox, type PanelSample } from "../src/pipeline/side-panel.js";
+import { detectContentRegion, contentReason, frameVote, type PBox, type RegionSample } from "../src/pipeline/content-region.js";
+import { contentSide } from "@reelsaw/shared";
 import { decideLayout, segmentLayouts, type FaceSample } from "../src/pipeline/layout.js";
 
 const cfg = { LAYOUT_MIN_FACE_RATIO: 0.6, LAYOUT_MIN_FACE_SIZE: 0.18 };
@@ -14,22 +15,22 @@ const line = (x1: number, x2: number, y: number): PBox => ({ x1, x2, y1: y, y2: 
 /** `n` lines of text stacked from y0 in the column x1..x2 */
 const column = (x1: number, x2: number, y0: number, n: number, gap = 0.08): PBox[] => Array.from({ length: n }, (_, i) => line(x1, x2, y0 + i * gap));
 
-function frames(count: number, make: (i: number) => Partial<PanelSample> & { box?: PBox & { score: number } }): Array<PanelSample & FaceSample> {
+function frames(count: number, make: (i: number) => Partial<RegionSample> & { box?: PBox & { score: number } }): Array<RegionSample & FaceSample> {
   return Array.from({ length: count }, (_, i) => {
     const m = make(i);
     const box = m.box ?? face(0.15, 0.4);
-    return { t: i / 4, box, boxes: [box], text: m.text ?? [], ...(m.divider ? { divider: m.divider } : {}) } as PanelSample & FaceSample;
+    return { t: i / 4, box, boxes: [box], text: m.text ?? [], ...(m.divider ? { divider: m.divider } : {}) } as RegionSample & FaceSample;
   });
 }
 
-describe("side panel", () => {
+describe("content region", () => {
   it("app screen on the right: text beside the speaker, backed by a divider", () => {
     const s = frames(40, () => ({ text: column(0.72, 0.95, 0.1, 10), divider: { x: 0.68, s: 0.5 } }));
     const d = decideLayout(s, cfg);
     assert.equal(d.layout, "stack");
-    assert.equal(d.panel?.side, "right");
-    assert.equal(d.panel?.x1, 0.68);
-    assert.equal(d.panel?.x2, 1);
+    assert.equal(contentSide(d.content!), "right");
+    assert.equal(d.content?.x1, 0.68);
+    assert.equal(d.content?.x2, 1);
     assert.match(d.reason, /^app panel beside the speaker \(right 32%\)$/);
   });
 
@@ -37,29 +38,29 @@ describe("side panel", () => {
     const s = frames(40, () => ({ box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } }));
     const d = decideLayout(s, cfg);
     assert.equal(d.layout, "stack");
-    assert.equal(d.panel?.side, "left");
-    assert.equal(d.panel?.x2, 0.495);
+    assert.equal(contentSide(d.content!), "left");
+    assert.equal(d.content?.x2, 0.495);
     assert.match(d.reason, /^title card beside the speaker \(left 50%\)$/);
   });
 
   it("text alone is enough when it fills the height, and the panel starts at the text", () => {
     const s = frames(40, () => ({ box: face(0.55, 0.85), text: column(0.05, 0.3, 0.08, 10) }));
-    const p = detectSidePanel(s);
-    assert.equal(p.panel?.side, "left");
+    const p = detectContentRegion(s);
+    assert.equal(contentSide(p.content!), "left");
     assert.equal(p.evidence, "text");
-    assert.ok(p.panel!.x2 > 0.25 && p.panel!.x2 < 0.35);
+    assert.ok(p.content!.x2 > 0.25 && p.content!.x2 < 0.35);
   });
 
   it("a strong straight edge with no readable text (charts, photos) still counts", () => {
     const s = frames(40, () => ({ divider: { x: 0.66, s: 0.55 } }));
-    const p = detectSidePanel(s);
-    assert.equal(p.panel?.side, "right");
+    const p = detectContentRegion(s);
+    assert.equal(contentSide(p.content!), "right");
     assert.equal(p.evidence, "divider");
   });
 
   it("an ordinary room edge (weak divider) is not a panel", () => {
     const s = frames(40, () => ({ divider: { x: 0.7, s: 0.27 } }));
-    assert.equal(detectSidePanel(s).panel, undefined);
+    assert.equal(detectContentRegion(s).panel, undefined);
     assert.equal(decideLayout(s, cfg).layout, "face");
   });
 
@@ -67,7 +68,7 @@ describe("side panel", () => {
     const s = frames(40, () => ({ text: [line(0.1, 0.5, 0.78), line(0.12, 0.48, 0.84)] }));
     const d = decideLayout(s, cfg);
     assert.equal(d.layout, "face");
-    assert.equal(d.panel, undefined);
+    assert.equal(d.content, undefined);
   });
 
   it("text on both sides of the speaker is not a panel", () => {
@@ -77,26 +78,26 @@ describe("side panel", () => {
 
   it("a panel narrower than 22% of the frame is not worth a half of the screen", () => {
     const s = frames(40, () => ({ text: column(0.84, 0.98, 0.1, 10), divider: { x: 0.82, s: 0.5 } }));
-    const p = detectSidePanel(s);
-    assert.equal(p.panel, undefined);
+    const p = detectContentRegion(s);
+    assert.equal(p.content, undefined);
     assert.equal(decideLayout(s, cfg).layout, "face");
   });
 
   it("a panel that is on screen for under 60% of the frames keeps the face crop", () => {
     const s = frames(40, (i) => (i < 20 ? { text: column(0.72, 0.95, 0.1, 10), divider: { x: 0.68, s: 0.5 } } : {}));
-    const p = detectSidePanel(s);
-    assert.equal(p.panel, undefined);
+    const p = detectContentRegion(s);
+    assert.equal(p.content, undefined);
     assert.match(p.rejected ?? "", /only 50%/);
   });
 
   it("a face under 20% of the frame height is left to the existing stack rules", () => {
     const s = frames(40, () => ({ box: face(0.15, 0.3, 0.19), text: column(0.72, 0.95, 0.1, 10), divider: { x: 0.68, s: 0.5 } }));
-    assert.equal(detectSidePanel(s).rejected, "face under 20% tall");
+    assert.equal(detectContentRegion(s).rejected, "face under 20% tall");
   });
 
   it("a panel edge that wanders is not trusted", () => {
     const s = frames(40, (i) => ({ text: column(0.72, 0.95, 0.1, 10), divider: { x: 0.6 + (i % 4) * 0.06, s: 0.5 } }));
-    assert.equal(detectSidePanel(s).panel, undefined);
+    assert.equal(detectContentRegion(s).panel, undefined);
   });
 
   it("frameVote ignores a panel that would overlap the speaker", () => {
@@ -117,7 +118,7 @@ describe("side panel", () => {
     const s = frames(80, (i) => (i >= 28 && i < 40 ? { box: face(0.62, 0.86), divider: { x: 0.495, s: 0.35 } } : card));
     const segs = segmentLayouts(s, cfg, [], 20);
     assert.deepEqual(segs.map((x) => x.decision.layout), ["stack"]);
-    assert.equal(segs[0]!.decision.panel?.side, "left");
+    assert.equal(contentSide(segs[0]!.decision.content!), "left");
   });
 
   it("a gap with no divider is not held", () => {
@@ -144,7 +145,7 @@ describe("side panel", () => {
     assert.deepEqual(segmentLayouts(s as never, cfg, [], 10).map((x) => x.decision.layout), ["fit"]);
   });
 
-  it("panelReason names what it found", () => {
-    assert.equal(panelReason({ side: "right", x1: 0.68, x2: 1 }, { evidence: "divider", panelLines: 0 }), "panel beside the speaker (right 32%)");
+  it("contentReason names what it found", () => {
+    assert.equal(contentReason({ x1: 0.68, y1: 0, x2: 1, y2: 1 }, { evidence: "divider", lines: 0 }), "content beside the speaker (right 32%)");
   });
 });

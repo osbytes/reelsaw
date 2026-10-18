@@ -135,8 +135,8 @@ export interface DetectedSegment {
   track?: Array<[number, number]>;
   /** manual offset that was applied */
   offsetX?: number;
-  /** "stack" only: the app screen / title card beside the speaker that fills the top half (normalized x bounds) */
-  panel?: { side: "left" | "right"; x1: number; x2: number };
+  /** "stack" only: the part of the frame shown on top (absent = the whole frame) */
+  content?: ContentRegion;
 }
 
 /**
@@ -538,32 +538,62 @@ export function speakerCrop(srcW: number, srcH: number, aspect: number, face: { 
 }
 
 /**
- * Geometry of a "stack" with a side panel (an app screen or title card beside the speaker): the top
- * half shows only the panel, the bottom half the speaker cropped from the other side of the frame.
- * Source pixels, shared by the renderer and the editor preview. `panel.x1/x2` come from a probe on a
- * 320 px wide frame (±1% of the width), so both crops keep 1.2% of the width clear of the divider.
+ * The part of the source frame a "stack" shows on top (normalized); the speaker is cropped below.
+ * A corner webcam over a screen share shows the whole frame; an app screen or title card beside the
+ * speaker is a full-height region on one side; an inset or a top strip are regions too.
  */
-export function panelStackGeometry(
+export interface ContentRegion {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+export const FULL_FRAME: ContentRegion = { x1: 0, y1: 0, x2: 1, y2: 1 };
+/** No region, or one covering the whole frame: the classic stack (frame on top, zoomed speaker below). */
+export function isFullFrame(c: ContentRegion | undefined | null): boolean {
+  return !c || (c.x1 <= 0.01 && c.y1 <= 0.01 && c.x2 >= 0.99 && c.y2 >= 0.99);
+}
+/** Which edge a full-height region hugs, or null for any other shape. */
+export function contentSide(c: ContentRegion): "left" | "right" | null {
+  if (c.y1 > 0.01 || c.y2 < 0.99) return null;
+  if (c.x1 <= 0.01 && c.x2 < 0.99) return "left";
+  if (c.x2 >= 0.99 && c.x1 > 0.01) return "right";
+  return null;
+}
+/** "Stack" for the whole frame, "Stack · content left 50%" for a region. */
+export function contentLabel(c: ContentRegion | undefined | null): string {
+  if (isFullFrame(c)) return "Stack";
+  const side = contentSide(c!);
+  return `Stack · content ${side ?? "inset"} ${Math.round((c!.x2 - c!.x1) * 100)}%`;
+}
+
+/**
+ * Geometry of a "stack" with a content region: the top half shows only the region, the bottom half
+ * the speaker cropped from the part of the frame the region is not on. Source pixels, shared by the
+ * renderer and the editor preview. Region bounds come from a probe on a 320 px wide frame (±1% of
+ * the width), so both crops keep 1.2% of the width clear of a shared edge.
+ */
+export function contentStackGeometry(
   srcW: number,
   srcH: number,
-  panel: { side: "left" | "right"; x1: number; x2: number },
+  content: ContentRegion,
   face: { cy: number; size: number },
   halfAspect: number,
   avoid: Array<{ y1: number; y2: number }> = [],
-): { panel: { x: number; w: number }; free: { lo: number; hi: number }; zoom: { w: number; h: number; y: number } } {
+): { content: { x: number; y: number; w: number; h: number }; free: { lo: number; hi: number }; zoom: { w: number; h: number; y: number } } {
   const gap = 0.012 * srcW;
-  const right = panel.side === "right";
-  const px = right ? panel.x1 * srcW + gap : 0;
-  const pw = right ? srcW - px : panel.x2 * srcW - gap;
-  const free = right ? { lo: 0, hi: panel.x1 * srcW - gap } : { lo: panel.x2 * srcW + gap, hi: srcW };
+  const side = contentSide(content);
+  const x = side === "right" ? content.x1 * srcW + gap : side === "left" ? 0 : content.x1 * srcW;
+  const w = side === "left" ? content.x2 * srcW - gap - x : content.x2 * srcW - x;
+  const free = side === "right" ? { lo: 0, hi: content.x1 * srcW - gap } : side === "left" ? { lo: content.x2 * srcW + gap, hi: srcW } : { lo: 0, hi: srcW };
   let zoom = speakerCrop(srcW, srcH, halfAspect, face, avoid);
   if (zoom.w > free.hi - free.lo) {
     // the speaker's side of the frame is narrower than the usual crop: use all of it
-    const w = free.hi - free.lo;
-    const h = Math.min(srcH, w / halfAspect);
-    zoom = { w, h, y: Math.max(0, Math.min(srcH - h, face.cy * srcH - 0.42 * h)) };
+    const zw = free.hi - free.lo;
+    const h = Math.min(srcH, zw / halfAspect);
+    zoom = { w: zw, h, y: Math.max(0, Math.min(srcH - h, face.cy * srcH - 0.42 * h)) };
   }
-  return { panel: { x: px, w: pw }, free, zoom };
+  return { content: { x, y: content.y1 * srcH, w, h: (content.y2 - content.y1) * srcH }, free, zoom };
 }
 
 /** Left edge of a crop of width `w` centred on normalized x `cx`, kept inside the frame. */

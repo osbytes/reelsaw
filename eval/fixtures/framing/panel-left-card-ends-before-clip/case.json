@@ -1,5 +1,5 @@
 {
-  "kind": "panel",
+  "kind": "content",
   "note": "The \"Step 1\" title card (left 50%) is on screen from the start until a scene cut 1.9 s before the clip ends (source 0:43-1:04, card gone at 1:01.8). The 1.9 s tail is shorter than the minimum segment, so it used to be folded INTO the panel stack: the left half of the room on top and a face crop below. The tail must be a plain face crop.",
   "source": { "id": "budgeting-43-64", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 43.19, "end": 63.73, "sha256": "73883d4b8ddd6f2032ad74a00b366f52cf23bef55209b45c2a762ef3861c0a46", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
   "start": 0,
@@ -7,5 +7,5 @@
   "srcW": 1920,
   "srcH": 1080,
   "sceneCuts": [18.61],
-  "expect": { "layout": "stack", "panel": { "side": "left", "minWidth": 0.25 }, "segments": ["stack", "face"], "edges": [18.6] }
+  "expect": { "layout": "stack", "content": { "side": "left", "minWidth": 0.25 }, "segments": ["stack", "face"], "edges": [18.6] }
 }

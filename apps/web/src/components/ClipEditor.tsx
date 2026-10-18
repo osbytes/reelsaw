@@ -434,8 +434,8 @@ export function ClipEditor(props: Props) {
       cy2: det?.cy2,
       size: det?.size,
       size2: det?.size2,
-      // a side panel is an automatic choice; a section forced to Stack keeps the whole frame on top
-      ...(sec.mode === "auto" && det && !det.manual && det.panel ? { panel: det.panel } : {}),
+      // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top
+      ...(sec.mode === "auto" && det && !det.manual && det.content ? { content: det.content } : {}),
     };
   }, [current, sections, secIdx, clip.layoutSegments, clip.layout]);
   const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map(layoutLabel))].join(" / ");

@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
+import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
-import { panelRuns, type PanelRun } from "./panel-runs.js";
-import { probeDivider, detectSidePanel, panelReason, frameVote, type PanelRegion, type PanelSignals, type PBox, type DividerProbe } from "./side-panel.js";
+import { contentRuns, type ContentRun } from "./content-runs.js";
+import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
 
 /** Resolved layout for one clip. */
 export type Layout = "face" | "split" | "stack" | "fit" | "center" | "none";
@@ -31,10 +32,10 @@ export interface LayoutDecision {
   /** Per-speaker median face heights for split crops (first = track, second = track2). */
   speakerSizes?: [number, number];
   faceCount: number;
-  /** "stack" only: the content panel beside the speaker; the top half shows just this region */
-  panel?: PanelRegion;
-  /** side-panel detector inputs and outcome, for the debug log */
-  panelSignals?: PanelSignals;
+  /** "stack" only: the part of the frame shown on top (FULL_FRAME for a corner webcam over a screen, a region for an app screen or title card beside the speaker) */
+  content?: ContentRegion;
+  /** content-region detector inputs and outcome, for the debug log */
+  contentSignals?: ContentSignals;
 }
 
 export interface LayoutOptions {
@@ -87,14 +88,14 @@ function median(xs: number[]) {
  * Decide how to frame a clip from its face samples.
  *  - a big face most of the time → "face": 9:16 crop that follows the face
  *  - a face that is small or parked in a corner (webcam over a slide/screen) → "stack": full frame on top, zoomed face below
- *  - a big face beside an app screen or title card (side-by-side composite) → "stack" with `panel`: just the panel on top, the speaker below (see side-panel.ts)
+ *  - a big face beside an app screen or title card (side-by-side composite) → "stack" with a `content` region: just that region on top, the speaker below (see content-region.ts)
  *  - no face → "fit": whole frame over a blurred background (graphics, b-roll, screencasts without a webcam)
  */
 export function decideLayout(
   samples: FaceSample[],
   config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">,
   sceneCuts: number[] = [],
-  opts: { panel?: boolean } = {},
+  opts: { content?: boolean } = {},
 ): LayoutDecision {
   const withFace = samples.filter((s) => s.box);
   const faceRatio = samples.length ? withFace.length / samples.length : 0;
@@ -122,30 +123,30 @@ export function decideLayout(
     return { ...base, track: t1, track2: t2, speakerSizes: pairSizes(pair), layout: "split", reason: `two faces in ${Math.round(twoFaces * 100)}% of frames` };
   }
   if (faceSize < config.LAYOUT_MIN_FACE_SIZE || inCorner) {
-    return { ...base, layout: "stack", reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
+    return { ...base, layout: "stack", content: FULL_FRAME, reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
   }
-  // a big speaker beside an app screen / title card (a side-by-side composite): stack the panel on top
-  if (opts.panel === false) return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
-  const found = detectSidePanel(samples);
-  if (found.panel) {
-    const { panel, ...signals } = found;
-    return { ...base, layout: "stack", panel, panelSignals: signals, reason: panelReason(panel, signals) };
+  // a big speaker beside an app screen / title card (a side-by-side composite): stack that region on top
+  if (opts.content === false) return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+  const found = detectContentRegion(samples);
+  if (found.content) {
+    const { content, ...signals } = found;
+    return { ...base, layout: "stack", content, contentSignals: signals, reason: contentReason(content, signals) };
   }
-  return { ...base, layout: "face", panelSignals: found, reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+  return { ...base, layout: "face", contentSignals: found, reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
 }
 
 /**
- * The stack decision for one stretch where the panel was on screen. The aggregate rule decides on
+ * The stack decision for one stretch where the content region was on screen. The aggregate rule decides on
  * the whole stretch; when a bridged gap (OCR lost the title for a few seconds) pulls its share under
- * the threshold, the frames that did show the panel decide, with the stretch's own face track.
+ * the threshold, the frames that did show the region decide, with the stretch's own face track.
  */
-function panelDecision(inside: FaceSample[], config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">, cuts: number[]): LayoutDecision {
+function contentDecision(inside: FaceSample[], config: Pick<Config, "LAYOUT_MIN_FACE_RATIO" | "LAYOUT_MIN_FACE_SIZE">, cuts: number[]): LayoutDecision {
   const d = decideLayout(inside, config, cuts);
-  if (d.panel || d.layout !== "face") return d;
-  const found = detectSidePanel(inside.filter((s) => frameVote(s)));
-  if (!found.panel) return d;
-  const { panel, ...signals } = found;
-  return { ...d, layout: "stack", panel, panelSignals: signals, reason: `${panelReason(panel, signals)}; held through a gap in the evidence` };
+  if (d.content || d.layout !== "face") return d;
+  const found = detectContentRegion(inside.filter((s) => frameVote(s)));
+  if (!found.content) return d;
+  const { content, ...signals } = found;
+  return { ...d, layout: "stack", content, contentSignals: signals, reason: `${contentReason(content, signals)}; held through a gap in the evidence` };
 }
 
 /**
@@ -357,14 +358,14 @@ export function segmentLayouts(
     kept.push(e);
   }
   edges = kept;
-  const runs = panelRuns(samples, duration, cuts);
+  const runs = contentRuns(samples, duration, cuts);
   const segs: LayoutSegment[] = [];
   for (let i = 0; i + 1 < edges.length; i++) {
     const start = edges[i]!;
     const end = edges[i + 1]!;
-    // a panel stack only exists inside the runs where the panel was seen: cut the piece at the run's
+    // a region stack only exists inside the runs where the region was seen: cut the piece at the run's
     // edges, so a leading or trailing sliver stays the plain face crop (never half the room on top)
-    const pieces: Array<{ a: number; b: number; run?: PanelRun }> = [];
+    const pieces: Array<{ a: number; b: number; run?: ContentRun }> = [];
     let t = start;
     for (const r of runs) {
       const a = Math.max(r.start, start);
@@ -380,14 +381,14 @@ export function segmentLayouts(
       const near = inside.length ? inside : [samples.reduce((best, s) => (Math.abs(s.t - p.a) < Math.abs(best.t - p.a) ? s : best))];
       const cutsIn = cuts.filter((c) => c > p.a && c < p.b);
       if (p.run) {
-        const d = panelDecision(samples.filter((s) => s.t >= p.run!.start && s.t < p.run!.end), config, cuts.filter((c) => c > p.run!.start && c < p.run!.end));
-        if (d.panel) {
+        const d = contentDecision(samples.filter((s) => s.t >= p.run!.start && s.t < p.run!.end), config, cuts.filter((c) => c > p.run!.start && c < p.run!.end));
+        if (d.content) {
           const track = d.track.filter((pt) => pt.t >= p.a - 1e-6 && pt.t < p.b);
           segs.push({ start: p.a, end: p.b, decision: { ...d, track: track.length ? track : d.track.slice(0, 1) } });
           continue;
         }
       }
-      segs.push({ start: p.a, end: p.b, decision: decideLayout(near, config, cutsIn, { panel: false }) });
+      segs.push({ start: p.a, end: p.b, decision: decideLayout(near, config, cutsIn, { content: false }) });
     }
   }
   // a short one-face stretch beside a split, where the visible face IS one of the split's speakers
@@ -418,10 +419,11 @@ export function segmentLayouts(
   return merged;
 }
 
-/** Same layout, and for a stack the same panel (a left panel and a right panel are different framings). */
+/** Same layout, and for a stack the same kind of region (content on the left and on the right are different framings). */
 export function sameFraming(a: LayoutDecision, b: LayoutDecision): boolean {
   if (a.layout !== b.layout) return false;
-  return (a.panel?.side ?? null) === (b.panel?.side ?? null);
+  const kind = (d: LayoutDecision) => (isFullFrame(d.content) ? "full" : (contentSide(d.content!) ?? "inset"));
+  return kind(a) === kind(b);
 }
 
 /** Re-base track points to a segment's own clock (t = 0 at segment start). */
@@ -490,8 +492,8 @@ export function forcedDecision(samples: FaceSample[], layout: Layout, config: Pi
     const pair = assignPair(samples);
     return { ...base, layout, reason: "manual", track: tripodTrack(pair.a, sceneCuts), track2: tripodTrack(pair.b, sceneCuts), speakerSizes: pairSizes(pair) };
   }
-  // a forced Stack is the whole frame on top: the detected panel only applies to the automatic choice
-  return { ...base, layout, reason: "manual", panel: undefined, panelSignals: undefined };
+  // a forced Stack is the whole frame on top: the detected content region only applies to the automatic choice
+  return { ...base, layout, reason: "manual", content: layout === "stack" ? FULL_FRAME : undefined, contentSignals: undefined };
 }
 
 function shiftDecision(d: LayoutDecision, by: number): LayoutDecision {
@@ -647,8 +649,8 @@ export function fitTextHeavy(segments: ResolvedSegment[], runs: Array<[number, n
   if (!runs.length) return segments;
   const out: ResolvedSegment[] = [];
   for (const sg of segments) {
-    // a side panel is already shown whole on top (the text in it is why the frame looks text-heavy)
-    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none" || sg.decision.panel) {
+    // a content region is already shown whole on top (the text in it is why the frame looks text-heavy)
+    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none" || (sg.decision.content && !isFullFrame(sg.decision.content))) {
       out.push(sg);
       continue;
     }

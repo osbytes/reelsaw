@@ -5,10 +5,10 @@
  *    preview) must centre its speaker within `maxOffset` of the crop width and keep burned-in
  *    caption bands out of the crop. With `maxDrift`, neither speaker's crop may wander more than
  *    that (normalized x) from where that speaker sits: no pan over to the other person and back.
- *  - panel cases: a speaker beside an app screen or title card. Samples carry text boxes and the
+ *  - content cases: a speaker beside an app screen or title card. Samples carry text boxes and the
  *    divider probe too (generated with the text model on first run). The layout must be "stack" with
- *    the panel on the expected side and at least `minWidth` wide, and the auto segmentation of the
- *    range (`segments`) must show the panel as its own piece when it appears and goes away.
+ *    the content region on the expected side and at least `minWidth` wide, and the auto segmentation of the
+ *    range (`segments`) must show the region as its own piece when it appears and goes away.
  *  - track cases: the "heavy tripod" camera (`tripodTrack`) must settle within `maxErrPx` of the
  *    face after `settleSec`, and never pan faster than `maxPanPxPerSec`.
  * Face samples are committed (samples.json, derived from the video); when missing they are
@@ -17,16 +17,16 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { speakerCrop, cropX } from "@reelsaw/shared";
+import { speakerCrop, cropX, isFullFrame, contentSide } from "@reelsaw/shared";
 import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, type FaceSample } from "../../pipeline/layout.js";
-import { attachText } from "../../pipeline/side-panel.js";
+import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadFaceDetector } from "../../vision/faces.js";
 import { loadTextDetector } from "../../vision/text.js";
 import { materialize, type CaseResult, type MediaSource, type Suite, type EvalContext } from "../framework.js";
 
 interface FramingCase {
-  kind: "split" | "track" | "panel";
+  kind: "split" | "track" | "content";
   note?: string;
   source: MediaSource;
   /** seconds inside the materialised media */
@@ -35,7 +35,7 @@ interface FramingCase {
   srcW: number;
   srcH: number;
   avoid?: Array<{ y1: number; y2: number }>;
-  /** panel cases: scene cuts inside the range (seconds from its start), as the render passes them */
+  /** content cases: scene cuts inside the range (seconds from its start), as the render passes them */
   sceneCuts?: number[];
   expect: {
     layout?: string;
@@ -44,11 +44,11 @@ interface FramingCase {
     settleSec?: number;
     maxErrPx?: number;
     maxPanPxPerSec?: number;
-    /** panel cases: the content panel beside the speaker (side, and at least this share of the frame width) */
-    panel?: { side: "left" | "right"; minWidth: number };
-    /** panel cases: the auto segmentation of the range, in order (the panel appears and goes away mid-range) */
+    /** content cases: the region shown on top: the side it hugs (or an explicit box, +-0.03), and at least this share of the frame width */
+    content?: { side?: "left" | "right"; box?: [number, number, number, number]; minWidth: number };
+    /** content cases: the auto segmentation of the range, in order (the region appears and goes away mid-range) */
     segments?: string[];
-    /** panel cases: where the segments change, in seconds from the range start (+-0.3 s) */
+    /** content cases: where the segments change, in seconds from the range start (+-0.3 s) */
     edges?: number[];
   };
 }
@@ -60,8 +60,8 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   const det = await loadFaceDetector(ctx.config().FACE_MODEL_PATH);
   try {
     let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4 });
-    if (c.kind === "panel") {
-      // panel cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
+    if (c.kind === "content") {
+      // content cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
       const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
       try {
         const frames = await sampleClipText({ detector: text, ffmpegPath: ctx.config().FFMPEG_PATH }, media, c.start, c.end - c.start, 2);
@@ -129,22 +129,25 @@ export const framingSuite: Suite = {
           if (faceY < crop.y || faceY > crop.y + crop.h) fails.push(`speaker ${s.label} face outside crop vertically`);
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
-      } else if (c.kind === "panel") {
+      } else if (c.kind === "content") {
         // the way a render does it: segment the clip (with its scene cuts), judge the stack piece
         const segs = segmentLayouts(samples, cfg, c.sceneCuts ?? [], c.end - c.start);
-        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.panel)?.decision ?? decideLayout(samples, cfg, c.sceneCuts ?? []);
+        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.content && !isFullFrame(sg.decision.content))?.decision ?? decideLayout(samples, cfg, c.sceneCuts ?? []);
         const fails: string[] = [];
-        const checks: Record<string, number | string> = { layout: d.layout, share: d.panelSignals?.share ?? 0 };
-        if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.panelSignals?.rejected ? ` (${d.panelSignals.rejected})` : ""}`);
-        const want = c.expect.panel;
+        const checks: Record<string, number | string> = { layout: d.layout, share: d.contentSignals?.share ?? 0 };
+        if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.contentSignals?.rejected ? ` (${d.contentSignals.rejected})` : ""}`);
+        const want = c.expect.content;
         if (want) {
-          if (!d.panel) fails.push("no panel found");
+          const r = d.content;
+          if (!r || isFullFrame(r)) fails.push("no content region found");
           else {
-            checks.side = d.panel.side;
-            checks.panelX = `${d.panel.x1}-${d.panel.x2}`;
+            const side = contentSide(r);
+            checks.side = side ?? "inset";
+            checks.contentX = `${r.x1}-${r.x2}`;
             checks.reason = d.reason;
-            if (d.panel.side !== want.side) fails.push(`panel on the ${d.panel.side}, expected ${want.side}`);
-            if (d.panel.x2 - d.panel.x1 < want.minWidth) fails.push(`panel ${(d.panel.x2 - d.panel.x1).toFixed(2)} wide, expected at least ${want.minWidth}`);
+            if (want.side && side !== want.side) fails.push(`content on the ${side}, expected ${want.side}`);
+            if (want.box && [r.x1, r.y1, r.x2, r.y2].some((v, i) => Math.abs(v - want.box![i]!) > 0.03)) fails.push(`content ${r.x1},${r.y1},${r.x2},${r.y2}, expected ${want.box.join(",")}`);
+            if (r.x2 - r.x1 < want.minWidth) fails.push(`content ${(r.x2 - r.x1).toFixed(2)} wide, expected at least ${want.minWidth}`);
           }
         }
         if (c.expect.segments) {

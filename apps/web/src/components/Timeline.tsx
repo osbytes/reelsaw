@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Scissors, Undo2, Redo2, Check } from "lucide-react";
-import { formatTime, type DetectedSegment, type SectionMode, type Word } from "@reelsaw/shared";
+import { formatTime, contentLabel, type ContentRegion, type DetectedSegment, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 export const SPLIT_SHORTCUT = `${MOD}B`;
@@ -24,8 +24,8 @@ export const MODE_COLOR: Record<string, string> = {
   none: "#334155",
 };
 export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
-/** What a rendered piece looks like: a stack with a side panel (app screen, title card) says which side. */
-export const layoutLabel = (d: { layout: string; panel?: { side: string } }) => (d.layout === "stack" && d.panel ? `Stack · panel ${d.panel.side}` : MODE_LABEL[d.layout]);
+/** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"). */
+export const layoutLabel = (d: { layout: string; content?: ContentRegion }) => (d.layout === "stack" ? contentLabel(d.content) : MODE_LABEL[d.layout]);
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;

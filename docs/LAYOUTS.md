@@ -1,5 +1,11 @@
 # Framing layouts
 
+One idea runs through the stack layouts: **a stack shows a content region on top and the speaker below.**
+A corner webcam over a screen share is the full-frame region; an app screen or title card beside the
+speaker is a full-height region on one side. A top strip or an inset are the same thing with other
+shapes. The layout decision carries `content: { x1, y1, x2, y2 }` (normalized); the renderer, the
+editor preview and the fixtures all read that one region.
+
 How Reelsaw turns a 16:9 (or any) source into 9:16, which layouts it aims to support, how it picks
 one, where it is known to fail, and which fixtures guard each case. Line numbers are as of this
 writing; search for the function name if they drifted.
@@ -11,12 +17,12 @@ writing; search for the function name if they drifted.
 | `face` | one speaker, big in frame | full-height 9:16 crop that follows the face (heavy-tripod smoothing) | face in at least `LAYOUT_MIN_FACE_RATIO` (0.6) of sampled frames, median face height at least `LAYOUT_MIN_FACE_SIZE` (0.18), not in a corner, no second face, no side panel (`decideLayout`, `layout.ts:92`) | section mode "Follow speaker"; drag the picture to offset |
 | `split` | two people in one wide shot | two speaker-sized crops, one above the other | a second face (at least 8% tall) in at least 50% of frames (`layout.ts:116`); inside it the crop follows whoever talks when `activeSpeakers` is confident (`render.ts:276`) | section mode "Two stacked" |
 | `stack` | small webcam over a screen share or slides | whole frame on top, zoomed speaker below | median face under `LAYOUT_MIN_FACE_SIZE`, or face centre in a corner (x < 0.22 or > 0.78 and y < 0.3 or > 0.7) (`layout.ts:106`) | section mode "Screen + speaker" |
-| `stack` with `panel` | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectSidePanel` (`side-panel.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
+| `stack` with a content region | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectContentRegion` (`content-region.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
 | `fit` | no usable face: graphics, b-roll, screencasts, slides | whole frame over a blurred background | face in under `LAYOUT_MIN_FACE_RATIO` of frames; or a text-heavy run (`fitTextHeavy`, `layout.ts:605`) | section mode "Whole frame" |
 | `center` | anything | static centre crop | only when there is no face detector, or a manual mode found no face | section mode "Centre crop" |
 | `none` | anything | original aspect, no reframing | manual / legacy only; mixed with other pieces it becomes `fit` | project reframe setting or legacy per-clip override |
 
-Side-panel thresholds (`PANEL`, `side-panel.ts:41`), all general, none tuned to one video:
+Content-region thresholds (`REGION`, `content-region.ts:41`), all general, none tuned to one video:
 
 | signal | threshold |
 |---|---|
@@ -26,7 +32,7 @@ Side-panel thresholds (`PANEL`, `side-panel.ts:41`), all general, none tuned to 
 | divider | strongest straight vertical edge per frame (mean luma step across all rows): at least 0.30 to back text, at least 0.40 to count alone; must lie within 0.12 of the text's inner bound to back it |
 | persistence | the panel is seen in at least 60% of sampled frames, and its edge stays within 0.04 in at least 70% of those |
 | size | panel at least 0.22 of the width; clears the speaker's face by 0.02 |
-| decision | `stack` with `panel { side, x1, x2 }`; reason "app panel / title card / panel beside the speaker (right 32%)" |
+| decision | `stack` with `content { x1, y1, x2, y2 }` (here a full-height strip on one side); reason "app panel / title card / content beside the speaker (right 32%)" |
 
 Where the user can override: project setting `reframe` (`reframeModeSchema`, `packages/shared/src/index.ts:50`),
 per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; `coverTimeline`,
@@ -37,7 +43,7 @@ per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; 
 
 **Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps, 320x240,
 for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame vertical-divider probe
-(`probeDivider`, `side-panel.ts`). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
+(`probeDivider`, `content-region.ts`). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
 (`attachText`) and are the only text input the layout reads. Scene cuts come from the transcript
 stage (`scenes.ts`, adaptive threshold). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
@@ -49,14 +55,14 @@ correlated with the audio envelope) runs only on `split` segments of 3 s or more
 1. face in fewer than `LAYOUT_MIN_FACE_RATIO` of frames: `fit`
 2. a second face (at least 8% tall) in at least 50% of frames: `split`
 3. face under `LAYOUT_MIN_FACE_SIZE`, or parked in a corner: `stack` (whole frame on top)
-4. big face with a side panel (`detectSidePanel`): `stack` with `panel`
+4. big face with a content region (`detectContentRegion`): `stack` with `panel`
 5. otherwise `face`
 
 **Segmenting** (`segmentLayouts`, `layout.ts:299`): each sample is `face`, `split`, `panel` or `none`;
 states are smoothed over 2 samples either side (split holds across a missed second face for 3 s),
 boundaries snap to a scene cut within 1 s, pieces under 2.5 s fold into a neighbour, each piece
 runs `decideLayout` on its own samples, and neighbours with the same layout (and panel side) merge.
-Side panels are segmented separately (`panelRuns`, `panel-runs.ts`): runs of frames that voted for a
+Content regions are segmented separately (`contentRuns`, `content-runs.ts`): runs of frames that voted for a
 panel (holes up to 0.75 s closed; gaps up to 4 s bridged when the divider stays at the same x),
 trimmed to the last voting frame plus one sample and snapped to a scene cut within 0.25 s. A run under
 2.5 s, or with the speaker in under 60% of its frames, is dropped. A panel stack only exists inside a
@@ -65,16 +71,16 @@ A short one-face stretch beside a split that is one of its speakers is held as s
 
 **Post-passes** (`render.ts`): active-speaker expansion of splits; `fitTextHeavy` turns auto
 segments into `fit` where text fills the frame (a slide, or a paragraph of 4+ lines) for at least 2 s,
-snapped to scene cuts, but never over a segment that has a side panel (its text is why the frame
+snapped to scene cuts, but never over a segment that has a content region (its text is why the frame
 looks text-heavy); a clip with several pieces becomes 9:16 throughout. `tripodTrack` smooths the face
 path: dead zone 0.025, capped pan speed, instant snap at scene cuts.
 
 **Logged at debug** (`layout per section`, `render.ts:310`): per section the layout, manual flag,
-reason, average faces per frame, and for face / panel decisions the side-panel signals (share of
+reason, average faces per frame, and for face / panel decisions the content-region signals (share of
 frames, side, evidence, text beside per side, text extent, divider x and share, or why it was
 rejected). At info, `layout resolved` carries the per-piece summary and the first reason. The
-decision is stored per clip (`layoutSegments`, with `panel`) and shown in the editor
-("Stack · panel right").
+decision is stored per clip (`layoutSegments`, with `content`) and shown in the editor
+("Stack · content right 32%").
 
 ## 3. Known caveats
 
@@ -110,7 +116,7 @@ decision is stored per clip (`layoutSegments`, with `panel`) and shown in the ed
   divider, splits the stack.
 - The reason text "app panel" vs "title card" is a guess from the number of text lines (5+ is an app).
 - 4:3 and vertical sources: the full-height crop is narrower than the source, so `face` barely moves;
-  nothing special is done for vertical input, and side-panel detection assumes a landscape composite.
+  nothing special is done for vertical input, and content-region detection assumes a landscape composite.
 - Letterboxed or pillarboxed sources: the black bars are part of the frame; a pillar can look like a
   divider (a bar is a strong straight edge) and the face-size thresholds are measured against the full
   frame, not the picture. No fixture yet.
@@ -150,7 +156,7 @@ Adding a case from a bad clip: read what was decided with `docker compose exec a
 `layout per section` line. Extract frames at the interesting moments
 (`ffmpeg -ss T -i source.mp4 -frames:v 1 -vf scale=960:-2 tT.jpg`), find the exact range, then add
 `eval/fixtures/framing/<name>/case.json` with a media source (`id`, `url`, `localPath`, `start`, `end`),
-the range inside it, `srcW`/`srcH` and an `expect` block (`layout`, `panel`, `segments`, offsets).
+the range inside it, `srcW`/`srcH` and an `expect` block (`layout`, `content`, `segments`, offsets).
 Run `pnpm eval framing`: the case must fail first, and it generates `samples.json` on the first run
 (commit it). Fix the rule, rerun, then `--update` the baseline. Details and what stays out of git:
 [EVALS.md](EVALS.md#adding-a-case-when-a-bug-shows-up).

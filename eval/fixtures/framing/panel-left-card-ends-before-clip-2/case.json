@@ -1,5 +1,5 @@
 {
-  "kind": "panel",
+  "kind": "content",
   "note": "Same defect on a 36 s clip (source 5:08-5:44): the \"Step 7\" title card (on screen from 26.3 s) ends at a scene cut (5:42.4) 1.6 s before the clip ends and the short tail was folded into the panel stack.",
   "source": { "id": "budgeting-308-344", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 307.75, "end": 344.01, "sha256": "1df5c62c30a9082347f78368344d9a8bb5108c0957626404f9f4495e95f527b5", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
   "start": 0,
@@ -7,5 +7,5 @@
   "srcW": 1920,
   "srcH": 1080,
   "sceneCuts": [34.62],
-  "expect": { "layout": "stack", "panel": { "side": "left", "minWidth": 0.25 }, "segments": ["face", "stack", "face"], "edges": [26.3, 34.6] }
+  "expect": { "layout": "stack", "content": { "side": "left", "minWidth": 0.25 }, "segments": ["face", "stack", "face"], "edges": [26.3, 34.6] }
 }
