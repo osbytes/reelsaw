@@ -105,6 +105,10 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
         const usage = { input: res.usage.inputTokens.total ?? 0, output: res.usage.outputTokens.total ?? 0 };
         const ms = Date.now() - startTime.getTime();
         tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: usage.input, outputTokens: usage.output, ms, ok: true });
+        // tokens and latency per call are in llm_usage (and the AI SDK spans); a cut-off answer is in neither
+        const fr = res.finishReason as unknown;
+        const finish = typeof fr === "string" ? fr : (fr as { unified?: string } | undefined)?.unified;
+        if (finish && finish !== "stop" && finish !== "tool-calls") traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, finishReason: finish, outputTokens: usage.output }, "llm answer did not finish normally");
         if (sinks.includes("logs")) {
           traceLog.info(
             { ...ctx, model: model.modelId, provider: model.provider, ms, usage, settings, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })), response: clip(output, config.LLM_TRACE_MAX_CHARS) },
@@ -118,6 +122,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
       } catch (err) {
         const ms = Date.now() - startTime.getTime();
         tracer.onUsage?.({ ctx, model: model.modelId, inputTokens: 0, outputTokens: 0, ms, ok: false });
+        if (!sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, provider: model.provider, ms, err }, "llm call failed");
         if (sinks.includes("logs")) traceLog.warn({ ...ctx, model: model.modelId, ms, err, prompt: input.map((m) => ({ role: m.role, content: clip(m.content, config.LLM_TRACE_MAX_CHARS) })) }, "llm call failed");
         if (langfuse) traceFor(ctx).generation({ name: ctx.call ?? ctx.stage ?? "generate", model: model.modelId, input, startTime, endTime: new Date(), level: "ERROR", statusMessage: (err as Error).message?.slice(0, 1000), metadata: ctx });
         throw err;

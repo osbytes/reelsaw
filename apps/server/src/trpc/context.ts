@@ -2,16 +2,29 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { Services } from "../services.js";
 import { requester, type Requester } from "../auth.js";
+import type { Logger } from "../log.js";
+import type { Context as HonoContext } from "hono";
+import { resolveRequestId, type AppEnv } from "../request-log.js";
 
 export type Context = {
   svc: Services;
   /** null = anonymous. From the browser session cookie or an API key (bearer). */
   who: Requester | null;
   req: Request;
+  /** request id (x-request-id), also on the response and in the http access line */
+  requestId: string;
+  /** child logger carrying requestId and, once known, userId */
+  log: Logger;
 };
 
 export function contextFactory(svc: Services) {
-  return async ({ req }: FetchCreateContextFnOptions): Promise<Context> => ({ svc, who: await requester(svc.auth, svc.database.db, req.headers), req });
+  return async ({ req }: FetchCreateContextFnOptions, c?: HonoContext<AppEnv>): Promise<Context> => {
+    const who = await requester(svc.auth, svc.database.db, req.headers);
+    const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
+    if (who) c?.set("userId", who.user.id);
+    const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });
+    return { svc, who, req, requestId, log: who ? base.child({ userId: who.user.id }) : base };
+  };
 }
 
 const t = initTRPC.context<Context>().create({

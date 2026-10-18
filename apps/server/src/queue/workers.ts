@@ -42,7 +42,7 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
       log.info({ attempt, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
       const t0 = Date.now();
       await withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
-        withLlmContext({ projectId, stage, jobId: job.id }, () => fn(new StageContext(svc, projectId, stage, job.signal))),
+        withLlmContext({ projectId, stage, jobId: job.id }, async () => fn(await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }))),
       );
       log.info({ ms: Date.now() - t0 }, "job done");
     } catch (err) {
@@ -71,7 +71,7 @@ export async function startWorkers(svc: Services) {
     const log = svc.log.child({ module: "worker", queue, jobId: job.id, projectId });
     try {
       log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1 }, "job start");
-      await withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () => withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, () => fn(new StageContext(svc, projectId, "refine", job.signal))));
+      await withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () => withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => fn(await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }))));
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
@@ -97,7 +97,7 @@ export async function startWorkers(svc: Services) {
       const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
       log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
       if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "prepare", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
-      await withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, () => prepareClip(new StageContext(svc, projectId, "render", job.signal), clipId, mode)));
+      await withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => prepareClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.prepare }), clipId, mode)));
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
@@ -118,8 +118,8 @@ export async function startWorkers(svc: Services) {
       if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "render", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
       const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
       try {
-        await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, () =>
-          renderClip(new StageContext(svc, projectId, "render", job.signal), clipId, gen),
+        await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () =>
+          renderClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.render }), clipId, gen),
         );
       } finally {
         release();

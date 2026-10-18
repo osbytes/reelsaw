@@ -131,8 +131,10 @@ export async function analyze(ctx: StageContext) {
   const project = await ctx.project();
   const settings = project.settings;
 
+  const log = ctx.log;
   const existingClips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) });
   if (existingClips.length) {
+    log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
     await svc.tx(async (u) => {
       await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
       for (const c of existingClips) if (c.status !== "done") await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
@@ -154,6 +156,7 @@ export async function analyze(ctx: StageContext) {
   const sc: SelectContext = { title: project.title, durationSec, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds, maxClips: settings.maxClips, focus: settings.focus, instructions: settings.instructions };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const segments = transcript.segments;
+  log.info({ durationSec, segments: segments.length, model: svc.models.get().language, selfHosted, concurrency, samples, pairwise, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
 
   // 1-2. chunk + map
   const chunks = chunkTranscript(segments);
@@ -172,6 +175,7 @@ export async function analyze(ctx: StageContext) {
     perChunk[i]!.push(...more);
   }
   const candidates = perChunk.flat();
+  log.debug({ chunks: chunks.length, perChunk: perChunk.map((l) => l.length), candidates: candidates.length }, "moments proposed by the model");
   // what happened to every candidate the model proposed (stage artifact for diagnosis / reports)
   const chunkOf = perChunk.flatMap((list, i) => list.map(() => i));
   const fate: CandidateFate[] = candidates.map((c, i) => ({ i, chunk: chunkOf[i]!, title: c.title, proposed: [c.startSec, c.endSec], modelScore: c.score, reasoning: c.reasoning, outcome: "unusable" }));
@@ -196,6 +200,7 @@ export async function analyze(ctx: StageContext) {
     poolIdx.push(i);
   }
   const pooled = pool.slice(0, Math.min(40, Math.max(cap * 3, 12)));
+  log.debug({ proposed: candidates.length, snapped: snapped.length, unusable: candidates.length - snapped.length, overlapDropped: snapped.length - pool.length, pooled: pooled.length, poolCapDropped: pool.length - pooled.length }, "candidate pool built");
   for (const i of poolIdx.slice(pooled.length)) fate[i]!.outcome = "pool-cap";
   // the candidates matter most when nothing survives ("no clips found"): keep them on failure too
   const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: AUTO_MIN_SCORE, focus: settings.focus ?? null, samples, pairwise }, chunks: chunks.map((c) => [c.start, c.end]), candidates: fate, ...extra });
@@ -203,6 +208,7 @@ export async function analyze(ctx: StageContext) {
     await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), modelsUsed(svc, "language"))).catch(() => {});
     throw new Error(message);
   };
+  if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
   if (!pooled.length) await failWithCandidates("The model did not return any usable clips. Try widening the clip duration range.");
 
   // 4. rubric scoring
@@ -217,6 +223,7 @@ export async function analyze(ctx: StageContext) {
   const weak = auto ? ranked.filter((x, i) => i > 0 && x.total < AUTO_MIN_SCORE).length : 0;
   if (auto) ranked.forEach((x, i) => i > 0 && x.total < AUTO_MIN_SCORE && (fate[poolIdx[x.id]!]!.outcome = "weak"));
   let chosen = (auto ? ranked.filter((x, i) => i === 0 || x.total >= AUTO_MIN_SCORE) : ranked).slice(0, cap);
+  log.debug({ scored: scored.size, pooled: pooled.length, offTopic, weak, kept: chosen.length, cap, minScore: auto ? AUTO_MIN_SCORE : null, top: ranked.slice(0, 10).map((x) => ({ start: x.c.startSec, end: x.c.endSec, total: x.total, title: x.c.title.slice(0, 60) })) }, "candidates scored");
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
@@ -228,6 +235,7 @@ export async function analyze(ctx: StageContext) {
     const byId = new Map(top.map((x) => [x.id, x]));
     chosen = [...order.map((id) => byId.get(id)!), ...chosen.slice(top.length)];
     ranks = new Map(order.map((id, i) => [id, i + 1]));
+    log.debug({ compared: top.length, order }, "pairwise re-rank");
   }
 
   const rows = chosen.map(({ c, id, r, total }, index) => ({
@@ -246,6 +254,7 @@ export async function analyze(ctx: StageContext) {
     hashtags: c.hashtags.map((h) => h.replace(/^#/, "")),
     status: "pending" as const,
   }));
+  log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
   rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: index, rank: ranks?.get(chosen[index]!.id) }));
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit

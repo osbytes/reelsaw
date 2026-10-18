@@ -32,6 +32,8 @@ import { decodeCursor, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
+import { logControl } from "../log.js";
+import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
 import { generateText } from "ai";
 
@@ -672,6 +674,27 @@ export const appRouter = router({
      * anything that does not resolve, lacks its key, lacks word timestamps or is not installed on the
      * self-hosted server. Stages that are already running keep their model; new ones use the change.
      */
+    /** Log levels in force and a temporary override (every process follows within ~5 s); see log-level.ts. */
+    logLevel: router({
+      get: adminProcedure.query(async ({ ctx }) => {
+        const st = await ctx.svc.logLevel.refresh();
+        const ctl = logControl(ctx.svc.log);
+        return { ...st, modules: knownModules(ctx.svc.log), levels: PICKABLE_LEVELS, envGlobal: ctl?.base.global ?? "info" };
+      }),
+      /** `null` removes the override. */
+      set: adminProcedure
+        .input(z.object({ global: z.enum(PICKABLE_LEVELS), modules: z.array(z.object({ module: z.string().max(40), level: z.enum(PICKABLE_LEVELS) })).max(40), forMinutes: z.union([z.literal(15), z.literal(60), z.literal(240), z.literal(1440)]) }).nullable())
+        .mutation(async ({ ctx, input }) => {
+          try {
+            const spec = input ? specFromStructured(input, knownModules(ctx.svc.log)) : null;
+            const st = await ctx.svc.logLevel.set(spec, ctx.user.email, (input?.forMinutes ?? 15) * 60_000);
+            ctx.log.info({ spec, minutes: input?.forMinutes ?? null }, "log level changed");
+            return st;
+          } catch (err) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
+          }
+        }),
+    }),
     models: router({
       get: adminProcedure.query(({ ctx }) => ({ ...ctx.svc.models.state(), pulls: ctx.svc.catalog.pulls() })),
       catalog: adminProcedure.input(z.object({ kind: z.enum(["language", "transcription"]), refresh: z.boolean().optional() })).query(({ ctx, input }) => ctx.svc.catalog.list(input.kind, { refresh: input.refresh })),
@@ -727,7 +750,11 @@ export const appRouter = router({
    */
   search: protectedProcedure
     .input(z.object({ q: z.string().max(200), limit: z.number().int().min(1).max(50).default(SEARCH_CLIPS), links: z.array(z.string().min(1).max(300)).max(50).optional() }))
-    .query(({ ctx, input }) => searchLibrary(ctx.svc.database.db, ctx.user.id, input)),
+    .query(async ({ ctx, input }) => {
+      const res = await searchLibrary(ctx.svc.database.db, ctx.user.id, input);
+      ctx.log.debug({ qLength: input.q.length, links: input.links?.length ?? 0, projects: res.projects.length, clips: res.clips.length, truncated: res.truncated }, "search");
+      return res;
+    }),
 
   projects: router({
     /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
@@ -735,6 +762,7 @@ export const appRouter = router({
       .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional() }).optional())
       .query(async ({ ctx, input }) => {
         const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status });
+        ctx.log.debug({ limit: input?.limit ?? 24, cursor: !!input?.cursor, status: input?.status ?? null, items: page.rows.length, hasMore: !!page.nextCursor, total: page.total }, "projects page");
         return {
           items: page.rows.map(({ p, ...card }) => ({ ...publicProject(p), ...card })),
           nextCursor: page.nextCursor,
@@ -764,7 +792,10 @@ export const appRouter = router({
       const { svc } = ctx;
       const db = svc.database.db;
       if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a sourceUrl or an uploadId" });
-      await checkProjectQuota(db, svc.config, ctx.user.id);
+      await checkProjectQuota(db, svc.config, ctx.user.id).catch((err) => {
+        ctx.log.warn({ reason: (err as Error).message }, "project quota reached");
+        throw err;
+      });
       let sourceMeta: schema.Project["sourceMeta"] = null;
       let title = input.title?.trim() || "";
       if (input.uploadId) {

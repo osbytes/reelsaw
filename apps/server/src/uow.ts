@@ -34,10 +34,37 @@ export interface UnitOfWork {
 
 export type RunInTx = <T>(fn: (u: UnitOfWork) => Promise<T>) => Promise<T>;
 
+/** Events that are state transitions: logged at the level a person reading the log should care about. */
+const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
+  "project.created": "info",
+  "run.started": "info",
+  "stage.started": "info",
+  "stage.completed": "info",
+  "stage.failed": "warn",
+  "project.done": "info",
+  "project.failed": "error",
+  "clip.done": "info",
+  "clip.failed": "error",
+  "clip.retrying": "warn",
+  "clip.bumper_skipped": "warn",
+  "job.stalled": "warn",
+};
+
+/** The scalar fields of an event payload (counts, durations, reasons), trimmed: enough to read the log without the event feed. */
+export function eventFields(payload: Record<string, unknown>): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const [k, v] of Object.entries(payload).slice(0, 16)) {
+    if (typeof v === "number" || typeof v === "boolean") out[k] = v;
+    else if (typeof v === "string") out[k] = v.length > 200 ? `${v.slice(0, 200)}…` : v;
+  }
+  return out;
+}
+
 export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunInTx {
   return async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
+    const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
     let result;
     try {
       await client.query("BEGIN");
@@ -46,6 +73,7 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
       const u: UnitOfWork = {
         db,
         async emit(projectId, type, payload = {}) {
+          emitted.push({ projectId, type, payload });
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
@@ -65,6 +93,11 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
       throw err;
     } finally {
       client.release();
+    }
+    // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
+    for (const e of emitted) {
+      const level = EVENT_LEVEL[e.type] ?? "debug";
+      log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
     }
     for (const f of after) {
       try {

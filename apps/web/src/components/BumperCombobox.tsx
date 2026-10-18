@@ -6,6 +6,8 @@ import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { ScrollArea } from "./scroll-area";
 import { Skeleton } from "./ui";
 
+// Rich rows (thumbnails, badges) live here; for a plain list with typeahead use `Combobox` in ui.tsx.
+
 /** What the combobox needs to know about a library asset (a subset of the `bumpers.list` row). */
 export interface PickerAsset {
   id: string;

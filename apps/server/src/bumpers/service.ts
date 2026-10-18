@@ -152,6 +152,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
     const storageKey = keys.upload(id, ext);
     await svc.storage.putFile(storageKey, dest);
     await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: size });
+    svc.log.child({ module: "bumpers", userId }).info({ uploadId: id, host: target.host, bytes: size }, "bumper downloaded from a link");
     return { uploadId: id, filename, sizeBytes: size };
   } finally {
     await fs.rm(dest, { force: true }).catch(() => {});

@@ -51,6 +51,13 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
       },
     },
     databaseHooks: {
+      session: {
+        create: {
+          after: async (session) => {
+            log.info({ userId: (session as { userId?: string }).userId }, "sign-in");
+          },
+        },
+      },
       user: {
         create: {
           // the first account administers the box; later ones follow SIGNUP_MODE
@@ -65,6 +72,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
           after: async (user) => {
             const u = user as typeof user & { role?: string; approvedAt?: Date | null };
             await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode } });
+            log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode }, "sign-up");
             if (u.approvedAt) return;
             const admins = await db.query.user.findMany({ where: eq(schema.user.role, "admin"), columns: { email: true } });
             for (const a of admins) void email.send({ to: a.email, ...templates.waitingForApproval(config.APP_URL, u.name, u.email) });

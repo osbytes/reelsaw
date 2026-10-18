@@ -6,6 +6,7 @@
  * `videos.insert` body, TikTok Content Posting API `post_info`) plus a paste-ready text
  * file per clip, a manifest and a CSV for spreadsheet / automation use.
  */
+import type { Logger } from "./log.js";
 import path from "node:path";
 import fsp from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -310,7 +311,7 @@ LINKING SHORTS TO THE PARENT VIDEO
  * responsible for piping it. Temp copies pulled from remote storage are removed when the archive
  * finishes or errors.
  */
-export async function createExportZip(deps: { storage: Storage; paths: Paths }, input: ExportInput): Promise<{ stream: Readable; filename: string; manifest: ExportManifest }> {
+export async function createExportZip(deps: { storage: Storage; paths: Paths; log?: Logger }, input: ExportInput): Promise<{ stream: Readable; filename: string; manifest: ExportManifest }> {
   const manifest = buildManifest(input);
   const byIndex = new Map(input.clips.map((c) => [c.index, c]));
   const tmpDir = path.join(deps.paths.tmp, `export-${randomUUID()}`);
@@ -324,8 +325,15 @@ export async function createExportZip(deps: { storage: Storage; paths: Paths }, 
 
   const archive = new ZipArchive({ zlib: { level: 1 } });
   const cleanup = () => void fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-  archive.on("end", cleanup);
-  archive.on("error", cleanup);
+  const log = deps.log?.child({ module: "export", projectId: input.project.id });
+  archive.on("end", () => {
+    cleanup();
+    log?.info({ clips: manifest.clips.length, bytes: archive.pointer() }, "export sent");
+  });
+  archive.on("error", (err) => {
+    cleanup();
+    log?.warn({ err, clips: manifest.clips.length }, "export failed");
+  });
   archive.on("close", cleanup);
 
   (async () => {

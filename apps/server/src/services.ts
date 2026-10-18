@@ -24,11 +24,14 @@ import { loadTextDetector, type TextDetector } from "./vision/text.js";
 import { loadVad, type Vad } from "./audio/vad.js";
 import { loadAligner, type Aligner } from "./audio/align.js";
 import { createLogger, type Logger } from "./log.js";
+import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
   /** root structured logger; derive children with ids (`log.child({ clipId })`) */
   log: Logger;
+  /** temporary log-level overrides, shared by every process (log-level.ts) */
+  logLevel: LogLevelSettings;
   config: Config;
   paths: Paths;
   otel: Otel;
@@ -186,7 +189,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const storage = await step(`storage (${config.STORAGE_DRIVER})`, async () => {
-    const s = createStorage(config, paths);
+    const s = createStorage(config, paths, log.child({ module: "storage" }));
     await s.check();
     return s;
   });
@@ -196,6 +199,11 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     await d.check();
     await d.migrate();
     return d;
+  });
+
+  const logLevel = createLogLevelSettings(log);
+  await step("log level settings", async () => {
+    await logLevel.attach(database.db);
   });
 
   await step("model settings", async () => {
@@ -244,10 +252,11 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
 
   const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }));
-  return { log, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
+  return { log, logLevel, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
+  s.logLevel.stop();
   s.models.stop();
   s.providers.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));

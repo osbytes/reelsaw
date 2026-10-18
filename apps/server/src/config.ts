@@ -1,5 +1,6 @@
 import { z } from "zod";
 import path from "node:path";
+import { parseLogLevels } from "./log.js";
 
 const boolTrue = z
   .string()
@@ -12,7 +13,18 @@ const boolFalse = z
 
 export const envSchema = z.object({
   NODE_ENV: z.string().default("development"),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  // a level (`info`) or a level plus per-module overrides (`info,render=debug,http=warn`); see log.ts
+  LOG_LEVEL: z
+    .string()
+    .default("info")
+    .refine((v) => {
+      try {
+        parseLogLevels(v);
+        return true;
+      } catch {
+        return false;
+      }
+    }, "LOG_LEVEL must be a level (trace, debug, info, warn, error, fatal, silent) optionally followed by module=level pairs, e.g. info,render=debug"),
   // json: one JSON object per line (default when stdout is not a terminal); pretty: human-readable
   LOG_FORMAT: z.enum(["auto", "json", "pretty"]).default("auto"),
   PORT: z.coerce.number().default(3000),

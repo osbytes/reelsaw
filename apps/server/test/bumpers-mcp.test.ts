@@ -3,6 +3,7 @@
  * the effective-bumpers read model. No database or stack needed.
  * Run: node --import tsx --test test/bumpers-mcp.test.ts
  */
+import { createLogger } from "../src/log.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -77,6 +78,7 @@ describe("downloadAsUpload", () => {
     const svc = {
       paths: { uploads: dir },
       storage: { putFile: async (k: string) => void put.push(k) },
+      log: createLogger({ LOG_LEVEL: "silent", LOG_FORMAT: "json" }),
       database: { db: { insert: () => ({ values: async (v: Record<string, unknown>) => void rows.push(v) }) } },
     } as unknown as Services;
     return { svc, rows, put, dir };
