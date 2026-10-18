@@ -60,8 +60,17 @@ export function eventFields(payload: Record<string, unknown>): Record<string, st
   return out;
 }
 
+/** Postgres aborted the transaction to break a lock cycle (40P01) or a serialization conflict (40001); nothing was committed. */
+export function isRetryableTxError(err: unknown): boolean {
+  let e = err as { code?: unknown; cause?: unknown } | undefined;
+  for (let i = 0; e && i < 4; i++, e = e.cause as typeof e) if (e.code === "40P01" || e.code === "40001") return true;
+  return false;
+}
+
+const TX_ATTEMPTS = 3;
+
 export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunInTx {
-  return async (fn) => {
+  const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
     const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
@@ -107,5 +116,18 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
       }
     }
     return result;
+  };
+  // A deadlock victim is rolled back whole, so running the unit again is safe (its events, jobs and after-commit
+  // tasks were only queued in memory) and far cheaper than failing a render job that finished its ffmpeg work.
+  return async (fn) => {
+    for (let n = 1; ; n++) {
+      try {
+        return await once(fn);
+      } catch (err) {
+        if (n >= TX_ATTEMPTS || !isRetryableTxError(err)) throw err;
+        log.warn({ err, attempt: n }, "transaction aborted by a lock conflict; retrying");
+        await new Promise((r) => setTimeout(r, 20 + Math.random() * 80 * n));
+      }
+    }
   };
 }

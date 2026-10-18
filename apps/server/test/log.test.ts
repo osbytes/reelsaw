@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
+import fs from "node:fs";
+import path from "node:path";
+import { StageContext } from "../src/pipeline/common.js";
 import { Hono } from "hono";
 import { createLogger, formatLogLevels, logControl, parseLogLevels } from "../src/log.js";
 import { mergeLogLevels, parseDuration, specFromStructured, knownModules, KNOWN_LOG_MODULES } from "../src/log-level.js";
@@ -73,6 +76,34 @@ describe("module log levels", () => {
     log.child({ module: "http" }).warn("slow request");
     log.info("root line");
     assert.deepEqual(lines.map((l) => l.msg), ["slow request", "root line"]);
+  });
+  it("nested children keep every parent binding (stage logger -> clip logger)", () => {
+    const { log, lines } = capture("debug");
+    const stage = log.child({ module: "render", stage: "render", projectId: "p1", jobId: "j1", runSeq: 3 });
+    stage.child({ clipId: "c1" }).debug("layout per section");
+    assert.deepEqual({ module: lines[0]!.module, projectId: lines[0]!.projectId, jobId: lines[0]!.jobId, runSeq: lines[0]!.runSeq, clipId: lines[0]!.clipId }, { module: "render", projectId: "p1", jobId: "j1", runSeq: 3, clipId: "c1" });
+  });
+  it("StageContext loggers carry module, projectId, jobId, runSeq and clipId", () => {
+    const { log, lines } = capture("debug");
+    const ctx = new StageContext({ log } as never, "p9", "render", new AbortController().signal, { jobId: "j9", runSeq: 2, clipId: "c9" });
+    ctx.log.child({ extra: 1 }).debug("hello");
+    const l = lines[0]!;
+    assert.equal(l.module, "render");
+    assert.equal(l.projectId, "p9");
+    assert.equal(l.jobId, "j9");
+    assert.equal(l.runSeq, 2);
+    assert.equal(l.clipId, "c9");
+  });
+  it("pipeline code derives loggers from ctx.log, never from the root", () => {
+    const dir = path.join(import.meta.dirname, "../src/pipeline");
+    const bad: string[] = [];
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".ts"))) {
+      fs.readFileSync(path.join(dir, f), "utf8").split("\n").forEach((line, i) => {
+        if (/svc\.log\.child\(/.test(line) && !line.includes("module:")) bad.push(`${f}:${i + 1}`);
+        if (/svc\.log\.child\(\{\s*(clipId|projectId)/.test(line)) bad.push(`${f}:${i + 1}`);
+      });
+    }
+    assert.deepEqual(bad, [], "use ctx.log (StageContext.open) so lines carry module, projectId, jobId and runSeq");
   });
   it("children of a module logger inherit the module's level", () => {
     const { log, lines } = capture("info,render=debug");

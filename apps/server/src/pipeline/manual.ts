@@ -100,7 +100,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       : [];
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };
     const snapped = found
-      .map((c) => snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec))
+      .map((c) => snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, { words: transcript.words, log, bounds: [clip.startSec, clip.endSec] }))
       .filter((c): c is ClipCandidate => !!c && c.startSec >= clip.startSec - 1 && c.endSec <= clip.endSec + 1);
     log.info({ selection: [clip.startSec, clip.endSec], minSec, maxSec, modelPicks: found.map((c) => [c.startSec, c.endSec]), usable: snapped.length }, "searched selection");
     if (snapped.length) {

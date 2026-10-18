@@ -439,7 +439,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async "log-level"(svc) {
     const { parseLogLevels, formatLogLevels } = await import("./log.js");
     const env = parseLogLevels(process.env.LOG_LEVEL || "info");
-    const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>>) => {
+    const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number }) => {
+      if (st.acks !== undefined) console.log(st.acks > 0 ? `applied by ${st.acks} process(es)` : "no running process answered within 2 s (they will pick it up within ~5 s, or none is running)");
       const effective = st.override ? mergeLogLevels(env, st.override.spec) : env;
       console.log(`effective   ${formatLogLevels(effective)}`);
       console.log(`environment ${formatLogLevels(env)}  (LOG_LEVEL)`);
@@ -447,10 +448,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     };
     const spec = pos[0];
     if (!spec) return show(await svc.logLevel.refresh());
-    if (spec === "reset" || spec === "off") return show(await svc.logLevel.set(null, "cli"));
+    if (spec === "reset" || spec === "off") return show(await svc.logLevel.set(null, "cli", undefined, 2000));
     const forMs = flag("for") ? parseDuration(flag("for")!) : DEFAULT_LOG_OVERRIDE_MS;
     if (forMs === undefined) throw new Error("--for takes a duration like 90s, 15m, 2h (max 24h)");
-    show(await svc.logLevel.set(spec, "cli", forMs));
+    show(await svc.logLevel.set(spec, "cli", forMs, 2000));
   },
 
   async scenes(svc) {

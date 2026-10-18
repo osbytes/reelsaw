@@ -145,7 +145,7 @@ blind, fixed judge model), and gold labels from user decisions once the decision
 
 | suite | needs | what it checks |
 |---|---|---|
-| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries |
+| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md) |
 | `framing` | nothing (committed face samples) | split crops centre each speaker and stay clear of burned-in caption bands; tripod camera settles on the face, no fast pans; a speaker beside an app screen or title card is a `stack` with the panel on top (`panel` cases commit face boxes, text boxes and a divider probe per frame) |
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |
@@ -157,8 +157,7 @@ Known issues recorded in the baselines today:
 - `disfluency`: discourse "like" fillers ("and like throwing a ball") and optional "that" are missed
   (recall 0.70); the verifier keeps them, which is the safe direction. One comma-separated quotative
   repeat ("he's like, he's like, son") is still proposed, for review only.
-- `selection/apollo/snapping`: candidates whose end has no sentence boundary within 2.5 s keep a
-  mid-sentence end (long 6–7 s sentences in podcasts).
+- `selection/apollo/snapping`: segment-level only; apollo has no word timings, so its candidates can still end mid-sentence (word-level fixtures like `lonely-chapter` are covered by `finishThought`).
 - `overlays/frame-640s`: the "YT/APOLLO" handle is occluded by a mic.
 - `overlays/aggregate-apollo-100-220`: with no scene cuts detected, a small text-like patch on a
   speaker's shirt becomes an "overlay" (blurring it would smudge the person).

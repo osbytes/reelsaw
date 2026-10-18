@@ -82,8 +82,9 @@ verdict, ffmpeg argv, framing, bumpers); `trace` = per-candidate loops. The defa
     docker compose exec -T app reelsaw log-level debug --for 5m  # everything, briefly
     docker compose exec -T app reelsaw log-level reset
 
-Every process (api, workers) applies it within about five seconds and drops back by itself when the
-time is up. Admins can do the same in Settings → System → Log level. Then re-run the thing (re-render
+The command NOTIFYs every process (api, workers hold a LISTEN connection), so the change is live when it returns and it prints
+`applied by N process(es)` (each process answers on `reelsaw_loglevel_ack`; waits up to 2 s). A process that missed the
+notification still picks it up within about five seconds (poll). It drops back by itself when the time is up. Admins can do the same in Settings → System → Log level. Then re-run the thing (re-render
 the clip) and read the lines.
 
 **Read a project's story.**

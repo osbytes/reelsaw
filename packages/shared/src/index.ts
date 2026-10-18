@@ -638,3 +638,20 @@ export const reportRequestSchema = z.object({
   client: reportClientSchema.default({}),
 });
 export type ReportRequest = z.infer<typeof reportRequestSchema>;
+
+// ---------- Clip boundaries ----------
+
+/**
+ * Words a thought cannot end on ("…and you're now so", "…the", "…to"). A pause or a capital letter
+ * after one of these is a hesitation or a transcription artefact, not a sentence end. Deliberately
+ * small: it only has to stop the common mid-sentence cuts, and a missing word costs a missed
+ * extension, never a wrong cut. Lower-case, apostrophes normalised to "'".
+ */
+export const CONNECTOR_WORDS: ReadonlySet<string> = new Set([
+  "and", "but", "or", "so", "nor", "yet", "that", "which", "who", "whose", "where", "because", "if", "when", "while", "as", "than", "then", "although", "though", "unless", "until", "since",
+  "to", "of", "the", "a", "an", "with", "from", "by",
+  "my", "your", "our", "their", "his", "her", "its",
+  "is", "are", "was", "were", "be", "been", "am", "do", "does", "did", "not",
+  "i'm", "i've", "i'll", "i'd", "you're", "you've", "you'll", "you'd", "we're", "we've", "we'll", "they're", "they've", "they'll",
+  "he's", "she's", "it's", "that's", "there's", "what's", "let's", "don't", "can't", "won't",
+]);

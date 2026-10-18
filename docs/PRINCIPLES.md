@@ -51,6 +51,13 @@ project already hit the problem it prevents.
 - **Lock order is fixed: transcript → clip → project.** Taking locks in a different order
   elsewhere can deadlock. If you need a project-level change while holding clip locks, use an
   atomic update rather than a lock.
+  - A transaction that re-renders or deletes several clips locks them first (`lockProjectClips`, id
+    order) and only then touches the project row.
+  - Inserting a `project_events` row (`u.emit`) takes `for key share` on the project. A project lock
+    taken after an emit must therefore be `for no key update`, never `for update`, or two
+    transactions that both emitted deadlock when they upgrade (`finalizeProjectIfDone`).
+  - `svc.tx` re-runs a unit that Postgres aborted for a deadlock or serialization failure (up to 3
+    attempts), so units must keep their side effects in the unit (`emit`, `enqueue`, `afterCommit`).
 - **Work carries a version; stale work exits.** Each render request bumps `clips.render_gen`. A
   job renders a specific generation into files named for it, and commits only while that
   generation is still current. Otherwise it deletes its own output. Use the same pattern for any
