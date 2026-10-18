@@ -1,5 +1,6 @@
 import { inArray, eq, desc } from "drizzle-orm";
-import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
+import { needsPrepare } from "../pipeline/manual.js";
+import { requestPrepare } from "../pipeline/lifecycle.js";
 import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
@@ -37,16 +38,19 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
         if (c.status === "done" || c.status === "failed") continue;
         if (needsPrepare(c)) {
           if (await svc.queue.hasLiveJob(QUEUES.prepare, c.id)) continue;
+          // restart: false re-checks for a live prepare job inside the transaction and keeps one that appeared meanwhile
           await svc.tx(async (u) => {
-            if (c.status !== "preparing") await u.db.update(schema.clips).set({ status: "preparing" }).where(eq(schema.clips.id, c.id));
             await u.cancelLiveJobs(QUEUES.render, c.id);
-            await u.enqueue(QUEUES.prepare, { projectId: p.id, clipId: c.id, mode: prepareModeOf(c) });
+            await requestPrepare(svc, u, p.id, c.id, { restart: false });
           });
           requeued++;
           continue;
         }
         if (await svc.queue.hasLiveJob(QUEUES.render, c.id)) continue;
-        // re-queue the clip's current generation (no bump: nothing about the clip changed)
+        // re-queue the clip's current generation (no bump: nothing about the clip changed). Outside a unit of work on
+        // purpose: no row changes here, and a duplicate is harmless only because pg-boss enqueues with
+        // singletonKey = clip id on an exclusive queue (one live job per clip), so a race with another enqueue is a
+        // no-op, and a render of a stale generation exits. Drop that singletonKey and this needs svc.tx + hasLiveJob.
         await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id, gen: c.renderGen });
         requeued++;
       }
@@ -60,6 +64,7 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
         const st = t.refine[step];
         if (st === "done" || st === "failed") continue;
         if (await svc.queue.hasLiveJob(REFINE_QUEUE[step], p.id)) continue;
+        // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
         await svc.queue.enqueue(REFINE_QUEUE[step], { projectId: p.id });
         requeued++;
       }
@@ -68,6 +73,7 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
     }
     const queue = statusQueue[p.status];
     if (!queue || (await svc.queue.hasLiveJob(queue, p.id))) continue;
+    // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
     await svc.queue.enqueue(queue, { projectId: p.id });
     requeued++;
   }

@@ -1,4 +1,4 @@
-import { requestRender, requestRenders, startRun } from "./pipeline/lifecycle.js";
+import { requestPrepare, requestRender, requestRenders } from "./pipeline/lifecycle.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -46,7 +46,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
 import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
 import { eq, desc, and, inArray } from "drizzle-orm";
-import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
+import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
 import { sampleClipText } from "./pipeline/overlays.js";
@@ -59,7 +59,6 @@ import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
-import { QUEUES } from "./queue/boss.js";
 import { planClipCuts } from "./pipeline/render.js";
 import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
@@ -391,13 +390,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id) });
     if (c) {
       if (needsPrepare(c)) {
-        await svc.tx(async (u) => {
-          await u.cancelLiveJobs(QUEUES.render, c.id);
-          await u.cancelLiveJobs(QUEUES.prepare, c.id);
-          await u.db.update(schema.clips).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(schema.clips.id, c.id));
-          await u.enqueue(QUEUES.prepare, { projectId: c.projectId, clipId: c.id, mode: prepareModeOf(c) });
-          await startRun(u, c.projectId, { reason: "retry", status: "rendering", stage: "render" });
-        });
+        await svc.tx((u) => requestPrepare(svc, u, c.projectId, c.id, { reason: "retry" }));
         return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
       }
       await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));

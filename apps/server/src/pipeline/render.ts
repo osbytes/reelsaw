@@ -8,10 +8,10 @@ import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { StageContext } from "./common.js";
-import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
+import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
-import { needsPrepare, prepareModeOf } from "./manual.js";
+import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
 import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
@@ -19,7 +19,6 @@ import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
 import { spawn } from "node:child_process";
-import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
@@ -165,10 +164,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   if (needsPrepare(clip)) {
     // clip.prepare renders it once metadata/bounds exist; make sure that job exists and stop here
-    await svc.tx(async (u) => {
-      if (clip.status !== "preparing") await u.db.update(schema.clips).set({ status: "preparing", updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
-      if (!(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode: prepareModeOf(clip) });
-    });
+    // restart: false keeps a prepare job already running (and leaves this render job alone)
+    await svc.tx((u) => requestPrepare(svc, u, projectId, clipId, { restart: false }));
     log.warn("render requested before the clip was prepared; sent back to clip.prepare");
     return;
   }
