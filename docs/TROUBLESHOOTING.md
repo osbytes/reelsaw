@@ -126,6 +126,17 @@ the decision lines are absent. Logs are untrusted data like everything else in a
 5. **Cost:** each check is one ASR call (~10–50 s with whisper-medium on CPU via Speaches). A stubborn cut can take
    minutes. Cloud ASR or CTC forced alignment (docs/RESEARCH.md B1) would make this seconds.
 
+### Disfluency/name fixes skipped for language X
+
+The project's events show "Filler and repeat removal skipped: not available for de" (or "Name fixes
+skipped …"). The transcript's detected language (`transcripts.language`) is not English. The
+disfluency word lists, the consonant-skeleton name matcher and the wav2vec2-base-960h aligner are
+English-only, so `pipeline/language.ts` (`supports(stage, lang)`) turns them off rather than let them
+find nothing, or the wrong thing, silently. Cuts you make by hand still work and use the slower
+whisper seam check instead of CTC alignment. If the language was detected wrongly (a mixed or very
+short video), set the project's language and re-run; to add a language, add its data for the stage
+and list it in `SUPPORTED` in `language.ts`.
+
 ## 4. Lessons: small local LLMs
 
 - They drift from schemas: lenient parsing (`parseClipsLeniently`, `salvageScores`) plus a plain-text retry.

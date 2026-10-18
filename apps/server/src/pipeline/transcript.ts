@@ -6,7 +6,7 @@ export interface RawSegment {
   endSecond: number;
 }
 
-const SENTENCE_END = /[.!?…]["')\]]?$/;
+export const SENTENCE_END = /[.!?…。！？｡।॥؟۔]["')\]」』）”’]?$/u;
 
 /** Decide whether a provider gave us word-level or phrase-level segments. */
 export function looksWordLevel(segments: RawSegment[]): boolean {
