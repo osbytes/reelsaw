@@ -325,6 +325,8 @@ export interface ClipTextFrame {
   /** overlay evidence: text lines that aren't part of a paragraph */
   boxes: Box[];
   slide: boolean;
+  /** every text box in the frame, paragraphs included (side-panel detection reads it) */
+  all: Box[];
   /** a slide, document or paragraph of text fills this frame (content to show whole, not to crop or blur) */
   textHeavy: boolean;
 }
@@ -340,8 +342,9 @@ export async function sampleClipText(deps: { detector: TextDetector; ffmpegPath:
     while (buf.length >= frameBytes) {
       const frame = new Uint8Array(buf.subarray(0, frameBytes));
       buf = buf.subarray(frameBytes);
-      const { evidence, slide, textHeavy } = splitText(await deps.detector.detect(frame));
-      frames.push({ t: frames.length / fps, boxes: evidence, slide, textHeavy });
+      const all = await deps.detector.detect(frame);
+      const { evidence, slide, textHeavy } = splitText(all);
+      frames.push({ t: frames.length / fps, boxes: evidence, all: all.map(({ x1, y1, x2, y2 }) => ({ x1, y1, x2, y2 })), slide, textHeavy });
     }
   }
   return frames;

@@ -7,7 +7,7 @@ import { readHash, writeHash, linkWith, fmtSec } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
-import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
+import { Timeline, normalizeSections, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom } from "./BumperField";
 import { ThemeToggle } from "../App";
@@ -434,9 +434,11 @@ export function ClipEditor(props: Props) {
       cy2: det?.cy2,
       size: det?.size,
       size2: det?.size2,
+      // a side panel is an automatic choice; a section forced to Stack keeps the whole frame on top
+      ...(sec.mode === "auto" && det && !det.manual && det.panel ? { panel: det.panel } : {}),
     };
   }, [current, sections, secIdx, clip.layoutSegments, clip.layout]);
-  const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map((d) => MODE_LABEL[d.layout]))].join(" / ");
+  const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map(layoutLabel))].join(" / ");
 
   const panSection = (dx: number) => {
     const i = secIdx;
@@ -827,7 +829,7 @@ export function ClipEditor(props: Props) {
           s.mode === "auto"
             ? chose
               ? `Auto chose ${chose}${chose.includes("Two stacked") ? ": both speakers in frame" : chose === "Follow speaker" ? ": tracking whoever talks" : ""}.`
-              : "Auto decides at render: follow the speaker, two stacked for two people, screen + speaker for a webcam over a screen, whole frame when nobody is on screen."
+              : "Auto decides at render: follow the speaker, two stacked for two people, screen + speaker for a webcam over a screen (or an app screen or title card beside the speaker), whole frame when nobody is on screen."
             : `${MODE_EXPLAIN[s.mode] ?? ""} ${chose ? `Auto would choose ${chose}.` : ""}`;
         return (
           <div
@@ -1004,7 +1006,7 @@ export function ClipEditor(props: Props) {
   );
 
   // ----- preview -----
-  const frameTag = curSec ? (curSec.mode === "auto" ? `Auto → ${MODE_LABEL[framing.layout] ?? framing.layout}` : MODE_LABEL[curSec.mode]) : undefined;
+  const frameTag = curSec ? (curSec.mode === "auto" ? `Auto → ${layoutLabel(framing) ?? framing.layout}` : MODE_LABEL[curSec.mode]) : undefined;
   const len = range[1] - range[0];
   const tbtn = "grid h-[34px] min-w-[34px] place-items-center rounded-[10px] border border-line bg-panel px-2 text-[13px] text-ink hover:bg-sunk";
   const preview = (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, type Style, type SourceOverlay } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, panelStackGeometry, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -12,6 +12,8 @@ export interface Framing {
   /** median face height (fraction of source height) for speaker-sized split/stack crops */
   size?: number;
   size2?: number;
+  /** "stack" with an app screen / title card beside the speaker: the top half shows only this region */
+  panel?: { side: "left" | "right"; x1: number; x2: number };
 }
 export interface PreviewWord {
   text: string;
@@ -261,6 +263,7 @@ function SafeZones({ platform }: { platform: Platform }) {
 /** Width of the crop window as a fraction of the source width, per layout (mirrors paint()). */
 function cropFraction(f: Framing, srcW: number, srcH: number, W: number, H: number) {
   if (f.layout === "split") return speakerCrop(srcW, srcH, W / (H / 2), { cy: f.cy, size: f.size ?? 0.3 }).w / srcW;
+  if (f.layout === "stack" && f.panel) return panelStackGeometry(srcW, srcH, f.panel, { cy: f.cy, size: f.size ?? 0.3 }, W / (H / 2)).zoom.w / srcW;
   if (f.layout === "stack") {
     const botH = H - (W * srcH) / srcW;
     return speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }).w / srcW;
@@ -349,6 +352,25 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       return;
     }
     case "stack": {
+      if (f.panel) {
+        // mirrors layoutFilter: panel fitted over a blurred copy of itself on top, speaker below
+        const halfH = H / 2;
+        const g = panelStackGeometry(srcW, srcH, f.panel, { cy: f.cy, size: f.size ?? 0.3 }, W / halfH, avoid);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, W, halfH);
+        ctx.clip();
+        const cover = Math.max(W / g.panel.w, halfH / srcH);
+        ctx.filter = "blur(14px)";
+        draw(g.panel.x, 0, g.panel.w, srcH, (W - g.panel.w * cover) / 2, (halfH - srcH * cover) / 2, g.panel.w * cover, srcH * cover);
+        ctx.filter = "none";
+        const fit = Math.min(W / g.panel.w, halfH / srcH);
+        draw(g.panel.x, 0, g.panel.w, srcH, (W - g.panel.w * fit) / 2, (halfH - srcH * fit) / 2, g.panel.w * fit, srcH * fit);
+        ctx.restore();
+        const zx = clamp(f.cx * srcW - g.zoom.w / 2, g.free.lo, g.free.hi - g.zoom.w);
+        draw(zx, g.zoom.y, g.zoom.w, g.zoom.h, 0, halfH, W, halfH);
+        return;
+      }
       const topH = (W * srcH) / srcW;
       const botH = H - topH;
       draw(0, 0, srcW, srcH, 0, 0, W, topH);

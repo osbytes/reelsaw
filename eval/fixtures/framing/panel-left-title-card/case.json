@@ -1,0 +1,10 @@
+{
+  "kind": "panel",
+  "note": "Black title card with white text on the left 50%, presenter on the right 50% (source 0:42-1:02, \"Step 1: Find a real take-home number.\"). `face` cropped to the speaker and hid the card.",
+  "source": { "id": "budgeting-39-65", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 39, "end": 65.5, "sha256": "b3834652fd05242e32c7e29c7ac069498525b6f918ff283eadbca94cdccc4b7a", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
+  "start": 0,
+  "end": 26.5,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": { "layout": "stack", "panel": { "side": "left", "minWidth": 0.25 }, "segments": ["face", "stack", "face"] }
+}

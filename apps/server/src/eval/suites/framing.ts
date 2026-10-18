@@ -5,6 +5,10 @@
  *    preview) must centre its speaker within `maxOffset` of the crop width and keep burned-in
  *    caption bands out of the crop. With `maxDrift`, neither speaker's crop may wander more than
  *    that (normalized x) from where that speaker sits: no pan over to the other person and back.
+ *  - panel cases: a speaker beside an app screen or title card. Samples carry text boxes and the
+ *    divider probe too (generated with the text model on first run). The layout must be "stack" with
+ *    the panel on the expected side and at least `minWidth` wide, and the auto segmentation of the
+ *    range (`segments`) must show the panel as its own piece when it appears and goes away.
  *  - track cases: the "heavy tripod" camera (`tripodTrack`) must settle within `maxErrPx` of the
  *    face after `settleSec`, and never pan faster than `maxPanPxPerSec`.
  * Face samples are committed (samples.json, derived from the video); when missing they are
@@ -14,12 +18,15 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { speakerCrop, cropX } from "@reelsaw/shared";
-import { decideLayout, sampleFaces, tripodTrack, trackCenter, type FaceSample } from "../../pipeline/layout.js";
+import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, type FaceSample } from "../../pipeline/layout.js";
+import { attachText } from "../../pipeline/side-panel.js";
+import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadFaceDetector } from "../../vision/faces.js";
+import { loadTextDetector } from "../../vision/text.js";
 import { materialize, type CaseResult, type MediaSource, type Suite, type EvalContext } from "../framework.js";
 
 interface FramingCase {
-  kind: "split" | "track";
+  kind: "split" | "track" | "panel";
   note?: string;
   source: MediaSource;
   /** seconds inside the materialised media */
@@ -28,7 +35,18 @@ interface FramingCase {
   srcW: number;
   srcH: number;
   avoid?: Array<{ y1: number; y2: number }>;
-  expect: { layout?: string; maxOffset?: number; maxDrift?: number; settleSec?: number; maxErrPx?: number; maxPanPxPerSec?: number };
+  expect: {
+    layout?: string;
+    maxOffset?: number;
+    maxDrift?: number;
+    settleSec?: number;
+    maxErrPx?: number;
+    maxPanPxPerSec?: number;
+    /** panel cases: the content panel beside the speaker (side, and at least this share of the frame width) */
+    panel?: { side: "left" | "right"; minWidth: number };
+    /** panel cases: the auto segmentation of the range, in order (the panel appears and goes away mid-range) */
+    segments?: string[];
+  };
 }
 
 async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promise<FaceSample[]> {
@@ -37,7 +55,18 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   const media = await materialize(ctx, c.source);
   const det = await loadFaceDetector(ctx.config().FACE_MODEL_PATH);
   try {
-    const samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4 });
+    let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4 });
+    if (c.kind === "panel") {
+      // panel cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
+      const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
+      try {
+        const frames = await sampleClipText({ detector: text, ffmpegPath: ctx.config().FFMPEG_PATH }, media, c.start, c.end - c.start, 2);
+        const r3 = (v: number) => Number(v.toFixed(3));
+        samples = attachText(samples, frames.map((f) => ({ t: f.t, all: f.all.map((b) => ({ x1: r3(b.x1), y1: r3(b.y1), x2: r3(b.x2), y2: r3(b.y2) })) })));
+      } finally {
+        await text.release();
+      }
+    }
     await fs.writeFile(file, JSON.stringify(samples));
     ctx.log.warn({ file }, "generated face samples; commit them so the case runs offline");
     return samples;
@@ -94,6 +123,28 @@ export const framingSuite: Suite = {
             if (overlaps && faceY < b.y1 * c.srcH) fails.push(`speaker ${s.label} crop includes text band ${b.y1}-${b.y2}`);
           }
           if (faceY < crop.y || faceY > crop.y + crop.h) fails.push(`speaker ${s.label} face outside crop vertically`);
+        }
+        out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
+      } else if (c.kind === "panel") {
+        const d = decideLayout(samples, cfg, []);
+        const fails: string[] = [];
+        const checks: Record<string, number | string> = { layout: d.layout, share: d.panelSignals?.share ?? 0 };
+        if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.panelSignals?.rejected ? ` (${d.panelSignals.rejected})` : ""}`);
+        const want = c.expect.panel;
+        if (want) {
+          if (!d.panel) fails.push("no panel found");
+          else {
+            checks.side = d.panel.side;
+            checks.panelX = `${d.panel.x1}-${d.panel.x2}`;
+            checks.reason = d.reason;
+            if (d.panel.side !== want.side) fails.push(`panel on the ${d.panel.side}, expected ${want.side}`);
+            if (d.panel.x2 - d.panel.x1 < want.minWidth) fails.push(`panel ${(d.panel.x2 - d.panel.x1).toFixed(2)} wide, expected at least ${want.minWidth}`);
+          }
+        }
+        if (c.expect.segments) {
+          const got = segmentLayouts(samples, cfg, [], c.end - c.start).map((sg) => sg.decision.layout);
+          checks.segments = got.join(",");
+          if (got.join(",") !== c.expect.segments.join(",")) fails.push(`segments ${got.join(",")}, expected ${c.expect.segments.join(",")}`);
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else {

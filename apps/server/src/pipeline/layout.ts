@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
+import { probeDivider, detectSidePanel, panelReason, frameVote, type PanelRegion, type PanelSignals, type PBox, type DividerProbe } from "./side-panel.js";
 
 /** Resolved layout for one clip. */
 export type Layout = "face" | "split" | "stack" | "fit" | "center" | "none";
@@ -9,6 +10,10 @@ export interface FaceSample {
   t: number; // seconds from clip start
   box: FaceBox | null; // largest face, normalized coords
   boxes: FaceBox[]; // every face this frame
+  /** text boxes near this frame (all of them, paragraphs included); absent when text was not scanned */
+  text?: PBox[];
+  /** strongest straight vertical edge of the frame, for side-by-side composites */
+  divider?: DividerProbe;
 }
 
 export interface LayoutDecision {
@@ -25,6 +30,10 @@ export interface LayoutDecision {
   /** Per-speaker median face heights for split crops (first = track, second = track2). */
   speakerSizes?: [number, number];
   faceCount: number;
+  /** "stack" only: the content panel beside the speaker; the top half shows just this region */
+  panel?: PanelRegion;
+  /** side-panel detector inputs and outcome, for the debug log */
+  panelSignals?: PanelSignals;
 }
 
 export interface LayoutOptions {
@@ -55,9 +64,10 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
     while (buf.length >= frameBytes) {
       const frame = buf.subarray(0, frameBytes);
       buf = buf.subarray(frameBytes);
-      const boxes = await det.detect(new Uint8Array(frame));
+      const px = new Uint8Array(frame);
+      const boxes = await det.detect(px);
       const sorted = boxes.sort((a, b) => (b.x2 - b.x1) * (b.y2 - b.y1) - (a.x2 - a.x1) * (a.y2 - a.y1));
-      samples.push({ t: i / fps, box: sorted[0] ?? null, boxes: sorted });
+      samples.push({ t: i / fps, box: sorted[0] ?? null, boxes: sorted, divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H) });
       i++;
     }
   }
@@ -76,6 +86,7 @@ function median(xs: number[]) {
  * Decide how to frame a clip from its face samples.
  *  - a big face most of the time → "face": 9:16 crop that follows the face
  *  - a face that is small or parked in a corner (webcam over a slide/screen) → "stack": full frame on top, zoomed face below
+ *  - a big face beside an app screen or title card (side-by-side composite) → "stack" with `panel`: just the panel on top, the speaker below (see side-panel.ts)
  *  - no face → "fit": whole frame over a blurred background (graphics, b-roll, screencasts without a webcam)
  */
 export function decideLayout(
@@ -111,7 +122,13 @@ export function decideLayout(
   if (faceSize < config.LAYOUT_MIN_FACE_SIZE || inCorner) {
     return { ...base, layout: "stack", reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
   }
-  return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+  // a big speaker beside an app screen / title card (a side-by-side composite): stack the panel on top
+  const found = detectSidePanel(samples);
+  if (found.panel) {
+    const { panel, ...signals } = found;
+    return { ...base, layout: "stack", panel, panelSignals: signals, reason: panelReason(panel, signals) };
+  }
+  return { ...base, layout: "face", panelSignals: found, reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
 }
 
 /**
@@ -291,7 +308,8 @@ export function segmentLayouts(
   const raw = samples.map((s) => {
     const big = !!s.box && s.box.y2 - s.box.y1 >= config.LAYOUT_MIN_FACE_SIZE;
     const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= 0.08;
-    return two ? "split" : big ? "face" : "none";
+    // a speaker beside an app screen / title card is its own state, so the shot gets its own segment
+    return two ? "split" : big ? (frameVote(s) ? "panel" : "face") : "none";
   });
   // a second speaker who briefly disappears (drinks, turns away, leans out) shouldn't flip the
   // layout: "split" holds while two faces were seen in ≥35% of the surrounding ±3 s
@@ -300,9 +318,9 @@ export function segmentLayouts(
     const wide = raw.slice(Math.max(0, i - hold), i + hold + 1);
     if (wide.filter((w) => w === "split").length / wide.length >= 0.35) return "split" as const;
     const win = raw.slice(Math.max(0, i - 2), i + 3);
-    const counts = { face: 0, split: 0, none: 0 };
+    const counts = { face: 0, split: 0, none: 0, panel: 0 };
     for (const w of win) counts[w as keyof typeof counts]++;
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as "face" | "split" | "none";
+    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as "face" | "split" | "none" | "panel";
   });
   const cuts = sceneCuts.filter((c) => c > 0 && c < duration).sort((a, b) => a - b);
   const bounds = new Set<number>([0, duration, ...cuts]);
@@ -351,12 +369,18 @@ export function segmentLayouts(
   const merged: LayoutSegment[] = [];
   for (const seg of segs) {
     const last = merged[merged.length - 1];
-    if (last && last.decision.layout === seg.decision.layout) {
+    if (last && sameFraming(last.decision, seg.decision)) {
       last.end = seg.end;
       last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
     } else merged.push({ ...seg, decision: { ...seg.decision } });
   }
   return merged;
+}
+
+/** Same layout, and for a stack the same panel (a left panel and a right panel are different framings). */
+export function sameFraming(a: LayoutDecision, b: LayoutDecision): boolean {
+  if (a.layout !== b.layout) return false;
+  return (a.panel?.side ?? null) === (b.panel?.side ?? null);
 }
 
 /** Re-base track points to a segment's own clock (t = 0 at segment start). */
@@ -425,7 +449,8 @@ export function forcedDecision(samples: FaceSample[], layout: Layout, config: Pi
     const pair = assignPair(samples);
     return { ...base, layout, reason: "manual", track: tripodTrack(pair.a, sceneCuts), track2: tripodTrack(pair.b, sceneCuts), speakerSizes: pairSizes(pair) };
   }
-  return { ...base, layout, reason: "manual" };
+  // a forced Stack is the whole frame on top: the detected panel only applies to the automatic choice
+  return { ...base, layout, reason: "manual", panel: undefined, panelSignals: undefined };
 }
 
 function shiftDecision(d: LayoutDecision, by: number): LayoutDecision {
@@ -480,7 +505,7 @@ export function resolveSegments(
   const merged: ResolvedSegment[] = [];
   for (const seg of out) {
     const last = merged[merged.length - 1];
-    if (last && last.decision.layout === seg.decision.layout && last.manual === seg.manual && last.offsetX === seg.offsetX) {
+    if (last && sameFraming(last.decision, seg.decision) && last.manual === seg.manual && last.offsetX === seg.offsetX) {
       last.end = seg.end;
       last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
     } else merged.push({ ...seg, decision: { ...seg.decision } });
@@ -581,7 +606,8 @@ export function fitTextHeavy(segments: ResolvedSegment[], runs: Array<[number, n
   if (!runs.length) return segments;
   const out: ResolvedSegment[] = [];
   for (const sg of segments) {
-    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none") {
+    // a side panel is already shown whole on top (the text in it is why the frame looks text-heavy)
+    if (sg.manual || sg.decision.layout === "fit" || sg.decision.layout === "none" || sg.decision.panel) {
       out.push(sg);
       continue;
     }

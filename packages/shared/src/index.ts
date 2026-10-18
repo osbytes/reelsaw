@@ -135,6 +135,8 @@ export interface DetectedSegment {
   track?: Array<[number, number]>;
   /** manual offset that was applied */
   offsetX?: number;
+  /** "stack" only: the app screen / title card beside the speaker that fills the top half (normalized x bounds) */
+  panel?: { side: "left" | "right"; x1: number; x2: number };
 }
 
 /**
@@ -533,6 +535,35 @@ export function speakerCrop(srcW: number, srcH: number, aspect: number, face: { 
     w = h * aspect;
   }
   return { w: Math.round(w), h: Math.round(h), y: Math.round(clamp(y, 0, srcH - h)) };
+}
+
+/**
+ * Geometry of a "stack" with a side panel (an app screen or title card beside the speaker): the top
+ * half shows only the panel, the bottom half the speaker cropped from the other side of the frame.
+ * Source pixels, shared by the renderer and the editor preview. `panel.x1/x2` come from a probe on a
+ * 320 px wide frame (±1% of the width), so both crops keep 1.2% of the width clear of the divider.
+ */
+export function panelStackGeometry(
+  srcW: number,
+  srcH: number,
+  panel: { side: "left" | "right"; x1: number; x2: number },
+  face: { cy: number; size: number },
+  halfAspect: number,
+  avoid: Array<{ y1: number; y2: number }> = [],
+): { panel: { x: number; w: number }; free: { lo: number; hi: number }; zoom: { w: number; h: number; y: number } } {
+  const gap = 0.012 * srcW;
+  const right = panel.side === "right";
+  const px = right ? panel.x1 * srcW + gap : 0;
+  const pw = right ? srcW - px : panel.x2 * srcW - gap;
+  const free = right ? { lo: 0, hi: panel.x1 * srcW - gap } : { lo: panel.x2 * srcW + gap, hi: srcW };
+  let zoom = speakerCrop(srcW, srcH, halfAspect, face, avoid);
+  if (zoom.w > free.hi - free.lo) {
+    // the speaker's side of the frame is narrower than the usual crop: use all of it
+    const w = free.hi - free.lo;
+    const h = Math.min(srcH, w / halfAspect);
+    zoom = { w, h, y: Math.max(0, Math.min(srcH - h, face.cy * srcH - 0.42 * h)) };
+  }
+  return { panel: { x: px, w: pw }, free, zoom };
 }
 
 /** Left edge of a crop of width `w` centred on normalized x `cx`, kept inside the frame. */

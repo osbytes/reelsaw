@@ -1,0 +1,10 @@
+{
+  "kind": "panel",
+  "note": "Presenter fills the left ~68% and a phone-width app screen (white UI, lots of text) the right ~32% (source 4:00-4:26, the panel appears at 4:06). `face` followed the speaker and threw the app away.",
+  "source": { "id": "budgeting-240-266", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 240.75, "end": 265.7, "sha256": "aae8a260692c276d359f952ec6a4ea7d5f53d52060aaa5d8a7a124b5ac4bf5e8", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
+  "start": 0,
+  "end": 24.95,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": { "layout": "stack", "panel": { "side": "right", "minWidth": 0.25 }, "segments": ["face", "stack"] }
+}

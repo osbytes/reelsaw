@@ -24,6 +24,8 @@ export const MODE_COLOR: Record<string, string> = {
   none: "#334155",
 };
 export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
+/** What a rendered piece looks like: a stack with a side panel (app screen, title card) says which side. */
+export const layoutLabel = (d: { layout: string; panel?: { side: string } }) => (d.layout === "stack" && d.panel ? `Stack · panel ${d.panel.side}` : MODE_LABEL[d.layout]);
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;
@@ -366,7 +368,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
               const width = Math.max(2, x(s.end) - left);
               const det = detected.filter((d) => !d.manual && d.end > s.start && d.start < s.end);
               const auto = s.mode === "auto";
-              const chose = [...new Set(det.map((d) => MODE_LABEL[d.layout]))].join(" / ");
+              const chose = [...new Set(det.map(layoutLabel))].join(" / ");
               return (
                 <div
                   key={i}
@@ -486,7 +488,7 @@ function TimelineMenu(p: {
   const at = p.at;
   if (!at) return null;
   const sec = at.section >= 0 ? p.sections[at.section] : undefined;
-  const autoChose = sec ? [...new Set(p.detected.filter((d) => !d.manual && d.end > sec.start && d.start < sec.end).map((d) => MODE_LABEL[d.layout]))].join(" / ") : "";
+  const autoChose = sec ? [...new Set(p.detected.filter((d) => !d.manual && d.end > sec.start && d.start < sec.end).map(layoutLabel))].join(" / ") : "";
   return (
     <ContextMenu.Content className="menu z-[60] w-[240px]" collisionPadding={8}>
       <ContextMenu.Label className="px-2.5 py-1 font-mono text-[10px] text-ink3">{formatTime(at.t)}</ContextMenu.Label>
