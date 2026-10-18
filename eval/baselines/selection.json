@@ -1,9 +1,12 @@
 {
-  "updatedAt": "2026-10-15T18:54:16.488Z",
+  "updatedAt": "2026-10-18T05:16:27.674Z",
   "cases": {
     "repair-mmss": true,
     "apollo/chunking": true,
-    "apollo/snapping": true
+    "apollo/snapping": true,
+    "lonely-chapter/chunking": true,
+    "lonely-chapter/snapping": true,
+    "lonely-chapter/ends-on-thought": true
   },
   "metrics": {
     "passRate": {
