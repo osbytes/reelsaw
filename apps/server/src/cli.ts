@@ -129,7 +129,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
     if (p.error) console.log(`  error: ${p.error}`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
-    console.log(`  events: ${ev.rows[0]!.total} total, ${ev.rows[0]!.progress} stage.progress (pruned when a stage completes; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
+    console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
     if (t) console.log(`  transcript: lang=${t.language} flags=${t.flags.length} refine=${JSON.stringify(t.refine)}`);
     const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: schema.clips.index });

@@ -9,9 +9,55 @@ import type { Logger } from "./log.js";
 export const EVENTS_CHANNEL = "reelsaw_events";
 const CHANNEL = EVENTS_CHANNEL;
 
+/** NOTIFY payload of a persisted event: ids only, listeners read the row. */
 export interface EventNotice {
   id: number;
   projectId: string;
+}
+
+/**
+ * NOTIFY payload of a progress tick. Ticks are ephemeral: nothing is written to project_events (the
+ * projects row keeps the latest value for reloads), so the payload travels inline. Postgres limits a
+ * payload to 8000 bytes; we stay under PROGRESS_NOTICE_MAX.
+ */
+export interface ProgressNotice {
+  kind: "progress";
+  projectId: string;
+  clipId?: string;
+  stage: string;
+  progress: number;
+  message?: string;
+}
+export type Notice = EventNotice | ProgressNotice;
+export const isProgressNotice = (n: Notice): n is ProgressNotice => "kind" in n && n.kind === "progress";
+export const PROGRESS_NOTICE_MAX = 500;
+
+/** JSON for pg_notify, at most PROGRESS_NOTICE_MAX bytes: the message is cut (then dropped) to fit. */
+export function encodeProgressNotice(n: Omit<ProgressNotice, "kind">): string {
+  const base: ProgressNotice = { kind: "progress", projectId: n.projectId, ...(n.clipId ? { clipId: n.clipId } : {}), stage: n.stage, progress: Math.round(n.progress * 10_000) / 10_000 };
+  let message = n.message ?? "";
+  for (;;) {
+    const json = JSON.stringify(message ? { ...base, message } : base);
+    if (Buffer.byteLength(json) <= PROGRESS_NOTICE_MAX || !message) return json;
+    message = message.length > 40 ? message.slice(0, Math.floor(message.length * 0.7)) : "";
+  }
+}
+
+/** A notification from the channel, or null when it is not one we understand. */
+export function decodeNotice(payload: string): Notice | null {
+  try {
+    const n = JSON.parse(payload) as Notice;
+    if (typeof n?.projectId !== "string") return null;
+    if (isProgressNotice(n)) return typeof n.stage === "string" && typeof n.progress === "number" ? n : null;
+    return typeof (n as EventNotice).id === "number" ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A progress notice as the event-shaped message the stream sends. id 0 = not stored; never used as a resume point. */
+export function progressEvent(n: ProgressNotice, now = new Date()): ProjectEvent {
+  return { id: 0, projectId: n.projectId, type: "stage.progress", payload: { stage: n.stage, progress: n.progress, ...(n.message ? { message: n.message } : {}), ...(n.clipId ? { clipId: n.clipId } : {}) }, createdAt: now.toISOString() };
 }
 
 /**
@@ -29,7 +75,9 @@ export interface EventBus {
   /** Highest event id of the project (0 if none) and how many non-progress events it has. */
   stats(projectId: string): Promise<{ headId: number; total: number }>;
   /** Live notices for one project. Ends when `signal` aborts. Requires start(). */
-  notices(projectId: string, signal?: AbortSignal): AsyncIterable<EventNotice>;
+  notices(projectId: string, signal?: AbortSignal): AsyncIterable<Notice>;
+  /** Live progress tick: NOTIFY only, no row. */
+  progress(projectId: string, tick: Omit<ProgressNotice, "kind" | "projectId">): Promise<void>;
   /** Open the LISTEN connection (API processes only). */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -47,12 +95,8 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
     const c = new pg.Client({ connectionString: config.DATABASE_URL });
     c.on("notification", (msg) => {
       if (msg.channel !== CHANNEL || !msg.payload) return;
-      try {
-        const notice = JSON.parse(msg.payload) as EventNotice;
-        emitter.emit(`project:${notice.projectId}`, notice);
-      } catch {
-        /* malformed payload */
-      }
+      const notice = decodeNotice(msg.payload);
+      if (notice) emitter.emit(`project:${notice.projectId}`, notice);
     });
     c.on("error", (err) => {
       log.error({ err }, "listener error, reconnecting");
@@ -94,6 +138,9 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
       });
       return rows.map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() }));
     },
+    async progress(projectId, tick) {
+      await pool.query("SELECT pg_notify($1, $2)", [CHANNEL, encodeProgressNotice({ projectId, ...tick })]);
+    },
     async history(projectId, { limit, after, before, upTo }) {
       const t = schema.projectEvents;
       const rows = await db
@@ -113,7 +160,7 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
     },
     async *notices(projectId, signal) {
       try {
-        for await (const [notice] of on(emitter, `project:${projectId}`, { signal }) as AsyncIterable<[EventNotice]>) yield notice;
+        for await (const [notice] of on(emitter, `project:${projectId}`, { signal }) as AsyncIterable<[Notice]>) yield notice;
       } catch (err) {
         if ((err as Error).name !== "AbortError") throw err;
       }

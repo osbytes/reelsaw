@@ -1,7 +1,7 @@
-/** Planning for history pruning: batch-delete selection and progress-tick coalescing. No database. */
+/** Planning for history pruning: batch-delete selection. No database. */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planPruneBatch, retentionCutoff, shouldPersistTick, PROTECTED_EVENT_TYPES, PROGRESS_PERSIST_MS, type PruneRow } from "../src/events-retention.js";
+import { planPruneBatch, retentionCutoff, PROTECTED_EVENT_TYPES, type PruneRow } from "../src/events-retention.js";
 
 const CUT = new Date("2026-07-19T00:00:00Z");
 const old = (id: number, type = "stage.progress"): PruneRow => ({ id, type, createdAt: new Date("2026-01-01T00:00:00Z") });
@@ -39,27 +39,5 @@ describe("planPruneBatch", () => {
   });
   it("tables without a type column delete everything old", () => {
     assert.deepEqual(planPruneBatch([{ id: 1, createdAt: new Date("2026-01-01") }], 0, CUT, 5).deleteIds, [1]);
-  });
-});
-
-describe("shouldPersistTick", () => {
-  it("first tick, final tick, and one per 10 s", () => {
-    assert.equal(shouldPersistTick(undefined, 1000, 0.1), true);
-    assert.equal(shouldPersistTick(1000, 1000 + 1500, 0.2), false);
-    assert.equal(shouldPersistTick(1000, 1000 + PROGRESS_PERSIST_MS, 0.3), true);
-    assert.equal(shouldPersistTick(1000, 1500, 1), true);
-  });
-  it("a 3 h stage at one tick per 1.5 s persists about 1/7 of them", () => {
-    let last: number | undefined;
-    let kept = 0;
-    const ticks = (3 * 3600 * 1000) / 1500;
-    for (let i = 0; i < ticks; i++) {
-      const now = i * 1500;
-      if (shouldPersistTick(last, now, i / ticks)) {
-        last = now;
-        kept++;
-      }
-    }
-    assert.ok(kept < ticks / 6 && kept > ticks / 8, `kept ${kept} of ${ticks}`);
   });
 });
