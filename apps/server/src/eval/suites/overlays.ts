@@ -127,7 +127,8 @@ export const overlaysSuite: Suite = {
       handleCoverage: { value: meanOf("handle"), better: "higher", tolerance: 0.05 },
       logoCoverage: { value: meanOf("logo"), better: "higher", tolerance: 0.05 },
       framePassRate: { value: Number((frames.filter((r) => r.pass).length / (frames.length || 1)).toFixed(2)), better: "higher" },
-      aggregatePass: { value: results.filter((r) => r.id.startsWith("aggregate-") && r.pass).length, better: "higher" },
+      // only when aggregates ran: with their media uncached (--offline) a 0 here would read as a regression
+      ...(results.some((r) => r.id.startsWith("aggregate-")) ? { aggregatePass: { value: results.filter((r) => r.id.startsWith("aggregate-") && r.pass).length, better: "higher" as const } } : {}),
     };
   },
 };

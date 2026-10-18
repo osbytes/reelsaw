@@ -6,7 +6,9 @@ One runner, many suites. Every bug we fix should leave a case behind so it can't
 pnpm eval                                  # all suites (host; uses the repo .env, compose hosts → localhost)
 pnpm eval selection framing overlays       # just these
 pnpm eval --offline                        # skip suites that need models/network
-pnpm eval cuts --update                    # accept current results as the new baseline
+pnpm eval cuts --update                    # accept current results as the new baseline (refused while there are regressions)
+pnpm eval cuts --update --accept-regressions "why this is fine"   # record them anyway; the reason is stored in the baseline
+pnpm eval disfluency --split heldout       # one split of a suite that has them (never updates baselines)
 pnpm eval --list                           # suites and what they need
 pnpm eval --json out.json                  # machine-readable report as well
 
@@ -23,6 +25,35 @@ too are *known issues*: they show as FAIL but don't break the run; fixing one sh
 Every model call a suite makes is metered (latency, tokens, cost when the provider reports it,
 failures) and printed under the metrics as a `calls` line. Calls served from `eval/.cache` never reach
 the meter, so a cached rerun shows `cached` rather than fake latencies.
+
+`--update` writes the baseline only when the run has no regressions. With regressions it prints them,
+leaves the file alone and exits 1; `--accept-regressions "<reason>"` overrides that and appends
+`{ id | metric, reason, at }` to `acceptedRegressions` in the baseline JSON, so `git log` shows who
+accepted a worse number and why. An `--offline` run of a suite whose result depends on the model
+(`disfluency`: rules only) compares with and updates `baselines/<suite>.offline.json` instead.
+A suite whose every case was skipped reports no metrics (nothing ran, so nothing regressed).
+
+## Reading the numbers
+
+- **Intervals.** A metric that is a ratio of counts (disfluency precision / recall) prints a Wilson 95%
+  interval and its `n` next to the value, e.g. `precision 0.89  95% CI [0.67, 0.97] n=18`. Suites
+  return it as `ratio: { k, n }` on the `SummaryMetric`; add it to any new count-based metric.
+- **N < 10 is a smoke test.** Suites or splits with fewer than 10 trials behind a metric say "(n<10:
+  smoke test)": they catch a crash or an obvious break, not a quality difference. Most suites here
+  have 3 to 50 cases; treat their pass/fail as a tripwire rather than a measurement.
+- **Overlapping intervals are not a ranking.** In a matrix run, two profiles whose intervals overlap
+  are not ordered by their point estimates; with 50 cases the interval on a 0.9 rate is roughly
+  +/- 0.1. Only claim "A beats B" when the intervals are disjoint, or after adding cases / repeats.
+- **Dev vs heldout.** `disfluency` cases carry `split: "dev" | "heldout"` (assigned alternately within
+  `cut` and `keep`, so both splits stay balanced) and the summary reports `dev.*` and `heldout.*` next
+  to the overall numbers. **Rule: never read heldout cases while editing `disfluency.ts` or
+  `pipeline/disfluency.ts`** (rules, prompt, thresholds). Tune on `--split dev`, run the full set once
+  to check, and treat the heldout numbers as the honest ones; a dev score far above the heldout score
+  means the rules were fitted to the cases. Once a heldout case has informed a change, move it to `dev`
+  and add fresh heldout cases.
+- **Provenance.** Cases may carry `source: { url?, projectId?, userId?, decidedAt? }` (the video, the
+  project and reviewer the label came from). The disfluency windows predate it and record none of
+  these yet, so fill them in from the project when you touch a case; leave unknown fields out.
 
 ## Comparing models and settings (matrix runs)
 
@@ -162,6 +193,40 @@ Known issues recorded in the baselines today:
 - `overlays/aggregate-apollo-100-220`: with no scene cuts detected, a small text-like patch on a
   speaker's shirt becomes an "overlay" (blurring it would smudge the person).
 
+## What CI runs
+
+`.github/workflows/ci.yml` (job `check`) runs, on every PR and on main:
+
+1. `pnpm --filter @reelsaw/server test:unit`: every file in `apps/server/test` that does **not** import
+   `./helpers.js` (`scripts/unit-tests.mjs` filters by that import; today 21 of 31 files). Files that
+   import it need the app at `REELSAW_URL` and Postgres on 127.0.0.1:5432, and drive `docker compose
+   exec`. A new test that needs no stack should simply not import helpers.
+2. `pnpm --filter @reelsaw/server models:download` (cached by `actions/cache`, keyed on
+   `scripts/download-models.sh`), then `pnpm --filter @reelsaw/server eval:offline`: all suites
+   with `--offline`. Suites that need an LLM/STT (`cuts`, `selection-model`, `transcription`) are
+   skipped; suites whose source video is not in git (`scenes`, `speakers`, the overlay aggregates) skip
+   those cases; the rest (selection, framing, pauses, alignment, overlay frames, disfluency rules)
+   run and are compared with the baselines, and a regression fails the build.
+
+### Stack tests in CI
+
+Not enabled; a commented `stack` job sits at the bottom of `ci.yml`. The 10 stack test files
+(accounts, hosted, import, mcp, project-settings, render-completion-deadlock, report,
+sampling-concurrency, settings, search) are only run by hand against a local deploy. What blocks
+turning it on, none of which could be verified without running Docker:
+
+- **Never run in CI.** `docker compose up --build` of the root `docker-compose.yml` needs a throwaway
+  `.env` (`BETTER_AUTH_SECRET`, `APP_URL`, `PORT=3100`) and a ~10 minute image build; it has not been
+  confirmed that the app starts and passes `/api/health` with no AI provider configured (the local
+  setup refuses to start without an Ollama endpoint by design, so check the startup gate first).
+- **Helpers assume the author's host.** `test/helpers.ts` reads the Postgres password from `.env`, uses
+  `docker compose exec -T app reelsaw …` and `docker compose cp` from the repo root, and BASE defaults
+  to `localhost:3100`. In CI the compose project name, published ports and `.env` must match.
+- **Tests that call models** (anything that creates a project from a real URL) cannot run without
+  provider keys; they would need to be split out or given the mock in `scripts/mock-ai.mjs`.
+
+When it works locally in a clean checkout with only that throwaway `.env`, uncomment the job.
+
 ## Fixtures
 
 ```
@@ -181,7 +246,10 @@ Big media never goes in git. A fixture names it as a **media source**:
 
 `materialize()` produces `eval/.cache/media/<id>.mp4` from, in order: the cache, `localPath` (ffmpeg
 stream copy, works inside the app container), or `yt-dlp --download-sections`. The sha256 is
-informational (encoders drift); a mismatch is logged, not fatal. Derived data that is cheap to commit
+informational for suites whose labels tolerate a re-encode (a mismatch is logged); suites with
+sub-second labels (`scenes` cut times, `speakers` turns) pass `strictSha: true` to `materialize()`, and
+a mismatch there **fails the case** (`MediaDriftError`) instead of producing numbers against shifted
+labels. (`alignment`, `cuts` and `pauses` commit their WAVs, so there is no download to drift.) Derived data that is cheap to commit
 and makes a case run offline (face samples, labelled JPEG frames, 6 s WAVs) is committed next to the case.
 
 **Caching.** `ctx.cached(key, fn)` stores JSON results keyed by a hash of their inputs (audio bytes,

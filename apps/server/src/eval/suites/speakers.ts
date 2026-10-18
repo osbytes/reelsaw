@@ -7,7 +7,7 @@ import path from "node:path";
 import { loadFaceDetector } from "../../vision/faces.js";
 import { loadVad, VAD_SR } from "../../audio/vad.js";
 import { activeSpeakers, speechAt, envelopeAt } from "../../pipeline/speaker.js";
-import { materialize, type CaseResult, type MediaSource, type Suite } from "../framework.js";
+import { materialize, MediaDriftError, type CaseResult, type MediaSource, type Suite } from "../framework.js";
 
 interface Spec {
   cases: Array<{ id: string; source: MediaSource; segment: [number, number]; speakers: [number, number]; truth: Array<{ start: number; end: number; who: 0 | 1 }>; minAgreement: number }>;
@@ -32,9 +32,9 @@ export const speakersSuite: Suite = {
       for (const c of spec.cases) {
         let media: string;
         try {
-          media = await materialize(ctx, c.source);
+          media = await materialize(ctx, { ...c.source, strictSha: true }); // speaking turns are sub-second labels
         } catch (err) {
-          out.push({ id: c.id, pass: false, skipped: (err as Error).message });
+          out.push(err instanceof MediaDriftError ? { id: c.id, pass: false, notes: (err as Error).message } : { id: c.id, pass: false, skipped: (err as Error).message });
           continue;
         }
         const [s0, s1] = c.segment;

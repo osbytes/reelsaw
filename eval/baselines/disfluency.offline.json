@@ -1,0 +1,135 @@
+{
+  "updatedAt": "2026-10-18T15:53:55.261Z",
+  "cases": {
+    "01-for-by-whatever-s-due": true,
+    "02-the-car-payments-due": true,
+    "03-for-out-of-whatever-s": true,
+    "04-pay-actual-pay-dates": false,
+    "05-of-after-every-dollar": true,
+    "06-into-between-now-and": false,
+    "07-is-is-that-resistance": true,
+    "08-a-small-a-small-little": true,
+    "09-helpful-helpful-tool-if": true,
+    "10-of-walks-out-of": true,
+    "11-he-s-like-he-s-like-son": false,
+    "12-blah-blah-blah-right": true,
+    "13-blah-blah-right-and": true,
+    "14-he-said-he-said-success": true,
+    "15-that-s-when-that-s-when-you": true,
+    "16-i-mean-that-s-why-i": true,
+    "17-very-very-beginning-people": true,
+    "18-you-know-you-know-uh": true,
+    "19-uh-saying-bad-things": true,
+    "20-uh-and-so-like": true,
+    "21-i-i-think-that": true,
+    "22-um-being-able-to": true,
+    "23-really-really-hard-you-ve": true,
+    "24-with-past-trauma-and": true,
+    "25-it-just-it-just-wasn-t": true,
+    "26-and-and-this-is": true,
+    "27-it-was-it-was-just": true,
+    "28-of-like-what-game": true,
+    "29-is-is-a-successful": true,
+    "30-that-that-for-that": true,
+    "31-that-for-that-exchange": false,
+    "32-for-like-saying-what": true,
+    "33-of-in-myself-are": true,
+    "34-like-throwing-like-a": false,
+    "35-like-playing-with-my": false,
+    "36-like-in-mighty-mouse": false,
+    "37-outside-of-social-groups": true,
+    "38-that-the-more-you": false,
+    "39-of-like-independent-thinking": true,
+    "40-that-that-you-can": true,
+    "41-of-like-living-the": true,
+    "42-of-on-autopilot-a": true,
+    "43-like-to-freeze-and": true,
+    "44-the-end-of-the": true,
+    "45-about-to-go-bad": true,
+    "46-a-baked-good-like": true,
+    "47-into-like-your-oatmeal": true,
+    "48-like-in-a-minute": true,
+    "49-you-you-don-t-always": false,
+    "50-like-on-a-piece": true
+  },
+  "metrics": {
+    "precision": {
+      "value": 0.89,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 16,
+        "n": 18
+      }
+    },
+    "recall": {
+      "value": 0.7,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 16,
+        "n": 23
+      }
+    },
+    "falsePositives": {
+      "value": 2,
+      "better": "lower"
+    },
+    "autoFalsePositives": {
+      "value": 0,
+      "better": "lower"
+    },
+    "dev.precision": {
+      "value": 1,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 9,
+        "n": 9
+      }
+    },
+    "dev.recall": {
+      "value": 0.75,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 9,
+        "n": 12
+      }
+    },
+    "dev.falsePositives": {
+      "value": 0,
+      "better": "lower"
+    },
+    "dev.autoFalsePositives": {
+      "value": 0,
+      "better": "lower"
+    },
+    "heldout.precision": {
+      "value": 0.78,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 7,
+        "n": 9
+      }
+    },
+    "heldout.recall": {
+      "value": 0.64,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 7,
+        "n": 11
+      }
+    },
+    "heldout.falsePositives": {
+      "value": 2,
+      "better": "lower"
+    },
+    "heldout.autoFalsePositives": {
+      "value": 0,
+      "better": "lower"
+    }
+  }
+}

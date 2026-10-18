@@ -4,7 +4,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { materialize, type CaseResult, type MediaSource, type Suite } from "../framework.js";
+import { materialize, MediaDriftError, type CaseResult, type MediaSource, type Suite } from "../framework.js";
 import { parseSceneScores, pickSceneCuts } from "../../pipeline/scenes.js";
 
 interface Spec {
@@ -21,9 +21,9 @@ export const scenesSuite: Suite = {
     for (const c of spec.cases) {
       let media: string;
       try {
-        media = await materialize(ctx, c.source);
+        media = await materialize(ctx, { ...c.source, strictSha: true }); // cut times are sub-second labels
       } catch (err) {
-        out.push({ id: c.id, pass: false, skipped: (err as Error).message });
+        out.push(err instanceof MediaDriftError ? { id: c.id, pass: false, notes: (err as Error).message } : { id: c.id, pass: false, skipped: (err as Error).message });
         continue;
       }
       const until = c.gradeUntil ?? c.source.end - c.source.start;

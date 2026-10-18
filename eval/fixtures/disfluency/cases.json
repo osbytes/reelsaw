@@ -1,10 +1,11 @@
 {
- "note": "Real transcript windows (\u00b130 words) around disfluency candidates. expect=cut: a real disfluency the detector should flag; expect=keep: words the detector must not flag (user rejected, or intentional emphasis). Built from reviewed flags across projects; duplicates removed.",
+ "note": "Real transcript windows (\u00b130 words) around disfluency candidates. expect=cut: a real disfluency the detector should flag; expect=keep: words the detector must not flag (user rejected, or intentional emphasis). Built from reviewed flags across projects; duplicates removed. Each case has a split: dev cases may be read while tuning disfluency rules/prompts; heldout cases must not be (see docs/EVALS.md).",
  "cases": [
   {
    "id": "01-for-by-whatever-s-due",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -322,6 +323,7 @@
    "id": "02-the-car-payments-due",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -639,6 +641,7 @@
    "id": "03-for-out-of-whatever-s",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -956,6 +959,7 @@
    "id": "04-pay-actual-pay-dates",
    "expect": "cut",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -1273,6 +1277,7 @@
    "id": "05-of-after-every-dollar",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -1590,6 +1595,7 @@
    "id": "06-into-between-now-and",
    "expect": "cut",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -1907,6 +1913,7 @@
    "id": "07-is-is-that-resistance",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -2224,6 +2231,7 @@
    "id": "08-a-small-a-small-little",
    "expect": "cut",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 2
@@ -2541,6 +2549,7 @@
    "id": "09-helpful-helpful-tool-if",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -2858,6 +2867,7 @@
    "id": "10-of-walks-out-of",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -3175,6 +3185,7 @@
    "id": "11-he-s-like-he-s-like-son",
    "expect": "keep",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 2
@@ -3492,6 +3503,7 @@
    "id": "12-blah-blah-blah-right",
    "expect": "keep",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -3809,6 +3821,7 @@
    "id": "13-blah-blah-right-and",
    "expect": "keep",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -4126,6 +4139,7 @@
    "id": "14-he-said-he-said-success",
    "expect": "cut",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 2
@@ -4443,6 +4457,7 @@
    "id": "15-that-s-when-that-s-when-you",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 2
@@ -4760,6 +4775,7 @@
    "id": "16-i-mean-that-s-why-i",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 2
@@ -5077,6 +5093,7 @@
    "id": "17-very-very-beginning-people",
    "expect": "keep",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -5394,6 +5411,7 @@
    "id": "18-you-know-you-know-uh",
    "expect": "cut",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 2
@@ -5711,6 +5729,7 @@
    "id": "19-uh-saying-bad-things",
    "expect": "cut",
    "kind": "filler",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -6028,6 +6047,7 @@
    "id": "20-uh-and-so-like",
    "expect": "cut",
    "kind": "filler",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -6345,6 +6365,7 @@
    "id": "21-i-i-think-that",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -6662,6 +6683,7 @@
    "id": "22-um-being-able-to",
    "expect": "cut",
    "kind": "filler",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -6979,6 +7001,7 @@
    "id": "23-really-really-hard-you-ve",
    "expect": "keep",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -7296,6 +7319,7 @@
    "id": "24-with-past-trauma-and",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -7613,6 +7637,7 @@
    "id": "25-it-just-it-just-wasn-t",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 2
@@ -7930,6 +7955,7 @@
    "id": "26-and-and-this-is",
    "expect": "cut",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -8247,6 +8273,7 @@
    "id": "27-it-was-it-was-just",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 2
@@ -8564,6 +8591,7 @@
    "id": "28-of-like-what-game",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -8881,6 +8909,7 @@
    "id": "29-is-is-a-successful",
    "expect": "cut",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -9198,6 +9227,7 @@
    "id": "30-that-that-for-that",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -9515,6 +9545,7 @@
    "id": "31-that-for-that-exchange",
    "expect": "cut",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -9832,6 +9863,7 @@
    "id": "32-for-like-saying-what",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -10149,6 +10181,7 @@
    "id": "33-of-in-myself-are",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -10466,6 +10499,7 @@
    "id": "34-like-throwing-like-a",
    "expect": "cut",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -10783,6 +10817,7 @@
    "id": "35-like-playing-with-my",
    "expect": "cut",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -11100,6 +11135,7 @@
    "id": "36-like-in-mighty-mouse",
    "expect": "cut",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -11417,6 +11453,7 @@
    "id": "37-outside-of-social-groups",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -11734,6 +11771,7 @@
    "id": "38-that-the-more-you",
    "expect": "cut",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -12051,6 +12089,7 @@
    "id": "39-of-like-independent-thinking",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -12368,6 +12407,7 @@
    "id": "40-that-that-you-can",
    "expect": "cut",
    "kind": "repetition",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -12685,6 +12725,7 @@
    "id": "41-of-like-living-the",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -13002,6 +13043,7 @@
    "id": "42-of-on-autopilot-a",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -13319,6 +13361,7 @@
    "id": "43-like-to-freeze-and",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -13636,6 +13679,7 @@
    "id": "44-the-end-of-the",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -13953,6 +13997,7 @@
    "id": "45-about-to-go-bad",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -14270,6 +14315,7 @@
    "id": "46-a-baked-good-like",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -14587,6 +14633,7 @@
    "id": "47-into-like-your-oatmeal",
    "expect": "keep",
    "kind": "repair",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -14904,6 +14951,7 @@
    "id": "48-like-in-a-minute",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
@@ -15221,6 +15269,7 @@
    "id": "49-you-you-don-t-always",
    "expect": "keep",
    "kind": "repetition",
+   "split": "heldout",
    "target": {
     "index": 30,
     "span": 1
@@ -15538,6 +15587,7 @@
    "id": "50-like-on-a-piece",
    "expect": "keep",
    "kind": "repair",
+   "split": "dev",
    "target": {
     "index": 30,
     "span": 1
