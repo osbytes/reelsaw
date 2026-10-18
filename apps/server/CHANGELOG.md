@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.8.0
+
+### Minor Changes
+
+- [#32](https://github.com/osbytes/reelsaw/pull/32) [`af4f780`](https://github.com/osbytes/reelsaw/commit/af4f78091503582bfa6435d96c82dd0e2e8a959e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Admins are told when a newer Reelsaw is published: Settings → System shows the release with its notes link and the one command to upgrade, and the account menu marks Settings with the waiting version (a dot on the account button) until it is done. Settings itself moved from the top bar into the account menu. `reelsaw version` prints the same from the shell and the `check_for_update` MCP tool returns it to agents. The app asks GitHub's releases API every 6 hours, sending nothing but the request; `UPDATE_CHECK=false` turns it off.
+
+### Patch Changes
+
+- [#34](https://github.com/osbytes/reelsaw/pull/34) [`37f2f59`](https://github.com/osbytes/reelsaw/commit/37f2f591b489f98a96efadb03b243503c03406e9) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Escape the caption file path correctly for ffmpeg, so renders work when the data directory contains a colon, quote or backslash. YouTube links are only recognised on youtube.com and its subdomains, and a vulnerable esbuild pulled in by drizzle-kit is overridden.
+
 ## 0.7.0
 
 ### Minor Changes
