@@ -308,6 +308,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
+| `check_for_update` | Admins only: is a newer Reelsaw published? |
 <!-- /generated -->
 
 `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
@@ -326,6 +327,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 
 | Command | What it does |
 | --- | --- |
+| `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw users` | list accounts: role, status, sign-up date |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |

@@ -9,6 +9,7 @@ import { ProcessingTimes } from "../components/ProcessingTimes";
 import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
+import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -94,11 +95,12 @@ export function SettingsPage() {
         <ProjectDefaultsSection />
         <ApiKeysSection mcpUrl={mcpUrl} />
         {isAdmin && (
-          <div className="flex items-baseline gap-2 pt-2">
+          <div className="flex flex-wrap items-baseline gap-2 pt-2">
             <h2 className="text-[18px] font-bold tracking-tight">System</h2>
-            <span className="min-h-5 font-mono text-xs text-ink3">{s ? `${s.version.version} · ${s.version.commit}` : ""}</span>
+            <UpdateStatusLine version={s ? `${s.version.version} · ${s.version.commit}` : null} />
           </div>
         )}
+        {isAdmin && <UpdateBanner />}
         {isAdmin && !s && (
           <SkeletonRegion label="Loading system status…" className="flex flex-col gap-6">
             <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">

@@ -33,6 +33,10 @@ export const envSchema = z.object({
   REELSAW_VERSION: z.string().default("dev"),
   REELSAW_COMMIT: z.string().default("unknown"),
   REELSAW_BUILT_AT: z.string().default("unknown"),
+  // "a newer Reelsaw is available" (updates.ts); documented in scripts/docs-meta.ts
+  UPDATE_CHECK: boolTrue,
+  UPDATE_CHECK_URL: z.string().url().default("https://api.github.com/repos/osbytes/reelsaw/releases/latest"),
+  UPDATE_CHECK_HOURS: z.coerce.number().min(1).max(168).default(6),
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(16),
   DATA_DIR: z.string().default(path.resolve(process.cwd(), "data")),

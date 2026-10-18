@@ -146,6 +146,9 @@ importers:
       pino-roll:
         specifier: ^4.0.0
         version: 4.0.0
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       yauzl:
         specifier: 3.4.0
         version: 3.4.0
@@ -165,6 +168,9 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       '@types/yauzl':
         specifier: ^3.4.0
         version: 3.4.0
@@ -2343,6 +2349,9 @@ packages:
 
   '@types/readdir-glob@1.1.5':
     resolution: {integrity: sha512-raiuEPUYqXu+nvtY2Pe8s8FEmZ3x5yAH4VkLdihcPdalvsHltomrRC9BzuStrJ9yk06470hS0Crw0f1pXqD+Hg==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/yauzl@3.4.0':
     resolution: {integrity: sha512-NRPn5w6h8dhcnmx3YIRQcqMywY/+nND/uOkJessedcrowO3C0AssHp3tMJpxKAwOhFOo0OV1y9VtsC5hbKKBAw==}
@@ -6191,6 +6200,8 @@ snapshots:
   '@types/readdir-glob@1.1.5':
     dependencies:
       '@types/node': 24.19.2
+
+  '@types/semver@7.8.0': {}
 
   '@types/yauzl@3.4.0':
     dependencies:

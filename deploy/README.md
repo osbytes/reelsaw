@@ -89,7 +89,11 @@ docker compose pull && docker compose up -d
 ```
 
 Pin a version with `REELSAW_IMAGE=ghcr.io/osbytes/reelsaw:<version>` in `.env`. Settings shows
-the running version.
+the running version, and when a newer release is published admins see it there (Settings → System,
+plus a dot on the account button and the version next to Settings in its menu) with the release notes link and this command; `reelsaw version`
+prints the same from the shell, and agents can ask with the `check_for_update` MCP tool. The app
+asks GitHub's releases API every 6 hours (`UPDATE_CHECK_HOURS`) sending nothing but the request;
+`UPDATE_CHECK=false` turns it off.
 
 ## Back up
 

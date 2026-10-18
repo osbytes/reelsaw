@@ -1,8 +1,8 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate, Link, NavLink, useLocation } from "react-router";
+import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -15,6 +15,7 @@ const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ de
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
 const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default: m.LibraryPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
+import { UpdateDot, UpdateMenuHint } from "./components/UpdateNotice";
 import { PendingPage } from "./pages/Pending";
 const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
 import { Skeleton, SkeletonRegion } from "./components/ui";
@@ -68,13 +69,19 @@ function MachineChip() {
   const reason = why === "disk" ? "disk nearly full" : `${why} busy`;
   return (
     <Link to="/settings" className="chip min-w-0 shrink-0 whitespace-nowrap bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room" aria-label={`Jobs paused: ${reason}`}>
-      <span className="font-mono">◷</span> <span className="hidden sm:inline">Jobs paused · {reason}</span>
+      {/* the mono glyph's ink sits low in its box; a pixel up centres it on the text */}
+      <span className="relative -top-px font-mono leading-none" aria-hidden>
+        ◷
+      </span>
+      <span className="hidden sm:inline">Jobs paused · {reason}</span>
     </Link>
   );
 }
 
+/** Account menu: settings (with the update hint for admins), report, sign out. */
 function Avatar() {
   const { data } = useSession();
+  const navigate = useNavigate();
   const u = data?.user;
   if (!u) return null;
   const initials = (u.name || u.email)
@@ -86,13 +93,18 @@ function Avatar() {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="grid h-[30px] w-[30px] place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text" title={u.email} aria-label="Account">
+        <button className="relative grid h-[30px] w-[30px] place-items-center rounded-full bg-acc-soft text-xs font-bold text-acc-text" title={u.email} aria-label="Account">
           {initials}
+          <UpdateDot />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={8} className="menu">
           <DropdownMenu.Label className="px-2.5 py-1.5 text-xs text-ink3">{u.email}</DropdownMenu.Label>
+          <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
+            <SettingsIcon className="h-4 w-4" /> Settings
+            <UpdateMenuHint />
+          </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
             <LifeBuoy className="h-4 w-4" /> Report an issue…
           </DropdownMenu.Item>
@@ -124,30 +136,27 @@ function SearchButton() {
   const open = useCommandPalette();
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
   return (
-    <button onClick={() => open()} className="flex h-[34px] items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]" aria-label="Search">
-      <Search className="h-4 w-4" />
-      <span className="hidden flex-1 text-left sm:inline">Search or paste a link…</span>
-      <span className="kbd hidden sm:inline-grid">{mod}K</span>
+    <button onClick={() => open()} className="flex h-[34px] min-w-0 shrink items-center gap-2 rounded-[10px] border border-line bg-sunk px-2.5 text-[13px] text-ink3 hover:text-ink sm:w-[240px]" aria-label="Search">
+      <Search className="h-4 w-4 shrink-0" />
+      <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">Search or paste a link…</span>
+      <span className="kbd hidden shrink-0 sm:inline-grid">{mod}K</span>
     </button>
   );
 }
 
 export function TopBar() {
-  const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-2.5 py-[7px] no-underline sm:px-3 ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
+  const nav = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-2.5 py-[7px] whitespace-nowrap no-underline sm:px-3 ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
   const loc = useLocation();
   const inProjects = loc.pathname === "/" || loc.pathname.startsWith("/p/") || loc.pathname === "/new";
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:gap-5 sm:px-5">
       <Logo />
-      <nav className="flex min-w-0 gap-0.5 sm:gap-1">
+      <nav className="flex shrink-0 gap-0.5 sm:gap-1">
         <NavLink to="/" className={() => nav({ isActive: inProjects })}>
           Projects
         </NavLink>
         <NavLink to="/library" className={nav}>
           Library
-        </NavLink>
-        <NavLink to="/settings" className={nav}>
-          Settings
         </NavLink>
         <UsersLink nav={nav} />
       </nav>

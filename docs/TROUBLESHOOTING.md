@@ -49,6 +49,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 
 | Command | What it does |
 | --- | --- |
+| `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw users` | list accounts: role, status, sign-up date |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |

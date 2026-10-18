@@ -350,6 +350,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "check_for_update",
+    TOOLS.check_for_update,
+    ({ refresh }) => run(() => (refresh ? api.admin.updates.check() : api.admin.updates.get())),
+  );
+
+  server.registerTool(
     "delete_project",
     TOOLS.delete_project,
     ({ id }) => run(() => api.projects.delete({ id })),
