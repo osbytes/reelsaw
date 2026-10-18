@@ -288,8 +288,11 @@ export function SlotRow({
   inheritedId,
   secOnInherit,
   loading = false,
+  reserveSec = false,
 }: {
   loading?: boolean;
+  /** lay out as label | picker (capped) | seconds slot, keeping the slot's width when no image is chosen */
+  reserveSec?: boolean;
   slot: "intro" | "outro";
   label: string;
   choice: string;
@@ -306,6 +309,14 @@ export function SlotRow({
 }) {
   const effective = fixed.some((f) => f.value === choice) ? (secOnInherit && (choice === "default" || choice === "inherit") ? inheritedId : null) : choice;
   const image = effective ? known.find((a) => a.id === effective && a.kind === "image") : undefined;
+  if (reserveSec)
+    return (
+      <>
+        <span className="text-xs text-ink2 max-sm:col-span-full max-sm:-mb-1">{label}</span>
+        <BumperCombobox className="min-w-0" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
+        <div className="flex w-[5rem] justify-end">{image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}</div>
+      </>
+    );
   return (
     <>
       <span className="text-xs text-ink2">{label}</span>
@@ -604,7 +615,7 @@ export const effectiveAsset = (own: string | null | undefined, project: string |
 export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string | null | undefined, projectSec: number | undefined, assetSec: number | undefined) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
 
 /** Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset. */
-export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean }) {
+export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean }) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   const assets = library.data?.assets ?? [];
@@ -627,10 +638,11 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
       known={known}
       defaultId={defaultId}
       loading={library.isPending}
+      reserveSec={reserveSec}
     />
   );
   return (
-    <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 ${className}`}>
+    <div className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}>
       {row("intro", "Intro", projectIntroId, defaults?.introAssetId)}
       {row("outro", "Outro", projectOutroId, defaults?.outroAssetId)}
     </div>
