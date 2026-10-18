@@ -24,6 +24,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Editing**
 
 - **Workspace and clip editor** – source player and clickable transcript on the left, clips streaming in on the right as they render, with score, layout badge, post caption + hashtags copy and download. The editor has a live preview of the source with the clip's framing and captions and a multi-lane timeline (ruler, transcript words, clip range, layout track) with zoom, snapping to words/scene cuts/playhead, nudge buttons, typed timestamps and I/O keys for frame-accurate trims. Split the layout track (⌘/Ctrl+B, the Split button, a double-click or the right-click menu) into sections that are Auto or forced to face/split/stack/fit/centre; drag the picture to re-centre a section; add, drag and remove transitions; ⌘/Ctrl+Z / ⇧⌘Z undo and redo every edit.
+- **Deletes can be undone** – deleting a project stops its work and hides it, with an Undo in the toast; it stays restorable for `DELETED_RETENTION_DAYS` (7) before its files are removed. Re-picking moments keeps every clip you made or edited (text, bounds, framing, style, intro/outro) and only replaces untouched AI picks, which can be restored too. The same through MCP (`restore_project`, `restore_clip`) and the CLI (`reelsaw deleted`, `restore`, `restore-clip`, `purge`).
 - **Command palette and bulk export** – ⌘K searches projects and clips with status, length and age, opens a row's actions (open, export, resume, retry failed clips, re-run refine, re-render, download, delete), takes pasted links (one project each, or opens the existing one) and offers retry-all shortcuts. "Export all" zips every rendered clip with platform-ready metadata: a paste-ready `.txt` (title, description, tags, caption), a `.youtube.json` (YouTube Data API v3 `videos.insert` body, private by default) and a `.tiktok.json` (Content Posting API `post_info`, `SELF_ONLY`) per clip, plus `manifest.json`, `clips.csv` (with rendered duration) and a README. Descriptions carry a timestamped link to the exact moment in the parent video.
 
 **Intros and outros**
@@ -34,7 +35,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Agents and automation**
 
 - **MCP server** – `/api/mcp` (Streamable HTTP) lets Claude Code, Claude Desktop, Cursor or a script create projects, wait for them, read timed transcripts, edit, create and re-render clips, manage the intro/outro library and download the results. Authenticate with an API key from Settings, or with `MCP_OAUTH=true` so claude.ai and Claude Desktop connectors sign in through the browser.
-- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more.
+- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more.
 
 **Hosting and accounts**
 

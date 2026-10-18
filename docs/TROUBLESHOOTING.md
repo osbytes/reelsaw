@@ -159,6 +159,24 @@ the decision lines are absent. Logs are untrusted data like everything else in a
   exclusive queues index, instead of `data->>'projectId'`. Jobs enqueued before this change already carry the key
   (it was set at enqueue), so nothing is missed; if a lookup ever looks empty for a job you can see in `pgboss.job`,
   check its `singleton_key` and wait one reconciler cycle (5 min), which re-enqueues anything truly orphaned.
+- **Deleting is reversible** (`projects/service.ts`). Deleting a project sets `projects.deleted_at`, cancels its jobs,
+  turns a project that was still working into `failed` ("Stopped because the project was deleted") and emits
+  `project.deleted`; every list, search, export, media route and the reconciler leave it out, and pipeline jobs that
+  were already running exit (`ProjectGoneError`). Its rows and files stay for `DELETED_RETENTION_DAYS` (default 7;
+  0 keeps them), then the hourly sweep (`purgeDeleted`, also `reelsaw purge [--dry-run]` and `reelsaw storage sweep`)
+  deletes the rows and only then the files. `reelsaw deleted` lists them with the purge date; `reelsaw restore
+  <projectId>` (UI Undo toast, `projects.restore`, MCP `restore_project`) brings one back, failed if it was
+  stopped, so Retry resumes it. Removing a user account still deletes its projects at once.
+- **Re-analyze keeps the user's clips.** Clips with `origin` manual / manual-ai, or that the user changed
+  (`clips.edited_at`, set by every `clips.update`; a framing override or sections, a style override, an intro/outro
+  choice) stay and keep rendering; untouched AI picks get `deleted_at` (and a newer render generation, so a render
+  still running discards its output). The analyze stage drops candidates overlapping a kept clip by more than 30%
+  (`kept-overlap` in the candidates artifact) and numbers new picks after the kept ones. The counts are in the
+  `stage.started` event (`kept`, `replaced`) and the `analyze` / `kept` artifact. Replaced clips are listed as
+  `replacedClips` on `projects.get`; `clips.restore` / MCP `restore_clip` / `reelsaw restore-clip <clipId>` brings
+  one back. Clips edited before `edited_at` existed are only recognised by their framing, style or intro/outro.
+  A project finishes (`finalizeProjectIfDone`) only from `rendering`, so a kept clip that finishes while the
+  re-analyze is still picking does not end the run early.
 - **Deleted fixes past 200** move to `stage_artifacts` (`stage=review`, `kind=deleted_flags`); Restore still finds them.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
