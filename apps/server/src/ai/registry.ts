@@ -17,7 +17,7 @@ export interface AiService {
    */
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
   /** Static validation of configured models + required keys. No network calls. */
-  check(): Promise<void>;
+  check(effective?: { language: string; transcription: string }): Promise<void>;
   /**
    * Can `id` run here? Resolves it against the configured providers, checks the vendor's key is set
    * and, for a self-hosted server, that it is reachable and has the model installed (Speaches pulls
@@ -208,16 +208,18 @@ export function createAi(
     const { baseUrl: baseURL, apiKey } = credentials.get(provider);
     if (!baseURL) return;
     const base = baseURL.replace(/\/+$/, "");
+    // admin-entered URLs may carry user:pass@; only the redacted form is ever logged or put in an error
+    const shown = redactUrl(base);
     const headers = apiKey ? { authorization: `Bearer ${apiKey}` } : undefined;
     const get = async (path: string) => {
       try {
         return await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(10_000) });
       } catch (err) {
-        throw new Error(`cannot reach ${base} (${(err as Error).message}). Is the server running and the URL correct from inside this container?`);
+        throw new Error(`cannot reach ${shown} (${(err as Error).message}). Is the server running and the URL correct from inside this container?`);
       }
     };
     const res = await get("/models");
-    if (!res.ok) throw new Error(`${base}/models returned HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`${shown}/models returned HTTP ${res.status}`);
     const body = (await res.json().catch(() => ({}))) as { data?: Array<{ id: string }> };
     const installed = (body.data ?? []).map((m) => m.id);
     if (installed.includes(modelId)) return;
@@ -225,15 +227,15 @@ export function createAi(
     // Speaches: pull from its registry on demand
     const reg = await get(`/registry?task=automatic-speech-recognition`).catch(() => undefined);
     if (reg?.ok) {
-      log.info({ model: modelId, server: base }, "transcription model not installed; downloading via POST /models (first boot only)");
-      const dl = await fetch(`${base}/models/${modelId}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch((err) => {
-        throw new Error(`download of ${modelId} from ${base} failed: ${(err as Error).message}`);
+      log.info({ model: modelId, server: shown }, "transcription model not installed; downloading via POST /models (first boot only)");
+      const dl = await fetch(`${base}/models/${encodeURIComponent(modelId)}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch((err) => {
+        throw new Error(`download of ${modelId} from ${shown} failed: ${(err as Error).message}`);
       });
-      if (!dl.ok && dl.status !== 409) throw new Error(`download of ${modelId} from ${base} failed: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
+      if (!dl.ok && dl.status !== 409) throw new Error(`download of ${modelId} from ${shown} failed: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
       return;
     }
-    const hint = /11434/.test(base) ? ` Run: ollama pull ${modelId}` : "";
-    throw new Error(`model "${modelId}" is not installed on ${base}. Installed: ${installed.join(", ") || "(none)"}.${hint}`);
+    const hint = /11434/.test(shown) ? ` Run: ollama pull ${modelId}` : "";
+    throw new Error(`model "${modelId}" is not installed on ${shown}. Installed: ${installed.join(", ") || "(none)"}.${hint}`);
   }
 
   async function verify(kind: "language" | "transcription", id: string) {
@@ -255,17 +257,20 @@ export function createAi(
       return { [p]: wordTimestampOptions[p] ?? {} };
     },
     verify,
-    async check() {
+    /**
+     * Boot check of the models that will actually run (the environment's, or the admin override that
+     * `models.attach` loaded). Same rules as `verify`, so a model that cannot work fails here, not at
+     * the first job.
+     */
+    async check(effective: { language: string; transcription: string } = { language: config.AI_MODEL, transcription: config.TRANSCRIPTION_MODEL }) {
       const errors: string[] = [];
       for (const [label, kind, id] of [
-        ["AI_MODEL", "language", config.AI_MODEL],
-        ["TRANSCRIPTION_MODEL", "transcription", config.TRANSCRIPTION_MODEL],
+        [labelOf(config.AI_MODEL, effective.language, "AI_MODEL", "language model"), "language", effective.language],
+        [labelOf(config.TRANSCRIPTION_MODEL, effective.transcription, "TRANSCRIPTION_MODEL", "transcription model"), "transcription", effective.transcription],
         ...(config.ANALYZE_JUDGE_MODEL ? ([["ANALYZE_JUDGE_MODEL", "language", config.ANALYZE_JUDGE_MODEL]] as const) : []),
       ] as const) {
         try {
-          await resolve(kind, id);
-          requireKeys(id);
-          await checkSelfHosted(id);
+          await verify(kind, id);
         } catch (err) {
           errors.push(`${label}: ${(err as Error).message}`);
         }
@@ -273,4 +278,21 @@ export function createAi(
       if (errors.length) throw new Error(errors.join("\n"));
     },
   };
+}
+
+/** Label for an error: the env var when the environment's model is in force, else say it is an admin override. */
+function labelOf(envId: string, effective: string, envVar: string, what: string) {
+  return envId === effective ? envVar : `admin-selected ${what} (${effective})`;
+}
+
+/** A URL safe to log: userinfo (user:pass@) removed. */
+export function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.username = "";
+    u.password = "";
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/\/[^/@]*@/, "//");
+  }
 }

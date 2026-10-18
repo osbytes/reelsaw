@@ -257,8 +257,15 @@ It looked frozen and the evidence was gone with the container's logs. What chang
   interrupted) and post a `clip.retrying` event; the reconciler's watchdog posts `job.stalled` after
   `STALL_MINUTES` without events; the cut search reports progress per cut and attempt; logs also go to
   `LOG_FILE` (`/data/logs/reelsaw.log`, daily rotation, 7 kept) so `reelsaw logs <id>` works after redeploys.
-- **Dependencies down:** boot fail-fast (exit 78) on an unreachable model server is intended; on a host where
-  Ollama is started by hand, check `curl localhost:11434/api/version` first.
+- **Dependencies down:** boot fail-fast (exit 78) when the model that will actually run is unreachable or
+  unusable (step `ai model check`). "Effective" means the admin override from Settings → Models when one is
+  in force, else `AI_MODEL` / `TRANSCRIPTION_MODEL`; the error label says which. A dead server behind an
+  unused env default only logs a warning naming the env var, so a deployment switched to a cloud model still
+  boots. On a host where Ollama is started by hand, check `curl localhost:11434/api/version` first. On Linux
+  with a host Ollama, the container reaches it through `host.docker.internal`, so Ollama must listen on
+  `0.0.0.0` (`OLLAMA_HOST=0.0.0.0`), not only 127.0.0.1; test with
+  `docker run --rm --add-host host.docker.internal:host-gateway busybox:1.36 wget -qO- http://host.docker.internal:11434/api/tags`.
+  A transcription model without word timestamps (for example `openai:gpt-4o-transcribe`) is rejected at boot too.
 
 ## 7. Improvements: done and next
 

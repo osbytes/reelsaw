@@ -5,7 +5,7 @@ speakers and burns in captions. Runs on your machine with Docker.
 
 ## Install
 
-Requires Docker with Compose (Docker Desktop on macOS/Windows), 8 GB RAM and ~10 GB disk.
+Requires Docker with Compose (Docker Desktop on macOS/Windows), 8 GB RAM for hosted providers or the smallest local model (`gemma3:4b`), 12 GB or more for `qwen2.5:7b`, 24 GB or more for `qwen2.5:14b`, and ~10 GB disk.
 
 ### Fully local in one command (Ollama + Speaches)
 
@@ -29,8 +29,10 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 above as is. `~/reelsaw` is `$HOME\reelsaw` on Windows; the same `REELSAW_*` options apply, set
 as `$env:REELSAW_LLM = "qwen2.5:7b"` before running.
 
-It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls `qwen2.5:14b`, starts
-everything and waits until the app answers. `REELSAW_LLM=qwen2.5:7b` for less RAM; see the top of
+It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls a language model sized to your RAM (`qwen2.5:14b` from 24 GB, `qwen2.5:7b` from 12 GB, else `gemma3:4b`; the script prints its choice), starts
+everything and waits until the app answers. `REELSAW_LLM=<model>` overrides the choice. On Linux with Ollama already running on the host, it must
+listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) so the container can reach it; the script checks this and
+says how to fix it. See the top of
 the script for the other options.
 
 ### By hand

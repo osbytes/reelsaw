@@ -134,14 +134,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return t;
   });
 
-  // the environment's models and keys are checked at boot; what an admin saved (keys, model override)
-  // is loaded, and verified, once the database is up
+  // what an admin saved (keys, model override) is loaded once the database is up; the models and keys
+  // are then checked at boot against the EFFECTIVE models, so a dead local server does not block a
+  // deployment an admin has already switched to a cloud model
   const providers = createProviderSettings(config, log.child({ module: "providers" }));
   let models!: ReturnType<typeof createModelSettings>;
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
     const a = createAi(config, log.child({ module: "ai" }), llmTrace.middleware, () => models.get(), providers);
     models = createModelSettings(config, log.child({ module: "models" }), a.verify);
-    await a.check();
+    // reachability is checked below, against the models that will really run (after the admin override loads)
     return a;
   });
   const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
@@ -210,6 +211,19 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     await providers.attach(database.db);
     const s = await models.attach(database.db);
     if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
+  });
+
+  await step(`ai model check (${models.get().language}, ${models.get().transcription})`, async () => {
+    const eff = models.get();
+    await ai.check(eff);
+    // an unreachable environment default only matters if it is what runs; with an override in force, warn
+    for (const [envVar, kind, envId, effId] of [
+      ["AI_MODEL", "language", config.AI_MODEL, eff.language],
+      ["TRANSCRIPTION_MODEL", "transcription", config.TRANSCRIPTION_MODEL, eff.transcription],
+    ] as const) {
+      if (envId === effId) continue;
+      await ai.verify(kind, envId).catch((err) => log.warn({ module: "models", envVar, model: envId, reason: (err as Error).message }, `${envVar} is not usable but an admin override is in force; fix it or clear the override before relying on the default`));
+    }
   });
 
   // usage accounting: one row per model call, attributed to the project's owner
