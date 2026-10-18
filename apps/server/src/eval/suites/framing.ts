@@ -13,22 +13,43 @@
  *    source width) of the face after `settleSec`, and never pan faster than `maxPanFracPerSec`
  *    (source widths per second). Source-size independent; the legacy `maxErrPx` / `maxPanPxPerSec`
  *    keys (1920 px source) are still accepted and converted.
+ *  - shots cases: any source shape (multi-camera, screencast + webcam, hands-only POV, 4:3, 9:16). The
+ *    range is segmented the way a render does it (static faces dropped, the source aspect passed, the
+ *    detected scene cuts) and compared with hand-labelled `windows`: the share of labelled time whose
+ *    layout is one of the window's allowed layouts must reach `minAgreement`; where a window gives
+ *    `faces` (x of each person a human would frame), the matching segment's crop track(s) must sit
+ *    within `faceTol` of them. `uncertain` windows (a human editor could go either way) are reported
+ *    but never scored. `maxFaceFrames` caps the share of sampled frames with any face box (a source
+ *    with no face must not grow one), and `minCropWidth` the face crop's share of the source width
+ *    (a vertical source should come out near the identity).
  * Face samples are committed (samples.json, derived from the video); when missing they are
  * regenerated from the materialised media with UltraFace.
  */
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { speakerCrop, cropX, isFullFrame, contentSide } from "@reelsaw/shared";
-import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, type FaceSample } from "../../pipeline/layout.js";
+import { speakerCrop, cropX, isFullFrame, contentSide, verticalCrop } from "@reelsaw/shared";
+import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, dropStaticFaces, type FaceSample } from "../../pipeline/layout.js";
 import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadFaceDetector } from "../../vision/faces.js";
 import { loadTextDetector } from "../../vision/text.js";
 import { materialize, type CaseResult, type MediaSource, type Suite, type EvalContext } from "../framework.js";
 
+interface ShotWindow {
+  /** seconds from the range start */
+  from: number;
+  to: number;
+  /** the layout(s) a human editor would accept here */
+  layout: string | string[];
+  /** x (0..1 of the source width) of each person the crop should frame, left to right */
+  faces?: number[];
+  /** debatable: reported, never scored */
+  uncertain?: boolean;
+}
+
 interface FramingCase {
-  kind: "split" | "track" | "content";
+  kind: "split" | "track" | "content" | "shots";
   note?: string;
   source: MediaSource;
   /** seconds inside the materialised media */
@@ -57,6 +78,14 @@ interface FramingCase {
     recentre?: { at: number; within: number };
     /** content cases: where the segments change, in seconds from the range start (+-0.3 s) */
     edges?: number[];
+    /** shots cases: hand-labelled windows, the share of labelled time that must agree, and the face tolerance (fraction of width) */
+    windows?: ShotWindow[];
+    minAgreement?: number;
+    faceTol?: number;
+    /** shots cases: at most this share of sampled frames may hold any face box */
+    maxFaceFrames?: number;
+    /** shots cases: a face crop must keep at least this share of the source width */
+    minCropWidth?: number;
   };
 }
 
@@ -67,7 +96,7 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   const det = await loadFaceDetector(ctx.config().FACE_MODEL_PATH);
   try {
     let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4 });
-    if (c.kind === "content") {
+    if (c.kind === "content" || c.kind === "shots") {
       // content cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
       const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
       try {
@@ -86,6 +115,57 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   }
 }
 
+/** Segment a shots case the way a render does and score it against its labelled windows. */
+function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Parameters<typeof segmentLayouts>[1]): CaseResult {
+  const samples = dropStaticFaces(raw).samples;
+  const segs = segmentLayouts(samples, config, c.sceneCuts ?? [], c.end - c.start);
+  const fails: string[] = [];
+  const faceFrames = samples.filter((s) => s.boxes.length > 0).length / Math.max(1, samples.length);
+  const checks: Record<string, number | string> = {
+    segments: segs.map((sg) => `${sg.decision.layout}@${sg.start.toFixed(1)}`).join(","),
+    faceFrames: Number(faceFrames.toFixed(3)),
+  };
+  if (c.expect.maxFaceFrames !== undefined && faceFrames > c.expect.maxFaceFrames) fails.push(`faces in ${(faceFrames * 100).toFixed(0)}% of frames, expected at most ${(c.expect.maxFaceFrames * 100).toFixed(0)}%`);
+  const tol = c.expect.faceTol ?? 0.08;
+  let scored = 0;
+  let agreed = 0;
+  let worstFace = 0;
+  for (const w of c.expect.windows ?? []) {
+    const allowed = Array.isArray(w.layout) ? w.layout : [w.layout];
+    let ok = 0;
+    for (const sg of segs) {
+      const a = Math.max(w.from, sg.start);
+      const b = Math.min(w.to, sg.end);
+      if (b <= a || !allowed.includes(sg.decision.layout)) continue;
+      ok += b - a;
+      if (w.uncertain || !w.faces?.length || sg.decision.layout === "fit" || sg.decision.layout === "center" || sg.decision.layout === "none") continue;
+      // where the crop sits inside this window: one track per framed person, left to right
+      const inWin = (tr: Array<{ t: number; x: number; y: number }> | undefined) => (tr ?? []).filter((p) => p.t >= a - 1e-6 && p.t <= b + 1e-6);
+      const xs = [inWin(sg.decision.track), inWin(sg.decision.track2)].filter((tr) => tr.length).map((tr) => trackCenter(tr).x).sort((p, q) => p - q);
+      for (let i = 0; i < Math.min(xs.length, w.faces.length); i++) worstFace = Math.max(worstFace, Math.abs(xs[i]! - w.faces[i]!));
+    }
+    const span = w.to - w.from;
+    checks[`w${w.from}-${w.to}`] = `${Number((ok / span).toFixed(2))}${w.uncertain ? "?" : ""}`;
+    if (w.uncertain) continue;
+    scored += span;
+    agreed += ok;
+  }
+  const agreement = scored > 0 ? agreed / scored : 1;
+  checks.agreement = Number(agreement.toFixed(3));
+  checks.faceErr = Number(worstFace.toFixed(3));
+  const minAgree = c.expect.minAgreement ?? 0.8;
+  if (agreement < minAgree) fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);
+  if (worstFace > tol) fails.push(`crop ${worstFace.toFixed(2)} of the width off a labelled face (tolerance ${tol})`);
+  if (c.expect.minCropWidth !== undefined) {
+    const share = verticalCrop(c.srcW, c.srcH).w / c.srcW;
+    checks.cropWidth = Number(share.toFixed(3));
+    if (segs.some((sg) => sg.decision.layout === "face") && share < c.expect.minCropWidth) fails.push(`face crop keeps ${(share * 100).toFixed(0)}% of the width`);
+    const wide = segs.filter((sg) => sg.decision.layout === "split" || sg.decision.layout === "stack");
+    if (wide.length) fails.push(`${wide.map((sg) => sg.decision.layout).join(",")} on a source that already fits the output`);
+  }
+  return { id, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" };
+}
+
 export const framingSuite: Suite = {
   name: "framing",
   description: "speaker crops centre faces and avoid burned-in text; tripod camera settles on the face",
@@ -98,6 +178,8 @@ export const framingSuite: Suite = {
       const dir = path.join(root, name);
       if (!(await fs.stat(dir)).isDirectory()) continue;
       const c = JSON.parse(await fs.readFile(path.join(dir, "case.json"), "utf8")) as FramingCase;
+      // face-size floors are relative to the shorter source side, as in a render (identical for 16:9)
+      const lcfg = { ...cfg, srcAspect: c.srcW / c.srcH };
       let samples: FaceSample[];
       try {
         samples = await samplesFor(ctx, dir, c);
@@ -106,7 +188,7 @@ export const framingSuite: Suite = {
         continue;
       }
       if (c.kind === "split") {
-        const d = decideLayout(samples, cfg, []);
+        const d = decideLayout(samples, lcfg, []);
         const halfAspect = 1080 / 960;
         const checks: Record<string, number | string> = { layout: d.layout };
         const fails: string[] = [];
@@ -138,8 +220,8 @@ export const framingSuite: Suite = {
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else if (c.kind === "content") {
         // the way a render does it: segment the clip (with its scene cuts), judge the stack piece
-        const segs = segmentLayouts(samples, cfg, c.sceneCuts ?? [], c.end - c.start);
-        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.content && !isFullFrame(sg.decision.content))?.decision ?? decideLayout(samples, cfg, c.sceneCuts ?? []);
+        const segs = segmentLayouts(samples, lcfg, c.sceneCuts ?? [], c.end - c.start);
+        const d = segs.find((sg) => sg.decision.layout === "stack" && sg.decision.content && !isFullFrame(sg.decision.content))?.decision ?? decideLayout(samples, lcfg, c.sceneCuts ?? []);
         const fails: string[] = [];
         const checks: Record<string, number | string> = { layout: d.layout, share: d.contentSignals?.share ?? 0 };
         if (c.expect.layout && d.layout !== c.expect.layout) fails.push(`layout ${d.layout}, expected ${c.expect.layout}${d.contentSignals?.rejected ? ` (${d.contentSignals.rejected})` : ""}`);
@@ -169,6 +251,8 @@ export const framingSuite: Suite = {
           if (off || got.length !== c.expect.edges.length) fails.push(`boundaries at ${got.join(",")} s, expected ${c.expect.edges.join(",")} (+-0.3)`);
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
+      } else if (c.kind === "shots") {
+        out.push(judgeShots(name, c, samples, lcfg));
       } else {
         const track = tripodTrack(samples, c.sceneCuts ?? []);
         // tolerances are fractions of the source width; legacy px keys are 1920 px source pixels
@@ -206,7 +290,9 @@ export const framingSuite: Suite = {
   summarize(results) {
     const offs = results.flatMap((r) => ["A.offset", "B.offset"].map((k) => r.metrics?.[k]).filter((v): v is number => typeof v === "number"));
     const errs = results.map((r) => r.metrics?.medianErrPx).filter((v): v is number => typeof v === "number");
+    const agree = results.filter((r) => !r.skipped).map((r) => r.metrics?.agreement).filter((v): v is number => typeof v === "number");
     return {
+      worstShotAgreement: { value: agree.length ? Math.min(...agree) : 1, better: "higher", tolerance: 0.05 },
       worstSpeakerOffset: { value: offs.length ? Math.max(...offs) : 0, better: "lower", tolerance: 0.03 },
       worstTrackErrPx: { value: errs.length ? Math.max(...errs) : 0, better: "lower", tolerance: 6 },
       passRate: { value: Number((results.filter((r) => r.pass).length / (results.length || 1)).toFixed(2)), better: "higher" },
