@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2 } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
@@ -14,6 +14,7 @@ import { ThemeToggle } from "../App";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
+import { createClock, useClock, type Clock } from "../lib/playback";
 import {
   defaultStyle,
   formatTime,
@@ -222,6 +223,18 @@ const SIZES: Array<{ v: number; l: string }> = [
   { v: 1.25, l: "L" },
 ];
 
+/** The timeline with a per-frame playhead; the rest of the editor does not follow the clock. */
+function LiveTimeline({ clock, ...props }: Omit<ComponentProps<typeof Timeline>, "current"> & { clock: Clock }) {
+  return <Timeline {...props} current={useClock(clock)} />;
+}
+
+/** The 9:16 preview, re-rendered per frame on its own (framing and caption time follow the clock). */
+function LivePreview({ clock, framingAt, rangeStart, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time"> & { clock: Clock; framingAt: (t: number) => Framing; rangeStart: number }) {
+  const t = useClock(clock);
+  const framing = useMemo(() => framingAt(t), [framingAt, t]);
+  return <VerticalPreview {...props} framing={framing} time={t - rangeStart} />;
+}
+
 /**
  * Full-screen clip editor: live 9:16 preview of the source with the clip's framing and captions,
  * inspector tabs (captions, framing, text, cuts, transcript) and a multi-lane timeline. Every edit is
@@ -255,7 +268,10 @@ export function ClipEditor(props: Props) {
   }, [sections.length, selected]);
   const [styleScope, setStyleScope] = useState<"clip" | "all">("clip");
   const [playing, setPlaying] = useState(false);
+  // `current` follows timeupdate (~4 Hz) and seeks; `clock` is the per-frame position, read only by
+  // the timeline playhead and the preview so the rest of the editor does not re-render at 60 Hz
   const [current, setCurrent] = useState(clip.startSec);
+  const clock = useMemo(() => createClock(clip.startSec), []);
   const [buffering, setBuffering] = useState(true);
   // deep link: #tab=<tab>&t=<seconds into the clip>
   const TABS: Tab[] = ["captions", "framing", "text", "cuts", "transcript"];
@@ -314,8 +330,9 @@ export function ClipEditor(props: Props) {
     const v = videoRef.current;
     if (!v) return;
     setVideoEl(v);
-    const onTime = () => {
-      setCurrent(v.currentTime);
+    const onTime = (coarse = true) => {
+      clock.set(v.currentTime);
+      if (coarse) setCurrent(v.currentTime);
       const [a, b] = rangeRef.current;
       if (!v.paused && v.currentTime >= b) {
         v.pause();
@@ -332,7 +349,7 @@ export function ClipEditor(props: Props) {
       v.currentTime = Number.isFinite(t) && t > 0 ? Math.min(b - 0.05, a + t) : a;
     };
     const evs: Array<[string, () => void]> = [
-      ["timeupdate", onTime],
+      ["timeupdate", () => onTime()],
       ["play", onPlay],
       ["pause", onPause],
       ["waiting", onWaiting],
@@ -345,7 +362,7 @@ export function ClipEditor(props: Props) {
     if (v.readyState >= 1) onMeta();
     let raf = 0;
     const tick = () => {
-      if (!v.paused) onTime();
+      if (!v.paused) onTime(false);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -364,6 +381,7 @@ export function ClipEditor(props: Props) {
     const v = videoRef.current;
     if (!v) return;
     v.currentTime = Math.max(0, t);
+    clock.set(Math.max(0, t));
     setCurrent(Math.max(0, t));
   };
   const togglePlay = () => {
@@ -409,9 +427,8 @@ export function ClipEditor(props: Props) {
 
   // framing at the playhead: forced section → that layout; auto → what the last render detected there.
   const secIdx = Math.max(0, sections.findLastIndex((s) => current >= s.start - 0.02));
-  const framing: Framing = useMemo(() => {
-    const t = current;
-    const sec = sections[secIdx] ?? sections[0]!;
+  const framingAt = useMemo(() => (t: number): Framing => {
+    const sec = sections[Math.max(0, sections.findLastIndex((s) => t >= s.start - 0.02))] ?? sections[0]!;
     const det = clip.layoutSegments.find((d) => t >= d.start && t < d.end) ?? clip.layoutSegments.find((d) => !d.manual);
     const fallback: PreviewLayout = clip.layout && clip.layout !== "mixed" ? (clip.layout as PreviewLayout) : "fit";
     const lay: PreviewLayout = sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode;
@@ -438,7 +455,8 @@ export function ClipEditor(props: Props) {
       // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top
       ...(sec.mode === "auto" && det && !det.manual && det.content ? { content: det.content } : {}),
     };
-  }, [current, sections, secIdx, clip.layoutSegments, clip.layout]);
+  }, [sections, clip.layoutSegments, clip.layout]);
+  const framing = useMemo(() => framingAt(current), [framingAt, current]);
   const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map(layoutLabel))].join(" / ");
 
   const panSection = (dx: number) => {
@@ -534,7 +552,7 @@ export function ClipEditor(props: Props) {
       }
       if (mod && (k === "b" || k === "k")) {
         e.preventDefault();
-        splitAt(current);
+        splitAt(clock.get());
         return;
       }
       if (el.closest("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]")) return;
@@ -547,12 +565,12 @@ export function ClipEditor(props: Props) {
       else if (e.key === " ") {
         e.preventDefault();
         togglePlay();
-      } else if (k === "i") setIn(current);
-      else if (k === "o") setOut(current);
+      } else if (k === "i") setIn(clock.get());
+      else if (k === "o") setOut(clock.get());
       else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         videoRef.current?.pause();
-        seek(current + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
+        seek(clock.get() + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
       } else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null && selected > 0) mergeSection(selected, "left");
     };
     window.addEventListener("keydown", onKey);
@@ -1018,14 +1036,15 @@ export function ClipEditor(props: Props) {
   const preview = (
     <div className={`flex min-h-0 min-w-0 flex-col items-center gap-2.5 px-4 pb-3 pt-3.5 ${compact ? "" : "flex-1"}`}>
       <div className={`relative flex w-full justify-center ${compact ? "h-[min(62vh,520px)]" : "min-h-0 flex-1"}`}>
-        <VerticalPreview
+        <LivePreview
+          clock={clock}
+          framingAt={framingAt}
+          rangeStart={range[0]}
           source={videoEl}
           srcW={srcW}
           srcH={srcH}
-          framing={framing}
           style={style}
           words={clipWords}
-          time={current - range[0]}
           hook={hook}
           emphasis={emphasis}
           onPan={panSection}
@@ -1136,11 +1155,11 @@ export function ClipEditor(props: Props) {
     </>
   );
   const timeline = (
-    <Timeline
+    <LiveTimeline
+      clock={clock}
       sourceDuration={durationSec}
       range={range}
       onRange={setRange}
-      current={current}
       onSeek={seek}
       words={rawWords.length ? rawWords : words}
       cuts={cutSpans}

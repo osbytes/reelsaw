@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Popover from "@radix-ui/react-popover";
 import { ArrowDown, Check, X, Sparkles, Play, Loader2, ListChecks, Trash2, Link2 } from "lucide-react";
@@ -520,6 +520,27 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     </button>
   );
 
+  // Everything a line needs besides its own words. Rebuilt only when real state changes (not on every
+  // playhead tick); callbacks go through `latest`, so a memoised line never calls a stale closure.
+  const flagIndex = useMemo(() => new Map(orderedFlags.map((f, i) => [f.id, i] as const)), [orderedFlags]);
+  const latest = useRef<LineCtx>(null as unknown as LineCtx);
+  latest.current = { visibleFlag, activeRef, onSeek, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, flagRefs, setOpenFlag, setPinnedFlag, setFlagCursor, decide, deleteOne, deleting: delFlag.isPending, copyLink, hasPlayback: !!playback, looping, loopPaused, ctxSec, toggleLoop, setCtxSec, startLoop, variant, setVariant, plans, fetchPlan };
+  const lineCtx = useMemo<LineCtx>(
+    () => ({
+      ...latest.current,
+      visibleFlag: (f) => latest.current.visibleFlag(f),
+      onSeek: (t) => latest.current.onSeek(t),
+      decide: (id, d) => latest.current.decide(id, d),
+      deleteOne: (f) => latest.current.deleteOne(f),
+      copyLink: (p) => latest.current.copyLink(p),
+      toggleLoop: (f) => latest.current.toggleLoop(f),
+      startLoop: (...a) => latest.current.startLoop(...a),
+      fetchPlan: (...a) => latest.current.fetchPlan(...a),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filter, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, delFlag.isPending, !!playback, looping, loopPaused, ctxSec, variant, plans],
+  );
+
   return (
     <div ref={rootRef} className={`relative flex min-h-0 flex-col ${className}`}>
       {/* one scrollable row on phones, wraps on wider screens */}
@@ -583,115 +604,9 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               </div>
               <div className="min-w-0">
                 {g.items.map((i) => {
-            const { s, ws } = lines[i]!;
-            const isActive = currentTime >= s.start && currentTime < s.end;
-            const inClip = clipOfLine[i];
-            const marks = ws.filter((x) => x.flag && visibleFlag(x.flag));
-            return (
-              <div
-                key={i}
-                ref={isActive ? activeRef : undefined}
-                className={`-mx-3 grid grid-cols-[30px_minmax(0,1fr)] gap-2.5 rounded-[12px] px-3 py-2 ${isActive ? "bg-panel shadow-[0_0_0_1px_var(--line)]" : ""}`}
-              >
-                <div className="flex flex-col items-center gap-1 pt-0.5">
-                  {marks.slice(0, 3).map(({ flag }) => (
-                    <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flag!.kind === "entity" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink"}`}>
-                      {flag!.kind === "entity" ? "Aa" : "✂"}
-                    </span>
-                  ))}
-                </div>
-                <div className="min-w-0">
-                  <button className="select-none font-mono text-[11px] text-ink3 hover:text-ink" onClick={() => onSeek(s.start)} title="Seek here">
-                    {formatTime(s.start)}
-                  </button>
-                  <p className="text-base leading-[1.7] [text-wrap:pretty]">
-                    {ws.length === 0 && (
-                      <span data-s={s.start} data-e={s.end} onClick={() => onSeek(s.start)}>
-                        {s.text}
-                      </span>
-                    )}
-                    {ws.map(({ w, flag }, k) => {
-                      const spoken = currentTime >= w.start && currentTime < w.end;
-                      const inside = inClip && w.start >= inClip.startSec - 0.02 && w.end <= inClip.endSec + 0.05;
-                      if (!flag || !visibleFlag(flag)) {
-                        return (
-                          <span key={k}>
-                            <span
-                              data-s={w.start}
-                              data-e={w.end}
-                              onClick={() => !window.getSelection()?.toString() && onSeek(w.start)}
-                              className={`cursor-pointer rounded-[3px] ${spoken ? "bg-acc text-acc-ink" : inside ? "bg-acc-soft/70" : "hover:bg-sunk"}`}
-                            >
-                              {flag && (flag.status === "auto" || flag.status === "accepted") && flag.kind === "entity" ? (flag.replacement ?? flag.suggested) : w.text}
-                            </span>{" "}
-                          </span>
-                        );
-                      }
-                      return (
-                        <FlagWord
-                          key={k}
-                          word={w}
-                          flag={flag}
-                          decision={decisions[flag.id]}
-                          open={openFlag === flag.id}
-                          pinned={pinnedFlag === flag.id}
-                          highlighted={orderedFlags[flagCursor]?.id === flag.id}
-                          rendered={flag.kind === "disfluency" ? cutState(flag, clips) : null}
-                          where={`${formatTime(flag.start)}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
-                          position={`${orderedFlags.indexOf(flag) + 1} of ${orderedFlags.length}`}
-                          anchorRef={(el) => {
-                            flagRefs.current[flag.id] = el;
-                          }}
-                          onOpenChange={(o) => {
-                            if (o) setOpenFlag(flag.id);
-                            else if (pinnedFlag !== flag.id) setOpenFlag((cur) => (cur === flag.id ? null : cur));
-                          }}
-                          onPin={(p) => {
-                            setPinnedFlag(p ? flag.id : null);
-                            setOpenFlag(p ? flag.id : null);
-                            if (p) setFlagCursor(orderedFlags.indexOf(flag));
-                          }}
-                          onDecide={(d) => decide(flag.id, d)}
-                          onDelete={() => void deleteOne(flag)}
-                          deleting={delFlag.isPending}
-                          onCopyLink={() => copyLink({ fix: flag.id })}
-                          loop={
-                            playback
-                              ? {
-                                  on: looping === flag.id,
-                                  paused: looping === flag.id && loopPaused,
-                                  sec: ctxSec,
-                                  toggle: () => toggleLoop(flag),
-                                  setSec: (n) => {
-                                    setCtxSec(n);
-                                    if (looping === flag.id) void startLoop(flag, n);
-                                  },
-                                  ab:
-                                    flag.kind === "disfluency"
-                                      ? {
-                                          variant,
-                                          setVariant: (v) => {
-                                            setVariant(v);
-                                            void startLoop(flag, ctxSec, v);
-                                          },
-                                          plan: plans[flag.id],
-                                          loadPlan: () => void (plans[flag.id]?.plan || plans[flag.id]?.loading ? undefined : fetchPlan(flag)),
-                                          findExact: async () => {
-                                            const pl = await fetchPlan(flag, true);
-                                            if (pl && looping === flag.id && variant === "cut") void startLoop(flag, ctxSec, "cut", pl);
-                                          },
-                                        }
-                                      : undefined,
-                                }
-                              : undefined
-                          }
-                        />
-                      );
-                    })}
-                  </p>
-                </div>
-              </div>
-            );
+                  const { s, ws } = lines[i]!;
+                  const isActive = currentTime >= s.start && currentTime < s.end;
+                  return <Line key={i} s={s} ws={ws} inClip={clipOfLine[i]} isActive={isActive} time={isActive ? currentTime : -1} ctx={lineCtx} />;
                 })}
               </div>
             </div>
@@ -872,6 +787,151 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     </div>
   );
 }
+
+interface LineCtx {
+  visibleFlag: (f: TranscriptFlag) => boolean;
+  activeRef: React.RefObject<HTMLDivElement | null>;
+  onSeek: (t: number) => void;
+  decisions: Record<string, Decision>;
+  openFlag: string | null;
+  pinnedFlag: string | null;
+  orderedFlags: TranscriptFlag[];
+  flagIndex: Map<string, number>;
+  flagCursor: number;
+  clips: TranscriptClip[];
+  flagRefs: React.MutableRefObject<Record<string, HTMLElement | null>>;
+  setOpenFlag: React.Dispatch<React.SetStateAction<string | null>>;
+  setPinnedFlag: (id: string | null) => void;
+  setFlagCursor: (i: number) => void;
+  decide: (id: string, d: Decision | null) => void;
+  deleteOne: (f: TranscriptFlag) => Promise<void>;
+  deleting: boolean;
+  copyLink: (params: Record<string, string>) => unknown;
+  hasPlayback: boolean;
+  looping: string | null;
+  loopPaused: boolean;
+  ctxSec: number;
+  toggleLoop: (f: TranscriptFlag) => void;
+  setCtxSec: (n: number) => void;
+  startLoop: (f: TranscriptFlag, pad?: number, v?: Variant, plan?: CutPlan) => Promise<void> | void;
+  variant: Variant;
+  setVariant: (v: Variant) => void;
+  plans: Record<string, PlanState>;
+  fetchPlan: (f: TranscriptFlag, exact?: boolean) => Promise<CutPlan | undefined>;
+}
+
+/**
+ * One transcript line. Memoised: while playing, only the line holding the playhead gets a new `time`
+ * (every other line gets -1), so the other hundreds of lines and their words do not re-render.
+ */
+const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: TranscriptSegment; ws: Array<{ w: Word; flag?: TranscriptFlag }>; inClip: TranscriptClip | undefined; isActive: boolean; time: number; ctx: LineCtx }) {
+  const { visibleFlag, activeRef, onSeek, decisions, openFlag, pinnedFlag, orderedFlags, flagIndex, flagCursor, clips, flagRefs, setOpenFlag, setPinnedFlag, setFlagCursor, decide, deleteOne, deleting, copyLink, hasPlayback, looping, loopPaused, ctxSec, toggleLoop, setCtxSec, startLoop, variant, setVariant, plans, fetchPlan } = ctx;
+  const marks = ws.filter((x) => x.flag && visibleFlag(x.flag));
+  return (
+    <div
+      ref={isActive ? activeRef : undefined}
+      className={`-mx-3 grid grid-cols-[30px_minmax(0,1fr)] gap-2.5 rounded-[12px] px-3 py-2 ${isActive ? "bg-panel shadow-[0_0_0_1px_var(--line)]" : ""}`}
+    >
+      <div className="flex flex-col items-center gap-1 pt-0.5">
+        {marks.slice(0, 3).map(({ flag }) => (
+          <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flag!.kind === "entity" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink"}`}>
+            {flag!.kind === "entity" ? "Aa" : "✂"}
+          </span>
+        ))}
+      </div>
+      <div className="min-w-0">
+        <button className="select-none font-mono text-[11px] text-ink3 hover:text-ink" onClick={() => onSeek(s.start)} title="Seek here">
+          {formatTime(s.start)}
+        </button>
+        <p className="text-base leading-[1.7] [text-wrap:pretty]">
+          {ws.length === 0 && (
+            <span data-s={s.start} data-e={s.end} onClick={() => onSeek(s.start)}>
+              {s.text}
+            </span>
+          )}
+          {ws.map(({ w, flag }, k) => {
+            const spoken = isActive && time >= w.start && time < w.end;
+            const inside = inClip && w.start >= inClip.startSec - 0.02 && w.end <= inClip.endSec + 0.05;
+            if (!flag || !visibleFlag(flag)) {
+              return (
+                <span key={k}>
+                  <span
+                    data-s={w.start}
+                    data-e={w.end}
+                    onClick={() => !window.getSelection()?.toString() && onSeek(w.start)}
+                    className={`cursor-pointer rounded-[3px] ${spoken ? "bg-acc text-acc-ink" : inside ? "bg-acc-soft/70" : "hover:bg-sunk"}`}
+                  >
+                    {flag && (flag.status === "auto" || flag.status === "accepted") && flag.kind === "entity" ? (flag.replacement ?? flag.suggested) : w.text}
+                  </span>{" "}
+                </span>
+              );
+            }
+            return (
+              <FlagWord
+                key={k}
+                word={w}
+                flag={flag}
+                decision={decisions[flag.id]}
+                open={openFlag === flag.id}
+                pinned={pinnedFlag === flag.id}
+                highlighted={orderedFlags[flagCursor]?.id === flag.id}
+                rendered={flag.kind === "disfluency" ? cutState(flag, clips) : null}
+                where={`${formatTime(flag.start)}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
+                position={`${(flagIndex.get(flag.id) ?? -1) + 1} of ${orderedFlags.length}`}
+                anchorRef={(el) => {
+                  flagRefs.current[flag.id] = el;
+                }}
+                onOpenChange={(o) => {
+                  if (o) setOpenFlag(flag.id);
+                  else if (pinnedFlag !== flag.id) setOpenFlag((cur) => (cur === flag.id ? null : cur));
+                }}
+                onPin={(p) => {
+                  setPinnedFlag(p ? flag.id : null);
+                  setOpenFlag(p ? flag.id : null);
+                  if (p) setFlagCursor(flagIndex.get(flag.id) ?? -1);
+                }}
+                onDecide={(d) => decide(flag.id, d)}
+                onDelete={() => void deleteOne(flag)}
+                deleting={deleting}
+                onCopyLink={() => copyLink({ fix: flag.id })}
+                loop={
+                  hasPlayback
+                    ? {
+                        on: looping === flag.id,
+                        paused: looping === flag.id && loopPaused,
+                        sec: ctxSec,
+                        toggle: () => toggleLoop(flag),
+                        setSec: (n) => {
+                          setCtxSec(n);
+                          if (looping === flag.id) void startLoop(flag, n);
+                        },
+                        ab:
+                          flag.kind === "disfluency"
+                            ? {
+                                variant,
+                                setVariant: (v) => {
+                                  setVariant(v);
+                                  void startLoop(flag, ctxSec, v);
+                                },
+                                plan: plans[flag.id],
+                                loadPlan: () => void (plans[flag.id]?.plan || plans[flag.id]?.loading ? undefined : fetchPlan(flag)),
+                                findExact: async () => {
+                                  const pl = await fetchPlan(flag, true);
+                                  if (pl && looping === flag.id && variant === "cut") void startLoop(flag, ctxSec, "cut", pl);
+                                },
+                              }
+                            : undefined,
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
+        </p>
+      </div>
+    </div>
+  );
+});
 
 function FlagWord({
   word,

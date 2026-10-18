@@ -673,6 +673,12 @@ export function ProjectPage() {
       </div>
     </div>
   );
+  // built once: the phone and desktop layouts share one element
+  const transcriptBody = transcriptStage ? tq.isLoading ? transcriptSkeleton : (
+    <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+  ) : (
+    waiting
+  );
 
   const clipsList = (
     <>
@@ -783,11 +789,7 @@ export function ProjectPage() {
           {mtab === "transcript" && (
             <div className="flex min-h-0 flex-1 flex-col">
               {source}
-              {transcriptStage ? (
-                tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
-              ) : (
-                waiting
-              )}
+              {transcriptBody}
             </div>
           )}
           {mtab === "clips" && (
@@ -807,11 +809,7 @@ export function ProjectPage() {
         <main className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `minmax(0,1fr) ${drawer ? (width < 1100 ? 320 : width < 1280 ? 360 : 400) : 56}px` }}>
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
-            {transcriptStage ? (
-              tq.isLoading ? transcriptSkeleton : <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
-            ) : (
-              waiting
-            )}
+            {transcriptBody}
           </section>
           <aside className="flex min-h-0 flex-col border-l border-line bg-sunk">
             {drawer ? (
