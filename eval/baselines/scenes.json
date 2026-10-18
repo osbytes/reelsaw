@@ -1,7 +1,10 @@
 {
-  "updatedAt": "2026-10-15T20:06:28.499Z",
+  "updatedAt": "2026-10-18T16:27:23.794Z",
   "cases": {
-    "apollo-dark-podcast": true
+    "apollo-dark-podcast": true,
+    "bradford-highlights-bright": true,
+    "voa-news-package": true,
+    "sister-circle-studio": true
   },
   "metrics": {}
 }
