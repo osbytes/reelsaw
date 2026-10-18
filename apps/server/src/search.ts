@@ -7,7 +7,7 @@
  * a weighted similarity score with a bonus for literal matches, then by how recently the project changed.
  * Everything is scoped to the user.
  */
-import { and, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "./db/index.js";
 
 export const SEARCH_PROJECTS = 8;
@@ -60,7 +60,7 @@ const PROJECT_COLUMNS = { id: true, title: true, status: true, durationSec: true
 async function clipFacts(db: Db, ids: string[]) {
   const facts = new Map<string, { clipCount: number; clipsDone: number; failedClipIds: string[] }>();
   if (!ids.length) return facts;
-  const rows = await db.select({ projectId: schema.clips.projectId, id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(inArray(schema.clips.projectId, ids));
+  const rows = await db.select({ projectId: schema.clips.projectId, id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(and(inArray(schema.clips.projectId, ids), isNull(schema.clips.deletedAt)));
   for (const c of rows) {
     const f = facts.get(c.projectId) ?? { clipCount: 0, clipsDone: 0, failedClipIds: [] };
     f.clipCount++;
@@ -90,7 +90,7 @@ export type SearchProject = Awaited<ReturnType<typeof projectRows>>[number];
 
 /** The user's most recently changed projects (the palette's list before anything is typed). */
 export async function recentProjects(db: Db, userId: string, limit = 20) {
-  const rows = await db.query.projects.findMany({ where: eq(schema.projects.userId, userId), columns: PROJECT_COLUMNS, orderBy: desc(schema.projects.updatedAt), limit });
+  const rows = await db.query.projects.findMany({ where: and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)), columns: PROJECT_COLUMNS, orderBy: desc(schema.projects.updatedAt), limit });
   return projectRows(db, rows);
 }
 
@@ -107,7 +107,8 @@ export interface SearchInput {
 
 export async function searchLibrary(db: Db, userId: string, input: SearchInput) {
   const limit = input.limit ?? SEARCH_CLIPS;
-  const mine = eq(schema.projects.userId, userId);
+  // deleted projects (and clips a re-analyze replaced) are not found until restored
+  const mine = and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt));
   if (input.links?.length) {
     const rows = await db.query.projects.findMany({ where: and(mine, or(...input.links.map((n) => contains(schema.projects.sourceUrl, n)))), columns: PROJECT_COLUMNS, orderBy: desc(schema.projects.updatedAt), limit: 50 });
     return { projects: await projectRows(db, rows), clips: [], truncated: false };
@@ -144,7 +145,7 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
       })
       .from(schema.clips)
       .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
-      .where(and(mine, ...clipMatch))
+      .where(and(mine, isNull(schema.clips.deletedAt), ...clipMatch))
       .orderBy(desc(clipScore), desc(schema.projects.updatedAt), schema.clips.index)
       .limit(limit + 1);
     return { projectsFound, clipsFound };
@@ -173,11 +174,11 @@ export async function searchLibrary(db: Db, userId: string, input: SearchInput) 
 
 /** Failed work across the account, for the palette's "Retry all failed" commands (ids capped; the counts are exact). */
 export async function failedCounts(db: Db, userId: string) {
-  const failedClip = and(eq(schema.projects.userId, userId), eq(schema.clips.status, "failed"));
+  const failedClip = and(eq(schema.projects.userId, userId), eq(schema.clips.status, "failed"), isNull(schema.projects.deletedAt), isNull(schema.clips.deletedAt));
   const [[clipTotals], clipIds, projectIds] = await Promise.all([
     db.select({ clips: count(), projects: sql<number>`count(distinct ${schema.clips.projectId})` }).from(schema.clips).innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id)).where(failedClip),
     db.select({ id: schema.clips.id }).from(schema.clips).innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id)).where(failedClip).limit(500),
-    db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.userId, userId), eq(schema.projects.status, "failed"))).limit(200),
+    db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.userId, userId), eq(schema.projects.status, "failed"), isNull(schema.projects.deletedAt))).limit(200),
   ]);
   return {
     failedClips: Number(clipTotals?.clips ?? 0),

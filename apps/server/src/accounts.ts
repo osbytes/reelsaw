@@ -3,35 +3,14 @@
  * each a unit of work that writes the user row and its admin event together and sends mail after
  * commit. tRPC (admin router) and the CLI call these; nothing else edits role/approval columns.
  */
-import fs from "node:fs/promises";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
 import { templates } from "./email.js";
-import { listClips } from "./pipeline/analyze.js";
-import { QUEUES } from "./queue/boss.js";
-import { keys } from "./storage/index.js";
-import { releaseUpload } from "./storage/uploads.js";
+import { purgeProject } from "./projects/service.js";
 import type { UserRole } from "./db/schema.js";
-
-const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
-
-/** Delete a project with its jobs cancelled and its files removed after commit. Used by the owner and by user removal. */
-export async function deleteProject(svc: Services, u: UnitOfWork, projectId: string) {
-  for (const c of await listClips(u.db, projectId)) {
-    await u.cancelLiveJobs(QUEUES.render, c.id);
-    await u.cancelLiveJobs(QUEUES.prepare, c.id);
-  }
-  for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, projectId);
-  const [gone] = await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId)).returning({ sourceMeta: schema.projects.sourceMeta });
-  await releaseUpload(svc, u, projectId, gone?.sourceMeta?.uploadId);
-  u.afterCommit(async () => {
-    await fs.rm(svc.paths.project(projectId), { recursive: true, force: true });
-    await svc.storage.deletePrefix(keys.projectPrefix(projectId));
-  });
-}
 
 /** The admin event is the record; this is the same fact in the log, written once the change has committed. */
 function audit(svc: Services, u: UnitOfWork, action: string, actorId: string | null, userId: string) {
@@ -105,7 +84,8 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own account from here." });
     if (user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin." });
     const projects = await u.db.query.projects.findMany({ where: eq(schema.projects.userId, userId), columns: { id: true } });
-    for (const p of projects) await deleteProject(svc, u, p.id);
+    // removing an account is final: its projects (deleted ones included) go now, not after the restore window
+    for (const p of projects) await purgeProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
     await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
     audit(svc, u, "user.removed", actorId, userId);

@@ -9,7 +9,7 @@
  *   timestamps – raw word timestamps from the transcript (approximate, may clip a word edge)
  */
 import { spawn } from "node:child_process";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { refineCuts } from "./audiocuts.js";
@@ -50,7 +50,7 @@ function ffmpeg(bin: string, args: string[], signal?: AbortSignal): Promise<Buff
 
 async function load(svc: Services, userId: string, projectId: string, flagId: string) {
   const db = svc.database.db;
-  const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)) });
+  const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)) });
   if (!project?.sourceKey) return null;
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   const flag = transcript?.flags?.find((f) => f.id === flagId);

@@ -1,4 +1,4 @@
-import { and, eq, asc, inArray, sql } from "drizzle-orm";
+import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
 import { lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
@@ -86,7 +86,7 @@ export function snapTolerance(segments: TranscriptSegment[]) {
   return Math.max(1, Math.min(4, 0.4 * median(d)));
 }
 
-function overlapRatio(a: ClipCandidate, b: ClipCandidate) {
+function overlapRatio(a: { startSec: number; endSec: number }, b: { startSec: number; endSec: number }) {
   const inter = Math.max(0, Math.min(a.endSec, b.endSec) - Math.max(a.startSec, b.startSec));
   const shortest = Math.min(a.endSec - a.startSec, b.endSec - b.startSec);
   return shortest > 0 ? inter / shortest : 0;
@@ -204,7 +204,9 @@ interface CandidateFate {
   overlaps?: number;
   clipId?: string;
   clipIndex?: number;
-  outcome: "unusable" | "overlap" | "pool-cap" | "off-topic" | "weak" | "clip-cap" | "chosen";
+  /** kept-overlap: covers a clip the user kept through a re-analyze */
+  keptClipId?: string;
+  outcome: "unusable" | "overlap" | "kept-overlap" | "pool-cap" | "off-topic" | "weak" | "clip-cap" | "chosen";
 }
 
 /** Transcript text inside a candidate, for scoring and pairwise prompts. */
@@ -222,7 +224,11 @@ export async function analyze(ctx: StageContext) {
   const settings = project.settings;
 
   const log = ctx.log;
-  const existingClips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId) });
+  // Untouched AI picks mean this analysis already committed (a re-analyze replaces every one of them before it
+  // queues this job): converge instead of re-picking. Clips the user made or edited were kept: new picks go around them.
+  const live = await db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) });
+  const existingClips = live.filter((c) => !keepReason(c));
+  const kept = live.filter((c) => keepReason(c));
   if (existingClips.length) {
     log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
     await svc.tx(async (u) => {
@@ -299,6 +305,12 @@ export async function analyze(ctx: StageContext) {
   const poolIdx: number[] = [];
   for (const { c, i } of snappedIdx) {
     fate[i]!.snapped = [c.startSec, c.endSec];
+    const keptHit = kept.find((k) => overlapRatio(k, c) > 0.3);
+    if (keptHit) {
+      fate[i]!.outcome = "kept-overlap";
+      fate[i]!.keptClipId = keptHit.id;
+      continue;
+    }
     const over = pool.findIndex((k) => overlapRatio(k, c) > 0.3);
     if (over >= 0) {
       fate[i]!.outcome = "overlap";
@@ -314,7 +326,7 @@ export async function analyze(ctx: StageContext) {
   // the candidates matter most when nothing survives ("no clips found"): keep them on failure too
   let gate: (Omit<ScoreGate, "keep"> & { kept: number; dropped: number; unscored: number; unscoredKept: number }) | null = null;
   // settings.minScore is the effective threshold of this run; settings.gate says how it was derived
-  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: gate?.threshold ?? null, gate, focus: settings.focus ?? null, samples, pairwise, pairwisePasses: pairwise ? passes : 0, judge: judgeId ?? null }, chunks: chunks.map((c) => [c.start, c.end]), candidates: fate, ...extra });
+  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: gate?.threshold ?? null, gate, focus: settings.focus ?? null, samples, pairwise, pairwisePasses: pairwise ? passes : 0, judge: judgeId ?? null }, chunks: chunks.map((c) => [c.start, c.end]), ...(kept.length ? { kept: kept.map((k) => ({ clipId: k.id, index: k.index, origin: k.origin, bounds: [k.startSec, k.endSec] })) } : {}), candidates: fate, ...extra });
   const artifactModels = () => ({ ...modelsUsed(svc, "language"), ...(judgeId ? { judge: judgeId } : {}) });
   const failWithCandidates = async (message: string): Promise<never> => {
     await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), artifactModels())).catch(() => {});
@@ -369,10 +381,12 @@ export async function analyze(ctx: StageContext) {
     log.debug({ compared: top.length, passes, order }, "pairwise re-rank");
   }
 
+  if (kept.length) log.debug({ kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length }, "new picks avoid the clips the user kept");
+  const firstIndex = kept.reduce((m, k) => Math.max(m, k.index + 1), 0);
   const rows = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
     projectId,
-    index,
+    index: firstIndex + index,
     title: c.title.slice(0, 120),
     hook: c.hook.slice(0, 80),
     startSec: c.startSec,
@@ -386,7 +400,7 @@ export async function analyze(ctx: StageContext) {
     status: "pending" as const,
   }));
   log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
-  rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: index, rank: ranks?.get(chosen[index]!.id) }));
+  rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit
   await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } }, async (u) => {
@@ -399,6 +413,17 @@ export async function analyze(ctx: StageContext) {
   void db;
 }
 
+/**
+ * Why a re-analyze keeps a clip instead of replacing it: the user made it ("manual"), or changed it in any way
+ * ("edited": text, bounds, framing, style, intro/outro). Null = an untouched AI pick, which is replaced.
+ */
+export function keepReason(c: Pick<schema.Clip, "origin" | "editedAt" | "layoutOverride" | "layoutSections" | "style" | "bumpers">): "manual" | "edited" | null {
+  if (c.origin !== "ai") return "manual";
+  if (c.editedAt || c.layoutOverride || c.layoutSections?.length || (c.style && Object.keys(c.style).length) || c.bumpers) return "edited";
+  return null;
+}
+
+/** A project's live clips (not soft-deleted), in order. */
 export async function listClips(db: Db, projectId: string) {
-  return db.query.clips.findMany({ where: eq(schema.clips.projectId, projectId), orderBy: asc(schema.clips.index) });
+  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: asc(schema.clips.index) });
 }

@@ -3,7 +3,7 @@
  * admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
  * number is known: project count and rate at creation, source minutes once ffprobe has run.
  */
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
 import type { Config } from "./config.js";
@@ -40,7 +40,8 @@ export async function checkProjectQuota(db: Db, config: Config, userId: string, 
   if (o.lock) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`);
   const l = await limitsFor(db, config, userId);
   if (l.MAX_PROJECTS_PER_USER > 0) {
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
+    // a deleted project frees its slot at once (it is only kept for undo)
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
     if (n >= l.MAX_PROJECTS_PER_USER) throw new QuotaError(`You have ${n} projects, the most this account may keep (${l.MAX_PROJECTS_PER_USER}). Delete one to start another.`);
   }
   if (l.MAX_NEW_PROJECTS_PER_HOUR > 0) {
@@ -75,7 +76,7 @@ async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
 
 /** What each limit counts right now, for the admin Limits dialog: kept projects, minutes since 00:00 UTC, projects in the last hour. */
 export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKey, number>> {
-  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(eq(schema.projects.userId, userId));
+  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
   const [{ hour }] = await db
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.projects)

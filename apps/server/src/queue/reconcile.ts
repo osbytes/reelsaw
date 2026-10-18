@@ -1,4 +1,5 @@
-import { inArray, eq, desc } from "drizzle-orm";
+import { and, inArray, eq, desc, isNull } from "drizzle-orm";
+import { purgeDeleted } from "../projects/service.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare } from "../pipeline/lifecycle.js";
 import { sweepRetention } from "../retention.js";
@@ -28,12 +29,12 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
   const db = svc.database.db;
   let requeued = 0;
   const active = await db.query.projects.findMany({
-    where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]),
+    where: and(inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)),
     columns: { id: true, status: true }, // not the whole row (settings etc.): only these two are read
   });
   for (const p of active) {
     if (p.status === "rendering") {
-      const clips = await db.query.clips.findMany({ where: (t, { eq }) => eq(t.projectId, p.id) });
+      const clips = await db.query.clips.findMany({ where: (t, { and, eq, isNull }) => and(eq(t.projectId, p.id), isNull(t.deletedAt)) });
       for (const c of clips) {
         if (c.status === "done" || c.status === "failed") continue;
         if (needsPrepare(c)) {
@@ -94,6 +95,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         lastSweep = Date.now();
         await sweepScratch(svc, { budgeted: true });
         await purgeBumperAssets(svc);
+        await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();
@@ -111,7 +113,7 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const db = svc.database.db;
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
-  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), columns: { id: true, status: true, updatedAt: true } });
+  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });

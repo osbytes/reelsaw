@@ -132,6 +132,7 @@ export const envSchema = z.object({
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  DELETED_RETENTION_DAYS: z.coerce.number().int().min(0).default(7), // deleted projects / replaced clips stay restorable this long, then rows and files go (0 = keep forever)
   // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),

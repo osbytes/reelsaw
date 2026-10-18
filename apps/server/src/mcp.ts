@@ -19,11 +19,13 @@ import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { addBumperInput, assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput, type AssetRef } from "./bumpers/service.js";
+import { restorableFor } from "./projects/service.js";
 
 const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (poll until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Clips can be edited (update_clip: title, hook, caption, hashtags, bounds, framing) and re-rendered. get_project returns only a transcript summary; get_transcript gives the timed transcript (optionally a time range) for picking your own moments with create_clip. search_clips finds clips and projects by words in their titles, hooks and captions.
 Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). get_project and get_clip show the effective intro/outro and where it comes from. Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
+Deleting is reversible for a while: delete_project and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses).");
@@ -92,6 +94,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     durationSec: p.durationSec,
     clips: `${p.clipsDone}/${p.clipCount} rendered`,
     createdAt: p.createdAt,
+    ...(p.deletedAt ? { deletedAt: p.deletedAt } : {}),
     url: abs(`/p/${p.id}`),
   });
   const clipSummary = (c: Awaited<ReturnType<typeof api.projects.get>>["clips"][number]) => ({
@@ -120,20 +123,20 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "list_projects",
     {
       title: "List projects",
-      description: "Your projects, most recently updated first, with pipeline status and how many clips are rendered. Returns up to `limit` (default 24, max 100) plus `total`; when `nextCursor` is not null, pass it as `cursor` to get the next page.",
-      inputSchema: { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(24) },
+      description: `Your projects, most recently updated first, with pipeline status and how many clips are rendered. Returns up to \`limit\` (default 24, max 100) plus \`total\`; when \`nextCursor\` is not null, pass it as \`cursor\` to get the next page. deleted: true lists only deleted projects, which restore_project can bring back ${restorableFor(svc)} after deletion.`,
+      inputSchema: { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(24), deleted: z.boolean().optional().describe("true = only deleted (restorable) projects") },
       annotations: { readOnlyHint: true },
     },
-    ({ cursor, limit }) =>
+    ({ cursor, limit, deleted }) =>
       run(async () => {
-        const page = await api.projects.list({ cursor, limit });
+        const page = await api.projects.list({ cursor, limit, deleted });
         return { projects: page.items.map(projectSummary), total: page.total, nextCursor: page.nextCursor };
       }),
   );
 
   server.registerTool(
     "get_project",
-    { title: "Get project", description: "A project with its clips (title, hook, bounds, score, status, download links) and settings. The transcript is only summarised (language, pending fixes); use get_transcript to read it.", inputSchema: { id: z.string() }, annotations: { readOnlyHint: true } },
+    { title: "Get project", description: "A project with its clips (title, hook, bounds, score, status, download links) and settings. The transcript is only summarised (language, pending fixes); use get_transcript to read it. replacedClips lists clips a re-analyze replaced; restore_clip brings one back.", inputSchema: { id: z.string() }, annotations: { readOnlyHint: true } },
     ({ id }) =>
       run(async () => {
         const p = await api.projects.get({ id });
@@ -272,7 +275,8 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
         const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id), columns: { projectId: true } });
         if (!c) throw new TRPCError({ code: "NOT_FOUND" });
         const p = await api.projects.get({ id: c.projectId });
-        const clip = p.clips.find((x) => x.id === id)!;
+        const clip = p.clips.find((x) => x.id === id);
+        if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `A re-analyze replaced this clip. restore_clip brings it back (possible ${restorableFor(svc)} after it was replaced).` });
         return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsById()) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
       }),
   );
@@ -356,7 +360,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   server.registerTool(
     "reanalyze_project",
-    { title: "Re-analyze project", description: "Keep the transcript, pick clips again, optionally with new settings (focus topic, instructions, clip length, maxClips).", inputSchema: { id: z.string(), settings: settingsInput.optional() } },
+    { title: "Re-analyze project", description: `Keep the transcript, pick clips again, optionally with new settings (focus topic, instructions, clip length, maxClips). Clips you created or edited (text, bounds, framing, style, intro/outro) are kept and new picks avoid them; untouched AI picks are replaced and stay restorable with restore_clip ${restorableFor(svc)}. Returns how many were kept and replaced.`, inputSchema: { id: z.string(), settings: settingsInput.optional() } },
     ({ id, settings }) => run(() => api.projects.reanalyze({ id, settings })),
   );
 
@@ -431,8 +435,20 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   server.registerTool(
     "delete_project",
-    { title: "Delete project", description: "Delete a project and all its clips. Cannot be undone.", inputSchema: { id: z.string() }, annotations: { destructiveHint: true } },
+    { title: "Delete project", description: `Delete a project and all its clips; work in progress stops. Reversible: restore_project brings it back ${restorableFor(svc)}, after which it and its files are removed for good.`, inputSchema: { id: z.string() }, annotations: { destructiveHint: true } },
     ({ id }) => run(() => api.projects.delete({ id })),
+  );
+
+  server.registerTool(
+    "restore_project",
+    { title: "Restore project", description: "Bring back a deleted project (see list_projects with deleted: true) with its clips and files. A project that was processing when deleted comes back failed; retry_project resumes it.", inputSchema: { id: z.string() } },
+    ({ id }) => run(() => api.projects.restore({ id })),
+  );
+
+  server.registerTool(
+    "restore_clip",
+    { title: "Restore clip", description: "Bring back a clip a re-analyze replaced (get_project lists them as replacedClips). It is added at the end of the project's clips; one that never finished rendering needs rerender_clip.", inputSchema: { id: z.string() } },
+    ({ id }) => run(() => api.clips.restore({ id })),
   );
 
   return server;

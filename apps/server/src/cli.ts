@@ -67,6 +67,7 @@ import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-le
 import { formatTime } from "@reelsaw/shared";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
+import { deletedProjects, purgeDeleted, restoreClip, restoreProject } from "./projects/service.js";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -121,6 +122,29 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await sweepRetention(svc);
     console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${svc.config.CLIP_RETENTION_DAYS})`);
   },
+  /** Deleted projects that can still be restored, with the date the purge removes them (DELETED_RETENTION_DAYS). */
+  async deleted(svc) {
+    const rows = await deletedProjects(svc);
+    table(rows.map((r) => ({ id: r.id, title: r.title, owner: r.email, status: r.status, deleted: r.deletedAt!.toISOString().slice(0, 16), purged: r.purgeAt?.toISOString().slice(0, 10) ?? "never" })));
+  },
+  /** Undo a delete: `reelsaw restore <projectId>`. Same function as projects.restore and the restore_project tool. */
+  async restore(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw restore <projectId>   (reelsaw deleted lists them)");
+    const r = await restoreProject(svc, null, pos[0]);
+    console.log(r.changed ? `restored ${pos[0]} (${r.status}${r.status === "failed" ? "; Retry resumes it" : ""})` : `${pos[0]} was not deleted`);
+  },
+  /** Bring back a clip a re-analyze replaced: `reelsaw restore-clip <clipId>`. */
+  async "restore-clip"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw restore-clip <clipId>");
+    const r = await restoreClip(svc, null, pos[0]);
+    console.log(r.changed ? `restored clip ${pos[0]}${r.needsRerender ? " (it never finished rendering: re-render it)" : ""}` : `${pos[0]} was not deleted`);
+  },
+  /** Remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now (the storage sweep does this hourly). */
+  async purge(svc) {
+    const dry = args.includes("--dry-run");
+    const r = await purgeDeleted(svc, { dryRun: dry });
+    console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
+  },
   "make-admin": async (svc) => {
     const u = await userByEmail(svc, pos[0]);
     if (!u.approvedAt) await approveUser(svc, null, u.id);
@@ -134,6 +158,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!p) throw new Error("project not found");
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
     if (p.error) console.log(`  error: ${p.error}`);
+    if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
     console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
@@ -144,7 +169,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       clips.map((c) => ({
         "#": c.index + 1,
         id: c.id.slice(0, 8),
-        status: c.status,
+        status: c.deletedAt ? `${c.status}, replaced` : c.status,
         origin: c.origin,
         range: `${formatTime(c.startSec)}-${formatTime(c.endSec)}`,
         score: Math.round(c.score),
@@ -342,6 +367,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
       console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) removed over 30 days ago and used nowhere`);
+      const del = await purgeDeleted(svc, { dryRun: dry });
+      console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
       return;
     }
     const r = await storageReport(svc);
@@ -591,7 +618,7 @@ async function userByEmail(svc: Services, email: string | undefined) {
 async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|deleted|restore|restore-clip|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

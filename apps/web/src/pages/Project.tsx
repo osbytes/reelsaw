@@ -54,6 +54,7 @@ export function ProjectPage() {
   const reanalyze = useMutation(trpc.projects.reanalyze.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
+  const restore = useMutation(trpc.projects.restore.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const rerenderMany = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
@@ -868,9 +869,14 @@ export function ProjectPage() {
         open={confirm === "repick"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Re-pick moments?"
-        body="The clips found so far will be replaced. The transcript and refine results are kept."
+        body="The AI picks you haven’t touched are replaced. Clips you made or edited stay, and the transcript and refine results are kept."
         confirm="Replace clips"
-        onConfirm={() => reanalyze.mutateAsync({ id }).then(invalidate)}
+        onConfirm={() =>
+          reanalyze.mutateAsync({ id }).then((r) => {
+            invalidate();
+            if (r.kept) toast(`Kept ${r.kept} clip${r.kept === 1 ? "" : "s"} you made or edited`);
+          })
+        }
       />
       <ConfirmDialog
         open={confirm === "refine"}
@@ -884,10 +890,21 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The source video, transcript and every clip are removed. This can’t be undone."
+        body="The project, its transcript and every clip are removed. Work in progress stops. You can undo this for a few days."
         confirm="Delete project"
         danger
-        onConfirm={() => del.mutateAsync({ id }).then(() => nav("/"))}
+        onConfirm={() =>
+          del.mutateAsync({ id }).then((r) => {
+            nav("/"); // leave first, so this page never refetches the project it just deleted
+            void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
+            const title = q.data?.title ?? "Project";
+            toast(`Deleted ${title}`, {
+              description: `Restorable ${r.restorable}`,
+              duration: 8000,
+              action: { label: "Undo", onClick: () => void restore.mutateAsync({ id }).then(() => (void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() }), nav(`/p/${id}`)), (err: Error) => toast.error(err.message.slice(0, 120))) },
+            });
+          })
+        }
       />
       <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} introSec={p.settings.introSec} outroSec={p.settings.outroSec} />
     </div>

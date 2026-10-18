@@ -86,6 +86,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const retry = useMutation(trpc.projects.retry.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
+  const restoreProject = useMutation(trpc.projects.restore.mutationOptions());
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
@@ -692,13 +693,16 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body={`“${confirm?.title ?? ""}”: the source video, transcript and every clip are removed. This can’t be undone.`}
+        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are removed. Work in progress stops. You can undo this for a few days.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
           const c = confirm!;
           del.mutateAsync({ id: c.id }).then(
-            () => (refresh(), toast("Project deleted")),
+            (r) => {
+              refresh();
+              toast(`Deleted ${c.title}`, { description: `Restorable ${r.restorable}`, duration: 8000, action: { label: "Undo", onClick: () => void restoreProject.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
+            },
             (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
