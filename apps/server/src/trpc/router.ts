@@ -23,11 +23,12 @@ import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
+import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
-import { decodeCursor, escapeLike, pageOf } from "../pagination.js";
+import { decodeCursor, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
@@ -544,38 +545,45 @@ export const appRouter = router({
         .query(async ({ ctx, input }) => {
           const db = ctx.svc.database.db;
           const limit = input?.limit ?? 50;
-          const q = input?.q?.trim().toLowerCase();
+          const ws = words(input?.q ?? "");
           const U = schema.user;
-          const like = q ? "%" + escapeLike(q) + "%" : null;
-          const match = like ? sql`(lower(${U.email}) like ${like} escape '\\' or lower(${U.name}) like ${like} escape '\\')` : undefined;
+          // A search matches like the palette's (typo-tolerant, every word, best first) and returns the best
+          // SEARCH_USERS matches in one page: no cursor, the header says when more match. Without a search the
+          // list is the keyset-paged one: pending first, then newest.
+          const match = userMatch(ws);
+          const score = userScore(ws);
           const approved = sql<number>`(case when ${U.approvedAt} is null then 0 else 1 end)`;
           let after: SQL | undefined;
-          if (input?.cursor) {
+          if (!ws.length && input?.cursor) {
             const c = decodeCursor(input.cursor, 3);
             if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
             after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
           }
-          const [fetched, [{ total }]] = await Promise.all([
-            db
-              .select({
-                id: U.id,
-                name: U.name,
-                email: U.email,
-                role: U.role,
-                approvedAt: U.approvedAt,
-                banned: U.banned,
-                banReason: U.banReason,
-                createdAt: U.createdAt,
-                approved,
-                ts: sql<string>`${U.createdAt}::text`,
-              })
-              .from(U)
-              .where(and(match, after))
-              .orderBy(approved, desc(U.createdAt), desc(U.id))
-              .limit(limit + 1),
-            db.select({ total: sql<number>`count(*)::int` }).from(U).where(match),
-          ]);
-          const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
+          const pageSize = ws.length ? SEARCH_USERS : limit;
+          const [fetched, [{ total }]] = await db.transaction(async (tx) => {
+            await setSearchThreshold(tx);
+            return Promise.all([
+              tx
+                .select({
+                  id: U.id,
+                  name: U.name,
+                  email: U.email,
+                  role: U.role,
+                  approvedAt: U.approvedAt,
+                  banned: U.banned,
+                  banReason: U.banReason,
+                  createdAt: U.createdAt,
+                  approved,
+                  ts: sql<string>`${U.createdAt}::text`,
+                })
+                .from(U)
+                .where(and(match, after))
+                .orderBy(...(score ? [desc(score)] : []), approved, desc(U.createdAt), desc(U.id))
+                .limit(pageSize + 1),
+              tx.select({ total: sql<number>`count(*)::int` }).from(U).where(match),
+            ]);
+          });
+          const { items, nextCursor } = ws.length ? { items: fetched.slice(0, pageSize), nextCursor: null } : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
           const ids = items.map((r) => r.id);
           const [usage, sessions] = await Promise.all([
             usageByUser(db, null, ids),

@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema } from "../src/db/index.js";
-import { searchLibrary } from "../src/search.js";
+import { and, desc, inArray } from "drizzle-orm";
+import { searchLibrary, setSearchThreshold, userMatch, userScore, words } from "../src/search.js";
 import { db, signUp } from "./helpers.js";
 
 describe("search", () => {
@@ -90,4 +91,46 @@ describe("search", () => {
     const wild = await search("%");
     assert.deepEqual(wild.clips.map((c) => c.title), ["100% sure it works"]);
   });
+});
+
+describe("users search", () => {
+  const pool = db();
+  const orm = drizzle(pool, { schema });
+  const tag = randomUUID().slice(0, 8);
+  const made: string[] = [];
+  async function mk(name: string, email: string) {
+    const id = randomUUID();
+    made.push(id);
+    await pool.query(`insert into "user" (id, name, email, email_verified, role, banned) values ($1, $2, $3, true, 'user', false)`, [id, name, email]);
+  }
+  /** what admin.users.list runs for a search, restricted to the users made here */
+  const find = (q: string) =>
+    orm.transaction(async (tx) => {
+      await setSearchThreshold(tx);
+      const ws = words(q);
+      const rows = await tx.select({ id: schema.user.id, name: schema.user.name, email: schema.user.email }).from(schema.user).where(and(userMatch(ws), inArray(schema.user.id, made))).orderBy(desc(userScore(ws)!));
+      return rows.map((r) => r.name);
+    });
+
+  before(async () => {
+    await mk("Rosalind Franklin", `rosalind.${tag}@example.test`);
+    await mk("Grace Hopper", `ghopper-${tag}@example.test`);
+    await mk("Ada Lovelace", `bench-${tag}@example.test`);
+  });
+  after(async () => {
+    await pool.query(`delete from "user" where id = any($1)`, [made]);
+    await pool.end();
+  });
+
+  it("finds a name through a typo", async () => assert.deepEqual(await find("rosalnd"), ["Rosalind Franklin"]));
+  it("matches part of an email, with punctuation", async () => {
+    assert.deepEqual(await find(`bench-${tag.slice(0, 4)}`), ["Ada Lovelace"]);
+    assert.deepEqual(await find("ghopper-"), ["Grace Hopper"]);
+    assert.deepEqual(await find(`@example.test ${tag}`).then((n) => n.length), 3);
+  });
+  it("ANDs words across name and email", async () => {
+    assert.deepEqual(await find(`grace ${tag}`), ["Grace Hopper"]);
+    assert.deepEqual(await find("grace lovelace"), []);
+  });
+  it("ranks a literal match above a typo", async () => assert.equal((await find("grace"))[0], "Grace Hopper"));
 });

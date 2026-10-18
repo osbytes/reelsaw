@@ -33,7 +33,12 @@ export const user = pgTable("user", {
   banReason: text("ban_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+},
+(t) => [
+  // admin Users search: ILIKE '%q%' and word similarity on name and email
+  index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
+  index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
+]);
 
 export const session = pgTable(
   "session",

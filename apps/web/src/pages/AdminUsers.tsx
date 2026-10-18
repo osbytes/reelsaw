@@ -118,7 +118,7 @@ export function AdminUsersPage() {
           <div>
             <h1 className="text-[28px] font-bold tracking-tight">Users</h1>
             <div className="mt-1 flex min-h-5 items-center text-sm text-ink2">
-              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `Showing ${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
+              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
             </div>
           </div>
           <div className="flex items-center gap-2">
