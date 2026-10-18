@@ -27,6 +27,7 @@ import { loadAligner, type Aligner } from "./audio/align.js";
 import { createLogger, type Logger } from "./log.js";
 import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
 import { createUpdateChecker, type UpdateChecker } from "./updates.js";
+import { createInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
@@ -40,6 +41,8 @@ export interface Services {
   database: Database;
   storage: Storage;
   ai: AiService;
+  /** instance settings in force now (sign-up, quotas, retention, …): environment defaults, or the admin's runtime override (instance-settings.ts) */
+  settings: InstanceSettings;
   /** the model ids in force now: environment defaults, or the admin's runtime override (ai/models.ts) */
   models: ModelSettings;
   /** provider keys and base URLs in force: environment, or what an admin entered (ai/providers.ts) */
@@ -210,8 +213,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return d;
   });
 
+  // what an admin saved under Settings → System (sign-up mode, quotas, retention, …) loads once the database is up
+  const settings = createInstanceSettings(config, log.child({ module: "settings" }), { emailEnabled: config.EMAIL_DRIVER !== "none" });
+  await step("instance settings", () => settings.attach(database.db));
+
   const logLevel = createLogLevelSettings(log, { listen: env.REELSAW_CLI !== "1" });
-  const updates = createUpdateChecker(config, log.child({ module: "updates" }));
+  const updates = createUpdateChecker(config, log.child({ module: "updates" }), { enabled: () => settings.get().UPDATE_CHECK });
   await step("log level settings", async () => {
     await logLevel.attach(database.db, config.DATABASE_URL);
   });
@@ -291,15 +298,16 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return e;
   });
 
-  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" })));
+  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings));
 
-  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), config);
-  return { log, logLevel, config, paths, otel, database, storage, ai, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, updates, faces, text, vad, aligner };
+  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get());
+  return { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, updates, faces, text, vad, aligner };
 }
 
 export async function shutdownServices(s: Services) {
   s.logLevel.stop();
   s.updates.stop();
+  s.settings.stop();
   s.models.stop();
   s.providers.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));

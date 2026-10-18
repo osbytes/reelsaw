@@ -14,7 +14,7 @@ import { requestRender } from "../src/pipeline/lifecycle.js";
 
 const h = lifecycleHarness();
 const notReady = await h.ready();
-(h.svc.config as { DELETED_RETENTION_DAYS?: number }).DELETED_RETENTION_DAYS = 7;
+(h.svc.settings.get() as { DELETED_RETENTION_DAYS: number }).DELETED_RETENTION_DAYS = 7;
 
 after(() => h.cleanup());
 

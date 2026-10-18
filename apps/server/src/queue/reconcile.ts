@@ -86,7 +86,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
   let lastSweep = 0;
   const tick = () =>
     reconcile(svc)
-      .then(() => detectStalls(svc, svc.config.STALL_MINUTES))
+      .then(() => detectStalls(svc, svc.settings.get().STALL_MINUTES))
       .then(() => sweepRetention(svc))
       .then(() => pruneHistory(svc)) // daily per table, batched and resumable; a no-op between runs
       .then(async () => {

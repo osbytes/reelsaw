@@ -22,7 +22,7 @@ const FIRST_CHECK_DELAY_MS = 10_000;
 const FETCH_TIMEOUT_MS = 10_000;
 
 export interface UpdateState {
-  /** UPDATE_CHECK; when false nothing is ever fetched and `latest` stays null */
+  /** UPDATE_CHECK (or the admin's runtime setting); when false nothing is fetched and `latest` stays null */
   enabled: boolean;
   /** REELSAW_VERSION: "0.5.0", or "dev" from source */
   current: string;
@@ -70,10 +70,13 @@ type FetchLike = (url: string, init: { headers: Record<string, string>; signal: 
 export function createUpdateChecker(
   config: Pick<Config, "REELSAW_VERSION" | "UPDATE_CHECK" | "UPDATE_CHECK_URL" | "UPDATE_CHECK_HOURS">,
   log: Logger,
-  deps: { fetch?: FetchLike; now?: () => number } = {},
+  deps: { fetch?: FetchLike; now?: () => number; enabled?: () => boolean } = {},
 ): UpdateChecker {
   const doFetch = deps.fetch ?? ((url, init) => fetch(url, init));
   const now = deps.now ?? Date.now;
+  // UPDATE_CHECK, or the admin's runtime setting: read on every tick, so turning it off stops the next request
+  const enabled = deps.enabled ?? (() => config.UPDATE_CHECK);
+  const snapshot = (): UpdateState => ({ ...state, enabled: enabled() });
   const current = config.REELSAW_VERSION;
   const state: UpdateState = {
     enabled: config.UPDATE_CHECK,
@@ -118,22 +121,23 @@ export function createUpdateChecker(
       state.checking = false;
       lastCheck = now();
     }
-    return { ...state };
+    return snapshot();
   };
 
   const check: UpdateChecker["check"] = async ({ force = false } = {}) => {
-    if (!state.enabled) return { ...state };
+    if (!enabled()) return snapshot();
     if (inflight) return inflight;
-    if (!force && state.checkedAt && now() - lastCheck < MIN_CHECK_GAP_MS) return { ...state };
+    if (!force && state.checkedAt && now() - lastCheck < MIN_CHECK_GAP_MS) return snapshot();
     inflight = fetchLatest().finally(() => (inflight = null));
     return inflight;
   };
 
   return {
-    state: () => ({ ...state }),
+    state: snapshot,
     check,
     start() {
-      if (!state.enabled || timer) return;
+      if (timer) return;
+      // the timer runs regardless; `check` itself does nothing while the setting is off
       const tick = () => void check({ force: true });
       timer = setTimeout(() => {
         tick();

@@ -274,6 +274,7 @@ export function App() {
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+      <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
       <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />

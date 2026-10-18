@@ -93,8 +93,9 @@ export function createApp(svc: Services) {
   const version = { version: svc.config.REELSAW_VERSION, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT };
   // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
   app.get("/api/health", async (c) => {
-    const who = config.HEALTH_DETAILS ? null : await activeRequester(auth, db, c.req.raw.headers);
-    const details = config.HEALTH_DETAILS || who?.user.role === "admin";
+    const open = svc.settings.get().HEALTH_DETAILS;
+    const who = open ? null : await activeRequester(auth, db, c.req.raw.headers);
+    const details = open || who?.user.role === "admin";
     return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
   });
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
@@ -155,12 +156,13 @@ export function createApp(svc: Services) {
     if (!session) return c.json({ error: "unauthorized" }, 401);
     const filename = decodeURIComponent(c.req.header("x-filename") ?? "upload.mp4").replace(/[\\/]/g, "_").slice(0, 200);
     const length = Number(c.req.header("content-length") ?? 0);
-    if (length > config.MAX_UPLOAD_MB * 1024 * 1024) {
-      c.get("log").warn({ bytes: length, maxMb: config.MAX_UPLOAD_MB }, "upload rejected: too large");
-      return c.json({ error: `file exceeds ${config.MAX_UPLOAD_MB} MB` }, 413);
+    const maxUploadMb = svc.settings.get().MAX_UPLOAD_MB;
+    if (length > maxUploadMb * 1024 * 1024) {
+      c.get("log").warn({ bytes: length, maxMb: maxUploadMb }, "upload rejected: too large");
+      return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
     }
     try {
-      await checkStorageQuota(db, config, session.user.id, length);
+      await checkStorageQuota(db, svc.settings.get(), session.user.id, length);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       return c.json({ error: (err as Error).message }, 413);
@@ -170,7 +172,7 @@ export function createApp(svc: Services) {
     const ext = path.extname(filename).toLowerCase() || ".mp4";
     const dest = path.join(paths.uploads, `${id}${ext}`);
     // chunked bodies carry no content-length: count the bytes as they stream and stop at the cap
-    const maxBytes = config.MAX_UPLOAD_MB * 1024 * 1024;
+    const maxBytes = maxUploadMb * 1024 * 1024;
     let received = 0;
     const cap = new Transform({
       transform(chunk: Buffer, _enc, cb) {
@@ -195,8 +197,8 @@ export function createApp(svc: Services) {
       return c.json({ uploadId: id, filename, sizeBytes: st.size });
     } catch (err) {
       if (err instanceof UploadTooLarge) {
-        c.get("log").warn({ bytes: received, maxMb: config.MAX_UPLOAD_MB }, "upload rejected: too large");
-        return c.json({ error: `file exceeds ${config.MAX_UPLOAD_MB} MB` }, 413);
+        c.get("log").warn({ bytes: received, maxMb: maxUploadMb }, "upload rejected: too large");
+        return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);

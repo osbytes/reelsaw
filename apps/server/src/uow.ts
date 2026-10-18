@@ -18,7 +18,7 @@ import type { ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
-import type { Config } from "./config.js";
+import type { InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
 
 /**
@@ -89,7 +89,7 @@ export function isRetryableTxError(err: unknown): boolean {
 
 const TX_ATTEMPTS = 3;
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, config?: Config): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -111,8 +111,8 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, confi
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
           if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a });
-          if (config) {
-            const limits = await limitsFor(db, config, a.userId);
+          if (instanceLimits) {
+            const limits = await limitsFor(db, instanceLimits(), a.userId);
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
               // one admission at a time per user, counted again under the lock, so two requests can't both take the last slot
               await client.query("select pg_advisory_xact_lock(hashtext($1))", [`jobs:${a.userId}`]);

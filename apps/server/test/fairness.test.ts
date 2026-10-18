@@ -50,7 +50,7 @@ describe("fair share between users", () => {
     await pool.end();
   });
 
-  const enqueue = (maxLive: number, projectId: string) => createUnitOfWork(pool, queue, quiet, limits(maxLive))((u) => u.enqueue(name, { projectId }));
+  const enqueue = (maxLive: number, projectId: string) => createUnitOfWork(pool, queue, quiet, () => limits(maxLive))((u) => u.enqueue(name, { projectId }));
   const jobs = async () => (await pool.query<{ project: string; user: string; priority: number; by: string | null }>(`select data->>'projectId' as project, data->>'userId' as user, priority, data->>'by' as by from pgboss.job where name = $1 order by priority desc, created_on`, [name])).rows;
 
   it("serves a user with nothing in flight before another user's backlog", async () => {

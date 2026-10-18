@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { NavLink, useLocation } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
 import { ApiKeysSection } from "../components/ApiKeys";
@@ -10,23 +12,117 @@ import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
+import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
 }
 
+/** The System tab's sections, in page order; the side nav links to them and the URL hash deep-links one. */
+const SYSTEM_SECTIONS = [
+  ["overview", "Overview"],
+  ["models", "Models"],
+  ["access", "Access"],
+  ["limits", "Limits"],
+  ["retention", "Retention"],
+  ["operations", "Operations"],
+  ["log-level", "Log level"],
+] as const;
+
+/**
+ * Settings has two tabs: Account (everyone: profile, project defaults, API keys) and System (admins:
+ * what this machine runs and the instance settings that can change without a restart). /settings and
+ * /settings/system are the tabs; #access etc. deep-links a System section.
+ */
 export function SettingsPage() {
-  const trpc = useTRPC();
   const me = useMe();
   const status = useSystemStatus();
+  const loc = useLocation();
   const isAdmin = me.data?.role === "admin";
-  const q = useQuery({ ...trpc.admin.system.queryOptions(), refetchInterval: 5000, enabled: isAdmin });
+  const system = loc.pathname.endsWith("/system") && isAdmin;
+  const tab = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
+
+  return (
+    <ScrollArea className="min-h-0 flex-1">
+      <main className={`mx-auto flex flex-col gap-6 px-4 py-7 sm:px-6 ${system ? "max-w-[1180px]" : "max-w-[960px]"}`}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
+              <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
+            </div>
+            <p className="mt-1 min-h-5 text-sm text-ink2">
+              {system ? "This machine and this instance. Models, access, limits, retention and operations change here without a restart; the rest comes from .env." : "Your account, your defaults for new projects, and keys for agents and tools."}
+            </p>
+          </div>
+          {/* the tab row keeps its height for everyone, so the page does not jump when the role loads */}
+          <nav className="flex min-h-[34px] gap-1" aria-label="Settings tabs">
+            {isAdmin && (
+              <>
+                <NavLink to="/settings" end className={tab}>
+                  Account
+                </NavLink>
+                <NavLink to="/settings/system" className={tab}>
+                  System
+                </NavLink>
+              </>
+            )}
+          </nav>
+        </div>
+        {system ? (
+          <SystemTab />
+        ) : (
+          <>
+            <AccountSection />
+            <ProjectDefaultsSection />
+            <ApiKeysSection mcpUrl={`${window.location.origin}/api/mcp`} />
+          </>
+        )}
+      </main>
+    </ScrollArea>
+  );
+}
+
+/** Which section is on screen, for the side nav; the hash follows without adding history entries. */
+function useActiveSection(ids: readonly string[]) {
+  const [active, setActive] = useState<string>(() => window.location.hash.slice(1) || ids[0]!);
+  useEffect(() => {
+    const els = ids.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e);
+    if (!els.length) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const seen = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (seen[0]) setActive(seen[0].target.id);
+      },
+      { rootMargin: "-20% 0px -60% 0px", threshold: 0 },
+    );
+    els.forEach((e) => io.observe(e));
+    return () => io.disconnect();
+  }, [ids]);
+  return active;
+}
+
+function jumpTo(id: string, smooth = true) {
+  document.getElementById(id)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  history.replaceState(null, "", `#${id}`);
+}
+
+function SystemTab() {
+  const trpc = useTRPC();
+  const q = useQuery({ ...trpc.admin.system.queryOptions(), refetchInterval: 5000 });
   const s = q.data;
-  const mcpUrl = `${window.location.origin}/api/mcp`;
+  const ids = SYSTEM_SECTIONS.map(([id]) => id);
+  const active = useActiveSection(ids);
+  // a deep link (#access) lands on its section once the content exists
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (id && ids.includes(id as never)) jumpTo(id, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!s]);
+
   const r = s?.resources;
   const L = s?.limits;
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
-
   const gauges = r
     ? [
         {
@@ -56,55 +152,53 @@ export function SettingsPage() {
       ]
     : [];
 
-  const cfg = s
+  /** Facts that come from .env and need a restart to change; shown so an admin knows what this box runs. */
+  const env = s
     ? [
-        {
-          title: "Model servers",
-          rows: [
-            ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
-            ["Compatible base URL", s.compatBaseUrl ?? "not set"],
-            ["Face detection", s.faceDetection ? "on" : "off"],
-          ],
-        },
-        {
-          title: "Runtime",
-          rows: [
-            ["Storage", s.storage],
-            ["Render concurrency", s.renderConcurrency.mode === "auto" ? `Automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}` : `${s.renderConcurrency.max} (fixed)`],
-            ["Max upload", `${s.maxUploadMb} MB`],
-            ["Sign-ups", s.signupMode === "approval" ? "need approval" : s.signupMode],
-            ["Email", s.email],
-            ["Health details", s.healthDetails ? "public" : "admins only"],
-            ["OpenTelemetry", s.otel ? "on" : "off"],
-          ],
-        },
+        ["Storage", s.storage],
+        ["Render concurrency", s.renderConcurrency.mode === "auto" ? `automatic · ${s.renderConcurrency.running} running, up to ${s.renderConcurrency.max}` : `${s.renderConcurrency.max} (fixed)`],
+        ["Email", s.email],
+        ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
+        ["Compatible base URL", s.compatBaseUrl ?? "not set"],
+        ["Face detection", s.faceDetection ? "on" : "off"],
+        ["OpenTelemetry", s.otel ? "on" : "off"],
+        ["MCP endpoint", s.mcpUrl],
       ]
     : [];
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <main className="mx-auto flex max-w-[960px] flex-col gap-6 px-4 py-7 sm:px-6">
-        <div>
-          <div className="flex flex-wrap items-baseline gap-x-3">
-            <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
-            <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
-          </div>
-          <p className="mt-1 min-h-5 text-sm text-ink2">{isAdmin ? "Your account and defaults, then this machine: models can be switched here; keys, servers and limits come from .env (change and restart)." : "Your account, project defaults and API keys."}</p>
-        </div>
-        <AccountSection />
-        <ProjectDefaultsSection />
-        <ApiKeysSection mcpUrl={mcpUrl} />
-        {isAdmin && (
-          <div className="flex flex-wrap items-baseline gap-2 pt-2">
-            <h2 className="text-[18px] font-bold tracking-tight">System</h2>
+    <div className="flex flex-col gap-4 md:grid md:grid-cols-[11rem_minmax(0,1fr)] md:gap-6">
+      {/* side nav: a sticky column on wide screens (the grid cell spans the whole content, so it can follow), a scrollable row on phones */}
+      <div className="md:sticky md:top-0 md:self-start md:pt-1">
+      <ScrollArea className="-mx-4 px-4 md:mx-0 md:px-0">
+        <nav className="flex gap-1 pb-1 md:flex-col md:pb-0" aria-label="System sections">
+          {SYSTEM_SECTIONS.map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              aria-current={active === id ? "location" : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                jumpTo(id);
+              }}
+              className={`rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${active === id ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </ScrollArea>
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-6">
+        <section id="overview" className="flex scroll-mt-4 flex-col gap-4 rounded-[16px] border border-line bg-panel p-5">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h2 className="text-[15px] font-bold">Overview</h2>
             <UpdateStatusLine version={s ? `${s.version.version} · ${s.version.commit}` : null} />
           </div>
-        )}
-        {isAdmin && <UpdateBanner />}
-        {isAdmin && !s && (
-          <SkeletonRegion label="Loading system status…" className="flex flex-col gap-6">
-            <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
-              <Skeleton className="h-5 w-24" />
+          <UpdateBanner />
+          {!r ? (
+            <SkeletonRegion label="Loading system status…" className="flex flex-col gap-4">
               <div className="grid gap-4 sm:grid-cols-3">
                 {["w-4/5", "w-3/5", "w-2/3"].map((w, i) => (
                   <div key={i} className="flex flex-col gap-2">
@@ -117,67 +211,69 @@ export function SettingsPage() {
                   </div>
                 ))}
               </div>
-            </section>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {[3, 7].map((n) => (
-                <section key={n} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">
-                  <Skeleton className="h-5 w-28" />
-                  {Array.from({ length: n }, (_, i) => (
-                    <div key={i} className="flex h-5 items-center justify-between gap-4">
-                      <Skeleton className="h-3.5 w-24" />
-                      <Skeleton className={`h-3.5 ${["w-20", "w-28", "w-16"][i % 3]}`} />
-                    </div>
-                  ))}
-                </section>
-              ))}
-            </div>
-          </SkeletonRegion>
-        )}
-        {r && (
-          <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-[15px] font-bold">Machine</h2>
-              <span className="text-xs text-ink3">updates live</span>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {gauges.map((g) => (
-                <div key={g.name} className="flex flex-col gap-2">
-                  <div className="flex items-baseline justify-between">
-                    <b>{g.name}</b>
-                    <span className={`font-mono text-sm ${g.ok ? "" : "text-warn"}`}>{g.val}</span>
-                  </div>
-                  <div className="relative h-2 rounded-full bg-sunk">
-                    <div className={`h-full rounded-full ${g.ok ? "bg-acc" : "bg-warn"}`} style={{ width: `${Math.min(100, g.used)}%` }} />
-                    {g.limit !== undefined && g.limit > 0 && g.limit < 100 && <div title="Pause threshold" className="absolute -top-1 h-4 w-0.5 rounded-full bg-ink" style={{ left: `${g.limit}%` }} />}
-                  </div>
-                  <div className="text-xs text-ink2">
-                    {g.ok ? "" : "◷ Jobs paused · "}
-                    {g.note}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <ProcessingTimes />
-          </section>
-        )}
-        {isAdmin && <ModelsSection />}
-        {isAdmin && <LogLevelSection />}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {cfg.map((sec) => (
-            <section key={sec.title} className="flex flex-col gap-2 rounded-[16px] border border-line bg-panel p-5">
-              <h2 className="text-[15px] font-bold">{sec.title}</h2>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-                {sec.rows.map(([k, v]) => (
-                  <div key={k} className="contents">
-                    <dt className="text-ink2">{k}</dt>
-                    <dd className="truncate text-right font-mono text-xs leading-5">{v}</dd>
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div key={i} className="contents">
+                    <Skeleton className="h-3.5 w-28" />
+                    <Skeleton className={`h-3.5 justify-self-end ${["w-24", "w-40", "w-16"][i % 3]}`} />
                   </div>
                 ))}
-              </dl>
-            </section>
-          ))}
+              </div>
+            </SkeletonRegion>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {gauges.map((g) => (
+                  <div key={g.name} className="flex flex-col gap-2">
+                    <div className="flex items-baseline justify-between">
+                      <b>{g.name}</b>
+                      <span className={`font-mono text-sm ${g.ok ? "" : "text-warn"}`}>{g.val}</span>
+                    </div>
+                    <div className="relative h-2 rounded-full bg-sunk">
+                      <div className={`h-full rounded-full ${g.ok ? "bg-acc" : "bg-warn"}`} style={{ width: `${Math.min(100, g.used)}%` }} />
+                      {g.limit !== undefined && g.limit > 0 && g.limit < 100 && <div title="Pause threshold" className="absolute -top-1 h-4 w-0.5 rounded-full bg-ink" style={{ left: `${g.limit}%` }} />}
+                    </div>
+                    <div className="text-xs text-ink2">
+                      {g.ok ? "" : "◷ Jobs paused · "}
+                      {g.note}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <ProcessingTimes />
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-[13px] font-bold">From .env</h3>
+                  <span className="text-xs text-ink3">changes need a restart</span>
+                </div>
+                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+                  {env.map(([k, v]) => (
+                    <div key={k} className="contents">
+                      <dt className="text-ink2">{k}</dt>
+                      <dd className="truncate text-right font-mono text-xs leading-5" title={v}>
+                        {v}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </>
+          )}
+        </section>
+
+        <div id="models" className="scroll-mt-4">
+          <ModelsSection />
         </div>
-      </main>
-    </ScrollArea>
+
+        <InstanceSettingsGroup id="access" title="Access" intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in." fields={ACCESS_FIELDS} />
+        <InstanceSettingsGroup id="limits" title="Limits" intro="Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh." fields={LIMIT_FIELDS} />
+        <InstanceSettingsGroup id="retention" title="Retention" intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep." fields={RETENTION_FIELDS} />
+        <InstanceSettingsGroup id="operations" title="Operations" intro="Watchdog, update checks and what the health endpoint tells anonymous callers." fields={OPERATIONS_FIELDS} />
+
+        <div id="log-level" className="scroll-mt-4">
+          <LogLevelSection />
+        </div>
+      </div>
+    </div>
   );
 }

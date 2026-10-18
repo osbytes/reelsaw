@@ -18,7 +18,7 @@ async function main() {
       storage: config.STORAGE_DRIVER + (config.S3_BUCKET ? `:${config.S3_BUCKET}` : ""),
       dataDir: config.DATA_DIR,
       renderConcurrency: config.RENDER_CONCURRENCY,
-      signupMode: config.SIGNUP_MODE,
+      signupMode: svc.settings.get().SIGNUP_MODE,
       email: config.EMAIL_DRIVER,
       otel: svc.otel.enabled,
     },

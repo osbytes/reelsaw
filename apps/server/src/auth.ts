@@ -2,6 +2,8 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { apiKey } from "@better-auth/api-key";
 import { captcha } from "better-auth/plugins/captcha";
+import { APIError } from "better-auth/api";
+import type { BetterAuthPlugin } from "better-auth";
 import { jwt } from "better-auth/plugins/jwt";
 import { mcp } from "@better-auth/mcp";
 import { eq, sql } from "drizzle-orm";
@@ -10,6 +12,7 @@ import { schema, type Db } from "./db/index.js";
 import type { Email } from "./email.js";
 import { templates } from "./email.js";
 import type { Logger } from "./log.js";
+import type { InstanceSettings } from "./instance-settings.js";
 
 /** The MCP endpoint as OAuth clients see it (token audience). */
 export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_URL).toString();
@@ -20,8 +23,38 @@ export const API_KEY_PREFIX = "rs_";
 /** Serialises the "first account becomes admin" decision (arbitrary constant, used only here). */
 const FIRST_ADMIN_LOCK = 7_203_104_001;
 
-export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
-  const mode = config.SIGNUP_MODE;
+export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings) {
+  // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
+  // read them at request time, never once here. Better Auth checks `emailAndPassword.*` on the options
+  // object it was given, so those fields are kept current from the settings' subscription.
+  const mode = () => settings.get().SIGNUP_MODE;
+  const emailAndPassword = {
+    enabled: true,
+    disableSignUp: mode() === "closed",
+    requireEmailVerification: settings.get().REQUIRE_EMAIL_VERIFICATION,
+    sendResetPassword: email.enabled ? async ({ user, url }: { user: { email: string }; url: string }) => email.send({ to: user.email, ...templates.resetPassword(url) }) : undefined,
+  };
+  const emailVerification = email.enabled
+    ? {
+        sendOnSignUp: settings.get().REQUIRE_EMAIL_VERIFICATION,
+        autoSignInAfterVerification: true,
+        sendVerificationEmail: async ({ user, url }: { user: { email: string }; url: string }) => email.send({ to: user.email, ...templates.verifyEmail(url) }),
+      }
+    : undefined;
+  settings.subscribe((s) => {
+    emailAndPassword.disableSignUp = s.SIGNUP_MODE === "closed";
+    emailAndPassword.requireEmailVerification = s.REQUIRE_EMAIL_VERIFICATION;
+    if (emailVerification) emailVerification.sendOnSignUp = s.REQUIRE_EMAIL_VERIFICATION;
+  });
+  /** Bot protection whose provider and keys can change at runtime: a fresh captcha plugin per request, or nothing. */
+  const captchaGate: BetterAuthPlugin = {
+    id: "captcha",
+    onRequest: async (request, ctx) => {
+      const s = settings.get();
+      if (!s.CAPTCHA_PROVIDER || !s.CAPTCHA_SITE_KEY || !s.CAPTCHA_SECRET_KEY) return;
+      return captcha({ provider: s.CAPTCHA_PROVIDER, secretKey: s.CAPTCHA_SECRET_KEY, endpoints: ["/sign-up/email", "/sign-in/email", "/request-password-reset"] }).onRequest!(request, ctx);
+    },
+  };
   /** emails whose sign-up saw an empty user table; resolved in the `after` hook */
   const firstCandidates = new Set<string>();
   return betterAuth({
@@ -69,10 +102,12 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
           // races (two concurrent first sign-ups both see zero users), so a "first" candidate is
           // inserted as a plain user and promoted in `after` by one conditional update under a lock.
           before: async (user) => {
+            // checked here, at request time, so closing sign-ups applies to the next request without a restart
+            if (mode() === "closed") throw new APIError("FORBIDDEN", { message: "Sign-ups are closed on this Reelsaw." });
             const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
             const first = n === 0;
             if (first) firstCandidates.add(user.email);
-            return { data: { ...user, role: "user", approvedAt: first || mode === "open" ? new Date() : null } };
+            return { data: { ...user, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
           },
           // Better Auth owns the user insert, so this audit row cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
@@ -85,13 +120,13 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
                 const promoted = await tx.execute(
                   sql`update "user" set role = 'admin' where id = ${u.id} and not exists (select 1 from "user" where role = 'admin') returning id`,
                 );
-                if (promoted.rows.length === 0 && mode !== "open") await tx.update(schema.user).set({ approvedAt: null }).where(eq(schema.user.id, u.id));
+                if (promoted.rows.length === 0 && mode() !== "open") await tx.update(schema.user).set({ approvedAt: null }).where(eq(schema.user.id, u.id));
                 return promoted.rows.length > 0;
               });
-              u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode === "open" ? (u.approvedAt ?? new Date()) : null };
+              u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode() === "open" ? (u.approvedAt ?? new Date()) : null };
             }
-            await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode } });
-            log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode }, "sign-up");
+            await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() } });
+            log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
             if (u.approvedAt) return;
             const admins = await db.query.user.findMany({ where: eq(schema.user.role, "admin"), columns: { email: true } });
             for (const a of admins) void email.send({ to: a.email, ...templates.waitingForApproval(config.APP_URL, u.name, u.email) });
@@ -99,24 +134,11 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
         },
       },
     },
-    emailAndPassword: {
-      enabled: true,
-      disableSignUp: mode === "closed",
-      requireEmailVerification: config.REQUIRE_EMAIL_VERIFICATION,
-      sendResetPassword: email.enabled ? async ({ user, url }) => email.send({ to: user.email, ...templates.resetPassword(url) }) : undefined,
-    },
-    emailVerification: email.enabled
-      ? {
-          sendOnSignUp: config.REQUIRE_EMAIL_VERIFICATION,
-          autoSignInAfterVerification: true,
-          sendVerificationEmail: async ({ user, url }) => email.send({ to: user.email, ...templates.verifyEmail(url) }),
-        }
-      : undefined,
+    emailAndPassword,
+    emailVerification,
     session: { cookieCache: { enabled: true, maxAge: 60 } },
     plugins: [
-      ...(config.CAPTCHA_PROVIDER
-        ? [captcha({ provider: config.CAPTCHA_PROVIDER, secretKey: config.CAPTCHA_SECRET_KEY!, endpoints: ["/sign-up/email", "/sign-in/email", "/request-password-reset"] })]
-        : []),
+      captchaGate,
       // MCP over OAuth 2.1: Reelsaw is the authorization server; connectors register themselves (DCR), the
       // user signs in and consents in the browser. API keys keep working for CLIs regardless.
       ...(config.MCP_OAUTH
