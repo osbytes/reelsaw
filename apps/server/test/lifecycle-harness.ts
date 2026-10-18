@@ -45,11 +45,14 @@ export function lifecycleHarness() {
     },
   };
   const tx = createUnitOfWork(pool, queue, log);
+  const runtime = { DELETED_RETENTION_DAYS: 7, STALL_MINUTES: 15, SOURCE_RETENTION_DAYS: 0, CLIP_RETENTION_DAYS: 0 };
   const svc = {
     tx,
     queue,
     log,
     config: { CLEANUP_WORKDIR: false },
+    // the runtime settings a service function reads (instance-settings.ts); tests change the object in place
+    settings: { get: () => runtime },
     database: { db: database, pool },
     storage: { delete: async (key: string) => void deletedKeys.push(key) },
     paths: { project: (id: string) => `/tmp/reelsaw-test-nonexistent/${id}` },

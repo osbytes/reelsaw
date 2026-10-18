@@ -5,8 +5,11 @@ the process environment. Empty values count as unset. [`.env.example`](../.env.e
 [`deploy/.env.example`](../deploy/.env.example) (hosted install) list the same variables in file form.
 
 Not everything is set here: admins change the **models** and **provider keys** at runtime under
-Settings → System → Models, and per-user quotas on the Users page. The order in which `.env`, admin
-settings and per-project settings combine is in the README under "Settings and precedence".
+Settings → System → Models, per-user quotas on the Users page, and the variables marked
+"Runtime setting" below (sign-up policy, captcha, quotas, retention, upload limits, …) under
+Settings → System, with `reelsaw settings` or the `set_instance_settings` tool. For those the
+variable is the default and the stored value wins. The order in which `.env`, admin settings and
+per-project settings combine is in the README under "Settings and precedence".
 
 The tables below are generated from the zod schema in `apps/server/src/config.ts` (names, types,
 defaults) and `apps/server/scripts/docs-meta.ts` (descriptions). Run `pnpm docs:gen` after changing
@@ -23,7 +26,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `REELSAW_VERSION` | `dev` | Release version baked into the image at build time (`dev` from source). |
 | `REELSAW_COMMIT` | `unknown` | Git commit baked into the image at build time. |
 | `REELSAW_BUILT_AT` | `unknown` | Build timestamp baked into the image. |
-| `UPDATE_CHECK` | `true` | Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub. |
+| `UPDATE_CHECK` | `true` | Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub. Runtime setting: admins can change it under Settings → System without a restart. |
 | `UPDATE_CHECK_URL` | `https://api.github.com/repos/osbytes/reelsaw/releases/latest` | Releases endpoint the check asks (GitHub's `releases/latest` of this repository); change it for a fork or a mirror. |
 | `UPDATE_CHECK_HOURS` | `6` | Hours between update checks (1–168). "Check now" in Settings asks at most once a minute. |
 | `DATABASE_URL` | `x` | Postgres connection string. Compose sets it; set it yourself when running from source. |
@@ -32,28 +35,28 @@ either; `pnpm docs:check` fails when this file is stale.
 | `WEB_DIST` | unset | Directory of the built web app to serve. Unset: the bundled location. |
 | `RUN_WORKERS` | `true` | Process pipeline jobs in this process. false for a web-only container. At least one of RUN_HTTP / RUN_WORKERS must be on. |
 | `RUN_HTTP` | `true` | Serve HTTP in this process. false for a worker-only container. |
-| `MAX_UPLOAD_MB` | `4096` | Largest accepted file upload in MB. |
-| `MAX_SOURCE_FILE_MB` | `8192` | Largest file yt-dlp may download for a link source, in MB (`--max-filesize`). |
-| `ALLOW_PRIVATE_SOURCE_URLS` | `false` | `true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). |
+| `MAX_UPLOAD_MB` | `4096` | Largest accepted file upload in MB. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_SOURCE_FILE_MB` | `8192` | Largest file yt-dlp may download for a link source, in MB (`--max-filesize`). Runtime setting: admins can change it under Settings → System without a restart. |
+| `ALLOW_PRIVATE_SOURCE_URLS` | `false` | `true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Accounts and sign-up
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SIGNUP_MODE` | unset | `open`: anyone may sign up. `approval`: new accounts wait for an admin. `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. Values: `open | approval | closed`. |
+| `SIGNUP_MODE` | unset | `open`: anyone may sign up. `approval`: new accounts wait for an admin. `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. Runtime setting: admins can change it under Settings → System without a restart. Values: `open | approval | closed`. |
 | `ALLOW_SIGNUP` | unset | Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE. |
 | `EMAIL_DRIVER` | `none` | Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off. Values: `none | smtp | resend`. |
 | `EMAIL_FROM` | unset | Sender, e.g. `Reelsaw <no-reply@example.com>`. Required with an email driver. |
 | `SMTP_URL` | unset | SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp. |
 | `RESEND_API_KEY` | unset | Required with EMAIL_DRIVER=resend. |
-| `REQUIRE_EMAIL_VERIFICATION` | `false` | With an email driver: users must click the verification link before they can sign in. |
-| `TERMS_URL` | unset | Terms of service link shown on the sign-up form when set. |
-| `PRIVACY_URL` | unset | Privacy policy link shown on the sign-up form when set. |
-| `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
-| `CAPTCHA_SITE_KEY` | unset | Public captcha key. |
-| `CAPTCHA_SECRET_KEY` | unset | Secret captcha key. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | With an email driver: users must click the verification link before they can sign in. Runtime setting: admins can change it under Settings → System without a restart. |
+| `TERMS_URL` | unset | Terms of service link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
+| `PRIVACY_URL` | unset | Privacy policy link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
+| `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Runtime setting: admins can change it under Settings → System without a restart. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
+| `CAPTCHA_SITE_KEY` | unset | Public captcha key. Runtime setting: admins can change it under Settings → System without a restart. |
+| `CAPTCHA_SECRET_KEY` | unset | Secret captcha key. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MCP_OAUTH` | `false` | MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work. |
-| `HEALTH_DETAILS` | `false` | Include machine numbers in `GET /api/health` for anonymous callers (private networks only). Admins always get them. |
+| `HEALTH_DETAILS` | `false` | Include machine numbers in `GET /api/health` for anonymous callers (private networks only). Admins always get them. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Models
 
@@ -142,24 +145,24 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `EVENT_REPLAY_LIMIT` | `300` | Events a project page replays when it connects (progress ticks never replay); older ones load on request. |
-| `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. |
-| `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. |
-| `MAX_NEW_PROJECTS_PER_HOUR` | `0` | Quota: new projects per account per hour. 0 = unlimited. |
-| `MAX_LIVE_JOBS_PER_USER` | `0` | Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited. |
-| `MAX_RERENDERS_PER_HOUR` | `0` | Quota: re-renders and hand-made clips per account per hour. 0 = unlimited. |
-| `MAX_STORAGE_MB` | `0` | Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited. |
-| `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. |
-| `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. |
-| `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever. |
-| `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. |
-| `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. |
-| `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. |
+| `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_NEW_PROJECTS_PER_HOUR` | `0` | Quota: new projects per account per hour. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_LIVE_JOBS_PER_USER` | `0` | Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_RERENDERS_PER_HOUR` | `0` | Quota: re-renders and hand-made clips per account per hour. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_STORAGE_MB` | `0` | Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever. Runtime setting: admins can change it under Settings → System without a restart. |
+| `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Resource governor and workers
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `STALL_MINUTES` | `15` | A running job with no progress event for this long is reported (log and UI) as stalled. |
+| `STALL_MINUTES` | `15` | A running job with no progress event for this long is reported (log and UI) as stalled. Runtime setting: admins can change it under Settings → System without a restart. |
 | `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. |
 | `MAX_CPU_PERCENT` | `90` | Heavy steps wait while total CPU time is busier than this (measured, any OS). |
 | `MIN_FREE_MEM_MB` | `512` | Heavy steps wait while free memory is below this. |

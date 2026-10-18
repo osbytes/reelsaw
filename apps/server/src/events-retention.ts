@@ -9,6 +9,7 @@
  * cursor does move past them and they are never rescanned. They go with the project (cascade).
  */
 import type { Services } from "./services.js";
+import type { RuntimeSettings } from "./instance-settings.js";
 import { deadlineIn, expired } from "./lib/batch.js";
 import { getState, setState } from "./lib/state.js";
 
@@ -51,10 +52,10 @@ export function planPruneBatch(rows: PruneRow[], cursor: number, cutoff: Date, s
 }
 
 const TABLES = {
-  events: { table: "project_events", typed: true, days: (c: Services["config"]) => c.EVENT_RETENTION_DAYS },
-  llm: { table: "llm_usage", typed: false, days: (c: Services["config"]) => c.LLM_USAGE_RETENTION_DAYS },
-  stt: { table: "stt_usage", typed: false, days: (c: Services["config"]) => c.LLM_USAGE_RETENTION_DAYS },
-  admin: { table: "admin_events", typed: false, days: (c: Services["config"]) => c.ADMIN_EVENT_RETENTION_DAYS },
+  events: { table: "project_events", typed: true, days: (c: RuntimeSettings) => c.EVENT_RETENTION_DAYS },
+  llm: { table: "llm_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
+  stt: { table: "stt_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
+  admin: { table: "admin_events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
 } as const;
 type Which = keyof typeof TABLES;
 interface PruneState {
@@ -97,7 +98,7 @@ export async function pruneHistory(svc: Services, now = Date.now()): Promise<Rec
   const out: Record<string, number> = {};
   let changed = false;
   for (const which of Object.keys(TABLES) as Which[]) {
-    const cutoff = retentionCutoff(TABLES[which].days(svc.config), now);
+    const cutoff = retentionCutoff(TABLES[which].days(svc.settings.get()), now);
     if (!cutoff) continue;
     const s = state[which] ?? {};
     if (s.doneAt && now - s.doneAt < PRUNE_EVERY_MS) continue;

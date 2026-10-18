@@ -32,12 +32,15 @@ type Row = { name: string; group: string; description: string; def: string; valu
 
 async function envRows(): Promise<Row[]> {
   const { envSchema } = await import("../src/config.js");
+  const { RUNTIME_SETTINGS } = await import("../src/instance-settings.js");
   const shape = envSchema.shape as Record<string, any>;
   const parsed = envSchema.parse({ DATABASE_URL: "x", BETTER_AUTH_SECRET: "x".repeat(32) }) as Record<string, unknown>;
   const rows: Row[] = [];
   for (const [name, field] of Object.entries(shape)) {
     const doc = meta.DOCS[name];
-    const description: string | undefined = field.description ?? doc?.[1];
+    let description: string | undefined = field.description ?? doc?.[1];
+    // a runtime setting: the variable is the default; Settings → System, `reelsaw settings` and set_instance_settings override it
+    if (description && name in RUNTIME_SETTINGS) description = `${description.replace(/\s+$/, "")} Runtime setting: admins can change it under Settings → System without a restart.`;
     if (!description) problems.push(`env ${name} has no description: add one to apps/server/scripts/docs-meta.ts (or .describe() in config.ts)`);
     if (!doc) problems.push(`env ${name} has no group: add it to DOCS in apps/server/scripts/docs-meta.ts`);
     const v = parsed[name];

@@ -28,7 +28,7 @@ const IN_FLIGHT = ["preparing", "pending", "rendering"] as const;
 /** Who is asking: the owner, an admin (any project), or the operator CLI (null). */
 export type Actor = { id: string; admin: boolean } | null;
 
-const days = (svc: Services) => svc.config.DELETED_RETENTION_DAYS;
+const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 /** "for 7 days" / "until you purge it", for messages and tool results. */
 export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc)} day${days(svc) === 1 ? "" : "s"}` : "until it is purged");
 

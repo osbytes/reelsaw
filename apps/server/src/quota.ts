@@ -1,24 +1,26 @@
 /**
- * Quotas: instance-wide numbers from the environment (0 = unlimited), overridable per user by an
- * admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
+ * Quotas: instance-wide numbers (0 = unlimited) from the runtime settings (the environment or the
+ * admin's override, instance-settings.ts), overridable per user by an admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
  * number is known: project count and rate at creation, source minutes once ffprobe has run.
  */
 import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
-import type { Config } from "./config.js";
+import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
 
 export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
+/** The instance-wide numbers in force (`svc.settings.get()`): the environment, or the admin's runtime override. */
+export type InstanceLimits = Pick<RuntimeSettings, LimitKey>;
 
-export async function limitsFor(db: Db, config: Config, userId: string): Promise<Limits> {
+export async function limitsFor(db: Db, instance: InstanceLimits, userId: string): Promise<Limits> {
   const row = await db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { limits: true } });
   const out = {} as Limits;
   for (const k of LIMIT_KEYS) {
     const o = row?.limits?.[k];
-    out[k] = typeof o === "number" && o >= 0 ? o : config[k];
+    out[k] = typeof o === "number" && o >= 0 ? o : instance[k];
   }
   return out;
 }
@@ -37,9 +39,9 @@ const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
  * then serialises concurrent creates of one user, so the counts below include every project committed before this one
  * and N parallel requests can't all pass a cap they jointly exceed. (Without `lock` it is only an early, advisory check.)
  */
-export async function checkProjectQuota(db: Db, config: Config, userId: string, o: { lock?: boolean } = {}) {
+export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId: string, o: { lock?: boolean } = {}) {
   if (o.lock) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`);
-  const l = await limitsFor(db, config, userId);
+  const l = await limitsFor(db, instance, userId);
   if (l.MAX_STORAGE_MB > 0) checkStorage(l, await storedBytes(db, userId));
   if (l.MAX_PROJECTS_PER_USER > 0) {
     // a deleted project frees its slot at once (it is only kept for undo)
@@ -70,8 +72,8 @@ export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
 }
 
 /** Before an upload or a new project: what the account stores now (sources, uploads, renders, intros/outros) plus what is arriving. */
-export async function checkStorageQuota(db: Db, config: Config, userId: string, incomingBytes = 0) {
-  const l = await limitsFor(db, config, userId);
+export async function checkStorageQuota(db: Db, instance: InstanceLimits, userId: string, incomingBytes = 0) {
+  const l = await limitsFor(db, instance, userId);
   if (l.MAX_STORAGE_MB > 0) checkStorage(l, (await storedBytes(db, userId)) + incomingBytes);
 }
 
@@ -97,8 +99,8 @@ export async function storedBytes(db: Db, userId: string): Promise<number> {
 }
 
 /** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
-export async function sourceMinutesExceeded(db: Db, config: Config, userId: string, projectId: string, durationSec: number): Promise<string | null> {
-  const l = await limitsFor(db, config, userId);
+export async function sourceMinutesExceeded(db: Db, instance: InstanceLimits, userId: string, projectId: string, durationSec: number): Promise<string | null> {
+  const l = await limitsFor(db, instance, userId);
   if (l.MAX_SOURCE_MINUTES_PER_DAY <= 0) return null;
   const used = await minutesToday(db, userId, projectId);
   const total = used + durationSec / 60;

@@ -33,6 +33,7 @@ import { decodeCursor, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
+import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
 import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
@@ -310,14 +311,15 @@ export const appRouter = router({
     status: publicProcedure.query(async ({ ctx }) => {
       const r = await ctx.svc.resources.snapshot();
       const paused = !r.ok.memory ? "memory" : !r.ok.cpu ? "CPU" : !r.ok.disk ? "disk" : null;
+      const s = ctx.svc.settings.get();
       return {
         version: ctx.svc.config.REELSAW_VERSION,
-        signupMode: ctx.svc.config.SIGNUP_MODE,
+        signupMode: s.SIGNUP_MODE,
         emailEnabled: ctx.svc.email.enabled,
-        termsUrl: ctx.svc.config.TERMS_URL ?? null,
-        privacyUrl: ctx.svc.config.PRIVACY_URL ?? null,
-        maxUploadMb: ctx.svc.config.MAX_UPLOAD_MB,
-        captcha: ctx.svc.config.CAPTCHA_PROVIDER ? { provider: ctx.svc.config.CAPTCHA_PROVIDER, siteKey: ctx.svc.config.CAPTCHA_SITE_KEY! } : null,
+        termsUrl: s.TERMS_URL ?? null,
+        privacyUrl: s.PRIVACY_URL ?? null,
+        maxUploadMb: s.MAX_UPLOAD_MB,
+        captcha: s.CAPTCHA_PROVIDER && s.CAPTCHA_SITE_KEY && s.CAPTCHA_SECRET_KEY ? { provider: s.CAPTCHA_PROVIDER, siteKey: s.CAPTCHA_SITE_KEY } : null,
         /** heavy jobs wait for the machine; the word says what is short, never the numbers */
         paused,
       };
@@ -542,11 +544,11 @@ export const appRouter = router({
       compatBaseUrl: ctx.svc.providers.get(ctx.svc.config.OPENAI_COMPATIBLE_NAME).baseUrl ?? null,
       storage: ctx.svc.storage.driver,
       faceDetection: !!ctx.svc.faces,
-      signupMode: ctx.svc.config.SIGNUP_MODE,
+      signupMode: ctx.svc.settings.get().SIGNUP_MODE,
       email: ctx.svc.config.EMAIL_DRIVER,
-      healthDetails: ctx.svc.config.HEALTH_DETAILS,
+      healthDetails: ctx.svc.settings.get().HEALTH_DETAILS,
       mcpUrl: new URL("/api/mcp", ctx.svc.config.APP_URL).toString(),
-      maxUploadMb: ctx.svc.config.MAX_UPLOAD_MB,
+      maxUploadMb: ctx.svc.settings.get().MAX_UPLOAD_MB,
       renderConcurrency: { ...ctx.svc.resources.renders(), max: ctx.svc.resources.maxRenders() },
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,
@@ -564,6 +566,22 @@ export const appRouter = router({
         return ctx.svc.updates.state();
       }),
       check: adminProcedure.mutation(({ ctx }) => ctx.svc.updates.check({ force: true })),
+    }),
+    /**
+     * Instance settings (instance-settings.ts): sign-up policy, captcha, quotas, retention, … The environment is
+     * the default; what is set here overrides it for every process within seconds. `set` validates the result as a
+     * whole and writes a `settings.changed` admin event. The same code serves the CLI and the MCP tools.
+     */
+    settings: router({
+      get: adminProcedure.query(({ ctx }) => ctx.svc.settings.state()),
+      set: adminProcedure.input(settingsPatchSchema).mutation(async ({ ctx, input }) => {
+        try {
+          return await ctx.svc.settings.set(input, { id: ctx.user.id, email: ctx.user.email });
+        } catch (err) {
+          if (err instanceof SettingsError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+          throw err;
+        }
+      }),
     }),
     users: router({
       /**
@@ -651,7 +669,7 @@ export const appRouter = router({
       /** Per-user quota overrides; null = back to the instance setting. */
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
         const row = await ctx.svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true } });
-        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.config[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.config, input.id), usage: await limitUsage(ctx.svc.database.db, input.id) };
+        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.settings.get()[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.settings.get(), input.id), usage: await limitUsage(ctx.svc.database.db, input.id) };
       }),
       setLimits: adminProcedure
         .input(z.object({ id: z.string(), limits: z.partialRecord(z.enum(LIMIT_KEYS), z.number().int().min(0).nullable()) }))
@@ -827,7 +845,7 @@ export const appRouter = router({
         throw err;
       };
       // early refusal before the URL peek; the binding check runs again, locked, in the transaction that inserts
-      await checkProjectQuota(db, svc.config, ctx.user.id).catch(quotaReached);
+      await checkProjectQuota(db, svc.settings.get(), ctx.user.id).catch(quotaReached);
       let sourceMeta: schema.Project["sourceMeta"] = null;
       let title = input.title?.trim() || "";
       if (input.uploadId) {
@@ -845,7 +863,7 @@ export const appRouter = router({
       // row, event and first job together: never a "queued" project with no job behind it
       const p = await svc.tx(async (u) => {
         // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
-        await checkProjectQuota(u.db, svc.config, ctx.user.id, { lock: true }).catch(quotaReached);
+        await checkProjectQuota(u.db, svc.settings.get(), ctx.user.id, { lock: true }).catch(quotaReached);
         // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
         const settings = await resolveProjectSettings(u.db, ctx.user.id, input.settings);
         if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });

@@ -14,7 +14,7 @@ export const RETENTION_BUDGET_MS = 30_000; // per kind and tick; the backlog con
 type Cur = { at: string; id: string };
 
 export async function sweepRetention(svc: Services): Promise<{ sources: number; clips: number }> {
-  const { config } = svc;
+  const config = svc.settings.get(); // the days in force now (environment or admin override)
   const log = svc.log.child({ module: "retention" });
   let sources = 0;
   let clips = 0;

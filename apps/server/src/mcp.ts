@@ -356,6 +356,18 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "get_instance_settings",
+    TOOLS.get_instance_settings,
+    () => run(() => api.admin.settings.get()),
+  );
+
+  server.registerTool(
+    "set_instance_settings",
+    TOOLS.set_instance_settings,
+    (input) => run(() => api.admin.settings.set(input)),
+  );
+
+  server.registerTool(
     "delete_project",
     TOOLS.delete_project,
     ({ id }) => run(() => api.projects.delete({ id })),

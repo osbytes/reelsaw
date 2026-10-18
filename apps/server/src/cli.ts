@@ -60,6 +60,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
  *   limits  <email>                         an account's quotas: instance value, override, in force, in use now
+ *   settings [KEY=value…] [--clear KEY…]    instance settings in force (sign-up mode, quotas, retention, …): .env default,
+ *                                           admin override, effective; KEY=value changes one without a restart,
+ *                                           --clear KEY goes back to .env (same as Settings → System and set_instance_settings)
  *   mcp                                     the MCP server over stdio for clients that launch a command:
  *                                           same tools as /api/mcp, forwarded to REELSAW_URL with
  *                                           REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts)
@@ -77,6 +80,7 @@ import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser } from "./quota.js";
+import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
@@ -156,7 +160,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS). */
   async retention(svc) {
     const r = await sweepRetention(svc);
-    console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${svc.config.CLIP_RETENTION_DAYS})`);
+    const s = svc.settings.get();
+    console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${s.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${s.CLIP_RETENTION_DAYS})`);
   },
   /** Deleted projects that can still be restored, with the date the purge removes them (DELETED_RETENTION_DAYS). */
   async deleted(svc) {
@@ -245,8 +250,37 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async limits(svc) {
     const u = await userByEmail(svc, pos[0]);
     const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true } });
-    const [effective, used] = await Promise.all([limitsFor(svc.database.db, svc.config, u.id), limitUsage(svc.database.db, u.id)]);
-    table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.config[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
+    const [effective, used] = await Promise.all([limitsFor(svc.database.db, svc.settings.get(), u.id), limitUsage(svc.database.db, u.id)]);
+    table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.settings.get()[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
+  },
+  /**
+   * Instance settings in force and where each comes from. `settings SIGNUP_MODE=approval MAX_UPLOAD_MB=2048`
+   * changes them (validated as a whole, applied by every process within ~5 s); `--clear KEY` returns a key to .env.
+   */
+  async settings(svc) {
+    const sets = pos.filter((a) => a.includes("="));
+    const clears = args.flatMap((a, i) => (a === "--clear" && args[i + 1] ? [args[i + 1]!] : []));
+    if (sets.length || clears.length) {
+      const coerce = (v: string) => (v === "true" ? true : v === "false" ? false : /^-?\d+$/.test(v) ? Number(v) : v);
+      const patch: Record<string, unknown> = {};
+      for (const kv of sets) {
+        const i = kv.indexOf("=");
+        patch[kv.slice(0, i)] = coerce(kv.slice(i + 1));
+      }
+      for (const k of clears) patch[k] = null;
+      const parsed = settingsPatchSchema.strict().safeParse(patch);
+      if (!parsed.success) throw new Error(parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("\n"));
+      try {
+        await svc.settings.set(parsed.data, { id: "cli", email: "cli" });
+        console.log(`saved ${[...sets.map((s) => s.split("=")[0]), ...clears.map((k) => `${k} (back to .env)`)].join(", ")}; every process applies it within ~5 s`);
+      } catch (err) {
+        if (err instanceof SettingsError) throw new Error(err.message);
+        throw err;
+      }
+    }
+    const st = svc.settings.state();
+    const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "-" : String(v));
+    table(RUNTIME_KEYS.map((k) => ({ setting: k, "in force": fmt(st.values[k]), source: st.source[k] === "db" ? `set by ${st.updatedBy ?? "?"}` : ".env", ".env": fmt(st.env[k]), note: st.ignored[k] ?? "" })));
   },
   async status(svc) {
     const db = svc.database.db;
@@ -257,7 +291,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (p.error) console.log(`  error: ${p.error}`);
     if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
-    console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
+    console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.settings.get().EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
     if (t) console.log(`  transcript: lang=${t.language} flags=${t.flags.length} refine=${JSON.stringify(t.refine)}`);
     const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: schema.clips.index });
@@ -720,7 +754,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

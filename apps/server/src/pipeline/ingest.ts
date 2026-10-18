@@ -24,7 +24,7 @@ export async function ingest(ctx: StageContext) {
   } else {
     if (project.sourceType === "url") {
       // web and MCP both land here, so one check covers every way of adding a link
-      await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.config.ALLOW_PRIVATE_SOURCE_URLS });
+      await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
       let stderrTail = "";
       const { stdout } = await svc.media.ytdlp(
         [
@@ -38,7 +38,7 @@ export async function ingest(ctx: StageContext) {
           "--merge-output-format",
           "mp4",
           "--max-filesize",
-          `${svc.config.MAX_SOURCE_FILE_MB}M`,
+          `${svc.settings.get().MAX_SOURCE_FILE_MB}M`,
           "-o",
           path.join(dir, "source.%(ext)s"),
           "--",
@@ -94,7 +94,7 @@ export async function ingest(ctx: StageContext) {
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
-  const over = await sourceMinutesExceeded(ctx.db, svc.config, project.userId, projectId, probe.durationSec);
+  const over = await sourceMinutesExceeded(ctx.db, svc.settings.get(), project.userId, projectId, probe.durationSec);
   if (over) {
     ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "daily source-minutes limit reached");
     throw new Error(over);

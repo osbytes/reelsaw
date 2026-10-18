@@ -309,6 +309,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
+| `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
+| `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 <!-- /generated -->
 
 `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
@@ -360,6 +362,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email>` | an account's quotas: instance value, override, in force, in use now |
+| `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
 | `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |
 <!-- /generated -->
 
@@ -371,11 +374,12 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | --- | --- |
 | Models (language, transcription, alignment) | `.env` (`AI_MODEL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPT_ALIGN_MODEL`) then the admin's runtime override (Settings → System → Models, stored in `instance_settings`). A stage already running keeps the model it started with. |
 | Provider keys and URLs | `.env` then the encrypted keys admins enter in Settings. |
+| Instance settings (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) | `.env` then the admin's runtime override (Settings → System, `reelsaw settings`, `set_instance_settings`; stored in `instance_settings`, applied by every process within seconds). An override whose precondition goes away (email verification without an email driver) is ignored and shown as such. |
 | Stage knobs (`TRANSCRIPT_BIAS`, `TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
 | A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |
 | A clip's style | the project's style, then the clip's own override (`clips.style`). `updateStyle` clears clip overrides unless told to keep them. |
 | Framing | `auto` (face detection decides), then the project's `reframe`, then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i].mode`). |
-| Quotas | `.env` `MAX_*` (0 = unlimited), then a per-user limit set by an admin on the Users page. |
+| Quotas | `.env` `MAX_*` (0 = unlimited), then the instance setting an admin saved under Settings → System → Limits, then a per-user limit set on the Users page. |
 
 Two things to know:
 

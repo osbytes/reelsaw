@@ -128,7 +128,7 @@ export const apikey = pgTable(
 );
 
 /** Account-level audit trail: sign-ups, approvals, role changes, bans, model changes (admin page, email). */
-export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed", "models.changed", "provider.changed"] as const;
+export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed", "models.changed", "provider.changed", "settings.changed"] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
   "admin_events",

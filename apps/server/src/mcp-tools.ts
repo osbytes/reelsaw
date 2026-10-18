@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema } from "@reelsaw/shared";
 import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
+import { settingsPatchSchema } from "./instance-settings.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
@@ -279,6 +280,19 @@ export const TOOLS = {
     description: "Admins only: is a newer Reelsaw published? Returns { current, latest: { version, url, publishedAt }, available, checkedAt, error, upgrade: { command, note, docsUrl } }; available is null when the running build is not a release (from source). The server checks every few hours; refresh: true asks GitHub again now.",
     inputSchema: { refresh: z.boolean().default(false).describe("true = ask GitHub now instead of returning the last answer (at most once a minute)") },
     annotations: { readOnlyHint: true },
+  },
+  get_instance_settings: {
+    title: "Instance settings",
+    description:
+      "Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. Returns { values, env, override, source: { KEY: \"env\" | \"db\" }, ignored: { KEY: reason }, groups, help, updatedAt, updatedBy }; secrets are masked.",
+    annotations: { readOnlyHint: true },
+  },
+  set_instance_settings: {
+    title: "Change instance settings",
+    description:
+      "Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. Pass only the keys to change; null returns a key to the environment's value; an empty string clears an optional one (URLs, captcha). Validated as a whole (a captcha provider needs both keys; email verification needs an email driver). Returns the same state as get_instance_settings.",
+    inputSchema: settingsPatchSchema.shape,
+    annotations: { idempotentHint: true },
   },
 };
 
