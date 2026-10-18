@@ -38,7 +38,8 @@ says so; otherwise downgrading one minor is supported by pinning `REELSAW_IMAGE`
 3. Merge. `version.yml` runs `pnpm release:tag`, which pushes `vX.Y.Z`. `release.yml` builds
    amd64 + arm64, checks the image, publishes `ghcr.io/osbytes/reelsaw:X.Y.Z`, `:X.Y` and
    `:latest`, and attaches `reelsaw-X.Y.Z.zip` to the GitHub release. The release notes are the
-   changelog section.
+   changelog section (`scripts/release-notes.mjs`; maintainers' "Thanks @…!" credits are dropped,
+   outside contributors' stay).
 4. Pull the published image on a real install (`docker compose pull && docker compose up -d`) and
    watch the boot log for the migration and the health check.
 

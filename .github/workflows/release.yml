@@ -124,8 +124,14 @@ jobs:
           sed -i "s#\${REELSAW_IMAGE:-[^}]*}#\${REELSAW_IMAGE:-${GHCR_IMAGE}:${VERSION}}#" out/reelsaw/docker-compose.yml
           (cd out && zip -r "reelsaw-${VERSION}.zip" reelsaw)
 
+      # the release body is this version's CHANGELOG.md section (what changesets wrote), not the tag message
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/release-notes.mjs "${{ steps.v.outputs.version }}" > out/release-notes.md && cat out/release-notes.md
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          body_path: out/release-notes.md
           files: out/reelsaw-${{ steps.v.outputs.version }}.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
