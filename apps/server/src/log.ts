@@ -69,6 +69,8 @@ export interface LogControl {
   effective(): LogLevels;
   /** apply a spec to the root and every live child logger; `null` restores the environment's */
   apply(levels: LogLevels | null): void;
+  /** every `module` name a logger was created with so far */
+  modules(): string[];
 }
 
 const controls = new WeakMap<object, LogControl>();
@@ -124,6 +126,7 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
 
   let current = envLevels;
   const levelFor = (module: string | undefined): LogLevel => (module && current.modules[module]) || current.global;
+  const seen = new Set<string>();
   const moduleOf = new WeakMap<object, string | undefined>();
   let live: Array<WeakRef<Logger>> = [];
 
@@ -133,6 +136,7 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
     const module = typeof bindings?.module === "string" ? bindings.module : moduleOf.get(this);
     const child = origChild.call(this, bindings, options);
     moduleOf.set(child, module);
+    if (module) seen.add(module);
     live.push(new WeakRef(child));
     if (live.length > 4096) live = live.filter((r) => r.deref());
     child.level = levelFor(module);
@@ -143,6 +147,7 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
   controls.set(root, {
     base: envLevels,
     effective: () => current,
+    modules: () => [...seen],
     apply(levels) {
       current = levels ?? envLevels;
       root.level = current.global;

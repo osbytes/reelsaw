@@ -8,7 +8,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "./db/index.js";
 import { schema } from "./db/index.js";
-import { formatLogLevels, logControl, parseLogLevels, type LogLevels, type Logger } from "./log.js";
+import { formatLogLevels, logControl, parseLogLevels, type LogLevel, type LogLevels, type Logger } from "./log.js";
 
 const KEY = "log_level";
 export const MAX_LOG_OVERRIDE_MS = 24 * 3600_000;
@@ -117,4 +117,28 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number } = 
       if (timer) clearInterval(timer);
     },
   };
+}
+
+/** Module names used in code (the `module` binding), so the picker offers them before they have logged anything. */
+export const KNOWN_LOG_MODULES = ["accounts", "ai", "analyze", "asr", "auth", "boot", "bumpers", "cli", "cut-preview", "cuts", "db", "email", "events", "export", "http", "ingest", "llm", "log", "mcp", "media", "models", "otel", "providers", "prune", "queue", "reconcile", "refine", "render", "resources", "retention", "storage", "sweep", "transcribe", "uow", "uploads", "watchdog", "web", "worker"] as const;
+
+/** The levels a person may pick, most severe first (not `silent`: it hides errors too). */
+export const PICKABLE_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
+
+/** Every module that can be targeted: the static set plus whatever has registered with the logger. */
+export function knownModules(log: Logger): string[] {
+  return [...new Set<string>([...KNOWN_LOG_MODULES, ...(logControl(log)?.modules() ?? [])])].sort();
+}
+
+export interface StructuredLevels {
+  global: LogLevel;
+  modules: Array<{ module: string; level: LogLevel }>;
+}
+
+/** Build the `info,render=debug` spec from picker input; throws on a module that is not known. A repeated module: the last row wins. */
+export function specFromStructured(input: StructuredLevels, known: readonly string[]): string {
+  const unknown = input.modules.filter((m) => !known.includes(m.module)).map((m) => m.module);
+  if (unknown.length) throw new Error(`unknown log module${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`);
+  const byModule = new Map(input.modules.map((m) => [m.module, m.level]));
+  return [input.global, ...[...byModule].map(([m, l]) => `${m}=${l}`)].join(",");
 }

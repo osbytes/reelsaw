@@ -31,6 +31,8 @@ import { decodeCursor, escapeLike, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
+import { logControl } from "../log.js";
+import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
 import { generateText } from "ai";
 
@@ -666,13 +668,19 @@ export const appRouter = router({
      */
     /** Log levels in force and a temporary override (every process follows within ~5 s); see log-level.ts. */
     logLevel: router({
-      get: adminProcedure.query(({ ctx }) => ctx.svc.logLevel.refresh()),
+      get: adminProcedure.query(async ({ ctx }) => {
+        const st = await ctx.svc.logLevel.refresh();
+        const ctl = logControl(ctx.svc.log);
+        return { ...st, modules: knownModules(ctx.svc.log), levels: PICKABLE_LEVELS, envGlobal: ctl?.base.global ?? "info" };
+      }),
+      /** `null` removes the override. */
       set: adminProcedure
-        .input(z.object({ spec: z.string().trim().max(300).nullable(), minutes: z.number().int().min(1).max(1440).default(15) }))
+        .input(z.object({ global: z.enum(PICKABLE_LEVELS), modules: z.array(z.object({ module: z.string().max(40), level: z.enum(PICKABLE_LEVELS) })).max(40), forMinutes: z.union([z.literal(15), z.literal(60), z.literal(240), z.literal(1440)]) }).nullable())
         .mutation(async ({ ctx, input }) => {
           try {
-            const st = await ctx.svc.logLevel.set(input.spec, ctx.user.email, input.minutes * 60_000);
-            ctx.log.info({ spec: input.spec, minutes: input.minutes }, "log level changed");
+            const spec = input ? specFromStructured(input, knownModules(ctx.svc.log)) : null;
+            const st = await ctx.svc.logLevel.set(spec, ctx.user.email, (input?.forMinutes ?? 15) * 60_000);
+            ctx.log.info({ spec, minutes: input?.forMinutes ?? null }, "log level changed");
             return st;
           } catch (err) {
             throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });

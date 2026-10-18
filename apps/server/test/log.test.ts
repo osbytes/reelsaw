@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { Hono } from "hono";
 import { createLogger, formatLogLevels, logControl, parseLogLevels } from "../src/log.js";
-import { mergeLogLevels, parseDuration } from "../src/log-level.js";
+import { mergeLogLevels, parseDuration, specFromStructured, knownModules, KNOWN_LOG_MODULES } from "../src/log-level.js";
 import { accessLevel, requestLogger, resolveRequestId, trpcLogLevel, type AppEnv } from "../src/request-log.js";
 import { eventFields } from "../src/uow.js";
 import { lineMatches } from "../src/log-read.js";
@@ -214,5 +214,31 @@ describe("log helpers", () => {
     assert.ok(!lineMatches(line, { ids: ["proj-1"], module: "http" }));
     assert.ok(!lineMatches(line, { ids: ["proj-1"], since: new Date("2026-10-18T00:00:00Z") }));
     assert.ok(lineMatches(line, { ids: ["proj-1"], since: new Date("2026-10-17T00:00:00Z") }));
+  });
+});
+
+describe("structured log level input", () => {
+  const known = ["http", "render", "analyze"];
+  it("builds the spec string, global first", () => {
+    assert.equal(specFromStructured({ global: "info", modules: [{ module: "render", level: "debug" }, { module: "http", level: "warn" }] }, known), "info,render=debug,http=warn");
+    assert.equal(specFromStructured({ global: "warn", modules: [] }, known), "warn");
+  });
+  it("a repeated module keeps the last level, and the result parses", () => {
+    const spec = specFromStructured({ global: "info", modules: [{ module: "render", level: "debug" }, { module: "render", level: "trace" }] }, known);
+    assert.equal(spec, "info,render=trace");
+    assert.deepEqual(parseLogLevels(spec).modules, { render: "trace" });
+  });
+  it("rejects modules that do not exist", () => {
+    assert.throws(() => specFromStructured({ global: "info", modules: [{ module: "rendr", level: "debug" }] }, known), /unknown log module: rendr/);
+  });
+  it("known modules are the static set plus registered ones, sorted and unique", () => {
+    const { log } = capture("info");
+    log.child({ module: "brand-new" });
+    log.child({ module: "render" });
+    const m = knownModules(log);
+    assert.ok(m.includes("brand-new") && m.includes("render"));
+    assert.equal(new Set(m).size, m.length);
+    assert.deepEqual(m, [...m].sort());
+    for (const k of KNOWN_LOG_MODULES) assert.ok(m.includes(k));
   });
 });
