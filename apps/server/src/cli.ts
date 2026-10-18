@@ -47,7 +47,9 @@ import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { needsPrepare, prepareModeOf } from "./pipeline/manual.js";
-import { sampleFaces, dropStaticFaces, decideLayout } from "./pipeline/layout.js";
+import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
+import { attachText, voteTrace } from "./pipeline/content-region.js";
+import { sampleClipText } from "./pipeline/overlays.js";
 import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
 import { spawn } from "node:child_process";
@@ -196,10 +198,22 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const c = await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]!) });
     if (!c) throw new Error("clip not found");
     const [from, to] = (pos[1] ?? `0-${c.endSec - c.startSec}`).split("-").map(Number) as [number, number];
-    const samples = dropStaticFaces(
-      await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: await sourcePath(svc, c.projectId), startSec: c.startSec + from, durationSec: to - from, sampleFps: 4 }),
-    ).samples;
+    const source = await sourcePath(svc, c.projectId);
+    // exactly what a render feeds the layout: static faces dropped, the per-clip text scan (2 fps) attached
+    // to the nearest face sample, the divider probe (`divider.s` is its strength, 0..1) from the same frames
+    let samples = dropStaticFaces(await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source, startSec: c.startSec + from, durationSec: to - from, sampleFps: 4 })).samples;
+    if (svc.text) {
+      const frames = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH }, source, c.startSec + from, to - from);
+      samples = attachText(samples, frames.map((f) => ({ t: f.t, all: f.all })));
+    }
     if (args.includes("--json")) return console.log(JSON.stringify(samples)); // eval fixture (samples.json)
+    if (args.includes("--votes")) {
+      // the content-region vote per frame and the runs it forms (what `render=trace` / `content runs` log in a render)
+      const diag = newLayoutDiag();
+      const segs = segmentLayouts(samples, svc.config, [], to - from, undefined, diag);
+      console.log(JSON.stringify({ segments: segs.map((sg) => ({ start: sg.start, end: sg.end, layout: sg.decision.layout, reason: sg.decision.reason })), frames: diag.frames, voting: diag.voting, candidates: diag.candidates, decisions: diag.decisions }, null, 1));
+      return table(samples.map((sm) => voteTrace(sm)));
+    }
     const d = decideLayout(samples, svc.config);
     console.log(`${samples.length} samples, layout ${d.layout}: ${d.reason}`);
     const f = (n: number | undefined) => (n === undefined ? "  -  " : n.toFixed(3));

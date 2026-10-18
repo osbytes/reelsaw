@@ -183,6 +183,27 @@ export function contentReason(c: ContentRegion, sig: Pick<ContentSignals, "evide
   return `${kind} beside the speaker (${contentSide(c) ?? "inset"} ${Math.round((c.x2 - c.x1) * 100)}%)`;
 }
 
+/** Everything one frame contributes to the vote, for the trace log. */
+export function voteTrace(s: RegionSample): Record<string, number | string | null> {
+  const f = s.box;
+  const v = frameVote(s);
+  const beside = (side: ContentSide) => (f ? (s.text ?? []).filter((b) => (side === "right" ? b.x1 >= f.x2 + REGION.margin : b.x2 <= f.x1 - REGION.margin)) : []);
+  const boxes = [...beside("left"), ...beside("right")];
+  return {
+    t: Number(s.t.toFixed(2)),
+    textScanned: s.text ? s.text.length : null,
+    textBesideLeft: beside("left").length,
+    textBesideRight: beside("right").length,
+    textSpan: boxes.length ? Number((Math.max(...boxes.map((b) => b.y2)) - Math.min(...boxes.map((b) => b.y1))).toFixed(2)) : 0,
+    dividerX: s.divider?.x ?? null,
+    dividerStrength: s.divider?.s ?? null,
+    faceCx: f ? Number(((f.x1 + f.x2) / 2).toFixed(3)) : null,
+    faceH: f ? Number((f.y2 - f.y1).toFixed(3)) : null,
+    vote: v ? v.evidence : null,
+    side: v?.side ?? null,
+  };
+}
+
 /** Attach text boxes to the nearest face sample in time (text is scanned at its own rate). */
 export function attachText<S extends { t: number }>(samples: S[], frames: Array<{ t: number; all?: PBox[] }>, maxGap = 0.6): Array<S & { text?: PBox[] }> {
   if (!frames.length) return samples;

@@ -73,9 +73,20 @@ A short one-face stretch beside a split that is one of its speakers is held as s
 segments into `fit` where text fills the frame (a slide, or a paragraph of 4+ lines) for at least 2 s,
 snapped to scene cuts, but never over a segment that has a content region (its text is why the frame
 looks text-heavy); a clip with several pieces becomes 9:16 throughout. `tripodTrack` smooths the face
-path: dead zone 0.025, capped pan speed, instant snap at scene cuts.
+path: dead zone 0.025, capped pan speed. **Tripod.** The camera never pans across a break: a scene
+cut, or a face that jumps more than 0.15 of the width between consecutive samples and stays there for
+the next two (a cut the detector missed; a one-frame flip to another box is not a break). Each stretch
+between breaks is smoothed on its own, so no average straddles the cut, and the camera jumps to the
+median of the new stretch's first half second as a hard step (two crop-expression points 3 ms apart),
+not a lerp between two samples. A segment's track is re-based to its own clock and holds its first
+position back to t=0. Segments are joined by a plain concat (no wipe or fade) unless the user adds a
+transition, and ffmpeg's `crop` clamps x/y to the frame, so a crop never shows black.
 
-**Logged at debug** (`layout per section`, `render.ts:310`): per section the layout, manual flag,
+**Logged** at `trace` per sample (`content vote`: text beside the face per side, text span, divider x and
+strength, face centre and height, the vote and its side) and at `debug` once per render (`content runs`:
+frames, voting frames, text frames attached, each candidate run with its votes and why it was dropped,
+and the decision made for each kept run). `reelsaw faces <clipId> <range> --votes` prints the same from
+the CLI. **Logged at debug** (`layout per section`, `render.ts:310`): per section the layout, manual flag,
 reason, average faces per frame, and for face / panel decisions the content-region signals (share of
 frames, side, evidence, text beside per side, text extent, divider x and share, or why it was
 rejected). At info, `layout resolved` carries the per-piece summary and the first reason. The

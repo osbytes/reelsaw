@@ -12,7 +12,7 @@ import { finalizeProjectIfDone as finalizeInTx } from "./lifecycle.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
-import { attachText } from "./content-region.js";
+import { attachText, voteTrace } from "./content-region.js";
 import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
 import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import { QUEUES } from "../queue/boss.js";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { toWords } from "./transcript.js";
-import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
+import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
@@ -261,7 +261,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     });
   }
   const speechProbs = svc.vad && clipAudio ? await svc.vad.probabilities(clipAudio) : null;
-  let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces);
+  const layoutDiag = newLayoutDiag();
+  let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces, layoutDiag);
+  // what the content-region logic saw: one summary at debug; the per-frame vote at trace (module render)
+  log.debug(
+    { frames: layoutDiag.frames, voting: layoutDiag.voting, textFrames: frames.length, samplesWithText: samples.filter((sm) => sm.text).length, candidates: layoutDiag.candidates, decisions: layoutDiag.decisions },
+    "content runs",
+  );
+  for (const sm of samples) log.trace(voteTrace(sm), "content vote");
   // two people on screen: follow whoever is talking when detection is confident, otherwise keep the
   // split. No setting: a section forced to Split in the editor (manual) is always left alone.
   if (svc.faces && speechProbs && segments.some((sg) => sg.decision.layout === "split" && !sg.manual)) {

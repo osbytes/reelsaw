@@ -38,7 +38,24 @@ const median = (xs: number[]) => (xs.length ? xs.slice().sort((a, b) => a - b)[M
  * snapped to scene cuts.
  */
 export function contentRuns(samples: RegionSample[], duration: number, sceneCuts: number[] = []): ContentRun[] {
-  if (!samples.length) return [];
+  return contentRunReport(samples, duration, sceneCuts).runs;
+}
+
+/** A stretch of voting frames the run builder considered, and what became of it (for the debug log). */
+export interface RunCandidate {
+  side: ContentSide;
+  start: number;
+  end: number;
+  /** frames in the stretch that voted for the region, of all frames in it */
+  votes: number;
+  frames: number;
+  kept: boolean;
+  /** why a candidate was dropped */
+  reason?: string;
+}
+
+export function contentRunReport(samples: RegionSample[], duration: number, sceneCuts: number[] = []): { runs: ContentRun[]; candidates: RunCandidate[]; voting: number } {
+  if (!samples.length) return { runs: [], candidates: [], voting: 0 };
   const dts = samples.slice(1).map((s, i) => s.t - samples[i]!.t).filter((d) => d > 0);
   const dt = dts.length ? median(dts) : 0.25;
   const votes = samples.map((s) => frameVote(s));
@@ -70,13 +87,23 @@ export function contentRuns(samples: RegionSample[], duration: number, sceneCuts
   }
   const snap = (t: number) => sceneCuts.find((c) => Math.abs(c - t) <= RUN.snap) ?? t;
   const out: ContentRun[] = [];
+  const candidates: RunCandidate[] = [];
   for (const r of merged) {
     const inRun = samples.slice(r.first, r.last + 1);
-    if (inRun.filter((s) => s.box).length / inRun.length < RUN.minFace) continue;
     const start = r.first === 0 ? 0 : snap(samples[r.first]!.t);
     const end = r.last === samples.length - 1 ? duration : Math.min(duration, snap(samples[r.last]!.t + dt));
-    if (end - start < RUN.minSec) continue;
+    const cand: RunCandidate = { side: r.side, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), votes: votes.slice(r.first, r.last + 1).filter(Boolean).length, frames: inRun.length, kept: false };
+    candidates.push(cand);
+    if (inRun.filter((s) => s.box).length / inRun.length < RUN.minFace) {
+      cand.reason = `speaker in ${Math.round((inRun.filter((s) => s.box).length / inRun.length) * 100)}% of the run's frames`;
+      continue;
+    }
+    if (end - start < RUN.minSec) {
+      cand.reason = `shorter than ${RUN.minSec} s`;
+      continue;
+    }
+    cand.kept = true;
     out.push({ side: r.side, start, end, first: r.first, last: r.last, edge: Number(edgeOf(r).toFixed(3)) });
   }
-  return out;
+  return { runs: out, candidates, voting: votes.filter(Boolean).length };
 }

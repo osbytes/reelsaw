@@ -48,6 +48,8 @@ interface FramingCase {
     content?: { side?: "left" | "right"; box?: [number, number, number, number]; minWidth: number };
     /** content cases: the auto segmentation of the range, in order (the region appears and goes away mid-range) */
     segments?: string[];
+    /** track cases: after a shot change at `at` (seconds from the range start) the crop must be on the face within `within` seconds */
+    recentre?: { at: number; within: number };
     /** content cases: where the segments change, in seconds from the range start (+-0.3 s) */
     edges?: number[];
   };
@@ -163,14 +165,15 @@ export const framingSuite: Suite = {
         }
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else {
-        const track = tripodTrack(samples, []);
+        const track = tripodTrack(samples, c.sceneCuts ?? []);
         const settle = c.expect.settleSec ?? 2;
         const t0 = samples[0]?.t ?? 0;
         const errs: number[] = [];
         let maxSpeed = 0;
         for (let i = 0; i < track.length; i++) {
           const s = samples.find((x) => Math.abs(x.t - track[i]!.t) < 1e-6);
-          if (i > 0) maxSpeed = Math.max(maxSpeed, (Math.abs(track[i]!.x - track[i - 1]!.x) * c.srcW) / Math.max(1e-3, track[i]!.t - track[i - 1]!.t));
+          // a hard cut (two points a few ms apart) is a snap, not a pan
+          if (i > 0 && track[i]!.t - track[i - 1]!.t >= 0.01) maxSpeed = Math.max(maxSpeed, (Math.abs(track[i]!.x - track[i - 1]!.x) * c.srcW) / (track[i]!.t - track[i - 1]!.t));
           if (!s?.box || track[i]!.t - t0 < settle) continue;
           errs.push(Math.abs(track[i]!.x - (s.box.x1 + s.box.x2) / 2) * c.srcW);
         }
@@ -178,8 +181,16 @@ export const framingSuite: Suite = {
         const median = errs[Math.floor(errs.length / 2)] ?? NaN;
         const fails: string[] = [];
         if (!(median <= (c.expect.maxErrPx ?? 30))) fails.push(`median error ${median.toFixed(0)}px after ${settle}s`);
+        const rc = c.expect.recentre;
+        let recentreErr = 0;
+        if (rc) {
+          // the face must be framed by `within` seconds after the shot change, and stay framed for the next second and a half
+          const late = track.flatMap((tp, i) => (tp.t - t0 >= rc.at + rc.within && tp.t - t0 <= rc.at + rc.within + 1.5 && samples[i]?.box ? [Math.abs(tp.x - (samples[i]!.box!.x1 + samples[i]!.box!.x2) / 2) * c.srcW] : []));
+          recentreErr = late.length ? Math.max(...late) : NaN;
+          if (!(recentreErr <= (c.expect.maxErrPx ?? 30) * 2)) fails.push(`${recentreErr.toFixed(0)}px off the face ${rc.within}s after the shot change`);
+        }
         if (maxSpeed > (c.expect.maxPanPxPerSec ?? 1200)) fails.push(`pans at ${maxSpeed.toFixed(0)}px/s`);
-        out.push({ id: name, pass: !fails.length, metrics: { medianErrPx: Number(median.toFixed(1)), maxPanPxPerSec: Math.round(maxSpeed), points: errs.length }, notes: fails.join("; ") || c.note || "" });
+        out.push({ id: name, pass: !fails.length, metrics: { medianErrPx: Number(median.toFixed(1)), maxPanPxPerSec: Math.round(maxSpeed), points: errs.length, ...(rc ? { recentreErrPx: Math.round(recentreErr) } : {}) }, notes: fails.join("; ") || c.note || "" });
       }
     }
     return out;

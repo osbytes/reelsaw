@@ -12,7 +12,7 @@ docker compose exec app reelsaw logs <id> [n]          # log lines for a project
 docker compose exec app reelsaw status <projectId>     # stage, refine steps, every clip, runs, live jobs, errors
 docker compose exec app reelsaw events <projectId> 50  # what the pipeline emitted, in order
 docker compose exec app reelsaw clip <clipId>          # one clip: bounds, layout segments, last render's cuts + reasons
-docker compose exec app reelsaw faces <clipId> [a-b]   # face boxes per frame (clip-relative range) + split speaker tracks; --json for eval fixtures
+docker compose exec app reelsaw faces <clipId> [a-b]   # face boxes per frame (clip-relative range) + split speaker tracks; --json = the exact samples a render uses (faces, text boxes, divider strength `divider.s`) for eval fixtures; --votes = per-frame content-region vote, runs and decisions
 docker compose logs -f app | pnpm dlx pino-pretty      # structured logs, readable
 docker compose logs app | grep '"clipId":"<id>"'       # every line for one clip (logs carry projectId/clipId/jobId)
 ```

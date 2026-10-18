@@ -5,9 +5,9 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { detectContentRegion, contentReason, frameVote, type PBox, type RegionSample } from "../src/pipeline/content-region.js";
+import { voteTrace, detectContentRegion, contentReason, frameVote, type PBox, type RegionSample } from "../src/pipeline/content-region.js";
 import { contentSide } from "@reelsaw/shared";
-import { decideLayout, segmentLayouts, type FaceSample } from "../src/pipeline/layout.js";
+import { newLayoutDiag, decideLayout, segmentLayouts, type FaceSample } from "../src/pipeline/layout.js";
 
 const cfg = { LAYOUT_MIN_FACE_RATIO: 0.6, LAYOUT_MIN_FACE_SIZE: 0.18 };
 const face = (x1: number, x2: number, h = 0.35): PBox & { score: number } => ({ x1, x2, y1: 0.2, y2: 0.2 + h, score: 0.9 });
@@ -143,6 +143,17 @@ describe("content region", () => {
   it("no face means fit, never a panel stack", () => {
     const s = frames(40, () => ({ text: column(0.1, 0.3, 0.1, 6), divider: { x: 0.5, s: 0.5 } })).map((x) => ({ ...x, box: null, boxes: [] }));
     assert.deepEqual(segmentLayouts(s as never, cfg, [], 10).map((x) => x.decision.layout), ["fit"]);
+  });
+
+  it("reports why a candidate run was dropped", () => {
+    const s = frames(80, (i) => (i < 4 ? { box: face(0.62, 0.86), text: column(0.07, 0.45, 0.36, 3, 0.12), divider: { x: 0.495, s: 0.49 } } : { box: face(0.43, 0.58) }));
+    const diag = newLayoutDiag();
+    segmentLayouts(s, cfg, [], 20, undefined, diag);
+    assert.equal(diag.candidates.length, 1);
+    assert.equal(diag.candidates[0]!.kept, false);
+    assert.match(diag.candidates[0]!.reason ?? "", /shorter than/);
+    assert.equal(voteTrace(s[0]!).vote, "text+divider");
+    assert.equal(voteTrace(s[10]!).vote, null);
   });
 
   it("contentReason names what it found", () => {
