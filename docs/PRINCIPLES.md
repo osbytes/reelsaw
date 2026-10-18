@@ -91,6 +91,58 @@ project already hit the problem it prevents.
   next person will look (`lib/`, `packages/shared`), with the one caller that proves it. The
   question to answer in review is "what did you search for first?"
 
+#### Logging
+
+Any issue must be debuggable from the logs alone. The logs say *what was decided and why*; they
+are not the metrics.
+
+- **Logs are not telemetry.** Logs hold decisions, their inputs and reasons, state transitions,
+  recoveries and failures. Durations, throughput and counters belong to the spans and metrics
+  (`withSpan`, the OpenTelemetry auto-instrumentation), to `llm_usage`, and to the `durationSec`
+  in event payloads; do not log them again. A duration or a count goes on a line only when the
+  line is an anomaly (a slow request, a truncated model answer) or the number *is* the reason
+  for a decision (`dropped: 3 overlapping`, `confidence 0.4 < 0.5`). Before adding `ms` or a
+  total to a log call, ask which span, metric or event already carries it.
+- **Levels mean one thing each.**
+  - `fatal`: the process cannot continue (a boot self-check failed, uncaught exception).
+  - `error`: an operation failed and a person must act, or a user saw a failure (clip failed,
+    request 5xx, job dead-lettered, project failed). Always with `err`.
+  - `warn`: degraded or recovered automatically, a limit hit, something skipped (retry,
+    fallback model, bumper skipped, truncated list, slow request, 4xx that is not routine).
+  - `info`: one line per state transition or milestone, countable: project events (run started,
+    stage started / completed, clip done), API requests, sign-in, admin actions, MCP tool calls.
+  - `debug`: the decisions and inputs you need to explain a wrong result: moments chosen with
+    scores, layout per section and why, each cut accepted or rejected and why, ffmpeg argv, the
+    framing requested, bumpers used. Never prompt bodies (that is `LLM_TRACE`). Safe to run in
+    production for a project for a few minutes.
+  - `trace`: per-item loops (per word, per frame, per candidate decision). Never above `trace`.
+- **Every line carries its ids.** Derive child loggers per module and per unit of work
+  (`module`, `projectId`, `clipId`, `jobId`, `runSeq`, `userId`, `requestId`, `tool` for MCP) so
+  one `grep projectId=` (or `reelsaw logs <id>`) reconstructs a project's whole story. A new
+  module takes `log` from the composition root or its context (`svc.log`, `ctx.log` in a
+  pipeline stage, `c.get("log")` in an HTTP handler, `ctx.log` in a tRPC procedure) and never
+  builds its own. No `console.*` in server code (the CLI prints output, it does not log).
+  The `module` binding is what runtime levels key on, so name it for the part of the system
+  (`render`, `analyze`, `http`, `storage`).
+- **Message is a constant phrase; data goes in fields.** `log.info({ cuts }, "applying jump cuts")`,
+  never a sentence with the numbers in it. Errors in `err` so the stack serialises. Pure
+  decision functions return their reasons; the stage that calls them logs the decision.
+- **Secrets never.** Passwords, API keys, tokens, cookies, `Authorization`, proxy URLs. The
+  redaction list in `log.ts` stays current when a new kind of secret appears, and argv or URLs
+  are logged through a masking helper (`loggableArgv`). Issue-report logs go through the
+  redactor again.
+- **Level is adjustable without a restart,** globally and per module, for a bounded time:
+  `LOG_LEVEL=info,render=debug,http=warn` at boot; `reelsaw log-level render=debug --for 15m`
+  (or Settings → System → Log level) at runtime, applied by every process within about five
+  seconds and reverted on its own. The default is `info`.
+- **A request has one id from edge to job.** `x-request-id` is accepted or generated, returned
+  on the response, and carried by the access line, the tRPC error line, the MCP tool line and
+  the lines of that handler; the job it enqueues is found by the `projectId` on both sides.
+- **Logs are the first thing a report carries.** The issue-report zip bundles the project's lines
+  from the last seven days and the level in force; `docs/TROUBLESHOOTING.md` ("Reading the logs")
+  says how to read them. A change that adds a decision point adds its `debug` line in the same
+  change.
+
 ### Scale
 
 Findings and the fix plan: [docs/specs/scale.md](specs/scale.md). Today's data is small, so
@@ -146,8 +198,9 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   break them.
 - **Prompted models over-delete and over-claim.** Put structural guards (rules) in front and a
   verifier behind, and keep only verified uncertain results, for review.
-- **Operable by default.** Structured logs carry ids (project, clip, job). Every diagnosis you
-  need more than once becomes a `reelsaw` CLI command. Events are readable in the activity feed.
+- **Operable by default.** Logs are the first debugging tool (see "Logging" under Backend /
+  Structure). Every diagnosis you need more than once becomes a `reelsaw` CLI command. Events are
+  readable in the activity feed.
 
 ## Frontend
 

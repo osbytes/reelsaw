@@ -169,6 +169,14 @@ export async function refineEntities(ctx: StageContext) {
     { title: project.title, uploader: project.sourceMeta?.uploader as string | undefined },
     { signal: ctx.signal, telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
   );
+  ctx.log.debug(
+    {
+      entities: t.entities.length,
+      applied: res.applied.map((a) => ({ heard: a.heard, entity: a.entity, at: Number(a.at.toFixed(1)) })),
+      pending: res.flags.filter((f) => f.status === "pending").map((f) => ({ heard: f.heard, suggested: f.suggested, confidence: f.confidence, at: Number(f.start.toFixed(1)) })),
+    },
+    "entity corrections",
+  );
   ctx.log.info({ step: "entities", auto: res.applied.length, pending: res.flags.length - res.applied.length, candidates: res.candidates }, "refine step done");
   await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } });
 }
@@ -213,6 +221,11 @@ export async function refineDisfluency(ctx: StageContext) {
     reserved,
     rejectedExamples: await rejectedCutExamples(svc, ctx.projectId).catch(() => []),
   }, trace);
+  const byOutcome: Record<string, number> = {};
+  for (const e of trace) byOutcome[e.outcome] = (byOutcome[e.outcome] ?? 0) + 1;
+  ctx.log.debug({ candidates: trace.length, rules: trace.filter((e) => e.source === "rule").length, model: trace.filter((e) => e.source === "model").length, byOutcome, reservedWords: reserved.size }, "disfluency candidates");
+  // every cut accepted or rejected, and why (bounded; the stage artifact keeps the full list)
+  for (const e of trace.slice(0, 200)) ctx.log.trace({ wordIndex: e.wordIndex, text: e.text, subkind: e.subkind, source: e.source, why: e.why, prior: e.prior, verdict: e.verdict ?? null, outcome: e.outcome }, "disfluency decision");
   ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
   await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: svc.config.DISFLUENCY_LLM ? modelsUsed(svc, "language") : { language: "none (rules only)" } } });
 }
@@ -239,6 +252,7 @@ export async function refineScenes(ctx: StageContext) {
       ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
     }
   }
+  ctx.log.debug({ cuts: sceneCuts.length, first: sceneCuts.slice(0, 12).map((c) => Number(c.toFixed(1))), skipped: !project.width ? "no video width" : undefined }, "scene cuts");
   ctx.log.info({ step: "scenes", cuts: sceneCuts.length, overlays: overlays.length }, "refine step done");
   await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays, textProfile });
 }
@@ -246,7 +260,7 @@ export async function refineScenes(ctx: StageContext) {
 /** Called by the worker when a refine job has exhausted its retries. */
 export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  svc.log.error({ stage: "refine", step, projectId, error: message }, "refine step gave up");
+  svc.log.child({ module: "refine", projectId }).error({ step, err }, "refine step gave up");
   const durationSec = await stageElapsed(svc.database.db, projectId, "refine");
   await svc.events.emit(projectId, "stage.failed", { stage: "refine", step, error: message.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
   await mergeRefine(svc, projectId, step, { status: "failed" });

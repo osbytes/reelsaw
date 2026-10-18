@@ -17,6 +17,7 @@ import type { AuthUser } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
+import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { addBumperInput, assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput, type AssetRef } from "./bumpers/service.js";
 
 const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
@@ -33,17 +34,41 @@ function text(data: unknown) {
 function fail(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
+/** Ids and scalars only, never bodies (captions, transcripts, prompts): enough to find what a tool touched. */
+export function argSummary(args: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!args || typeof args !== "object") return out;
+  for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+    if (typeof v === "number" || typeof v === "boolean") out[k] = v;
+    else if (typeof v === "string") out[k] = /id$/i.test(k) || k === "cursor" ? v.slice(0, 64) : `${v.length} chars`;
+    else if (Array.isArray(v)) out[k] = `${v.length} items`;
+    else if (v && typeof v === "object") out[k] = `{${Object.keys(v).join(",")}}`;
+  }
+  return out;
+}
 function mmss(s: number) {
   const m = Math.floor(s / 60);
   return `${m}:${String(Math.floor(s - m * 60)).padStart(2, "0")}`;
 }
 
-export function createMcpServer(svc: Services, user: AuthUser, req: Request): McpServer {
-  const ctx: Context = { svc, who: { user, via: "apikey", session: null, blocked: null }, req };
+export function createMcpServer(svc: Services, user: AuthUser, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
+  const log = svc.log.child({ module: "mcp", userId: user.id, requestId });
+  const ctx: Context = { svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId, log };
   const api = appRouter.createCaller(ctx);
   const db = svc.database.db;
   const abs = (p: string | null) => (p ? new URL(p, svc.config.APP_URL).toString() : null);
   const server = new McpServer({ name: "reelsaw", version: svc.config.REELSAW_VERSION }, { instructions: INSTRUCTIONS });
+  // every tool call is logged the same way: one info line (tool, ms, outcome), the argument ids at debug
+  const register = server.registerTool.bind(server) as unknown as (name: string, config: unknown, cb: (...a: unknown[]) => unknown) => unknown;
+  (server as unknown as { registerTool: typeof register }).registerTool = (name, config, cb) =>
+    register(name, config, async (...a: unknown[]) => {
+      const tlog = log.child({ tool: name });
+      tlog.debug({ args: argSummary(a[0]) }, "mcp tool call");
+      const res = (await cb(...a)) as { isError?: boolean; content?: Array<{ text?: string }> };
+      const code = res?.isError ? /^([A-Z_]{4,}):/.exec(res.content?.[0]?.text ?? "")?.[1] : undefined;
+      tlog[res?.isError ? "warn" : "info"]({ ok: !res?.isError, ...(res?.isError ? { code: code ?? "ERROR" } : {}) }, "mcp tool");
+      return res;
+    });
 
   /** Run a tool body; tRPC errors become tool errors the model can read instead of protocol failures. */
   const run = async (fn: () => Promise<unknown>) => {
@@ -51,7 +76,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
       return text(await fn());
     } catch (err) {
       if (err instanceof TRPCError) return fail(`${err.code}: ${err.message}`);
-      svc.log.error({ err, userId: user.id }, "mcp tool failed");
+      log.error({ err }, "mcp tool failed");
       return fail(err instanceof Error ? err.message : String(err));
     }
   };
@@ -415,7 +440,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
 
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser): Promise<Response> {
-  const server = createMcpServer(svc, user, c.req.raw);
+  const server = createMcpServer(svc, user, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return (await transport.handleRequest(c)) ?? c.text("Not found", 404);

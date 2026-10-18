@@ -163,6 +163,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
 
   const settings = project.settings;
   const duration = clip.endSec - clip.startSec;
+  log.debug({ gen, index: clip.index, startSec: clip.startSec, endSec: clip.endSec, durationSec: Number(duration.toFixed(2)), origin: clip.origin }, "render start");
   const srcW = project.width ?? 1920;
   const srcH = project.height ?? 1080;
 
@@ -170,6 +171,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const defaultMode = (clip.layoutOverride ?? settings.reframe ?? "auto") as TimelineMode;
   const sections = (clip.layoutSections ?? []).map((sc) => ({ start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode, offsetX: sc.offsetX }));
   const timeline = coverTimeline(duration, sections, defaultMode);
+  log.debug({ defaultMode, sections: sections.length, timeline: timeline.map((pc) => ({ start: Number(pc.start.toFixed(2)), end: Number(pc.end.toFixed(2)), mode: pc.mode })) }, "framing requested");
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
   const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true, textProfile: true } });
   // burned-in captions / watermarks: keep them out of speaker crops, blur whatever is still visible
@@ -273,6 +275,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const first = segments[0]!;
   const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
   log.info({ layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount }, "layout resolved");
+  log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
   const detected: DetectedSegment[] = segments.map((sg) => {
     const c1 = trackCenter(sg.decision.track);
     const c2 = sg.decision.track2 ? trackCenter(sg.decision.track2) : undefined;
@@ -496,6 +499,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   await svc.storage.putFile(thumbnailKey, thumbPath, "image/jpeg");
   if (svc.storage.driver !== "local") await fs.rm(outPath, { force: true }).catch(() => {});
 
+  log.debug({ intro: bumpers.intro?.id ?? null, outro: bumpers.outro?.id ?? null, used: usedBumpers, introSec: attached.introSec, outroSec: attached.outroSec, skipped: bumpers.skipped, fromClip: chosen.fromClip }, "bumpers");
   const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),

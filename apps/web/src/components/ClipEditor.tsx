@@ -9,8 +9,9 @@ import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
 import { Timeline, normalizeSections, MODE_LABEL, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
-import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, effectiveAsset, effectiveSeconds, useBumperLibrary } from "./BumperField";
+import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom } from "./BumperField";
 import { ThemeToggle } from "../App";
+import { reportClientError } from "../lib/diagnostics";
 import { useHistory } from "../lib/history";
 import {
   defaultStyle,
@@ -245,7 +246,6 @@ export function ClipEditor(props: Props) {
   }));
   const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers } = history.state;
   const [bumpersDialog, setBumpersDialog] = useState(false);
-  const library = useBumperLibrary();
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) => history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
   const [selected, setSelected] = useState<number | null>(null);
@@ -370,7 +370,7 @@ export function ClipEditor(props: Props) {
     if (!v) return;
     if (v.paused) {
       if (v.currentTime < range[0] - 0.05 || v.currentTime >= range[1] - 0.05) v.currentTime = range[0];
-      v.play().catch((err) => console.warn("[editor] play rejected", err));
+      v.play().catch((err) => reportClientError("error", err));
     } else v.pause();
   };
   const setIn = (t: number) => setRange([Math.min(t, range[1] - 1), range[1]]);
@@ -500,20 +500,6 @@ export function ClipEditor(props: Props) {
       return false;
     }
   }
-  // what the rendered file adds around the source range, from the library (or the last render if the asset is gone)
-  const introId = effectiveAsset(bumpers.intro, settings.introAssetId);
-  const outroId = effectiveAsset(bumpers.outro, settings.outroAssetId);
-  const libAll = [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])];
-  // effective length: an image uses this clip's seconds, else the project's, else its own; a video its own length
-  const secLabel = (slot: "intro" | "outro", id: string | null | undefined, last: number | undefined) => {
-    const asset = id ? libAll.find((a) => a.id === id) : undefined;
-    const n = !id ? undefined : asset?.kind === "image" ? effectiveSeconds(bumpers[`${slot}Sec`], bumpers[slot], settings[`${slot}Sec`], asset.durationSec) : (asset?.durationSec ?? last);
-    return n ? ` ${n.toFixed(n % 1 ? 1 : 0)} s` : "";
-  };
-  const bumpersLabel =
-    !introId && !outroId
-      ? "no intro / outro"
-      : [introId ? `+ intro${secLabel("intro", introId, clip.diagnostics?.bumpers?.introSec)}` : "", outroId ? `+ outro${secLabel("outro", outroId, clip.diagnostics?.bumpers?.outroSec)}` : ""].filter(Boolean).join(" · ");
   const busy = update.isPending || updateStyle.isPending;
   const requestExit = () => (changed ? setGuard(true) : onExit());
 
@@ -1049,6 +1035,8 @@ export function ClipEditor(props: Props) {
         )}
         <video ref={videoRef} src={sourceVideoUrl} preload="auto" playsInline className="pointer-events-none absolute h-px w-px opacity-0" />
       </div>
+      {/* one centred column, about the preview's width, so the controls line up with the video */}
+      <div className="mx-auto flex w-full max-w-[26rem] flex-col items-stretch gap-2.5">
       <div className="flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-ink2">
         <span className="flex items-center gap-1.5" title={cropLayout ? "Drag the picture to re-centre this section" : `Not adjustable in ${MODE_LABEL[framing.layout]}`}>
           Offset <span className="font-mono text-ink">{curSec?.offsetX ? `${curSec.offsetX > 0 ? "+" : ""}${Math.round(curSec.offsetX * 100)}%` : "0%"}</span>
@@ -1056,10 +1044,12 @@ export function ClipEditor(props: Props) {
             Reset
           </button>
         </span>
-        <label className="flex cursor-pointer items-center gap-1.5">
-          <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" /> Safe zones
-        </label>
-        <Select size="sm" className="w-[8.5rem]" ariaLabel="Platform" value={platform} onValueChange={(v) => setPlatform(v as Platform)} options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))} />
+        <span className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" /> Safe zones
+          </label>
+          <Select size="sm" disabled={!safe} className="w-[9rem]" ariaLabel="Platform" value={platform} onValueChange={(v) => setPlatform(v as Platform)} options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))} />
+        </span>
         {overlays.length > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-acc-soft px-2.5 py-1 text-ink" title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours">
             <span className="font-mono text-[10px]">CC</span> Burned-in text blurred
@@ -1099,17 +1089,16 @@ export function ClipEditor(props: Props) {
           Out ]
         </button>
       </div>
-      {/* fixed-height block: what the rendered file adds around this source range (the timeline is source time only) and this clip's own choice */}
-      <div className="flex h-[7.25rem] w-full flex-col items-center justify-start gap-1.5 overflow-hidden text-xs text-ink2">
-        <div className="flex h-5 items-center gap-3">
-          <span className="font-mono" title="Added around the clip in the rendered file; not part of the source timeline">
-            {bumpersLabel}
-          </span>
-          <button className="font-semibold text-acc-text" onClick={() => setBumpersDialog(true)} title="Intro and outro for the whole project">
-            Project…
+      {/* fixed height at each width, so a seconds field appearing never moves anything */}
+      <section className="flex h-[6.75rem] flex-col gap-1.5 max-sm:h-[9.75rem]" aria-label="Intro and outro">
+        <div className="flex h-5 items-center justify-between text-xs">
+          <span className="font-semibold text-ink2">Intro and outro</span>
+          <button className="text-acc-text hover:underline" onClick={() => setBumpersDialog(true)} title="Intro and outro for the whole project">
+            Project settings…
           </button>
         </div>
-        <BumperSelects value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} className="w-full max-w-[26rem] px-3" />
+        <BumperSelects reserveSec value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} />
+      </section>
       </div>
     </div>
   );

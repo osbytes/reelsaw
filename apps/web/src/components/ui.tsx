@@ -1,7 +1,10 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import * as Popover from "@radix-ui/react-popover";
+import { Command } from "cmdk";
+import { ScrollArea } from "./scroll-area";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as RadixSelect from "@radix-ui/react-select";
-import { Check, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, MoreHorizontal } from "lucide-react";
 import type { ProjectStatus, ClipStatus } from "@reelsaw/shared";
 
 type Tone = "ok" | "acc" | "warn" | "err" | "idle";
@@ -155,10 +158,10 @@ export type SelectOption = { value: string; label: ReactNode; hint?: string; dis
  * (md) or a compact button (sm); give it a width via `className` so a longer label never shifts layout.
  * An option with value "" is allowed (it means "unset").
  */
-export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void }) {
+export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
-    <RadixSelect.Root value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
+    <RadixSelect.Root disabled={disabled} value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
       <RadixSelect.Trigger
         aria-label={ariaLabel}
         onClick={onClick}
@@ -193,6 +196,62 @@ export function Select({ value, onValueChange, options, placeholder, size = "md"
         </RadixSelect.Content>
       </RadixSelect.Portal>
     </RadixSelect.Root>
+  );
+}
+
+export type ComboboxOption = { value: string; label: string; hint?: string };
+
+/**
+ * The one single-choice picker with typeahead, for plain lists that are too long for a `Select`
+ * (Radix Popover + cmdk). Same trigger as `Select`; give it a width via `className`. Rich rows
+ * (thumbnails, badges) are a purpose-built picker such as BumperCombobox.
+ */
+export function Combobox({ value, onValueChange, options, placeholder = "Choose…", emptyText = "No matches", className = "", ariaLabel, size = "md" }: { value: string; onValueChange: (v: string) => void; options: ComboboxOption[]; placeholder?: string; emptyText?: string; className?: string; ariaLabel: string; size?: "sm" | "md" }) {
+  const [open, setOpen] = useState(false);
+  const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
+  const current = options.find((o) => o.value === value);
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+          className={`flex w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}
+        >
+          <span className={`min-w-0 truncate ${current ? "" : "text-ink3"}`}>{current?.label ?? placeholder}</span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="menu z-[80] w-[max(var(--radix-popover-trigger-width),12rem)] overflow-hidden p-0">
+          <Command loop>
+            <Command.Input placeholder="Type to filter…" className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
+            <ScrollArea className="max-h-[min(260px,calc(var(--radix-popover-content-available-height)-60px))]">
+              <Command.List className="p-1.5">
+                <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">{emptyText}</Command.Empty>
+                {options.map((o) => (
+                  <Command.Item
+                    key={o.value}
+                    value={`${o.label} ${o.value}`}
+                    onSelect={() => {
+                      onValueChange(o.value);
+                      setOpen(false);
+                    }}
+                    className="menu-item relative pr-8 data-[selected=true]:bg-sunk"
+                  >
+                    <span className={o.value === value ? "font-semibold" : ""}>{o.label}</span>
+                    {o.hint && <span className="menu-hint">{o.hint}</span>}
+                    {o.value === value && <Check className="absolute right-2.5 h-4 w-4" />}
+                  </Command.Item>
+                ))}
+              </Command.List>
+            </ScrollArea>
+          </Command>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

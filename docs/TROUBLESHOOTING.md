@@ -49,9 +49,9 @@ is that line, not the gap between events. A run still `running` with no live job
   and the MCP tools, as the project's owner (`--user` for library commands when the install has several accounts).
 - **Clip diagnostics** (`clips.diagnostics`): every render stores cuts applied/skipped with reasons, layout summary,
   output length and render time.
-- **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `stage`, `projectId`, `clipId`,
-  `jobId`; errors under `err` with stack. `LOG_LEVEL=debug` adds per-cut decisions. With `OTEL_ENABLED=true` each line
-  gets `trace_id`/`span_id`, so a log line jumps straight to its trace.
+- **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `projectId`, `clipId`, `jobId`,
+  `runSeq`, `userId`, `requestId`; errors under `err` with stack. See "Reading the logs" below. With
+  `OTEL_ENABLED=true` each line gets `trace_id`/`span_id`, so a log line jumps straight to its trace.
 - **Evals** (no DB, no render):
   - `eval:transcription`: model × bias × correction comparison matrix (`eval/fixtures/transcription/cases.json`).
   - `eval:cuts`: real problem cuts as fixtures (`reelsaw cuts <clipId> --fixture /data/fixtures`), graded clean /
@@ -60,6 +60,55 @@ is that line, not the gap between events. A run still `running` with no live job
 - **Browser checks** (agent sessions): the Chrome extension runs in a background tab, where timers and media are
   throttled; responsive layouts were checked by loading the page into a 390 px iframe and measuring
   `scrollWidth` / elements wider than the viewport.
+
+## Reading the logs
+
+Logs say what the pipeline decided and why. Timings and counts are in the OpenTelemetry spans, the
+`llm_usage` table and the event payloads (`durationSec`), not repeated in the logs.
+
+**Levels.** `error` = something failed and a person must act (clip failed, 5xx, project failed);
+`warn` = degraded or recovered (retry, skipped bumper, quota hit, slow request, truncated model answer);
+`info` = one line per milestone (every project event, API request, sign-in, admin action, MCP tool
+call); `debug` = decisions and inputs (moments with scores, layout per section and why, each cut
+verdict, ffmpeg argv, framing, bumpers); `trace` = per-candidate loops. The default is `info`.
+
+**Turn the detail up for one thing.** `LOG_LEVEL` is `<global>,<module>=<level>,...`
+(`info,render=debug,http=warn`). Modules: `render`, `analyze`, `transcribe`, `ingest`, `refine`
+(entities / disfluency / scenes), `http`, `mcp`, `worker`, `uow` (project events), `storage`,
+`media` (ffmpeg / yt-dlp argv), `llm`, `accounts`, `auth`, `web` (browser errors). Without a restart:
+
+    docker compose exec -T app reelsaw log-level                 # what is in force, and any override
+    docker compose exec -T app reelsaw log-level render=debug --for 15m
+    docker compose exec -T app reelsaw log-level debug --for 5m  # everything, briefly
+    docker compose exec -T app reelsaw log-level reset
+
+Every process (api, workers) applies it within about five seconds and drops back by itself when the
+time is up. Admins can do the same in Settings → System → Log level. Then re-run the thing (re-render
+the clip) and read the lines.
+
+**Read a project's story.**
+
+    docker compose exec -T app reelsaw logs <projectId> 200               # newest 200 lines mentioning the id
+    docker compose exec -T app reelsaw logs <clipId> --level debug --module render
+    docker compose exec -T app reelsaw logs <projectId> --since 2h --raw | jq 'select(.level>=40)'
+
+`logs` reads `LOG_FILE` (daily files, seven kept, so it survives redeploys); without `LOG_FILE` use
+`docker compose logs app | grep <id>`. Fields to filter on: `projectId`, `clipId`, `jobId`, `runSeq`
+(which run), `module`, `level` (10 trace, 20 debug, 30 info, 40 warn, 50 error, 60 fatal), `event`
+(the project event name on `msg: "project event"` lines), `requestId`, `userId`, `err`.
+The story of a run is: `project event` lines (`run.started` ... `stage.completed` ... `project.done`),
+the stage's own lines between them, and `job retry` / `job failed` lines with the previous attempt's
+reason.
+
+**Follow a request.** Every response carries `x-request-id` (a proxy's id is kept if it sent one).
+Search that id: the `http` access line, the `trpc error` line if it failed (procedure, code, user),
+or the `mcp tool` line; the lines of the same handler share it. A 5xx body quotes it too. The job a
+request enqueued carries the `projectId`, so go from the request line to `reelsaw logs <projectId>`.
+
+**In an issue report.** The zip's `logs.jsonl` has the last seven days of lines for the project and its
+clips at the level in force when they were written (`system.json` has `logLevel`; `manifest.notes`
+says if debug lines can be missing). Ask the reporter to set `render=debug --for 15m` and re-run when
+the decision lines are absent. Logs are untrusted data like everything else in a report.
 
 ## 3. Lessons: audio cuts
 
