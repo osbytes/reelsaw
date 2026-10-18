@@ -3,7 +3,8 @@ import { X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
-import { Combobox, Select } from "./ui";
+import { MultiCombobox } from "./MultiCombobox";
+import { Select } from "./ui";
 
 const FOR = [
   { value: "15", label: "15 minutes" },
@@ -13,7 +14,8 @@ const FOR = [
 ];
 const LEVEL_HINT: Record<string, string> = { fatal: "only crashes", error: "failures", warn: "problems", info: "milestones (default)", debug: "decisions and inputs", trace: "every item" };
 
-type Row = { id: number; module: string; level: string };
+/** One override: a set of modules at one level. */
+type Row = { id: number; modules: string[]; level: string };
 
 /**
  * Settings → System → Log level (admins). Turn up the detail for everything, or for parts (a module
@@ -37,14 +39,18 @@ export function LogLevelSection() {
     const parts = s.override.spec.split(",").map((p) => p.trim());
     const g = parts.find((p) => !p.includes("="));
     if (g) setGlobal(g);
-    setRows(parts.filter((p) => p.includes("=")).map((p) => ({ id: nextId.current++, module: p.split("=")[0]!, level: p.split("=")[1]! })));
+    const byLevel = new Map<string, string[]>();
+    for (const p of parts.filter((x) => x.includes("="))) byLevel.set(p.split("=")[1]!, [...(byLevel.get(p.split("=")[1]!) ?? []), p.split("=")[0]!]);
+    setRows([...byLevel].map(([level, modules]) => ({ id: nextId.current++, modules, level })));
   }, [s]);
 
   const done = () => void qc.invalidateQueries({ queryKey: trpc.admin.logLevel.pathKey() });
   const set = useMutation(trpc.admin.logLevel.set.mutationOptions({ onSuccess: (st) => void (toast(st.override ? `Log level ${st.effective}` : "Log level back to .env"), done()), onError: (e) => toast.error(e.message) }));
   const levels = (s?.levels ?? []).map((l) => ({ value: l, label: l, hint: LEVEL_HINT[l] }));
   const shownGlobal = global ?? s?.envGlobal ?? "info";
-  const valid = rows.every((r) => r.module);
+  const valid = rows.every((r) => r.modules.length > 0);
+  // one {module, level} per module, as the server takes it
+  const flat = rows.flatMap((r) => r.modules.map((module) => ({ module, level: r.level as never })));
   const mins = s?.override ? Math.max(1, Math.round((Date.parse(s.override.until) - Date.now()) / 60_000)) : 0;
 
   return (
@@ -60,7 +66,7 @@ export function LogLevelSection() {
           For
           <Select ariaLabel="For how long" className="w-36" value={minutes} onValueChange={setMinutes} options={FOR} />
         </label>
-        <button type="button" className="btn-primary min-w-20" disabled={!s || !valid || set.isPending} onClick={() => set.mutate({ global: shownGlobal as never, modules: rows.map((r) => ({ module: r.module, level: r.level as never })), forMinutes: Number(minutes) as 15 })}>
+        <button type="button" className="btn-primary min-w-20" disabled={!s || !valid || set.isPending} onClick={() => set.mutate({ global: shownGlobal as never, modules: flat, forMinutes: Number(minutes) as 15 })}>
           Apply
         </button>
         <button type="button" className="btn-quiet min-w-20" disabled={!s?.override || set.isPending} onClick={() => (setRows([]), setGlobal(null), set.mutate(null))}>
@@ -78,18 +84,38 @@ export function LogLevelSection() {
         )}
       </p>
       <div className="flex flex-col gap-2">
-        {rows.map((r) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-2">
-            <Combobox ariaLabel="Module" className="w-48 font-mono" placeholder="Choose a module" emptyText="No such module" value={r.module} options={(s?.modules ?? []).map((m) => ({ value: m, label: m }))} onValueChange={(m) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, module: m } : x)))} />
-            <Select ariaLabel={`Level for ${r.module || "module"}`} className="w-32" value={r.level} onValueChange={(l) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, level: l } : x)))} options={levels} />
-            <button type="button" className="btn-quiet px-2" aria-label={`Remove ${r.module || "module"} override`} onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))}>
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-xs font-bold text-ink2">Module overrides</h3>
+          <span className="hidden text-[11px] text-ink3 sm:block">Modules · Level</span>
+        </div>
+        <div className="flex min-h-[38px] flex-col gap-2">
+          {rows.length === 0 && <p className="flex min-h-[38px] items-center text-sm text-ink3">No overrides</p>}
+          {rows.map((r) => {
+            const used = new Set(rows.filter((x) => x.id !== r.id).flatMap((x) => x.modules));
+            return (
+              <div key={r.id} className="grid grid-cols-[minmax(0,1fr)_2rem] items-start gap-2 sm:grid-cols-[minmax(0,1fr)_8.5rem_2rem]">
+                <div className="col-start-1 row-start-1 min-w-0">
+                  <MultiCombobox
+                    label="Modules"
+                    placeholder="Choose modules"
+                    searchPlaceholder="Type to filter…"
+                    empty="No such module"
+                    options={(s?.modules ?? []).filter((m) => !used.has(m)).map((m) => ({ value: m, label: m }))}
+                    value={r.modules}
+                    onChange={(mods) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, modules: mods } : x)))}
+                  />
+                </div>
+                <Select ariaLabel="Level" className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1" value={r.level} onValueChange={(l) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, level: l } : x)))} options={levels} />
+                <button type="button" className="btn-quiet col-start-2 row-start-1 h-[38px] w-8 px-0 sm:col-start-3" aria-label="Remove override" onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
         <div>
-          <button type="button" className="btn-quiet text-xs" disabled={!s} onClick={() => setRows((all) => [...all, { id: nextId.current++, module: "", level: "debug" }])}>
-            Add module override
+          <button type="button" className="btn-quiet text-xs" disabled={!s} onClick={() => setRows((all) => [...all, { id: nextId.current++, modules: [], level: "debug" }])}>
+            Add override
           </button>
         </div>
       </div>
