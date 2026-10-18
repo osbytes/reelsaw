@@ -64,6 +64,13 @@ the page shows the exact client config. The MCP endpoint is `<APP_URL>/api/mcp`,
 must be the address agents can reach. Agents can also manage your intro/outro library and assign it to
 projects and clips (`list_bumpers`, `add_bumper`, `set_project_bumpers`, `set_clip_bumpers`, …).
 
+A client that launches a command instead of calling a URL (Claude Desktop without `MCP_OAUTH`,
+Cursor's stdio entries) runs `reelsaw mcp` inside the app container; Settings shows the config:
+
+```json
+{ "mcpServers": { "reelsaw": { "command": "docker", "args": ["exec", "-i", "-e", "REELSAW_API_KEY=rs_…", "reelsaw-app-1", "reelsaw", "mcp"] } } }
+```
+
 ## Upgrade
 
 ```bash

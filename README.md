@@ -234,6 +234,15 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 { "mcpServers": { "reelsaw": { "type": "http", "url": "https://your-host/api/mcp", "headers": { "Authorization": "Bearer rs_…" } } } }
 ```
 
+Clients that launch a command instead of calling a URL with a header (Claude Desktop without
+`MCP_OAUTH`, Cursor's stdio entries) use `reelsaw mcp`: the same tools over stdio, forwarded to a
+running instance. It needs no database or models, only `REELSAW_URL` (default: the app in the same
+container) and `REELSAW_API_KEY`:
+
+```json
+{ "mcpServers": { "reelsaw": { "command": "docker", "args": ["exec", "-i", "-e", "REELSAW_API_KEY=rs_…", "reelsaw-app-1", "reelsaw", "mcp"] } } }
+```
+
 Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
 `get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
 `update_clip`, `create_clip`, `rerender_clip`, `rerender_clips` (several at once), `export_project` (zip link, optionally only some `clipIds`), `retry_project`, `reanalyze_project`,
@@ -242,7 +251,8 @@ upload id), `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usa
 `set_project_bumpers`, `set_clip_bumpers` (one clip or many; `rerender: true` re-renders only those
 clips); `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
 They call the same tRPC procedures as the web app, so ownership checks and
-validation are identical (`apps/server/src/mcp.ts`). The same key also authenticates tRPC
+validation are identical (`apps/server/src/mcp.ts`; the catalogue both transports advertise is
+`apps/server/src/mcp-tools.ts`). The same key also authenticates tRPC
 (`/api/trpc/*`), uploads and media downloads, so an agent can fetch the rendered clips. Keys are
 hashed at rest (`@better-auth/api-key`); revoke them from Settings.
 
