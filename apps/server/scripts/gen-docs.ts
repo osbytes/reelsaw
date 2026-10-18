@@ -63,6 +63,9 @@ async function envRows(): Promise<Row[]> {
   return rows.map((r, i) => ({ r, i })).sort((a, b) => order.indexOf(a.r.group) - order.indexOf(b.r.group) || a.i - b.i).map((x) => x.r);
 }
 
+/** Text for one markdown table cell: backslashes and pipes escaped, so the row keeps its columns. */
+const cell = (s: string) => s.replace(/[\\|]/g, (c) => `\\${c}`);
+
 function configMd(rows: Row[]): string {
   const out: string[] = [];
   for (const [id, title] of meta.GROUPS) {
@@ -72,7 +75,7 @@ function configMd(rows: Row[]): string {
     for (const r of rs) {
       const def = r.def === "" ? "unset" : `\`${r.def}\``;
       const vals = r.values ? ` Values: \`${r.values}\`.` : "";
-      out.push(`| \`${r.name}\` | ${def} | ${r.description.replace(/\|/g, "\\|")}${vals} |`);
+      out.push(`| \`${r.name}\` | ${def} | ${cell(r.description)}${vals} |`);
     }
     out.push("");
   }
@@ -134,7 +137,7 @@ function cliCommands(): Array<{ name: string; usage: string; description: string
 }
 
 function cliTable(cmds: ReturnType<typeof cliCommands>): string {
-  const rows = cmds.map((c) => `| \`reelsaw ${c.usage.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|") || "see the header of apps/server/src/cli.ts"} |`);
+  const rows = cmds.map((c) => `| \`reelsaw ${cell(c.usage)}\` | ${cell(c.description) || "see the header of apps/server/src/cli.ts"} |`);
   return ["Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).", "", "| Command | What it does |", "| --- | --- |", ...rows].join("\n");
 }
 
@@ -147,7 +150,7 @@ async function suiteRows() {
 
 function suiteTable(rows: Awaited<ReturnType<typeof suiteRows>>): string {
   const lines = ["| Suite | Needs | What it checks |", "| --- | --- | --- |"];
-  for (const s of rows) lines.push(`| \`${s.name}\` | ${s.needs.length ? s.needs.join(", ") : "nothing (runs offline)"} | ${s.description.replace(/\|/g, "\\|")} |`);
+  for (const s of rows) lines.push(`| \`${s.name}\` | ${s.needs.length ? s.needs.join(", ") : "nothing (runs offline)"} | ${cell(s.description)} |`);
   return lines.join("\n");
 }
 
@@ -158,7 +161,7 @@ async function mcpTable(): Promise<string> {
   const lines = ["| Tool | What it does |", "| --- | --- |"];
   for (const [name, t] of Object.entries(TOOLS) as Array<[string, { description: string }]>) {
     const first = /^.*?[.!?](?=\s|$)/.exec(t.description)?.[0] ?? t.description;
-    lines.push(`| \`${name}\` | ${first.replace(/\|/g, "\\|")} |`);
+    lines.push(`| \`${name}\` | ${cell(first)} |`);
   }
   return lines.join("\n");
 }
