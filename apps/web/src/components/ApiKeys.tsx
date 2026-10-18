@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { toast } from "sonner";
 import { ConfirmDialog, Skeleton, SkeletonRegion } from "./ui";
+import { ScrollArea } from "./scroll-area";
 
 type Key = { id: string; name: string | null; start: string | null; createdAt: Date | string; lastRequest: Date | string | null };
 
@@ -110,7 +111,9 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
                   Copy
                 </button>
               </div>
-              <pre className="overflow-x-auto rounded-[8px] bg-panel p-2 font-mono text-[11px] leading-4">{claudeCmd}</pre>
+              <ScrollArea className="rounded-[8px] bg-panel">
+                <pre className="w-max p-2 font-mono text-[11px] leading-4">{claudeCmd}</pre>
+              </ScrollArea>
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between text-xs text-ink2">
@@ -119,7 +122,9 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
                   Copy
                 </button>
               </div>
-              <pre className="overflow-x-auto rounded-[8px] bg-panel p-2 font-mono text-[11px] leading-4">{json}</pre>
+              <ScrollArea className="rounded-[8px] bg-panel">
+                <pre className="w-max p-2 font-mono text-[11px] leading-4">{json}</pre>
+              </ScrollArea>
             </div>
           </div>
         </div>

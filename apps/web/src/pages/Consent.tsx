@@ -3,6 +3,7 @@ import { Skeleton, SkeletonRegion } from "../components/ui";
 import { Navigate, useLocation } from "react-router";
 import { Logo, ThemeToggle } from "../App";
 import { authClient, useSession } from "../lib/auth";
+import { ScrollArea } from "../components/scroll-area";
 
 type Client = { client_id: string; name?: string; uri?: string; icon?: string };
 
@@ -44,7 +45,8 @@ export function ConsentPage() {
 
   const what: Record<string, string> = { openid: "know who you are", profile: "see your name", email: "see your email address", offline_access: "stay connected without signing in again" };
   return (
-    <div className="relative flex h-screen items-center justify-center overflow-auto p-6">
+    <ScrollArea className="h-screen">
+    <div className="relative flex min-h-screen items-center justify-center p-6">
       <ThemeToggle className="absolute right-4 top-4" />
       <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
         <Logo />
@@ -72,5 +74,6 @@ export function ConsentPage() {
         <p className="text-xs text-ink3">You can revoke this later by signing out everywhere or removing the connector on the other side.</p>
       </div>
     </div>
+    </ScrollArea>
   );
 }

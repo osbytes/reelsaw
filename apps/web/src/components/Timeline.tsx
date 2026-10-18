@@ -14,15 +14,6 @@ export interface EditorSection {
   offsetX?: number;
 }
 
-export const MODE_COLOR: Record<string, string> = {
-  auto: "#6b7280",
-  face: "#3b82f6",
-  split: "#a855f7",
-  stack: "#14b8a6",
-  fit: "#f59e0b",
-  center: "#64748b",
-  none: "#334155",
-};
 export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"). */
 export const layoutLabel = (d: { layout: string; content?: ContentRegion }) => (d.layout === "stack" ? contentLabel(d.content) : MODE_LABEL[d.layout]);

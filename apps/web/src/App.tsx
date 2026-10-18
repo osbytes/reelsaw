@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
@@ -7,18 +8,19 @@ import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
 import { useTheme } from "./lib/theme";
+import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage } from "./pages/Login";
 import { ProjectsPage } from "./pages/Projects";
-import { NewProjectPage } from "./pages/NewProject";
-import { ProjectPage } from "./pages/Project";
-import { LibraryPage } from "./pages/Library";
-import { SettingsPage } from "./pages/Settings";
+const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
+const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
+const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default: m.LibraryPage })));
+const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 import { PendingPage } from "./pages/Pending";
-import { AdminUsersPage } from "./pages/AdminUsers";
+const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
 import { Skeleton, SkeletonRegion } from "./components/ui";
 import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
-import { ClipEditorPage } from "./pages/ClipEditor";
+const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
@@ -157,9 +159,21 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col">
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary>
+          <Suspense fallback={<PageFallback />}>{children}</Suspense>
+        </ErrorBoundary>
       </div>
     </div>
+  );
+}
+
+/** What shows while a page's code loads (the bar stays; only the content area is a skeleton). */
+function PageFallback() {
+  return (
+    <SkeletonRegion label="Loading…" className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-40 w-full rounded-[16px]" />
+    </SkeletonRegion>
   );
 }
 
@@ -195,7 +209,9 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   if (bare)
     return (
       <div className="flex h-screen flex-col overflow-hidden">
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary>
+          <Suspense fallback={<PageFallback />}>{children}</Suspense>
+        </ErrorBoundary>
       </div>
     );
   return <Shell>{children}</Shell>;
@@ -224,6 +240,11 @@ function AppToaster() {
 }
 
 export function App() {
+  useShortcuts("Everywhere", [
+    ["Search, jump or run an action", `${MOD}K`],
+    ["Report an issue", "!"],
+    ["Show this list", "?"],
+  ]);
   return (
     <UploadsProvider>
     <CommandPaletteProvider>
