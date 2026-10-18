@@ -7,6 +7,14 @@
 
 # Reelsaw
 
+<p align="center">
+  <a href="https://github.com/osbytes/reelsaw/releases"><img src="https://img.shields.io/github/v/release/osbytes/reelsaw?label=release" alt="Latest release"></a>
+  <a href="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml"><img src="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/osbytes/reelsaw/pkgs/container/reelsaw"><img src="https://img.shields.io/badge/ghcr.io-osbytes%2Freelsaw-2496ED?logo=docker&logoColor=white" alt="Docker image on GHCR"></a>
+  <a href="https://glama.ai/mcp/servers/osbytes/reelsaw"><img src="https://glama.ai/mcp/servers/osbytes/reelsaw/badges/score.svg" alt="Glama MCP server score"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/osbytes/reelsaw" alt="License: AGPL-3.0"></a>
+</p>
+
 Self-hosted, AI-powered long-form → short-form video clipper. Paste a YouTube link or upload a video; Reelsaw transcribes it, asks an LLM for the most clippable moments, then renders vertical 9:16 clips with word-highlight captions and a hook overlay.
 
 Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step deploy with Docker Compose.
