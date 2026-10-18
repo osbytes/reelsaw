@@ -6,7 +6,6 @@ import type { Services } from "../services.js";
 import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import type { UnitOfWork } from "../uow.js";
-import { shouldPersistTick } from "../events-retention.js";
 
 export class ProjectGoneError extends Error {
   constructor(id: string) {
@@ -63,18 +62,14 @@ export class StageContext {
   }
 
   private lastProgressAt = 0;
-  private lastPersisted = new Map<string, number>();
   async progress(fraction: number, message?: string, extra: Record<string, unknown> = {}) {
     const pct = Math.max(0, Math.min(1, fraction));
     const now = Date.now();
     if (pct < 1 && now - this.lastProgressAt < 1500) return; // throttle writes
     this.lastProgressAt = now;
     await this.db.update(schema.projects).set({ stageProgress: pct, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
-    // the column above is current every tick; the event row (what the live stream replays) is coalesced, see events-retention.ts
-    const key = String(extra.clipId ?? "");
-    if (!shouldPersistTick(this.lastPersisted.get(key), now, pct)) return;
-    this.lastPersisted.set(key, now);
-    await this.svc.events.emit(this.projectId, "stage.progress", { stage: this.stage, progress: pct, message, ...extra });
+    // the column above is the state a reload reads; the tick itself is live-only (NOTIFY, no event row)
+    await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
   }
 
   /**

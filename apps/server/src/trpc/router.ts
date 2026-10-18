@@ -22,6 +22,7 @@ import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
+import { isProgressNotice, progressEvent } from "../events.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
@@ -994,7 +995,9 @@ export const appRouter = router({
       };
       yield* flush();
       for await (const notice of live) {
-        if (notice.id > lastId) yield* flush();
+        // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
+        if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
+        else if (notice.id > lastId) yield* flush();
       }
     }),
 

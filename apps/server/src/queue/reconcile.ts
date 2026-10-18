@@ -105,11 +105,12 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const db = svc.database.db;
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
-  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), columns: { id: true, status: true } });
+  const active = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), columns: { id: true, status: true, updatedAt: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
-    if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
+    // progress ticks only touch projects.updated_at (they are not stored as events), so that counts as activity too
+    if (!last || last.createdAt > cutoff || p.updatedAt > cutoff || last.type === "job.stalled") continue;
     // live jobs by (name, singleton_key): enqueue sets the key to the project id (stage jobs) or the clip id (render/prepare),
     // and exclusive-policy queues index exactly that, unlike data->>'projectId' which scans the whole job table
     const clipIds = (await db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, p.id))).map((c) => c.id);
@@ -120,7 +121,7 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
     const info = {
       projectId: p.id,
       status: p.status,
-      idleMinutes: Math.round((Date.now() - last.createdAt.getTime()) / 60_000),
+      idleMinutes: Math.round((Date.now() - Math.max(last.createdAt.getTime(), p.updatedAt.getTime())) / 60_000),
       lastEvent: { type: last.type, payload: last.payload },
       liveJobs: jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key, runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null })),
     };

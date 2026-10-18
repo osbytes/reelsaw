@@ -17,19 +17,6 @@ export const PRUNE_BUDGET_MS = 60_000;
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 export const PROTECTED_EVENT_TYPES = ["project.created", "run.started", "project.done"] as const;
 
-/**
- * Progress ticks. The projects row (`stage_progress`) is updated every tick, so lists and polls are
- * always current; the `stage.progress` event row is what the live subscription replays (NOTIFY
- * carries only an id and listeners read the row), so a tick without a row would never reach the
- * UI. We therefore keep the live path and bound it: at most one persisted tick per key (project +
- * clip) per 10 s, the first and the final (100%) always. At 3 h of transcribe that is ~1,000 rows
- * instead of ~7,000, and `UnitOfWork.emit` deletes them when the stage completes.
- */
-export const PROGRESS_PERSIST_MS = 10_000;
-export function shouldPersistTick(lastPersistedAt: number | undefined, now: number, pct: number): boolean {
-  return pct >= 1 || lastPersistedAt === undefined || now - lastPersistedAt >= PROGRESS_PERSIST_MS;
-}
-
 export function retentionCutoff(days: number, now = Date.now()): Date | null {
   return days > 0 ? new Date(now - days * 86_400_000) : null;
 }

@@ -48,15 +48,6 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger): RunI
         async emit(projectId, type, payload = {}) {
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
-          // progress ticks carry no history once the stage (or run) is over: drop them in the same transaction.
-          // Bounded by the partial index project_events (project_id, id) where type = 'stage.progress'.
-          if (type === "stage.completed" || type === "project.done" || type === "project.failed") {
-            const stage = type === "stage.completed" ? (payload.stage as string | undefined) : undefined;
-            await client.query(
-              `DELETE FROM project_events WHERE project_id = $1 AND type = 'stage.progress' AND id < $2 ${stage ? "AND payload->>'stage' = $3" : ""}`,
-              stage ? [projectId, row!.id, stage] : [projectId, row!.id],
-            );
-          }
           return row!.id;
         },
         enqueue: (q, data) => queue.enqueue(q, data, exec),
