@@ -6,10 +6,10 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
-import { deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, type Actor } from "../projects/service.js";
+import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -18,7 +18,7 @@ import { lockProjectClips, requestPrepare, requestRender, requestRenders, Render
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts } from "../bumpers/service.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
@@ -422,19 +422,10 @@ export const appRouter = router({
       }
       return { projects: [...out.values()] };
     }),
-    /**
-     * Change how long an image lasts. Assets are otherwise immutable; the normalised file is named by its
-     * seconds, so projects pick up the new length on their next render (the web says "re-render to apply").
-     */
-    update: protectedProcedure.input(z.object({ id: z.string(), imageSeconds: bumperSecondsSchema })).mutation(async ({ ctx, input }) => {
-      return ctx.svc.tx(async (u) => {
-        const [a] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id))).for("update");
-        if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-        if (a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
-        await u.db.update(schema.bumperAssets).set({ durationSec: input.imageSeconds }).where(eq(schema.bumperAssets.id, a.id));
-        return { ok: true };
-      });
-    }),
+    /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
+    update: protectedProcedure
+      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional() }))
+      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds })),
     /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. */
     create: protectedProcedure
       .input(z.object({ uploadId: z.string().min(1).max(100), imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(), setDefault: z.enum(["intro", "outro"]).optional() }))
@@ -810,7 +801,7 @@ export const appRouter = router({
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
-      // clips a re-analyze replaced, restorable with clips.restore until the purge
+      // clips deleted or replaced by a re-analyze, restorable with clips.restore until the purge
       const replacedClips = (await deletedClips(db, p.id)).map((c) => ({ ...c, deletedAt: c.deletedAt!.toISOString() }));
       return { ...publicProject(p), clips: clips.map(publicClip), replacedClips, transcript, estimates, bumpers };
     }),
@@ -986,7 +977,7 @@ export const appRouter = router({
      * and re-renders every finished clip so the whole set stays consistent.
      */
     updateStyle: protectedProcedure
-      .input(z.object({ id: z.string(), style: styleSchema.partial(), keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) }))
+      .input(z.object({ id: z.string(), style: styleOverrideSchema, keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) }))
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         const rerendered = await svc.tx(async (u) => {
@@ -1011,6 +1002,11 @@ export const appRouter = router({
     reanalyze: protectedProcedure
       .input(z.object({ id: z.string(), settings: projectSettingsPatchSchema.optional() }))
       .mutation(({ ctx, input }) => reanalyzeProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input.settings)),
+
+    /** Title and settings without re-running anything (selection settings apply on the next reanalyze, style on the next render). */
+    update: protectedProcedure
+      .input(z.object({ id: z.string(), title: z.string().trim().min(1).max(200).optional(), settings: projectSettingsPatchSchema.optional(), clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional() }))
+      .mutation(({ ctx, input }) => updateProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. */
     delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
@@ -1322,7 +1318,10 @@ export const appRouter = router({
       });
     }),
 
-    /** Bring back a clip a re-analyze replaced (listed as replacedClips on projects.get). */
+    /** Soft-delete one clip; restorable with clips.restore until the purge (DELETED_RETENTION_DAYS). */
+    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteClip(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+
+    /** Bring back a deleted clip or one a re-analyze replaced (listed as replacedClips on projects.get). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreClip(ctx.svc, actorOf(ctx.user), input.id)),
 
     /**

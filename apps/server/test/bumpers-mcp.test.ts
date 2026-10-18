@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { addBumperInput, assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/bumpers/service.js";
+import { addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/bumpers/service.js";
 import type { Services } from "../src/services.js";
 
 const clipIn = z.object(setClipBumpersInput);
@@ -29,6 +29,11 @@ describe("tool input schemas", () => {
   it("set_project_bumpers takes default, none or an id", () => {
     for (const v of ["default", "none", "3f2a"]) assert.ok(projectIn.safeParse({ projectId: "p", intro: v, rerender: true }).success);
     assert.ok(!projectIn.safeParse({ projectId: "p", intro: 5, rerender: true }).success);
+  });
+  it("rename_bumper trims the name and refuses an empty one", () => {
+    assert.equal(bumperNameSchema.parse("  Logo sting "), "Logo sting");
+    assert.ok(!bumperNameSchema.safeParse("   ").success);
+    assert.ok(!bumperNameSchema.safeParse("x".repeat(121)).success);
   });
   it("add_bumper wants a real url and one source", () => {
     assert.ok(!addIn.safeParse({ url: "not a url" }).success);

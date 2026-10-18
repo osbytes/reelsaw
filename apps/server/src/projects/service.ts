@@ -2,13 +2,13 @@
  * Deleting is reversible. A deleted project, or a clip a re-analyze replaced, keeps its row and files with
  * `deleted_at` set: every read path leaves it out, its jobs are cancelled, and restore clears the mark. After
  * DELETED_RETENTION_DAYS the hourly purge (`purgeDeleted`, run with the storage sweep) removes the rows and only
- * then the files. tRPC (`projects.delete` / `restore` / `reanalyze`, `clips.restore`), the MCP tools and the CLI
- * all call these functions.
+ * then the files. tRPC (`projects.delete` / `restore` / `reanalyze` / `update`, `clips.delete` / `restore`), the MCP
+ * tools and the CLI all call these functions.
  */
 import fs from "node:fs/promises";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { projectSettingsSchema, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { projectSettingsSchema, styleSchema, type ClearableSetting, type ProjectSettings, type ProjectSettingsPatch } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -17,7 +17,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { lockProjectClips, startRun } from "../pipeline/lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, startRun } from "../pipeline/lifecycle.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 
@@ -84,7 +84,32 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
   });
 }
 
-/** Bring back a clip a re-analyze replaced. It goes to the end of the project's list; a clip that never finished rendering needs a re-render. */
+/**
+ * Soft-delete one clip (owner or admin): hidden from the project, its render or preparation stopped (a newer generation
+ * makes a running render discard its output), restorable with `restoreClip` until the purge. A project that was only
+ * waiting for this clip finishes. Returns changed: false if it was already deleted.
+ */
+export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
+  return svc.tx(async (u) => {
+    // clip first, the project row last (finalize): the same order as a render completion
+    const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
+    await findProject(u.db, actor, c.projectId, { deleted: false });
+    if (c.deletedAt) return { ok: true, changed: false, clipId, restorable: restorableFor(svc) };
+    await u.cancelLiveJobs(QUEUES.render, c.id);
+    await u.cancelLiveJobs(QUEUES.prepare, c.id);
+    const unfinished = c.status !== "done" && c.status !== "failed";
+    await u.db
+      .update(schema.clips)
+      .set({ deletedAt: new Date(), renderGen: sql`${schema.clips.renderGen} + 1`, ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}), updatedAt: new Date() })
+      .where(eq(schema.clips.id, c.id));
+    await u.emit(c.projectId, "clip.deleted", { clipId: c.id, index: c.index, title: c.title, days: days(svc) });
+    await finalizeProjectIfDone(svc, u, c.projectId);
+    return { ok: true, changed: true, clipId, restorable: restorableFor(svc), message: `Deleted. restore_clip brings it back ${restorableFor(svc)}.` };
+  });
+}
+
+/** Bring back a clip a re-analyze replaced (or that was deleted). It goes to the end of the project's list; a clip that never finished rendering needs a re-render. */
 export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
@@ -110,7 +135,7 @@ export async function deletedProjects(svc: Services, limit = 100) {
   return rows.map((r) => ({ ...r, purgeAt: days(svc) > 0 ? new Date(r.deletedAt!.getTime() + days(svc) * 86_400_000) : null }));
 }
 
-/** Clips of a project that a re-analyze replaced and that can still be restored, newest first. */
+/** Clips of a project that were deleted or a re-analyze replaced and that can still be restored, newest first. */
 export async function deletedClips(db: Db, projectId: string) {
   return db
     .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, startSec: schema.clips.startSec, endSec: schema.clips.endSec, status: schema.clips.status, deletedAt: schema.clips.deletedAt })
@@ -154,6 +179,58 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     await u.enqueue(QUEUES.analyze, { projectId: p.id });
     u.afterCommit(() => svc.log.child({ module: "analyze", projectId: p.id }).info({ kept: kept.length, replaced: replaced.length }, "re-analyze keeps the clips the user made or edited"));
     return { ok: true, kept: kept.length, replaced: replaced.length, restorable: restorableFor(svc) };
+  });
+}
+
+/** Settings that only change which clips are picked: they apply on the next re-analyze. */
+const SELECTION_KEYS = new Set<string>(["maxClips", "minClipSeconds", "maxClipSeconds", "focus", "instructions"]);
+/** Settings burned into the video: they apply on each clip's next render. */
+const RENDER_KEYS = new Set<string>([...Object.keys(styleSchema.shape), "reframe", "pauses", "sourceText"]);
+/** Set through `projects.setBumpers`, which checks the library. */
+const BUMPER_KEYS = new Set<string>(["introAssetId", "outroAssetId", "introSec", "outroSec"]);
+
+/**
+ * Rename a project and/or change its settings without re-running anything: selection settings (focus, instructions,
+ * clip length, maxClips) apply on the next re-analyze, style / framing / pauses on each clip's next render. Writes only
+ * the keys given (atomic JSON merge), validated against the whole settings object. Per-clip style overrides are kept.
+ */
+export async function updateProject(svc: Services, actor: Actor, projectId: string, input: { title?: string; settings?: ProjectSettingsPatch; clear?: ClearableSetting[] }) {
+  return svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
+    const bumperKeys = Object.keys(patch).filter((k) => BUMPER_KEYS.has(k));
+    if (bumperKeys.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${bumperKeys.join(", ")}: set the intro/outro with set_project_bumpers` });
+    const clear = [...new Set(input.clear ?? [])].filter((k) => !(k in patch));
+    const next: Record<string, unknown> = { ...p.settings, ...patch };
+    for (const k of clear) delete next[k];
+    const parsed = projectSettingsSchema.safeParse(next);
+    if (!parsed.success) throw new TRPCError({ code: "BAD_REQUEST", message: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+    const merged: ProjectSettings = parsed.data;
+    if (merged.minClipSeconds >= merged.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+    const before = p.settings as Record<string, unknown>;
+    const changed = [
+      ...Object.keys(patch).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(merged[k as keyof ProjectSettings])),
+      ...clear.filter((k) => before[k] !== undefined),
+    ];
+    const title = input.title?.trim();
+    const titleChanged = !!title && title !== p.title;
+    if (titleChanged) changed.unshift("title");
+    const needsRerender = changed.some((k) => RENDER_KEYS.has(k));
+    const needsReanalyze = changed.some((k) => SELECTION_KEYS.has(k));
+    if (changed.length) {
+      let expr = sql`${schema.projects.settings}`;
+      for (const k of clear) expr = sql`(${expr}) - ${k}::text`;
+      // a style change replaces the legacy captionPosition, as projects.updateStyle does
+      if (Object.keys(patch).some((k) => k in styleSchema.shape)) expr = sql`(${expr}) - 'captionPosition'`;
+      const write = Object.fromEntries(Object.keys(patch).map((k) => [k, merged[k as keyof ProjectSettings]]));
+      await u.db
+        .update(schema.projects)
+        .set({ ...(titleChanged ? { title } : {}), settings: sql`(${expr}) || ${JSON.stringify(write)}::jsonb`, updatedAt: new Date() })
+        .where(eq(schema.projects.id, p.id));
+      await u.emit(p.id, "project.updated", { changed });
+    }
+    const followUps = [needsReanalyze && "reanalyze_project picks clips with the new selection settings", needsRerender && "rerender_clips applies the style/framing to finished clips"].filter(Boolean);
+    return { ok: true, changed, needsReanalyze, needsRerender, ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}) };
   });
 }
 

@@ -133,6 +133,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "update_project",
+    TOOLS.update_project,
+    ({ id, title, settings, clear }) => run(() => api.projects.update({ id, title, settings, clear })),
+  );
+
+  server.registerTool(
     "wait_for_project",
     TOOLS.wait_for_project,
     ({ id, timeoutSeconds }, extra) =>
@@ -216,7 +222,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
         if (!c) throw new TRPCError({ code: "NOT_FOUND" });
         const p = await api.projects.get({ id: c.projectId });
         const clip = p.clips.find((x) => x.id === id);
-        if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `A re-analyze replaced this clip. restore_clip brings it back (possible ${restorableFor(svc)} after it was replaced).` });
+        if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `This clip was deleted or replaced by a re-analyze. restore_clip brings it back (possible ${restorableFor(svc)} after that).` });
         return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsById()) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
       }),
   );
@@ -231,6 +237,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "create_clip",
     TOOLS.create_clip,
     (input) => run(async () => clipSummary(await api.clips.create(input))),
+  );
+
+  server.registerTool(
+    "delete_clip",
+    TOOLS.delete_clip,
+    ({ id }) => run(() => api.clips.delete({ id })),
   );
 
   server.registerTool(
@@ -293,6 +305,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
         const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault });
         return { ...created, isDefault: input.setDefault ?? null };
       }),
+  );
+
+  server.registerTool(
+    "rename_bumper",
+    TOOLS.rename_bumper,
+    ({ assetId, name }) => run(() => api.bumpers.update({ id: assetId, name })),
   );
 
   server.registerTool(

@@ -32,7 +32,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Editing**
 
 - **Workspace and clip editor** – source player and clickable transcript on the left, clips streaming in on the right as they render, with score, layout badge, post caption + hashtags copy and download. The editor has a live preview of the source with the clip's framing and captions and a multi-lane timeline (ruler, transcript words, clip range, layout track) with zoom, snapping to words/scene cuts/playhead, nudge buttons, typed timestamps and I/O keys for frame-accurate trims. Split the layout track (⌘/Ctrl+B, the Split button, a double-click or the right-click menu) into sections that are Auto or forced to face/split/stack/fit/centre; drag the picture to re-centre a section; add, drag and remove transitions; ⌘/Ctrl+Z / ⇧⌘Z undo and redo every edit.
-- **Deletes can be undone** – deleting a project stops its work and hides it, with an Undo in the toast; it stays restorable for `DELETED_RETENTION_DAYS` (7) before its files are removed. Re-picking moments keeps every clip you made or edited (text, bounds, framing, style, intro/outro) and only replaces untouched AI picks, which can be restored too. The same through MCP (`restore_project`, `restore_clip`) and the CLI (`reelsaw deleted`, `restore`, `restore-clip`, `purge`).
+- **Deletes can be undone** – deleting a project stops its work and hides it, with an Undo in the toast; it stays restorable for `DELETED_RETENTION_DAYS` (7) before its files are removed. Re-picking moments keeps every clip you made or edited (text, bounds, framing, style, intro/outro) and only replaces untouched AI picks, which can be restored too. Single clips can be deleted and restored the same way. The same through MCP (`delete_clip`, `restore_project`, `restore_clip`) and the CLI (`reelsaw deleted`, `restore`, `delete-clip`, `restore-clip`, `purge`).
 - **Command palette and bulk export** – ⌘K searches projects and clips with status, length and age, opens a row's actions (open, export, resume, retry failed clips, re-run refine, re-render, download, delete), takes pasted links (one project each, or opens the existing one) and offers retry-all shortcuts. "Export all" zips every rendered clip with platform-ready metadata: a paste-ready `.txt` (title, description, tags, caption), a `.youtube.json` (YouTube Data API v3 `videos.insert` body, private by default) and a `.tiktok.json` (Content Posting API `post_info`, `SELF_ONLY`) per clip, plus `manifest.json`, `clips.csv` (with rendered duration) and a README. Descriptions carry a timestamped link to the exact moment in the parent video.
 
 **Intros and outros**
@@ -254,13 +254,44 @@ container) and `REELSAW_API_KEY`:
 { "mcpServers": { "reelsaw": { "command": "docker", "args": ["exec", "-i", "-e", "REELSAW_API_KEY=rs_…", "reelsaw-app-1", "reelsaw", "mcp"] } } }
 ```
 
-Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
-`get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
-`update_clip`, `create_clip`, `rerender_clip`, `rerender_clips` (several at once), `export_project` (zip link, optionally only some `clipIds`), `retry_project`, `reanalyze_project`,
-`delete_project`. Intro/outro ("bumper") tools: `list_bumpers`, `add_bumper` (from a URL or an
-upload id), `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`,
-`set_project_bumpers`, `set_clip_bumpers` (one clip or many; `rerender: true` re-renders only those
-clips); `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
+The tools (generated from `apps/server/src/mcp-tools.ts`; each tool's full description and input
+schema say what it returns, whether it runs in the background and which neighbour to use instead):
+
+<!-- generated:mcp-tools -->
+| Tool | What it does |
+| --- | --- |
+| `list_projects` | Your projects, most recently updated first. |
+| `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
+| `create_project` | Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). |
+| `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses); only the fields you pass change. |
+| `wait_for_project` | Block until the project is done or failed, or timeoutSeconds pass. |
+| `get_transcript` | The project's transcript as timed lines "[m:ss] text", optionally only a time range. |
+| `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
+| `get_project_events` | The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. |
+| `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. |
+| `update_clip` | Edit one clip: only the fields you pass change; style and layoutSections replace the clip's whole value (null = back to the project's). |
+| `create_clip` | Add a clip from a time range of the source (needs a transcript). |
+| `delete_clip` | Delete one clip of your project; a render in progress stops. |
+| `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
+| `rerender_clips` | Queue several clips of one project for rendering again in one step (after edits or failures). |
+| `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. |
+| `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
+| `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
+| `list_bumpers` | Your intro/outro library. |
+| `add_bumper` | Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. |
+| `rename_bumper` | Rename one of your library items (removed ones too). |
+| `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
+| `remove_bumper` | Remove an item from your library and from your defaults. |
+| `restore_bumper` | Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. |
+| `bumper_usage` | The projects and clips that use a library item. |
+| `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
+| `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
+| `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
+| `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
+| `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
+<!-- /generated -->
+
+`get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
 They call the same tRPC procedures as the web app, so ownership checks and
 validation are identical (`apps/server/src/mcp.ts`; the catalogue both transports advertise is
 `apps/server/src/mcp-tools.ts`). The same key also authenticates tRPC
@@ -282,7 +313,9 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
 | `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
 | `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
-| `reelsaw restore-clip <clipId>` | bring back a clip a re-analyze replaced |
+| `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
+| `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
+| `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
@@ -300,7 +333,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
-| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |

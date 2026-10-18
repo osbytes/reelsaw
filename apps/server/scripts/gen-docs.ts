@@ -5,6 +5,7 @@
  *               -> docs/CONFIG.md, .env.example, deploy/.env.example
  *   CLI         the command list at the top of src/cli.ts -> README.md, docs/TROUBLESHOOTING.md
  *   eval suites src/eval/suites/index.ts (name, description, needs) -> docs/EVALS.md, README.md, docs/TROUBLESHOOTING.md
+ *   MCP tools   src/mcp-tools.ts (name, title, first sentence of the description) -> README.md
  *
  * Generated text lives between markers and everything outside them is hand-written:
  *   markdown  <!-- generated:NAME --> ... <!-- /generated -->
@@ -150,6 +151,18 @@ function suiteTable(rows: Awaited<ReturnType<typeof suiteRows>>): string {
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------- MCP tools
+
+async function mcpTable(): Promise<string> {
+  const { TOOLS } = await import("../src/mcp-tools.js");
+  const lines = ["| Tool | What it does |", "| --- | --- |"];
+  for (const [name, t] of Object.entries(TOOLS) as Array<[string, { description: string }]>) {
+    const first = /^.*?[.!?](?=\s|$)/.exec(t.description)?.[0] ?? t.description;
+    lines.push(`| \`${name}\` | ${first.replace(/\|/g, "\\|")} |`);
+  }
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------- blocks
 
 const MD = (name: string) => ({ open: `<!-- generated:${name} -->`, line: `<!-- generated:${name} -->`, close: "<!-- /generated -->" });
@@ -187,6 +200,7 @@ writeBlock("docs/TROUBLESHOOTING.md", MD("cli"), cliTable(cmds));
 writeBlock("docs/EVALS.md", MD("suites"), suiteTable(suiteInfo));
 const names = suiteInfo.map((s) => `\`${s.name}\``).join(", ");
 writeBlock("README.md", MD("suite-names"), names, true);
+writeBlock("README.md", MD("mcp-tools"), await mcpTable());
 writeBlock("docs/TROUBLESHOOTING.md", MD("suite-names"), names, true);
 
 if (problems.length) {

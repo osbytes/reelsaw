@@ -64,6 +64,10 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
       return { text: "Project restored", tone: "ok" };
     case "clip.restored":
       return { text: `${clip} restored${p.title ? `: “${p.title}”` : ""}`, tone: "ok" };
+    case "clip.deleted":
+      return { text: `${clip} deleted${p.title ? `: “${p.title}”` : ""} (restorable for ${p.days} days)`, tone: "warn" };
+    case "project.updated":
+      return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
     case "job.stalled":
       return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:

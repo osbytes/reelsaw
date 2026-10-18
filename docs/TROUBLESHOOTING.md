@@ -55,7 +55,9 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
 | `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
 | `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
-| `reelsaw restore-clip <clipId>` | bring back a clip a re-analyze replaced |
+| `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
+| `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
+| `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
@@ -73,7 +75,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
-| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
@@ -229,6 +231,11 @@ and list it in `SUPPORTED` in `language.ts`.
   one back. Clips edited before `edited_at` existed are only recognised by their framing, style or intro/outro.
   A project finishes (`finalizeProjectIfDone`) only from `rendering`, so a kept clip that finishes while the
   re-analyze is still picking does not end the run early.
+- **Deleting one clip** (`clips.delete`, MCP `delete_clip`, `reelsaw delete-clip <clipId>`, all `deleteClip`) is the
+  same soft delete: `deleted_at`, a newer render generation, its render/prepare jobs cancelled, a `clip.deleted`
+  event, and the project finalized if it was only waiting for that clip. It shows up in `replacedClips` and comes
+  back with `restore_clip`. `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
+  and settings (event `project.updated`): nothing re-runs until a re-analyze or re-render.
 - **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
   owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with
   nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The

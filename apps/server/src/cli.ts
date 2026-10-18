@@ -14,7 +14,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   retention                               run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS)
  *   deleted                                 deleted projects that can still be restored, with their purge date
  *   restore <projectId>                     undo a project delete (same as projects.restore and the restore_project tool)
- *   restore-clip <clipId>                   bring back a clip a re-analyze replaced
+ *   restore-clip <clipId>                   bring back a deleted clip or one a re-analyze replaced
+ *   delete-clip <clipId>                    delete one clip, restorable like a project (same as clips.delete and delete_clip)
+ *   update-project <projectId> [--title t] [--set key=value]… [--clear key]…
+ *                                           rename a project or change its settings without re-running anything
+ *                                           (same as projects.update and update_project); values are JSON or text
  *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
@@ -41,7 +45,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   log-level [<level|module=level,...>|reset] [--for 15m]
  *                                           show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s
  *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
- *   bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]
+ *   bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id>|rename <id> <name…> [--user <email>]
  *                                           the intro/outro library. The user is --user, else the only account
  *                                           on this install; otherwise pass --user
  *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
@@ -85,7 +89,8 @@ import { formatTime } from "@reelsaw/shared";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
 import { runMcpStdio } from "./mcp-stdio.js";
-import { deletedProjects, purgeDeleted, restoreClip, restoreProject } from "./projects/service.js";
+import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
+import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -156,6 +161,40 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!pos[0]) throw new Error("usage: reelsaw restore-clip <clipId>");
     const r = await restoreClip(svc, null, pos[0]);
     console.log(r.changed ? `restored clip ${pos[0]}${r.needsRerender ? " (it never finished rendering: re-render it)" : ""}` : `${pos[0]} was not deleted`);
+  },
+  /** Soft-delete one clip: `reelsaw delete-clip <clipId>`. Same function as clips.delete and the delete_clip tool. */
+  async "delete-clip"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw delete-clip <clipId>");
+    const r = await deleteClip(svc, null, pos[0]);
+    console.log(r.changed ? `deleted clip ${pos[0]}; reelsaw restore-clip brings it back ${r.restorable}` : `${pos[0]} was already deleted`);
+  },
+  /** Title and settings without re-running anything. Same function as projects.update and the update_project tool. */
+  async "update-project"(svc) {
+    const usage = "usage: reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…";
+    if (!pos[0]) throw new Error(usage);
+    const settings: Record<string, unknown> = {};
+    const clear: ClearableSetting[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--set") {
+        const kv = args[++i] ?? "";
+        const eq = kv.indexOf("=");
+        if (eq <= 0) throw new Error(`--set needs key=value\n${usage}`);
+        const raw = kv.slice(eq + 1);
+        let v: unknown = raw;
+        try {
+          v = JSON.parse(raw);
+        } catch {
+          // plain text (focus, instructions, …)
+        }
+        settings[kv.slice(0, eq)] = v;
+      } else if (args[i] === "--clear") {
+        const k = args[++i] as ClearableSetting;
+        if (!CLEARABLE_SETTINGS.includes(k)) throw new Error(`--clear takes one of ${CLEARABLE_SETTINGS.join(", ")}`);
+        clear.push(k);
+      }
+    }
+    const r = await updateProject(svc, null, pos[0], { title: flag("title"), settings: settings as ProjectSettingsPatch, clear });
+    console.log(r.changed.length ? `changed ${r.changed.join(", ")}${r.hint ? `. ${r.hint}` : ""}` : "nothing changed");
   },
   /** Remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now (the storage sweep does this hourly). */
   async purge(svc) {
@@ -555,10 +594,13 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
       await api.bumpers.setDefault({ slot: a, assetId: b === "none" ? null : b });
       console.log(b === "none" ? `cleared default ${a}` : `default ${a} is now ${b}`);
+    } else if (sub === "rename" && a && b) {
+      const r = await api.bumpers.update({ id: a, name: bumperArgs().pos.slice(2).join(" ") });
+      console.log(`renamed ${a}: ${r.previousName} → ${r.name}`);
     } else if ((sub === "remove" || sub === "restore") && a) {
       await api.bumpers[sub === "remove" ? "delete" : "restore"]({ id: a });
       console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
-    } else throw new Error("usage: reelsaw bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]");
+    } else throw new Error("usage: reelsaw bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id>|rename <id> <name…> [--user <email>]");
   },
   async "project-bumpers"(svc) {
     const { pos: p, rerender, ...o } = bumperArgs();
@@ -665,7 +707,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|usage|limits|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });
