@@ -393,7 +393,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       const heard = (transcript?.rawWords ?? transcript?.words ?? [])
         .filter((w) => w.end > clip.startSec && w.start < clip.endSec)
         .map((w) => ({ text: w.text, start: Math.max(0, w.start - clip.startSec), end: Math.min(duration, w.end - clip.startSec) }));
-      const res = await alignWordTimes(svc.aligner, clipAudio, heard);
+      const res = await alignWordTimes(svc.aligner, clipAudio, heard, { language: transcript?.language });
       const norm = normalizeToken;
       // match caption words to heard words one-to-one and in order: a repeated word ("or … or")
       // must not reuse an earlier occurrence's timing, or lines go back in time and overlap
@@ -675,7 +675,7 @@ export interface ClipCutPlan extends RefineResult {
 export async function planClipCuts(
   svc: Services,
   clip: { startSec: number; endSec: number },
-  transcript: Pick<Transcript, "flags" | "rawWords" | "words"> | null,
+  transcript: Pick<Transcript, "flags" | "rawWords" | "words" | "language"> | null,
   sourcePath: string,
   signal?: AbortSignal,
   log?: Logger,
@@ -693,6 +693,7 @@ export async function planClipCuts(
   const refined = await refineCuts(
     {
       onProgress,
+      language: transcript?.language,
       ...(svc.aligner ? { align: (pcm: Float32Array, ws: string[]) => svc.aligner!.align(pcm, ws) } : {}),
       log: log?.child({ module: "cuts" }),
       ffmpegPath: svc.config.FFMPEG_PATH,

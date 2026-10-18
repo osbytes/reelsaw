@@ -9,6 +9,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { supports } from "../pipeline/language.js";
 
 export const ALIGN_SR = 16000;
 const STRIDE_SEC = 0.02; // wav2vec2 conv stack: 320 samples per frame at 16 kHz
@@ -141,7 +142,9 @@ export function forceAlign(emit: Float32Array, T: number, C: number, words: stri
  * timing when the alignment is confident; otherwise it keeps its original timing, clamped between its
  * re-timed neighbours so order is preserved. `pcm` is 16 kHz mono for the clip; times clip-relative.
  */
-export async function alignWordTimes<W extends { text: string; start: number; end: number }>(aligner: Aligner, pcm: Float32Array, words: W[], opts: { maxWindow?: number; minScore?: number } = {}): Promise<{ words: W[]; aligned: number; medianShiftMs: number }> {
+export async function alignWordTimes<W extends { text: string; start: number; end: number }>(aligner: Aligner, pcm: Float32Array, words: W[], opts: { maxWindow?: number; minScore?: number; language?: string | null } = {}): Promise<{ words: W[]; aligned: number; medianShiftMs: number; unsupported?: boolean }> {
+  // the acoustic model and its A-Z vocabulary are English: other languages keep their transcript timing
+  if (!supports("ctcAlign", opts.language)) return { words: words.map((w) => ({ ...w })), aligned: 0, medianShiftMs: 0, unsupported: true };
   const maxWindow = opts.maxWindow ?? 20;
   const minScore = opts.minScore ?? -2.5;
   const duration = pcm.length / ALIGN_SR;

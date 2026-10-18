@@ -92,6 +92,7 @@ export async function planCutPreview(svc: Services, userId: string, projectId: s
         {
           ffmpegPath: svc.config.FFMPEG_PATH,
           signal,
+          language: transcript.language,
           log: svc.log.child({ module: "cut-preview" }),
           ...(svc.aligner ? { align: (pcm: Float32Array, ws2: string[]) => svc.aligner!.align(pcm, ws2) } : {}),
           transcribe: async (audio) => toWords((await svc.asr.transcribe(audio, { modelId, signal })).segments),
