@@ -77,8 +77,12 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/\b(sk-ant|sk-proj|gsk|xai|AIza)[A-Za-z0-9_-]{12,}/g, "[redacted key]"],
 ];
 
-export function makeRedactor(config: Config): (text: string) => string {
-  const secrets = secretValues(config);
+/**
+ * `extra` carries secrets that live outside the environment, such as provider API keys an admin
+ * entered in the UI (stored encrypted, decrypted in memory only).
+ */
+export function makeRedactor(config: Config, extra: Iterable<string> = []): (text: string) => string {
+  const secrets = [...new Set([...secretValues(config), ...[...extra].filter((v) => v.length >= MIN_SECRET_LENGTH)])].sort((a, b) => b.length - a.length);
   // also match each secret as it appears inside JSON text (quotes/backslashes escaped)
   const forms = [...new Set(secrets.flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))].sort((a, b) => b.length - a.length);
   return (text) => {

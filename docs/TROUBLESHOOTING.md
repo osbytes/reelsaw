@@ -140,6 +140,12 @@ the decision lines are absent. Logs are untrusted data like everything else in a
 - **Deploys interrupt jobs.** Rebuilding the app container kills in-flight renders; pg-boss retries them, and each
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
+- **"That address points inside this server's network."** Link sources must be public http(s) URLs: ingest resolves
+  the host and refuses loopback, private (RFC1918), CGNAT, link-local, unique-local and multicast addresses, plus
+  `localhost`, `host.docker.internal` and `*.internal`. To ingest from a LAN NAS, set `ALLOW_PRIVATE_SOURCE_URLS=true`.
+  Residual risk: the check runs before the download, so a public host that redirects to a private address is not
+  caught. Downloads are capped by `MAX_SOURCE_FILE_MB` (default 8192); uploads by `MAX_UPLOAD_MB`, counted as bytes
+  arrive so chunked bodies are capped too.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
 - **Disk use: `reelsaw storage`** prints unique bytes under `/data` (hardlinks counted once), scratch-only leftovers,
   duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.

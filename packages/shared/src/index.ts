@@ -270,7 +270,7 @@ export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.
 
 export const createProjectInputSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  sourceUrl: z.url().optional(),
+  sourceUrl: z.url({ protocol: /^https?$/, message: "Use a link that starts with http:// or https://" }).optional(),
   uploadId: z.string().optional(),
   settings: projectSettingsPatchSchema.optional(),
 });

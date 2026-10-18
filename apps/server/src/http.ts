@@ -8,7 +8,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { and, eq } from "drizzle-orm";
 import type { Services } from "./services.js";
 import { appRouter } from "./trpc/router.js";
@@ -34,6 +34,8 @@ const clientLogSchema = z.object({
   route: z.string().max(300).optional(),
 });
 
+class UploadTooLarge extends Error {}
+
 /** Range-capable file response for video playback. */
 async function sendFile(req: Request, file: string, downloadName?: string): Promise<Response> {
   let st: fs.Stats;
@@ -50,7 +52,7 @@ async function sendFile(req: Request, file: string, downloadName?: string): Prom
   const m = /bytes=(\d*)-(\d*)/.exec(req.headers.get("range") ?? "");
   if (m) {
     if (m[1]) start = Number(m[1]);
-    if (m[2]) end = Number(m[2]);
+    if (m[2]) end = Math.min(Number(m[2]), st.size - 1);
     if (!m[1] && m[2]) {
       start = Math.max(0, st.size - Number(m[2]));
       end = st.size - 1;
@@ -160,16 +162,35 @@ export function createApp(svc: Services) {
     const id = randomUUID();
     const ext = path.extname(filename).toLowerCase() || ".mp4";
     const dest = path.join(paths.uploads, `${id}${ext}`);
+    // chunked bodies carry no content-length: count the bytes as they stream and stop at the cap
+    const maxBytes = config.MAX_UPLOAD_MB * 1024 * 1024;
+    let received = 0;
+    const cap = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        received += chunk.length;
+        cb(received > maxBytes ? new UploadTooLarge() : null, chunk);
+      },
+    });
     try {
-      await pipeline(Readable.fromWeb(c.req.raw.body as never), fs.createWriteStream(dest));
+      await pipeline(Readable.fromWeb(c.req.raw.body as never), cap, fs.createWriteStream(dest));
       const st = await fsp.stat(dest);
       if (st.size === 0) throw new Error("empty file");
       const storageKey = keys.upload(id, ext);
       await storage.putFile(storageKey, dest);
-      await db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+      try {
+        await db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+      } catch (err) {
+        // put first (the row must never point at a missing object), so a failed insert leaves an orphan: remove it
+        await storage.delete(storageKey).catch((e) => c.get("log").warn({ err: e, storageKey }, "could not remove the orphaned upload object"));
+        throw err;
+      }
       c.get("log").info({ uploadId: id, bytes: st.size }, "upload stored");
       return c.json({ uploadId: id, filename, sizeBytes: st.size });
     } catch (err) {
+      if (err instanceof UploadTooLarge) {
+        c.get("log").warn({ bytes: received, maxMb: config.MAX_UPLOAD_MB }, "upload rejected: too large");
+        return c.json({ error: `file exceeds ${config.MAX_UPLOAD_MB} MB` }, 413);
+      }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);
     } finally {
