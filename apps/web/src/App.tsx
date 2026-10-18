@@ -25,16 +25,26 @@ import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
 import { Toaster } from "sonner";
 
+/** The "cut monogram" mark: an ExtraBold Hanken Grotesk "r" (outlined, so it never waits on the web font) sliced by a cut in the accent colour. Same drawing as public/favicon.svg. */
+const MARK_R = "M23.69 47V24.32H30.07V30.5L29.2 30.55Q29.3 28.6 30.3 27.09Q31.3 25.57 32.82 24.71Q34.34 23.84 35.94 23.84Q37.11 23.84 38.17 24.17Q39.23 24.49 40.39 25.22L37.35 30.93Q36.87 30.61 36.06 30.38Q35.25 30.14 34.45 30.14Q33.6 30.14 32.81 30.44Q32.03 30.74 31.43 31.38Q30.83 32.01 30.48 33.01Q30.26 33.65 30.14 34.65Q30.03 35.65 30.03 37.55V47Z";
+
+export function LogoMark({ className = "h-[26px] w-[26px]" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" className={`shrink-0 ${className}`} aria-hidden>
+      <rect width="64" height="64" rx="16" className="fill-acc" />
+      <path d={MARK_R} className="fill-acc-ink" />
+      <line x1="14" y1="40" x2="50" y2="26" strokeWidth="4" className="stroke-acc" />
+    </svg>
+  );
+}
+
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
-      <span className="grid h-[26px] w-[26px] place-items-center rounded-[8px] bg-acc text-acc-ink">
-        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor" aria-hidden>
-          <path d="M2 3h2.5v10H2zM6.75 3h2.5v10h-2.5zM11.5 3H14v10h-2.5z" opacity=".35" />
-          <path d="M1 7.2h14v1.6H1z" />
-        </svg>
+    <Link to="/" className="flex items-center gap-2.5 text-ink no-underline" aria-label="Reelsaw">
+      <LogoMark />
+      <span className="hidden text-[15px] font-extrabold tracking-tight sm:inline" aria-hidden>
+        reel<span className="mx-px font-medium text-acc-text">/</span>saw
       </span>
-      <span className="hidden text-[15px] font-bold tracking-tight sm:inline">Reelsaw</span>
     </Link>
   );
 }
