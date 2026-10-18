@@ -8,7 +8,8 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
+import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
+import { sentenceEndAfter } from "../../pipeline/thought.js";
 import { chunkTranscript, repairTimestamps, mapChunk, type LlmOpts, type SelectContext } from "../../pipeline/select.js";
 import { snapCandidate } from "../../pipeline/analyze.js";
 import { isUnavailable, type CaseResult, type Suite, type EvalContext } from "../framework.js";
@@ -18,6 +19,10 @@ interface TranscriptFixture {
   title: string;
   durationSec: number;
   segments: TranscriptSegment[];
+  /** word-level fixtures also run the "clip ends on a complete thought" cases */
+  words?: Word[];
+  sceneCuts?: number[];
+  cases?: Array<{ id: string; propose: [number, number]; expectEnd: number; tolerance: number; windowStart: number }>;
 }
 
 async function fixtures(ctx: EvalContext) {
@@ -93,6 +98,22 @@ export const selectionSuite: Suite = {
         if (!onStart || !onEnd) snapFails.push(`${s0.toFixed(1)}s → ${c.startSec}-${c.endSec} not on sentence boundaries`);
       }
       out.push({ id: `${name}/snapping`, pass: !snapFails.length && tried > 20, metrics: { candidates: tried }, notes: snapFails.slice(0, 4).join("; ") });
+
+      // a clip ends on a complete thought: what the model proposed goes through the real snapper with words
+      for (const k of t.cases ?? []) {
+        const words = t.words ?? [];
+        const c = snapCandidate(cand(k.propose[0], k.propose[1]), segs, t.sceneCuts ?? [], { ...settings, minClipSeconds: 20, maxClipSeconds: 60 }, t.durationSec, { words });
+        const bad: string[] = [];
+        if (!c) bad.push("candidate dropped");
+        else {
+          const lastIdx = words.map((w, i) => ((w.start + w.end) / 2 < c.endSec - 0.35 ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+          const signal = sentenceEndAfter(words, lastIdx);
+          if (!signal) bad.push(`ends inside a sentence, on "${words[lastIdx]?.text}"`);
+          if (Math.abs(c.endSec - k.expectEnd) > k.tolerance) bad.push(`end ${c.endSec} is ${(c.endSec - k.expectEnd).toFixed(2)} s from the user's ${k.expectEnd}`);
+          if (c.startSec > k.windowStart + 0.5) bad.push(`starts at ${c.startSec}, after ${k.windowStart}`);
+        }
+        out.push({ id: `${name}/${k.id}`, pass: !bad.length, metrics: { start: c?.startSec ?? -1, end: c?.endSec ?? -1, expectEnd: k.expectEnd, offBy: c ? Number((c.endSec - k.expectEnd).toFixed(2)) : -1 }, notes: bad.join("; ") });
+      }
     }
     return out;
   },

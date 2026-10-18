@@ -5,7 +5,9 @@ import { StageContext, modelsUsed } from "./common.js";
 import { fmtTs } from "./transcript.js";
 import { chunkTranscript, mapChunk, mapLimit, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type SelectContext } from "./select.js";
 import { QUEUES } from "../queue/boss.js";
-import { type ClipCandidate, type ProjectSettings, type TranscriptSegment } from "@reelsaw/shared";
+import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
+import { finishThought } from "./thought.js";
+import type { Logger } from "../log.js";
 
 export { normalizeCandidate, parseClipsLeniently } from "./select.js";
 
@@ -43,6 +45,7 @@ export function snapCandidate(
   sceneCuts: number[],
   settings: ProjectSettings,
   durationSec: number,
+  thought: { words?: Word[]; log?: Logger; bounds?: [number, number] } = {},
 ): ClipCandidate | null {
   const starts = segments.map((s) => s.start);
   const ends = segments.map((s) => s.end);
@@ -84,6 +87,25 @@ export function snapCandidate(
       const back = starts.filter((st) => end - st >= settings.minClipSeconds && end - st <= settings.maxClipSeconds).pop();
       if (back === undefined) return null;
       start = Math.max(0, back - 0.25);
+    }
+  }
+  // Segment boundaries are not sentence boundaries (the STT gives no punctuation and segments are
+  // capped at 28 words), so growing/trimming above can land mid-sentence. Last step, with the
+  // padding taken off and put back: a clip ends on a complete thought.
+  if (thought.words?.length) {
+    const PAD_START = 0.25;
+    const PAD_END = 0.35;
+    const done = finishThought(thought.words, start + PAD_START, end - PAD_END, {
+      minSec: settings.minClipSeconds - PAD_START - PAD_END,
+      maxSec: settings.maxClipSeconds - PAD_START - PAD_END,
+      bounds: thought.bounds ? [thought.bounds[0] + PAD_START, thought.bounds[1] - PAD_END] : undefined,
+    });
+    for (const ch of done.changes) {
+      thought.log?.debug({ edge: ch.edge, from: Number(ch.from.toFixed(2)), to: ch.to === undefined ? null : Number(ch.to.toFixed(2)), action: ch.action, reason: ch.reason, title: c.title.slice(0, 60) }, ch.action === "left" ? `clip ${ch.edge} left inside a sentence` : `clip ${ch.edge} moved to finish the sentence`);
+    }
+    if (done.changes.some((ch) => ch.action !== "left")) {
+      start = Math.max(0, done.start - PAD_START);
+      end = Math.min(durationSec || done.end + PAD_END, done.end + PAD_END);
     }
   }
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
@@ -182,7 +204,7 @@ export async function analyze(ctx: StageContext) {
 
   // 3. pool: snap to sentences/scene cuts, enforce length, drop overlaps (keep the better first guess)
   const snappedIdx = candidates
-    .map((c, i) => ({ c: snapCandidate(c, segments, transcript.sceneCuts ?? [], settings, durationSec), i }))
+    .map((c, i) => ({ c: snapCandidate(c, segments, transcript.sceneCuts ?? [], settings, durationSec, { words: transcript.words, log }), i }))
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);
   const snapped = snappedIdx.map((x) => x.c);
