@@ -155,10 +155,10 @@ export type SelectOption = { value: string; label: ReactNode; hint?: string; dis
  * (md) or a compact button (sm); give it a width via `className` so a longer label never shifts layout.
  * An option with value "" is allowed (it means "unset").
  */
-export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void }) {
+export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
-    <RadixSelect.Root value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
+    <RadixSelect.Root disabled={disabled} value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
       <RadixSelect.Trigger
         aria-label={ariaLabel}
         onClick={onClick}
