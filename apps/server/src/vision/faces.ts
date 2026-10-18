@@ -50,12 +50,13 @@ export async function loadFaceDetector(modelPath: string): Promise<FaceDetector>
   const session = await ort.InferenceSession.create(modelPath, { graphOptimizationLevel: "all", intraOpNumThreads: 1, logSeverityLevel: 3 });
   const inputName = session.inputNames[0]!;
   const n = FACE_INPUT_W * FACE_INPUT_H;
-  const input = new Float32Array(3 * n);
 
   return {
     async detect(rgb, threshold = 0.7) {
       if (rgb.length !== n * 3) throw new Error(`expected ${n * 3} bytes of RGB24, got ${rgb.length}`);
-      // HWC uint8 → CHW float, (x - 127) / 128
+      // HWC uint8 → CHW float, (x - 127) / 128. The tensor is this call's own: the session is shared by every
+      // clip rendering at once and `run` reads the buffer after the await, so a shared one mixed frames between clips.
+      const input = new Float32Array(3 * n);
       for (let i = 0; i < n; i++) {
         input[i] = (rgb[i * 3]! - 127) / 128;
         input[n + i] = (rgb[i * 3 + 1]! - 127) / 128;

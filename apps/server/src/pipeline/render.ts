@@ -13,6 +13,7 @@ import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare, prepareModeOf } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
+import { createHash } from "node:crypto";
 import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
 import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
@@ -144,6 +145,11 @@ function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
+/** Short checksum of a sample's contents (time, face boxes, divider, text boxes): two renders of one clip log the same value. */
+function sampleDigest(s: FaceSample | undefined): string | null {
+  return s ? createHash("sha1").update(JSON.stringify([s.t, s.boxes, s.divider, s.text])).digest("hex").slice(0, 10) : null;
+}
+
 export async function renderClip(ctx: StageContext, clipId: string, jobGen?: number) {
   const { svc, projectId, db } = ctx;
   const project = await ctx.project();
@@ -265,7 +271,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   let segments = resolveSegments(timeline, samples, svc.config, sceneCuts, !!svc.faces, layoutDiag);
   // what the content-region logic saw: one summary at debug; the per-frame vote at trace (module render)
   log.debug(
-    { frames: layoutDiag.frames, voting: layoutDiag.voting, textFrames: frames.length, samplesWithText: samples.filter((sm) => sm.text).length, candidates: layoutDiag.candidates, decisions: layoutDiag.decisions },
+    { samples: samples.length, firstSample: sampleDigest(samples[0]), lastSample: sampleDigest(samples.at(-1)), frames: layoutDiag.frames, voting: layoutDiag.voting, textFrames: frames.length, samplesWithText: samples.filter((sm) => sm.text).length, candidates: layoutDiag.candidates, decisions: layoutDiag.decisions },
     "content runs",
   );
   for (const sm of samples) log.trace(voteTrace(sm), "content vote");
