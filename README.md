@@ -220,7 +220,7 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 
 Tools: `list_projects`, `get_project`, `create_project` (URL → pipeline), `wait_for_project`,
 `get_transcript` (timed sentences, range + truncation), `get_project_events`, `get_clip`,
-`update_clip`, `create_clip`, `rerender_clip`, `retry_project`, `reanalyze_project`,
+`update_clip`, `create_clip`, `rerender_clip`, `rerender_clips` (several at once), `export_project` (zip link, optionally only some `clipIds`), `retry_project`, `reanalyze_project`,
 `delete_project`. Intro/outro ("bumper") tools: `list_bumpers`, `add_bumper` (from a URL or an
 upload id), `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`,
 `set_project_bumpers`, `set_clip_bumpers` (one clip or many; `rerender: true` re-renders only those

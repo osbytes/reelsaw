@@ -25,6 +25,8 @@ export interface ExportInput {
   project: Pick<Project, "id" | "title" | "sourceType" | "sourceUrl" | "sourceMeta" | "durationSec" | "settings">;
   clips: Clip[];
   language: string | null;
+  /** set when the zip holds only the clips the user picked, not every rendered clip */
+  subset?: { requested: number; total: number };
 }
 
 export interface ClipExport {
@@ -60,7 +62,28 @@ export interface ExportManifest {
   generator: string;
   project: { id: string; title: string; durationSec: number | null; language: string | null };
   parent: { url: string | null; platform: "youtube" | "other" | null; videoId: string | null; uploader: string | null };
+  /** present only for a partial export: the clips picked, and how many rendered clips the project has */
+  subset?: { requested: number; total: number };
   clips: ClipExport[];
+}
+
+export const EXPORT_CLIP_IDS_MAX = 200;
+
+/** The `?clips=a,b` allow-list: trimmed, de-duplicated, empty when absent. Null when it is malformed or too long. */
+export function parseClipIds(raw: string | null | undefined): string[] | null {
+  if (raw === undefined || raw === null || raw.trim() === "") return [];
+  const ids = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  if (ids.length > EXPORT_CLIP_IDS_MAX || ids.some((x) => !/^[\w-]{1,64}$/.test(x))) return null;
+  return ids;
+}
+
+/** Narrows a project's clips to an allow-list (empty = all). Unknown ids are reported, not ignored. */
+export function pickExportClips(clips: Clip[], ids: string[]): { clips: Clip[]; unknown: string[]; subset?: { requested: number; total: number } } {
+  if (!ids.length) return { clips, unknown: [] };
+  const have = new Set(clips.map((c) => c.id));
+  const want = new Set(ids);
+  const total = clips.filter((c) => c.status === "done" && c.outputKey).length;
+  return { clips: clips.filter((c) => want.has(c.id)), unknown: ids.filter((x) => !have.has(x)), subset: { requested: ids.length, total } };
 }
 
 /** Extract a YouTube video id from the common URL shapes; null for anything else. */
@@ -233,6 +256,7 @@ export function buildManifest(input: ExportInput): ExportManifest {
       videoId,
       uploader: (input.project.sourceMeta?.uploader as string | undefined) ?? null,
     },
+    ...(input.subset ? { subset: input.subset } : {}),
     clips,
   };
 }
@@ -269,7 +293,7 @@ export function buildCsv(m: ExportManifest) {
 
 export function buildReadme(m: ExportManifest) {
   return `Reelsaw export — "${m.project.title}"
-${m.clips.length} clip(s), generated ${m.generatedAt}
+${m.clips.length} clip(s)${m.subset ? ` (a selection: ${m.subset.requested} picked of ${m.subset.total} rendered)` : ""}, generated ${m.generatedAt}
 
 LAYOUT
   clips/NN-title.mp4           vertical 1080x1920 H.264/AAC, ready to upload as-is

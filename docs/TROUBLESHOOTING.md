@@ -40,7 +40,7 @@ is that line, not the gap between events. A run still `running` with no live job
 
 - **`reelsaw` CLI** (`apps/server/src/cli.ts`, also `pnpm --filter @reelsaw/server cli`): same composition root as
   the server with HTTP/workers off, so it sees the exact config, models and storage. Commands: `status`, `events`,
-  `clip`, `rerender`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
+  `clip`, `rerender <clipId…>`, `cuts` (dry-run the cut search, prints every candidate verdict; `--save` writes the removed
   and context audio; `--fixture` exports a regression case), `align` (raw word timestamps for any source window),
   `hear` (transcribe a range of the *rendered* clip: what viewers actually hear), `flags`.
   Intro/outro: `bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id> [--user <email>]`,
