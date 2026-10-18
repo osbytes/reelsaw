@@ -1,0 +1,1 @@
+CREATE INDEX "project_events_progress_idx" ON "project_events" USING btree ("project_id","id") WHERE "project_events"."type" = 'stage.progress';
