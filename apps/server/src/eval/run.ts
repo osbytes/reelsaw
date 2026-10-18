@@ -136,7 +136,10 @@ async function main() {
       try {
         results = await s.run(ctx);
       } catch (err) {
-        results = [{ id: "(suite)", pass: false, notes: `suite crashed: ${(err as Error).message}` }];
+        const msg = (err as Error).message;
+        // a missing tool (ffmpeg, ffprobe, yt-dlp not installed where the evals run) measured nothing: skip, don't fail
+        const missingTool = /spawn (\S+) ENOENT/.exec(msg)?.[1];
+        results = missingTool ? [{ id: "(suite)", pass: false, skipped: `needs ${missingTool} on PATH (${msg})` }] : [{ id: "(suite)", pass: false, notes: `suite crashed: ${msg}` }];
       }
       const ms = Date.now() - t0;
       // a suite whose every case was skipped measured nothing: no metrics, so nothing to "regress"
