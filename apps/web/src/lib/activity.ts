@@ -73,16 +73,18 @@ export interface RunGroup {
   outcome: "running" | "done" | "failed";
   /** seconds, from the run's finishing event; null while running or for runs from before durations were recorded */
   runSec: number | null;
+  /** the log starts in the middle of this run: its first events are older than what is loaded */
+  continued: boolean;
   /** newest first, like the feed */
   entries: Entry[];
 }
 
 /** Group the log by run (newest run first, entries newest first). A run starts at `run.started`; older logs start one at `project.created`. */
-export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null): RunGroup[] {
+export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => Entry["d"] | null, olderExist = false): RunGroup[] {
   const explicit = log.some((e) => e.type === "run.started");
   const groups: RunGroup[] = [];
   let cur: RunGroup | null = null;
-  const fresh = (seq: number, reason: string | null, startedAt: number): RunGroup => ({ seq, reason, startedAt, outcome: "running", runSec: null, entries: [] });
+  const fresh = (seq: number, reason: string | null, startedAt: number): RunGroup => ({ seq, reason, startedAt, outcome: "running", runSec: null, continued: false, entries: [] });
   for (const e of log) {
     if (e.type === "stage.progress") continue;
     const t = new Date(e.createdAt).getTime();
@@ -101,6 +103,8 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
         continue;
       }
       groups.push((cur = fresh(groups.length + 1, e.type === "project.created" ? "created" : null, t)));
+      // the loaded log begins inside a run whose start is on an older page
+      if (olderExist && groups.length === 1 && e.type !== "project.created") cur.continued = true;
     }
     const d = describe(e);
     if (d) cur!.entries.unshift({ e, d });
@@ -110,5 +114,8 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
       cur = null;
     }
   }
+  // a run cut off by the page boundary has no run.started to name it: number it from the run after it
+  const first = groups[0];
+  if (first?.continued) first.seq = groups[1] && groups[1].seq > 1 ? groups[1].seq - 1 : 0;
   return groups.reverse();
 }

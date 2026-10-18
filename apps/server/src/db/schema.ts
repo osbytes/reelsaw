@@ -292,6 +292,8 @@ export const projects = pgTable(
     index("projects_status_idx").on(t.status),
     // source retention (every reconciler tick when enabled)
     index("projects_source_retention_idx").on(t.updatedAt).where(sql`${t.sourceKey} is not null and ${t.sourceExpiredAt} is null`),
+    // palette search (`search`): ILIKE '%q%' on the title
+    index("projects_title_trgm_idx").using("gin", t.title.op("gin_trgm_ops")),
   ],
 );
 
@@ -383,6 +385,10 @@ export const clips = pgTable(
     index("clips_project_id_idx").on(t.projectId, t.index),
     // clip retention (every reconciler tick when enabled)
     index("clips_retention_idx").on(t.updatedAt).where(sql`${t.outputKey} is not null and ${t.status} = 'done'`),
+    // palette search (`search`): ILIKE '%q%' on title, hook and caption
+    index("clips_title_trgm_idx").using("gin", t.title.op("gin_trgm_ops")),
+    index("clips_hook_trgm_idx").using("gin", t.hook.op("gin_trgm_ops")),
+    index("clips_caption_trgm_idx").using("gin", t.caption.op("gin_trgm_ops")),
   ],
 );
 

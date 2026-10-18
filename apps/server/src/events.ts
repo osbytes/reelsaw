@@ -1,5 +1,6 @@
 import { EventEmitter, on } from "node:events";
 import pg from "pg";
+import { and, count, desc, eq, gt, lt, lte, max, ne } from "drizzle-orm";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { ProjectEvent, ProjectEventType } from "@reelsaw/shared";
@@ -20,6 +21,13 @@ export interface EventNotice {
 export interface EventBus {
   emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<ProjectEvent>;
   list(projectId: string, afterId?: number, limit?: number): Promise<ProjectEvent[]>;
+  /**
+   * The log without progress ticks (those are live-only), newest `limit` rows in ascending order.
+   * `after` / `before` / `upTo` bound the id range; `hasMore` says older rows exist below the first one returned.
+   */
+  history(projectId: string, opts: { limit: number; after?: number; before?: number; upTo?: number }): Promise<{ events: ProjectEvent[]; hasMore: boolean }>;
+  /** Highest event id of the project (0 if none) and how many non-progress events it has. */
+  stats(projectId: string): Promise<{ headId: number; total: number }>;
   /** Live notices for one project. Ends when `signal` aborts. Requires start(). */
   notices(projectId: string, signal?: AbortSignal): AsyncIterable<EventNotice>;
   /** Open the LISTEN connection (API processes only). */
@@ -85,6 +93,23 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
         limit,
       });
       return rows.map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() }));
+    },
+    async history(projectId, { limit, after, before, upTo }) {
+      const t = schema.projectEvents;
+      const rows = await db
+        .select()
+        .from(t)
+        .where(and(eq(t.projectId, projectId), ne(t.type, "stage.progress"), after !== undefined ? gt(t.id, after) : undefined, before !== undefined ? lt(t.id, before) : undefined, upTo !== undefined ? lte(t.id, upTo) : undefined))
+        .orderBy(desc(t.id))
+        .limit(limit + 1);
+      const hasMore = rows.length > limit;
+      return { events: rows.slice(0, limit).reverse().map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() })), hasMore };
+    },
+    async stats(projectId) {
+      const t = schema.projectEvents;
+      const [head] = await db.select({ v: max(t.id) }).from(t).where(eq(t.projectId, projectId));
+      const [total] = await db.select({ v: count() }).from(t).where(and(eq(t.projectId, projectId), ne(t.type, "stage.progress")));
+      return { headId: Number(head?.v ?? 0), total: Number(total?.v ?? 0) };
     },
     async *notices(projectId, signal) {
       try {
