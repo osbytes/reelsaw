@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
+import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { StageContext, exists } from "./common.js";
 
 export async function ingest(ctx: StageContext) {
@@ -22,6 +23,8 @@ export async function ingest(ctx: StageContext) {
     sourcePath = await svc.storage.ensureLocal(sourceKey, path.join(dir, path.posix.basename(sourceKey)));
   } else {
     if (project.sourceType === "url") {
+      // web and MCP both land here, so one check covers every way of adding a link
+      await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.config.ALLOW_PRIVATE_SOURCE_URLS });
       let stderrTail = "";
       const { stdout } = await svc.media.ytdlp(
         [
@@ -34,8 +37,11 @@ export async function ingest(ctx: StageContext) {
           "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
           "--merge-output-format",
           "mp4",
+          "--max-filesize",
+          `${svc.config.MAX_SOURCE_FILE_MB}M`,
           "-o",
           path.join(dir, "source.%(ext)s"),
+          "--",
           project.sourceUrl!,
         ],
         {

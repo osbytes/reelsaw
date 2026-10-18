@@ -17,8 +17,13 @@ export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_UR
 /** API keys look like `rs_…`; agents send them as `Authorization: Bearer rs_…` (or `x-api-key`). */
 export const API_KEY_PREFIX = "rs_";
 
+/** Serialises the "first account becomes admin" decision (arbitrary constant, used only here). */
+const FIRST_ADMIN_LOCK = 7_203_104_001;
+
 export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
   const mode = config.SIGNUP_MODE;
+  /** emails whose sign-up saw an empty user table; resolved in the `after` hook */
+  const firstCandidates = new Set<string>();
   return betterAuth({
     baseURL: config.APP_URL,
     secret: config.BETTER_AUTH_SECRET,
@@ -60,17 +65,31 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger) {
       },
       user: {
         create: {
-          // the first account administers the box; later ones follow SIGNUP_MODE
+          // the first account administers the box; later ones follow SIGNUP_MODE. Count-then-insert
+          // races (two concurrent first sign-ups both see zero users), so a "first" candidate is
+          // inserted as a plain user and promoted in `after` by one conditional update under a lock.
           before: async (user) => {
             const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
             const first = n === 0;
-            return { data: { ...user, role: first ? "admin" : "user", approvedAt: first || mode === "open" ? new Date() : null } };
+            if (first) firstCandidates.add(user.email);
+            return { data: { ...user, role: "user", approvedAt: first || mode === "open" ? new Date() : null } };
           },
           // Better Auth owns the user insert, so this audit row cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
           // and the gate read the user row). Admin actions in accounts.ts commit row + event together.
           after: async (user) => {
-            const u = user as typeof user & { role?: string; approvedAt?: Date | null };
+            let u = user as typeof user & { role?: string; approvedAt?: Date | null };
+            if (firstCandidates.delete(u.email)) {
+              const won = await db.transaction(async (tx) => {
+                await tx.execute(sql`select pg_advisory_xact_lock(${FIRST_ADMIN_LOCK})`);
+                const promoted = await tx.execute(
+                  sql`update "user" set role = 'admin' where id = ${u.id} and not exists (select 1 from "user" where role = 'admin') returning id`,
+                );
+                if (promoted.rows.length === 0 && mode !== "open") await tx.update(schema.user).set({ approvedAt: null }).where(eq(schema.user.id, u.id));
+                return promoted.rows.length > 0;
+              });
+              u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode === "open" ? (u.approvedAt ?? new Date()) : null };
+            }
             await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode } });
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode }, "sign-up");
             if (u.approvedAt) return;
