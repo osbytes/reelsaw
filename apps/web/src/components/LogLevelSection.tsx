@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import * as Popover from "@radix-ui/react-popover";
-import { Command } from "cmdk";
-import { Check, ChevronsUpDown, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
-import { ScrollArea } from "./scroll-area";
-import { Select } from "./ui";
+import { Combobox, Select } from "./ui";
 
 const FOR = [
   { value: "15", label: "15 minutes" },
@@ -17,47 +14,6 @@ const FOR = [
 const LEVEL_HINT: Record<string, string> = { fatal: "only crashes", error: "failures", warn: "problems", info: "milestones (default)", debug: "decisions and inputs", trace: "every item" };
 
 type Row = { id: number; module: string; level: string };
-
-/** Single-choice combobox with typeahead (Radix Popover + cmdk, as MultiCombobox), over a fixed list. */
-function ModulePicker({ value, options, onChange, ariaLabel }: { value: string; options: string[]; onChange: (v: string) => void; ariaLabel: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button type="button" role="combobox" aria-expanded={open} aria-label={ariaLabel} className="input flex w-48 items-center justify-between gap-2 text-left font-mono text-sm">
-          <span className={`min-w-0 truncate ${value ? "" : "font-sans text-ink3"}`}>{value || "Choose a module"}</span>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop">
-          <Command loop>
-            <Command.Input placeholder="Type to filter…" className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
-            <ScrollArea className="max-h-[min(260px,calc(var(--radix-popover-content-available-height)-60px))]">
-              <Command.List className="p-1">
-                <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">No such module</Command.Empty>
-                {options.map((m) => (
-                  <Command.Item
-                    key={m}
-                    value={m}
-                    onSelect={() => {
-                      onChange(m);
-                      setOpen(false);
-                    }}
-                    className="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 font-mono text-sm data-[selected=true]:bg-sunk"
-                  >
-                    <span className="grid h-4 w-4 shrink-0 place-items-center">{m === value && <Check className="h-3.5 w-3.5 text-acc" />}</span>
-                    {m}
-                  </Command.Item>
-                ))}
-              </Command.List>
-            </ScrollArea>
-          </Command>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
 
 /**
  * Settings → System → Log level (admins). Turn up the detail for everything, or for parts (a module
@@ -124,7 +80,7 @@ export function LogLevelSection() {
       <div className="flex flex-col gap-2">
         {rows.map((r) => (
           <div key={r.id} className="flex flex-wrap items-center gap-2">
-            <ModulePicker ariaLabel="Module" value={r.module} options={s?.modules ?? []} onChange={(m) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, module: m } : x)))} />
+            <Combobox ariaLabel="Module" className="w-48 font-mono" placeholder="Choose a module" emptyText="No such module" value={r.module} options={(s?.modules ?? []).map((m) => ({ value: m, label: m }))} onValueChange={(m) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, module: m } : x)))} />
             <Select ariaLabel={`Level for ${r.module || "module"}`} className="w-32" value={r.level} onValueChange={(l) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, level: l } : x)))} options={levels} />
             <button type="button" className="btn-quiet px-2" aria-label={`Remove ${r.module || "module"} override`} onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))}>
               <X className="h-4 w-4" />
