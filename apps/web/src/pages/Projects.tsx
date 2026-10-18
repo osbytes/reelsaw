@@ -94,7 +94,10 @@ function CardSkeleton({ i }: { i: number }) {
     <div className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel">
       <Skeleton className="aspect-video rounded-none" />
       <div className="flex flex-col gap-1.5 p-3.5">
-        <Skeleton className={`h-[1.1rem] ${["w-4/5", "w-2/3", "w-full"][i % 3]}`} />
+        <div className="flex min-h-[2.75em] flex-col gap-1 text-[15px] leading-snug">
+          <Skeleton className={`h-[1.1rem] ${["w-4/5", "w-2/3", "w-full"][i % 3]}`} />
+          {i % 3 === 2 && <Skeleton className="h-[1.1rem] w-1/2" />}
+        </div>
         <Skeleton className="h-4 w-20" />
         <Skeleton className={`h-3.5 ${["w-3/5", "w-1/2", "w-2/3"][i % 3]}`} />
       </div>
@@ -234,7 +237,8 @@ export function ProjectsPage() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5 p-3.5">
-                  <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug">{p.title}</h3>
+                  {/* always two lines tall so every card in the row ends at the same height, whatever the title length */}
+                  <h3 className="line-clamp-2 min-h-[2.75em] text-[15px] font-semibold leading-snug">{p.title}</h3>
                   <StatusText status={p.status} />
                   <div className="truncate text-xs text-ink3">{detail}</div>
                 </div>
