@@ -61,6 +61,12 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
   const keys = list.data ?? [];
   const claudeCmd = fresh ? `claude mcp add --transport http reelsaw ${mcpUrl} --header "Authorization: Bearer ${fresh.key}"` : "";
   const json = fresh ? JSON.stringify({ mcpServers: { reelsaw: { type: "http", url: mcpUrl, headers: { Authorization: `Bearer ${fresh.key}` } } } }, null, 2) : "";
+  // for clients that launch a command: `reelsaw mcp` serves the same tools over stdio from inside the app container
+  const stdio = fresh
+    ? JSON.stringify({ mcpServers: { reelsaw: { command: "docker", args: ["exec", "-i", "-e", `REELSAW_API_KEY=${fresh.key}`, "reelsaw-app-1", "reelsaw", "mcp"] } } }, null, 2)
+        // the args array on one line: seven one-word entries do not need seven lines
+        .replace(/\[\s+([^\]]+?)\s+\]/, (_, inner: string) => `[${inner.split(/,\s+/).join(", ")}]`)
+    : "";
 
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
@@ -120,6 +126,17 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
                 </button>
               </div>
               <pre className="overflow-x-auto rounded-[8px] bg-panel p-2 font-mono text-[11px] leading-4">{json}</pre>
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <div className="flex items-center justify-between text-xs text-ink2">
+                <span>
+                  Command (stdio), for clients that launch a program instead of calling a URL. <span className="font-mono">reelsaw-app-1</span> is the app container (<span className="font-mono">docker ps</span>).
+                </span>
+                <button className="btn-quiet text-xs" onClick={() => copy(stdio, "Config")}>
+                  Copy
+                </button>
+              </div>
+              <pre className="overflow-x-auto rounded-[8px] bg-panel p-2 font-mono text-[11px] leading-4">{stdio}</pre>
             </div>
           </div>
         </div>

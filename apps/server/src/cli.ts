@@ -42,6 +42,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --rerender re-renders only the affected clips
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
+ *   mcp                                     the MCP server over stdio for clients that launch a command:
+ *                                           same tools as /api/mcp, forwarded to REELSAW_URL with
+ *                                           REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts)
  */
 import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
@@ -68,6 +71,7 @@ import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-le
 import { formatTime } from "@reelsaw/shared";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
+import { runMcpStdio } from "./mcp-stdio.js";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -596,9 +600,11 @@ async function userByEmail(svc: Services, email: string | undefined) {
 }
 
 async function run() {
+  // the stdio MCP bridge talks to a running instance over HTTP and must not open the database or models
+  if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <users|approve|make-admin|retention|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

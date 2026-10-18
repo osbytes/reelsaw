@@ -49,6 +49,14 @@ export async function signUp(): Promise<{ email: string; cookie: string; userId:
   return { email, cookie, userId: body.user.id };
 }
 
+/** Create an API key for a signed-in account (the same call Settings → API keys makes). */
+export async function createKey(cookie: string, name: string): Promise<{ id: string; key: string }> {
+  const res = await fetch(`${BASE}/api/auth/api-key/create`, { method: "POST", headers: { "content-type": "application/json", origin: BASE, cookie }, body: JSON.stringify({ name }) });
+  const body = await res.text();
+  if (res.status !== 200) throw new Error(`api-key/create ${res.status}: ${body}`);
+  return JSON.parse(body) as { id: string; key: string };
+}
+
 export async function readZip(buf: Buffer): Promise<Map<string, Buffer>> {
   const zip = await new Promise<yauzl.ZipFile>((res, rej) => yauzl.fromBuffer(buf, { lazyEntries: true }, (e, z) => (e ? rej(e) : res(z!))));
   const out = new Map<string, Buffer>();

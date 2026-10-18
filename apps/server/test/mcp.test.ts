@@ -8,14 +8,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { BASE, db, signUp } from "./helpers.js";
-
-async function createKey(cookie: string, name: string): Promise<{ id: string; key: string }> {
-  const res = await fetch(`${BASE}/api/auth/api-key/create`, { method: "POST", headers: { "content-type": "application/json", origin: BASE, cookie }, body: JSON.stringify({ name }) });
-  const body = await res.text();
-  assert.equal(res.status, 200, body);
-  return JSON.parse(body) as { id: string; key: string };
-}
+import { BASE, createKey, db, signUp } from "./helpers.js";
 
 function mcpInit(headers: Record<string, string>) {
   return fetch(`${BASE}/api/mcp`, {

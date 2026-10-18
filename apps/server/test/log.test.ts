@@ -10,7 +10,7 @@ import { mergeLogLevels, parseDuration, specFromStructured, knownModules, KNOWN_
 import { accessLevel, requestLogger, resolveRequestId, trpcLogLevel, type AppEnv } from "../src/request-log.js";
 import { eventFields } from "../src/uow.js";
 import { lineMatches } from "../src/log-read.js";
-import { argSummary } from "../src/mcp.js";
+import { argSummary } from "../src/mcp-tools.js";
 import { loggableArgv } from "../src/media.js";
 
 /** A logger whose JSON lines land in an array. */
