@@ -19,6 +19,25 @@ Self-hosted, AI-powered long-form → short-form video clipper. Paste a YouTube 
 
 Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step deploy with Docker Compose.
 
+<p align="center">
+  <video src="docs/assets/demo-framing.mp4" poster="docs/assets/demo-framing-poster.jpg" width="280" controls playsinline>
+    <a href="docs/assets/demo-framing.mp4">demo-framing.mp4</a>
+  </video>
+</p>
+<p align="center">
+  <sub>Auto reframing in one clip: split → face → stack → fit</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/workspace.png" alt="Project workspace with source player, transcript, and rendered clips" width="920">
+</p>
+
+<p align="center">
+  <img src="docs/assets/editor.png" alt="Clip editor with 9:16 preview, captions panel, and multi-lane timeline" width="450">
+  &nbsp;
+  <img src="docs/assets/transcript-fixes.png" alt="Transcript with filler cuts and the fixes list" width="450">
+</p>
+
 ## Features
 
 **Pipeline**
