@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFuzzy, Highlight } from "../lib/fuzzy";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFuzzy, Highlight, type Fuzzy, type FuseResultMatch } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
 import { ChevronLeft, Download, Ban, ExternalLink, Film, FolderOpen, Images, Star, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
 import { openReportHere } from "../lib/report";
@@ -11,7 +11,7 @@ import { useTheme } from "../lib/theme";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
-import { extractUrls, isOnlyUrls, linkKey } from "../lib/links";
+import { extractUrls, isOnlyUrls, linkKey, youtubeId } from "../lib/links";
 import { ago } from "../lib/time";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
@@ -24,6 +24,25 @@ const oneLine = (s: string) => s.trim().split(/\s+/).join(" ");
 
 const Ctx = createContext<(q?: string) => void>(() => {});
 export const useCommandPalette = () => useContext(Ctx);
+
+/** What a pasted link looks like inside a stored source link: a YouTube id, else host and path. The server prefilters with it; linkKey decides. */
+function linkNeedle(url: string): string {
+  const yt = youtubeId(url);
+  if (yt) return yt;
+  try {
+    const u = new URL(url.trim());
+    return `${u.hostname.replace(/^www\./, "")}${u.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return url.trim();
+  }
+}
+
+/** Fuse ranks and highlights the few rows the server returned; rows it does not match stay, after the ranked ones. */
+function rankRows<T>(fz: Fuzzy<T>, rows: T[], q: string): Array<{ item: T; matches?: readonly FuseResultMatch[] }> {
+  const ranked = fz.search(q);
+  const seen = new Set(ranked.map((r) => r.item));
+  return [...ranked.map((r) => ({ item: r.item, matches: r.matches })), ...rows.filter((r) => !seen.has(r)).map((item) => ({ item }))];
+}
 
 /** What the action list (→) is about. */
 type Target = { kind: "project" | "clip" | "asset"; id: string } | { kind: "pick"; slot: "intro" | "outro"; id: string };
@@ -129,32 +148,54 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   const libFuse = useMemo(() => (library ? createFuzzy(library, [{ name: "name", weight: 1 }]) : null), [library]);
   const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
 
-  // one small index of every project and clip, fuzzy-matched locally as you type
-  const indexQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 30_000 });
-  const index = indexQ.data;
-  type Proj = NonNullable<typeof index>["projects"][number];
-  type ClipRow = NonNullable<typeof index>["clips"][number];
+  // The list before typing is the 20 most recent projects; typing asks the server (debounced), which matches in SQL
+  // and returns a handful of rows. Fuse only ranks and highlights those rows.
+  const linkMode = isOnlyUrls(q);
+  const urls = useMemo(() => (linkMode ? extractUrls(q) : []), [q, linkMode]);
+  const [dq, setDq] = useState(q);
+  useEffect(() => {
+    if (!open) return;
+    if (!q.trim() || isOnlyUrls(q)) return setDq(q);
+    const t = window.setTimeout(() => setDq(q), 120);
+    return () => window.clearTimeout(t);
+  }, [q, open]);
+  const searching = dq.trim() !== "";
+  const recentQ = useQuery({ ...trpc.searchIndex.queryOptions(), enabled: open, staleTime: 30_000 });
+  const searchQ = useQuery({
+    ...trpc.search.queryOptions({ q: linkMode ? "" : dq.trim(), limit: 15, links: linkMode ? urls.map(linkNeedle) : undefined }),
+    enabled: open && searching,
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+  const countsQ = useQuery({ ...trpc.projects.counts.queryOptions(), enabled: open, staleTime: 30_000 });
+  const counts = countsQ.data;
+  type Proj = NonNullable<typeof recentQ.data>["projects"][number];
+  type ClipRow = NonNullable<typeof searchQ.data>["clips"][number];
+  // a pasted link is only answered by results for that link, never by the previous query's
+  const staleLink = linkMode && (searchQ.isPlaceholderData || !searchQ.data);
+  const index = searching ? (staleLink ? undefined : searchQ.data) : recentQ.data ? { projects: recentQ.data.projects, clips: [] as ClipRow[], truncated: false } : undefined;
+  const loadingIndex = searching ? !searchQ.data || staleLink : !recentQ.data;
+  // everything the palette has shown, so an item's action list still works after the query changes
+  const known = useRef({ projects: new Map<string, Proj>(), clips: new Map<string, ClipRow>() });
+  for (const p of index?.projects ?? []) known.current.projects.set(p.id, p);
+  for (const c of index?.clips ?? []) known.current.clips.set(c.id, c);
   const fuse = useMemo(() => {
     if (!index) return null;
     return {
-      projects: createFuzzy(index.projects, [{ name: "title", weight: 1 }]),
-      clips: createFuzzy(index.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }]),
+      // loose: the server already decided what matches, Fuse only orders and highlights what it recognises
+      projects: createFuzzy(index.projects, [{ name: "title", weight: 1 }], { threshold: 0.6 }),
+      clips: createFuzzy(index.clips, [{ name: "title", weight: 3 }, { name: "hook", weight: 1.5 }, { name: "projectTitle", weight: 1 }, { name: "caption", weight: 0.6 }], { threshold: 0.6 }),
     };
   }, [index]);
-  // per-project clip facts, counted client-side from the same index
-  const stats = useMemo(() => {
-    const m = new Map<string, { clips: number; done: number; failed: ClipRow[] }>();
-    for (const c of index?.clips ?? []) {
-      const s = m.get(c.projectId) ?? { clips: 0, done: 0, failed: [] };
-      s.clips++;
-      if (c.status === "done") s.done++;
-      if (c.status === "failed") s.failed.push(c);
-      m.set(c.projectId, s);
-    }
-    return m;
-  }, [index]);
-  const failedClips = useMemo(() => (index?.clips ?? []).filter((c) => c.status === "failed"), [index]);
-  const failedProjects = useMemo(() => (index?.projects ?? []).filter((p) => p.status === "failed"), [index]);
+  // per-project clip facts come with each project row
+  const stats = {
+    get: (id: string) => {
+      const p = known.current.projects.get(id);
+      return p ? { clips: p.clipCount, done: p.clipsDone, failed: p.failedClipIds.map((cid) => ({ id: cid })) } : undefined;
+    },
+  };
+  const failedClipCount = counts?.failedClips ?? 0;
+  const failedProjectCount = counts?.failedProjects ?? 0;
 
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
@@ -165,11 +206,11 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     fn();
   };
 
-  const refresh = (projectId?: string) => {
+  const refresh = (_projectId?: string) => {
     void qc.invalidateQueries({ queryKey: trpc.searchIndex.queryKey() });
-    void qc.invalidateQueries({ queryKey: trpc.projects.list.queryKey() });
-    if (projectId) void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-    else void qc.invalidateQueries({ queryKey: trpc.projects.get.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.search.pathKey() });
+    // the Projects page (list and header counts), the project pages and the failed-work counts all live under projects
+    void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
   };
   /** Runs one mutation after the palette has closed; says in plain words how it went. */
   const act = (done: string, failed: string, fn: () => Promise<unknown>, projectId?: string) =>
@@ -219,7 +260,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
 
   // ----- row content -----
   const projectHint = (p: Proj): ReactNode => {
-    const n = stats.get(p.id)?.clips ?? 0;
+    const n = p.clipCount;
     return (
       <>
         <StatusText status={p.status} />
@@ -233,9 +274,6 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     </>
   );
   const projectItem = (p: Proj, group: string, label: ReactNode = p.title): Item => ({ key: `p-${p.id}`, group, thumb: p.thumbnailUrl, label, hint: projectHint(p), actions: { kind: "project", id: p.id }, run: go(() => nav(`/p/${p.id}`)) });
-
-  const linkMode = isOnlyUrls(q);
-  const urls = useMemo(() => (linkMode ? extractUrls(q) : []), [q, linkMode]);
 
   const items: Item[] = useMemo(() => {
     const out: Item[] = [];
@@ -288,7 +326,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "project") {
-        const p = d?.projects.find((x) => x.id === target.id);
+        const p = known.current.projects.get(target.id);
         if (!p) return out;
         const s = stats.get(p.id);
         const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
@@ -309,7 +347,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
         if (p.status === "done" || p.status === "failed") acts.push(A("refine", "Re-run refine", <Sparkles className="h-4 w-4" />, go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })), "Names, disfluencies, scene changes"));
         acts.push(A("delete", "Delete project", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })), "Removes the source, transcript and every clip", true));
       } else {
-        const c = d?.clips.find((x) => x.id === target.id);
+        const c = known.current.clips.get(target.id);
         if (!c) return out;
         const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, run });
         acts.push(A("open", "Open in project", <ExternalLink className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}#clip=${c.id}`))));
@@ -364,29 +402,29 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
     ];
     // global commands only appear when there is something for them to do
-    if (failedClips.length)
+    if (failedClipCount)
       actions.unshift({
         key: "a-retry-clips",
         group: "Actions",
         icon: <RotateCcw className="h-4 w-4" />,
-        label: `Retry all failed clips (${failedClips.length})`,
-        hint: `across ${plural(new Set(failedClips.map((c) => c.projectId)).size, "project")}`,
+        label: `Retry all failed clips (${failedClipCount})`,
+        hint: `across ${plural(counts?.failedClipProjects ?? 0, "project")}`,
         run: go(() => {
-          void each(failedClips, (c) => rerender.mutateAsync({ id: c.id })).then((r) => {
+          void each(counts?.failedClipIds ?? [], (id) => rerender.mutateAsync({ id })).then((r) => {
             refresh();
             toast(r.failed ? `Retrying ${plural(r.ok, "clip")} · ${r.failed} couldn’t be queued${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}` : `Retrying ${plural(r.ok, "failed clip")}`);
           });
         }),
       });
-    if (failedProjects.length)
+    if (failedProjectCount)
       actions.unshift({
         key: "a-resume-projects",
         group: "Actions",
         icon: <Play className="h-4 w-4" />,
-        label: `Resume failed projects (${failedProjects.length})`,
+        label: `Resume failed projects (${failedProjectCount})`,
         hint: "each from the last stage that didn’t finish",
         run: go(() => {
-          void each(failedProjects, (p) => retry.mutateAsync({ id: p.id })).then((r) => {
+          void each(counts?.failedProjectIds ?? [], (id) => retry.mutateAsync({ id })).then((r) => {
             refresh();
             toast(r.failed ? `Resumed ${plural(r.ok, "project")} · ${r.failed} couldn’t be resumed${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}` : `Resumed ${plural(r.ok, "failed project")}`);
           });
@@ -415,8 +453,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
       }
     }
     if (fuse) {
-      for (const r of fuse.projects.search(ql).slice(0, 6)) out.push(projectItem(r.item, "Projects", <Highlight text={r.item.title} matches={r.matches} k="title" />));
-      for (const r of fuse.clips.search(ql).slice(0, 10)) {
+      for (const r of rankRows(fuse.projects, index!.projects, ql).slice(0, 8)) out.push(projectItem(r.item, "Projects", <Highlight text={r.item.title} matches={r.matches} k="title" />));
+      for (const r of rankRows(fuse.clips, index!.clips, ql)) {
         const c = r.item;
         const via = r.matches?.find((m) => m.key !== "title");
         out.push({
@@ -434,7 +472,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, linkMode, urls, target, index, fuse, stats, failedClips, failedProjects, library, libFuse, defaults, pickSec]);
+  }, [q, linkMode, urls, target, index, fuse, counts, library, libFuse, defaults, pickSec, recentQ.data, searchQ.data]);
 
   useEffect(() => setCursor(0), [q, target]);
   useEffect(() => setPickSec(""), [target]);
@@ -444,10 +482,8 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
   // the item an open action list belongs to was deleted: back to the list
   useEffect(() => {
     if (!target) return;
-    if (target.kind === "asset") {
-      if (library && !library.some((a) => a.id === target.id)) setTarget(null);
-    } else if (index && !(target.kind === "project" || target.kind === "pick" ? index.projects.some((p) => p.id === target.id) : index.clips.some((c) => c.id === target.id))) setTarget(null);
-  }, [target, index, library]);
+    if (target.kind === "asset" && library && !library.some((a) => a.id === target.id)) setTarget(null);
+  }, [target, library]);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     listRef.current?.querySelector(`[data-idx="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
@@ -469,10 +505,10 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
     : target.kind === "asset"
       ? library?.find((a) => a.id === target.id)?.name
       : target.kind === "pick"
-        ? `${index?.projects.find((p) => p.id === target.id)?.title ?? ""} · ${target.slot === "intro" ? "Intro" : "Outro"}`
+        ? `${known.current.projects.get(target.id)?.title ?? ""} · ${target.slot === "intro" ? "Intro" : "Outro"}`
         : target.kind === "project"
-          ? index?.projects.find((p) => p.id === target.id)?.title
-          : index?.clips.find((c) => c.id === target.id)?.title || "Untitled clip";
+          ? known.current.projects.get(target.id)?.title
+          : known.current.clips.get(target.id)?.title || "Untitled clip";
 
   let lastGroup = "";
   return (
@@ -549,7 +585,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
             </div>
             <ScrollArea className="max-h-[min(460px,60vh)]">
               <div ref={listRef} className="flex flex-col p-1.5">
-                {items.length === 0 && (target?.kind === "pick" ? libQ.isLoading : indexQ.isLoading) && (
+                {items.length === 0 && (target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && (
                   <SkeletonRegion label="Loading…" className="flex flex-col">
                     {[0, 1, 2, 3, 4].map((i) => (
                       <div key={i} className="flex items-center gap-3 px-2.5 py-2">
@@ -566,7 +602,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                     ))}
                   </SkeletonRegion>
                 )}
-                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : indexQ.isLoading) && <div className="px-3 py-8 text-center text-sm text-ink3">Nothing found</div>}
+                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && <div className="px-3 py-8 text-center text-sm text-ink3">Nothing found</div>}
                 {items.map((it, i) => {
                   const head = it.group !== lastGroup ? it.group : null;
                   lastGroup = it.group;
@@ -604,6 +640,7 @@ function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpenChange:
                     </div>
                   );
                 })}
+                {!target && !linkMode && searching && searchQ.data?.truncated && items.length > 0 && <div className="px-3 pb-1 pt-2 text-xs text-ink3">More match than shown. Keep typing to narrow it down.</div>}
               </div>
             </ScrollArea>
             {target?.kind === "pick" && (

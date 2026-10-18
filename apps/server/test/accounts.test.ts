@@ -64,7 +64,7 @@ describe("accounts", () => {
   it("lists pending first and approves", async () => {
     const list = await trpc(admin.cookie, "admin.users.list", undefined, "GET");
     assert.equal(list.status, 200);
-    const rows = list.data as Array<{ id: string; status: string }>;
+    const rows = (list.data as { items: Array<{ id: string; status: string }> }).items;
     assert.equal(rows[0]!.status, "pending");
     const count = await trpc(admin.cookie, "admin.users.pendingCount", undefined, "GET");
     assert.ok((count.data as number) >= 1);

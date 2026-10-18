@@ -51,7 +51,7 @@ import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
 import { sweepRetention } from "./retention.js";
-import { sweepScratch, purgeBumperAssets } from "./storage/sweep.js";
+import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { QUEUES } from "./queue/boss.js";
@@ -128,6 +128,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!p) throw new Error("project not found");
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
     if (p.error) console.log(`  error: ${p.error}`);
+    const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
+    console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.config.EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
     if (t) console.log(`  transcript: lang=${t.language} flags=${t.flags.length} refine=${JSON.stringify(t.refine)}`);
     const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: schema.clips.index });
@@ -326,6 +328,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
     console.log(`expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`);
     if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");
+    const sw = await readSweepState(svc);
+    console.log(
+      sw.lastRunAt
+        ? `background sweep: last ran ${sw.lastRunAt} in ${sw.lastRunMs} ms, ${sw.lastScanned} directories, ${sw.lastComplete ? "reached the end" : `stopped on its time budget; resumes after "${sw.cursor}"`}, removed ${sw.lastRemoved}`
+        : "background sweep: has not run yet (hourly from the reconciler)",
+    );
   },
 
   async stuck(svc) {

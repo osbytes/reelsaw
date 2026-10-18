@@ -135,7 +135,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       setDecisions((x) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== f.id)));
       setPinnedFlag(null);
       setOpenFlag(null);
-      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
       toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""} · restore it from Deleted`);
     } catch (err) {
       toast.error((err as Error).message);
@@ -145,7 +145,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
   async function restoreOne(id: string) {
     try {
       const r = await restore.mutateAsync({ projectId, flagId: id });
-      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
       if (deletedFlags.length <= 1) setFilter("all");
       toast(`Restored${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`);
     } catch (err) {
@@ -165,7 +165,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       window.getSelection()?.removeAllRanges();
       setFixText(null);
       setPick(null);
-      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
       toast(r.rerendered ? `Corrected · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Corrected");
     } catch {
       /* error shown in the bar */
@@ -177,7 +177,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       const r = await addCut.mutateAsync({ projectId, start: pick.start, end: pick.end });
       window.getSelection()?.removeAllRanges();
       setPick(null);
-      await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+      await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
       toast(r.rerendered ? `Cut added · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Cut added");
     } catch {
       /* error shown in the bar */
@@ -362,7 +362,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     setDecisions({});
     setPinnedFlag(null);
     setOpenFlag(null);
-    await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+    await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
   }
 
   type Filter = "all" | "review" | "reviewed" | "entity" | "disfluency" | "deleted";

@@ -68,7 +68,8 @@ export class StageContext {
     if (pct < 1 && now - this.lastProgressAt < 1500) return; // throttle writes
     this.lastProgressAt = now;
     await this.db.update(schema.projects).set({ stageProgress: pct, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
-    await this.svc.events.emit(this.projectId, "stage.progress", { stage: this.stage, progress: pct, message, ...extra });
+    // the column above is the state a reload reads; the tick itself is live-only (NOTIFY, no event row)
+    await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
   }
 
   /**

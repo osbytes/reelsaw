@@ -3,7 +3,7 @@
  * admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
  * number is known: project count and rate at creation, source minutes once ffprobe has run.
  */
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
 import type { Config } from "./config.js";
@@ -78,23 +78,62 @@ export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKe
   return { MAX_PROJECTS_PER_USER: total, MAX_SOURCE_MINUTES_PER_DAY: Math.round(await minutesToday(db, userId)), MAX_NEW_PROJECTS_PER_HOUR: hour };
 }
 
-/** Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
-export async function usageByUser(db: Db, days: number) {
-  const since = sql`now() - make_interval(days => ${days}::int)`;
-  const uid = sql.raw('"user"."id"');
-  const rows = await db
-    .select({
-      id: schema.user.id,
-      projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${uid} and p.created_at >= ${since})`,
-      projectsTotal: sql<number>`(select count(*)::int from projects p where p.user_id = ${uid})`,
-      sourceMinutes: sql<number>`(select coalesce(sum(p.duration_sec), 0) / 60.0 from projects p where p.user_id = ${uid} and p.created_at >= ${since})`,
-      clipsRendered: sql<number>`(select count(*)::int from clips c join projects p on p.id = c.project_id where p.user_id = ${uid} and c.status = 'done' and c.updated_at >= ${since})`,
-      storedBytes: sql<number>`(select coalesce(sum(p.source_bytes), 0) from projects p where p.user_id = ${uid}) + (select coalesce(sum(u.size_bytes), 0) from uploads u where u.user_id = ${uid})`,
-      llmCalls: sql<number>`(select count(*)::int from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
-      llmInputTokens: sql<number>`(select coalesce(sum(l.input_tokens), 0) from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
-      llmOutputTokens: sql<number>`(select coalesce(sum(l.output_tokens), 0) from llm_usage l where l.user_id = ${uid} and l.created_at >= ${since})`,
-    })
-    .from(schema.user)
-    .limit(500);
-  return rows.map((r) => ({ ...r, sourceMinutes: Math.round(Number(r.sourceMinutes)), storedBytes: Number(r.storedBytes), llmInputTokens: Number(r.llmInputTokens), llmOutputTokens: Number(r.llmOutputTokens) }));
+/**
+ * Per-user usage over the last `days`: projects, minutes of source, clips rendered, model calls and tokens,
+ * stored bytes. One grouped query per metric table over `userIds` (the page the caller is showing), merged here;
+ * without ids it covers the first 500 accounts.
+ */
+export async function usageByUser(db: Db, days: number | null, userIds?: string[]) {
+  const ids = userIds ?? (await db.select({ id: schema.user.id }).from(schema.user).orderBy(schema.user.createdAt).limit(500)).map((u) => u.id);
+  if (!ids.length) return [];
+  // null = all time
+  const since = days == null ? sql`'-infinity'::timestamptz` : sql`now() - make_interval(days => ${days}::int)`;
+  const { projects: P, clips: C, uploads: U, llmUsage: L } = schema;
+  const [proj, clip, up, llm] = await Promise.all([
+    db
+      .select({
+        id: P.userId,
+        projects: sql<number>`(count(*) filter (where ${P.createdAt} >= ${since}))::int`,
+        projectsTotal: sql<number>`count(*)::int`,
+        sourceMinutes: sql<number>`coalesce(sum(${P.durationSec}) filter (where ${P.createdAt} >= ${since}), 0) / 60.0`,
+        sourceBytes: sql<number>`coalesce(sum(${P.sourceBytes}), 0)`,
+      })
+      .from(P)
+      .where(inArray(P.userId, ids))
+      .groupBy(P.userId),
+    db
+      .select({ id: P.userId, clipsRendered: sql<number>`count(*)::int` })
+      .from(C)
+      .innerJoin(P, eq(P.id, C.projectId))
+      .where(and(inArray(P.userId, ids), eq(C.status, "done"), sql`${C.updatedAt} >= ${since}`))
+      .groupBy(P.userId),
+    db.select({ id: U.userId, bytes: sql<number>`coalesce(sum(${U.sizeBytes}), 0)` }).from(U).where(inArray(U.userId, ids)).groupBy(U.userId),
+    db
+      .select({
+        id: L.userId,
+        llmCalls: sql<number>`count(*)::int`,
+        llmInputTokens: sql<number>`coalesce(sum(${L.inputTokens}), 0)`,
+        llmOutputTokens: sql<number>`coalesce(sum(${L.outputTokens}), 0)`,
+      })
+      .from(L)
+      .where(and(inArray(L.userId, ids), sql`${L.createdAt} >= ${since}`))
+      .groupBy(L.userId),
+  ]);
+  const by = <T extends { id: string | null }>(rows: T[]) => new Map(rows.map((r) => [r.id, r]));
+  const [pm, cm, um, lm] = [by(proj), by(clip), by(up), by(llm)];
+  return ids.map((id) => {
+    const p = pm.get(id);
+    const l = lm.get(id);
+    return {
+      id,
+      projects: p?.projects ?? 0,
+      projectsTotal: p?.projectsTotal ?? 0,
+      sourceMinutes: Math.round(Number(p?.sourceMinutes ?? 0)),
+      clipsRendered: cm.get(id)?.clipsRendered ?? 0,
+      storedBytes: Number(p?.sourceBytes ?? 0) + Number(um.get(id)?.bytes ?? 0),
+      llmCalls: l?.llmCalls ?? 0,
+      llmInputTokens: Number(l?.llmInputTokens ?? 0),
+      llmOutputTokens: Number(l?.llmOutputTokens ?? 0),
+    };
+  });
 }

@@ -67,12 +67,15 @@ describe("mcp", () => {
 
   it("lists the tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "get_clip", "update_clip", "create_clip", "rerender_clip", "delete_project", "list_bumpers", "add_bumper", "set_default_bumper", "remove_bumper", "restore_bumper", "bumper_usage", "set_project_bumpers", "set_clip_bumpers"]) assert.ok(names.includes(n), n);
+    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "delete_project", "list_bumpers", "add_bumper", "set_default_bumper", "remove_bumper", "restore_bumper", "bumper_usage", "set_project_bumpers", "set_clip_bumpers"]) assert.ok(names.includes(n), n);
   });
 
   it("sees only the caller's projects", async () => {
     const r = await client.callTool({ name: "list_projects", arguments: {} });
-    const rows = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as Array<{ id: string; title: string; clips: string }>;
+    const page = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as { projects: Array<{ id: string; title: string; clips: string }>; total: number; nextCursor: string | null };
+    const rows = page.projects;
+    assert.equal(page.total, 1);
+    assert.equal(page.nextCursor, null);
     assert.deepEqual(rows.map((p) => p.id), [mine]);
     assert.equal(rows[0]!.clips, "1/1 rendered");
     const denied = await client.callTool({ name: "get_project", arguments: { id: theirs } });
@@ -111,8 +114,8 @@ describe("mcp", () => {
     const h = { authorization: `Bearer ${apiKey.key}` };
     const t = await fetch(`${BASE}/api/trpc/projects.list`, { headers: h });
     assert.equal(t.status, 200);
-    const body = (await t.json()) as { result: { data: Array<{ id: string }> } };
-    assert.deepEqual(body.result.data.map((p) => p.id), [mine]);
+    const body = (await t.json()) as { result: { data: { items: Array<{ id: string }> } } };
+    assert.deepEqual(body.result.data.items.map((p) => p.id), [mine]);
     // the project has no stored source: auth passes (not 401), the file is missing (404)
     assert.equal((await fetch(`${BASE}/media/source/${mine}`, { headers: h })).status, 404);
     assert.equal((await fetch(`${BASE}/media/source/${theirs}`, { headers: h })).status, 404);

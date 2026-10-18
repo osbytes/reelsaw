@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSubscription } from "@trpc/tanstack-react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useProjectEvents } from "../lib/projectEvents";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ClipEditor, type EditorClip } from "../components/ClipEditor";
@@ -12,30 +12,23 @@ import { masksSourceText } from "@reelsaw/shared";
 export function ClipEditorPage() {
   const { id = "", clipId = "" } = useParams();
   const trpc = useTRPC();
-  const qc = useQueryClient();
   const nav = useNavigate();
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
+  const tq = useQuery(trpc.transcripts.get.queryOptions({ projectId: id }));
+  const t = tq.data;
   const [progress, setProgress] = useState<number | undefined>(undefined);
 
-  useSubscription(
-    trpc.projects.events.subscriptionOptions(
-      { id },
-      {
-        onData: ({ data: evt }) => {
-          const p = evt.payload as { clipId?: string; progress?: number };
-          if (evt.type === "stage.progress") {
-            if (p.clipId === clipId && typeof p.progress === "number") setProgress(p.progress);
-            return;
-          }
-          if (p.clipId === clipId || evt.type.startsWith("project.")) void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id }) });
-        },
-      },
-    ),
-  );
+  // render progress of this clip; the stream also keeps the project and transcript queries current
+  useProjectEvents(id, {
+    onProgress: (evt) => {
+      const p = evt.payload as { clipId?: string; progress?: number };
+      if (p.clipId === clipId && typeof p.progress === "number") setProgress(p.progress);
+    },
+  });
 
   const p = q.data;
   const clip = p?.clips.find((c) => c.id === clipId);
-  if (q.isLoading) return <ClipEditorSkeleton />;
+  if (q.isLoading || (tq.isLoading && !!q.data?.transcript)) return <ClipEditorSkeleton />;
   if (!p) return <NotFound what="project" error={q.error} onRetry={() => q.refetch()} />;
   if (!clip)
     return (
@@ -52,7 +45,7 @@ export function ClipEditorPage() {
         </div>
       </div>
     );
-  if (!p.transcript || !p.sourceVideoUrl)
+  if (!t || !p.sourceVideoUrl)
     return (
       <div className="p-6 text-ink2">
         The source video or transcript isn’t ready yet. <Link to={`/p/${p.id}`}>Back to the project</Link>
@@ -70,12 +63,12 @@ export function ClipEditorPage() {
       srcW={p.width ?? 1920}
       srcH={p.height ?? 1080}
       settings={p.settings}
-      words={p.transcript.words}
-      rawWords={p.transcript.rawWords ?? p.transcript.words}
-      segments={p.transcript.segments}
-      flags={p.transcript.flags ?? []}
-      sceneCuts={p.transcript.sceneCuts ?? []}
-      overlays={masksSourceText(p.settings.sourceText, p.transcript.textProfile) ? (p.transcript.overlays ?? []) : []}
+      words={t.words}
+      rawWords={t.rawWords ?? t.words}
+      segments={t.segments}
+      flags={t.flags ?? []}
+      sceneCuts={t.sceneCuts ?? []}
+      overlays={masksSourceText(p.settings.sourceText, t.textProfile) ? (t.overlays ?? []) : []}
       clip={clip as EditorClip}
       renderProgress={progress}
       onExit={() => nav(`/p/${p.id}#card=${clip.id}`)}

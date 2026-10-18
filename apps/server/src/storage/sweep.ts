@@ -8,10 +8,13 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { keys } from "./index.js";
+import { QUEUES } from "../queue/boss.js";
+import { chunk, deadlineIn, expired, keysetLoop, mapLimit } from "../lib/batch.js";
+import { getState, setState } from "../lib/state.js";
 
 /** Files younger than this are never touched: a worker may be writing or about to commit them. */
 export const SWEEP_GRACE_MS = 60 * 60_000;
@@ -26,6 +29,8 @@ export interface ScratchFile {
 export interface ScratchProject {
   id: string;
   files: ScratchFile[];
+  /** the listing was cut short by a time budget: fine for judging single files, not for "nothing fresh is in here" */
+  partial?: boolean;
 }
 export interface TmpFile {
   name: string;
@@ -68,7 +73,7 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
     const known = db.projects.get(p.id);
     if (!known) {
       // no row: the project was deleted (or never existed). Only when nothing in it is fresh.
-      if (p.files.length && p.files.every((f) => settled(f.mtimeMs))) {
+      if (!p.partial && p.files.length && p.files.every((f) => settled(f.mtimeMs))) {
         out.push({ kind: "project-gone", path: `projects/${p.id}`, bytes: p.files.reduce((s, f) => s + f.bytes, 0), projectId: p.id });
       }
       continue;
@@ -94,63 +99,166 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
   return out;
 }
 
-export async function walk(dir: string, base = dir): Promise<ScratchFile[]> {
-  const out: ScratchFile[] = [];
-  for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...(await walk(full, base)));
-    else if (e.isFile()) {
+/** Bounds of one background sweep. A manual `reelsaw storage sweep` has no budget. */
+export const SWEEP_CHUNK = 1000; // directories per database lookup (one array parameter each, never one parameter per id)
+export const SWEEP_STAT_CONCURRENCY = 16;
+export const SWEEP_BUDGET_MS = 60_000; // total per run; the rest continues next hour from the persisted cursor
+export const SWEEP_DIR_BUDGET_MS = 10_000; // per project directory
+const SWEEP_STATE = "sweep_state";
+
+/** List a directory's files, `stat`ing 16 at a time. `partial` = the deadline hit before every entry was seen. */
+export async function walkDir(dir: string, base: string, deadline = Infinity): Promise<{ files: ScratchFile[]; partial: boolean }> {
+  const files: ScratchFile[] = [];
+  let partial = false;
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const stats = await mapLimit(
+    entries.filter((e) => e.isFile()),
+    SWEEP_STAT_CONCURRENCY,
+    async (e) => {
+      if (expired(deadline)) {
+        partial = true;
+        return null;
+      }
+      const full = path.join(dir, e.name);
       const st = await fs.stat(full).catch(() => null);
-      if (st) out.push({ rel: path.relative(base, full).split(path.sep).join("/"), bytes: st.size, mtimeMs: st.mtimeMs });
+      return st ? { rel: path.relative(base, full).split(path.sep).join("/"), bytes: st.size, mtimeMs: st.mtimeMs } : null;
+    },
+  );
+  for (const f of stats) if (f) files.push(f);
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    if (expired(deadline)) {
+      partial = true;
+      break;
     }
+    const sub = await walkDir(path.join(dir, e.name), base, deadline);
+    files.push(...sub.files);
+    partial ||= sub.partial;
   }
-  return out;
+  return { files, partial };
 }
 
-/** Reads DATA_DIR and the database, returns what a sweep would remove (nothing is deleted). */
-export async function planScratchSweep(svc: Services, now = Date.now()): Promise<Removal[]> {
-  // list the directories first, read the database second: a project created in between is seen
-  const ids = (await fs.readdir(svc.paths.projects, { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory()).map((e) => e.name);
+export async function walk(dir: string, base = dir): Promise<ScratchFile[]> {
+  return (await walkDir(dir, base)).files;
+}
+
+/** Read the database for one chunk of project directories: `= any($1)` with a single array parameter. */
+export async function loadDbView(svc: Services, ids: string[]): Promise<DbView> {
   const db: DbView = { projects: new Map(), clips: new Map() };
-  if (ids.length) {
-    const d = svc.database.db;
-    const projects = await d.select({ id: schema.projects.id, status: schema.projects.status }).from(schema.projects).where(inArray(schema.projects.id, ids));
-    const clips = await d
-      .select({ id: schema.clips.id, projectId: schema.clips.projectId, renderGen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey })
-      .from(schema.clips)
-      .where(inArray(schema.clips.projectId, ids));
-    const jobs = await svc.database.pool.query<{ id: string }>(
-      `select distinct data->>'projectId' as id from pgboss.job where state in ('created','retry','active') and data->>'projectId' = any($1)`,
-      [ids],
-    );
-    const live = new Set(jobs.rows.map((r) => r.id));
-    for (const p of projects) db.projects.set(p.id, { busy: live.has(p.id) || (p.status !== "done" && p.status !== "failed") });
-    for (const c of clips) {
-      const referenced = new Set([c.outputKey, c.thumbnailKey].filter((k): k is string => !!k).map((k) => path.posix.basename(k)));
-      db.clips.set(c.id, { projectId: c.projectId, renderGen: c.renderGen, referenced });
-    }
+  if (!ids.length) return db;
+  const pool = svc.database.pool;
+  const projects = await pool.query<{ id: string; status: string }>(`select id, status from projects where id = any($1::text[])`, [ids]);
+  const clips = await pool.query<{ id: string; project_id: string; render_gen: number; output_key: string | null; thumbnail_key: string | null }>(
+    `select id, project_id, render_gen, output_key, thumbnail_key from clips where project_id = any($1::text[])`,
+    [ids],
+  );
+  // live jobs by (name, singleton_key): the key is the project id for stage jobs and the clip id for render/prepare
+  // jobs, and the exclusive-policy queues index exactly that (data->>'projectId' would scan every job)
+  const clipProject = new Map(clips.rows.map((c) => [c.id, c.project_id]));
+  const jobs = await pool.query<{ key: string }>(
+    `select distinct singleton_key as key from pgboss.job where name = any($1::text[]) and singleton_key = any($2::text[]) and state in ('created','retry','active')`,
+    [Object.values(QUEUES), [...ids, ...clipProject.keys()]],
+  );
+  const live = new Set(jobs.rows.map((r) => clipProject.get(r.key) ?? r.key));
+  for (const p of projects.rows) db.projects.set(p.id, { busy: live.has(p.id) || (p.status !== "done" && p.status !== "failed") });
+  for (const c of clips.rows) {
+    const referenced = new Set([c.output_key, c.thumbnail_key].filter((k): k is string => !!k).map((k) => path.posix.basename(k)));
+    db.clips.set(c.id, { projectId: c.project_id, renderGen: c.render_gen, referenced });
   }
-  const projects: ScratchProject[] = [];
-  for (const id of ids) {
-    const dir = svc.paths.project(id);
-    // a known project only needs its clips directory; an unknown one needs everything (to size and age it)
-    projects.push({ id, files: db.projects.has(id) ? (await walk(path.join(dir, "clips"), dir)) : await walk(dir) });
-  }
-  const tmp: TmpFile[] = [];
-  for (const e of await fs.readdir(svc.paths.tmp, { withFileTypes: true }).catch(() => [])) {
-    if (!e.isFile() || !e.name.startsWith("hear-")) continue;
-    const st = await fs.stat(path.join(svc.paths.tmp, e.name)).catch(() => null);
-    if (st) tmp.push({ name: e.name, bytes: st.size, mtimeMs: st.mtimeMs });
-  }
-  return planSweep({ projects, tmp, db, now });
+  return db;
 }
 
-/** Plans and executes a sweep, logging each removal with its ids and size. */
-export async function sweepScratch(svc: Services, opts: { dryRun?: boolean } = {}): Promise<{ removals: Removal[]; bytes: number }> {
+export interface ScanResult {
+  removals: Removal[];
+  /** project directories looked at in this run */
+  scanned: number;
+  /** last directory name processed (sorted order) when the run stopped early; null when it reached the end */
+  lastDir: string | null;
+  /** every directory was reached */
+  complete: boolean;
+}
+
+/**
+ * Walks DATA_DIR in directory-name order, `SWEEP_CHUNK` projects per database lookup, and stops
+ * (incomplete) when the total budget is spent; `after` resumes behind a previous run's last directory.
+ * A directory whose own budget ran out is marked `partial`, which only forbids "project-gone".
+ */
+export async function scanScratch(svc: Services, opts: { now?: number; budgetMs?: number; after?: string | null } = {}): Promise<ScanResult> {
+  const now = opts.now ?? Date.now();
+  const deadline = deadlineIn(opts.budgetMs);
+  // list the directories first, read the database second: a project created in between is seen
+  const names = (await fs.readdir(svc.paths.projects, { withFileTypes: true }).catch(() => []))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  const pending = opts.after ? names.filter((n) => n > opts.after!) : names;
+  const removals: Removal[] = [];
+  let scanned = 0;
+  let lastDir: string | null = opts.after ?? null;
+  let complete = true;
+  outer: for (const ids of chunk(pending, SWEEP_CHUNK)) {
+    if (expired(deadline)) {
+      complete = false;
+      break;
+    }
+    const db = await loadDbView(svc, ids);
+    const projects: ScratchProject[] = [];
+    for (const id of ids) {
+      if (expired(deadline)) {
+        complete = false;
+        removals.push(...planSweep({ projects, tmp: [], db, now }));
+        break outer;
+      }
+      const dir = svc.paths.project(id);
+      const dirDeadline = Math.min(deadline, deadlineIn(opts.budgetMs ? SWEEP_DIR_BUDGET_MS : 0));
+      // a known project only needs its clips directory; an unknown one needs everything (to size and age it)
+      const w = db.projects.has(id) ? await walkDir(path.join(dir, "clips"), dir, dirDeadline) : await walkDir(dir, dir, dirDeadline);
+      projects.push({ id, files: w.files, partial: w.partial });
+      scanned++;
+      lastDir = id;
+    }
+    removals.push(...planSweep({ projects, tmp: [], db, now }));
+  }
+  if (complete) {
+    const entries = (await fs.readdir(svc.paths.tmp, { withFileTypes: true }).catch(() => [])).filter((e) => e.isFile() && e.name.startsWith("hear-"));
+    const tmp = (
+      await mapLimit(entries, SWEEP_STAT_CONCURRENCY, async (e) => {
+        const st = await fs.stat(path.join(svc.paths.tmp, e.name)).catch(() => null);
+        return st ? { name: e.name, bytes: st.size, mtimeMs: st.mtimeMs } : null;
+      })
+    ).filter((t): t is TmpFile => !!t);
+    removals.push(...planSweep({ projects: [], tmp, db: { projects: new Map(), clips: new Map() }, now }));
+  }
+  return { removals, scanned, lastDir: complete ? null : lastDir, complete };
+}
+
+/** Reads DATA_DIR and the database, returns everything a sweep would remove (no budget; nothing is deleted). */
+export async function planScratchSweep(svc: Services, now = Date.now()): Promise<Removal[]> {
+  return (await scanScratch(svc, { now })).removals;
+}
+
+export interface SweepState {
+  cursor: string | null;
+  lastRunAt: string;
+  lastRunMs: number;
+  lastScanned: number;
+  lastComplete: boolean;
+  lastRemoved: number;
+}
+export const readSweepState = (svc: Services) => getState<SweepState & Record<string, unknown>>(svc.database.db, SWEEP_STATE);
+
+/**
+ * Plans and executes a sweep, logging each removal with its ids and size. Background runs
+ * (`budgeted`) stop after SWEEP_BUDGET_MS and continue from the saved cursor next time; a manual
+ * run or a dry run covers everything and leaves the cursor alone.
+ */
+export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budgeted?: boolean } = {}): Promise<{ removals: Removal[]; bytes: number; scanned: number; complete: boolean }> {
   const log = svc.log.child({ module: "sweep" });
-  const removals = await planScratchSweep(svc);
+  const started = Date.now();
+  const prior = opts.budgeted ? await readSweepState(svc) : {};
+  const scan = await scanScratch(svc, { budgetMs: opts.budgeted ? SWEEP_BUDGET_MS : 0, after: prior.cursor ?? null });
   const done: Removal[] = [];
-  for (const r of removals) {
+  for (const r of scan.removals) {
     if (!opts.dryRun) {
       try {
         await fs.rm(path.join(svc.paths.root, r.path), { recursive: true, force: true });
@@ -164,8 +272,14 @@ export async function sweepScratch(svc: Services, opts: { dryRun?: boolean } = {
     done.push(r);
   }
   const bytes = done.reduce((s, r) => s + r.bytes, 0);
-  if (done.length && !opts.dryRun) log.info({ files: done.length, bytes }, "scratch sweep finished");
-  return { removals: done, bytes };
+  if (!opts.dryRun) {
+    log.info({ directories: scan.scanned, files: done.length, bytes, complete: scan.complete, ms: Date.now() - started }, "scratch sweep finished");
+    if (opts.budgeted) {
+      const state: SweepState = { cursor: scan.lastDir, lastRunAt: new Date().toISOString(), lastRunMs: Date.now() - started, lastScanned: scan.scanned, lastComplete: scan.complete, lastRemoved: done.length };
+      await setState(svc.database.db, SWEEP_STATE, { ...state });
+    }
+  }
+  return { removals: done, bytes, scanned: scan.scanned, complete: scan.complete };
 }
 
 /** Delete one clip render (mp4 or jpg) from scratch, given its store key. The store copy is separate. */
@@ -182,6 +296,8 @@ export async function removeScratchSource(svc: Services, projectId: string) {
 }
 
 /** Soft-deleted library assets are kept this long so Undo and restore keep working. */
+export const PURGE_BATCH = 200;
+export const PURGE_BUDGET_MS = 30_000;
 export const BUMPER_PURGE_MS = 30 * 24 * 60 * 60_000;
 
 /** A removed asset is purgeable once it has been gone for 30 days and no project setting or clip names it. */
@@ -197,13 +313,34 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
   const log = svc.log.child({ module: "sweep" });
   const now = opts.now ?? Date.now();
   const cutoff = new Date(now - BUMPER_PURGE_MS);
-  const candidates = await svc.database.db
-    .select({ id: schema.bumperAssets.id })
-    .from(schema.bumperAssets)
-    .where(and(isNotNull(schema.bumperAssets.deletedAt), lt(schema.bumperAssets.deletedAt, cutoff)))
-    .limit(200);
   const purged: string[] = [];
-  for (const { id } of candidates) {
+  // Keyset over (deleted_at, id), 200 per batch. Still-referenced assets are excluded in SQL (`not exists`), so
+  // they neither consume the batch nor starve the assets behind them. The timestamp travels as text to keep
+  // microseconds: a JS Date would round the cursor and re-read or skip rows.
+  type Cur = { at: string; id: string };
+  await keysetLoop<{ id: string; at: string }, Cur>({
+    size: PURGE_BATCH,
+    deadline: deadlineIn(PURGE_BUDGET_MS),
+    start: null,
+    fetch: async (cur, size) => {
+      const res = await svc.database.db.execute(sql`
+        select a.id as id, a.deleted_at::text as at from bumper_assets a
+        where a.deleted_at is not null and a.deleted_at < ${cutoff.toISOString()}::timestamptz
+          ${cur ? sql`and (a.deleted_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
+          and not exists (select 1 from projects p where p.settings ->> 'introAssetId' = a.id or p.settings ->> 'outroAssetId' = a.id)
+          and not exists (select 1 from clips c where c.bumpers ->> 'intro' = a.id or c.bumpers ->> 'outro' = a.id)
+        order by a.deleted_at, a.id limit ${size}`);
+      return res.rows as Array<{ id: string; at: string }>;
+    },
+    cursorOf: (r) => ({ at: r.at, id: r.id }),
+    handle: async (rows) => {
+      await purgeBatch(rows.map((r) => r.id));
+    },
+  });
+  return purged;
+
+  async function purgeBatch(candidates: string[]) {
+  for (const id of candidates) {
     if (opts.dryRun) {
       purged.push(id);
       continue;
@@ -232,5 +369,5 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       log.info({ assetId: id }, "purged a library asset removed over 30 days ago");
     }
   }
-  return purged;
+  }
 }

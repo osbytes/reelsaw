@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +8,8 @@ import { router, protectedProcedure, publicProcedure, signedInProcedure, adminPr
 import { approveUser, banUser, deleteProject, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
-import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type ProjectEvent, type TranscriptFlag } from "@reelsaw/shared";
+import { createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -19,10 +20,15 @@ import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_
 import { projectBumperSummaries, bumperUsageCounts } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
-import { REFINE_STEPS } from "@reelsaw/shared";
+import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
+import { isProgressNotice, progressEvent } from "../events.js";
+import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
+import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
+import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
+import { decodeCursor, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
@@ -140,7 +146,9 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
 /**
  * Read-modify-write on a project's transcript flags, as one unit of work: ownership check, the
  * transcript row locked FOR UPDATE (so a concurrent edit or refine merge waits instead of being
- * overwritten), then the change, its re-renders and its event commit together.
+ * overwritten), then the change, its re-renders and its event commit together. The row is still read
+ * whole (words are one jsonb value); writes go through writeTranscript, which sends only changed columns.
+ * Chunked transcript storage, so an edit touches only the window it changes, is Phase 2 (docs/specs/scale.md).
  */
 async function withTranscript<T>(svc: Services, userId: string, projectId: string, fn: (u: UnitOfWork, p: schema.Project, t: schema.Transcript) => Promise<T>): Promise<T> {
   return svc.tx(async (u) => {
@@ -158,8 +166,19 @@ function softDelete(flags: TranscriptFlag[], deleted: DeletedFlag[], id: string)
   if (!f) return { flags, deletedFlags: deleted };
   return {
     flags: flags.flatMap((x) => (x.id === id ? restoreAbsorbed(x) : [x])).sort((a, b) => a.wordIndex - b.wordIndex),
-    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }].slice(-500),
+    deletedFlags: [...deleted.filter((x) => x.id !== id), { ...f, status: f.subkind === "manual" ? "accepted" : f.status, deletedAt: new Date().toISOString() }], // the live list is capped (and the overflow archived) when saved, see saveFlags
   };
+}
+
+/**
+ * Write back only the transcript columns that changed (rawWords and often words stay as they are), after
+ * moving deleted flags beyond the live cap into the archive in the same transaction.
+ */
+async function writeTranscript(u: UnitOfWork, projectId: string, t: schema.Transcript, next: { words: Word[]; rawWords: Word[]; flags: TranscriptFlag[]; deletedFlags: DeletedFlag[]; segments: ReturnType<typeof toSentences>; text: string }) {
+  const { keep, overflow } = splitDeleted(next.deletedFlags);
+  await archiveDeletedFlags(u.db, projectId, overflow);
+  const patch = changedColumns<Record<string, unknown>>({ words: t.words, rawWords: t.rawWords ?? undefined, flags: t.flags, deletedFlags: t.deletedFlags ?? [], segments: t.segments, text: t.text }, { ...next, deletedFlags: keep });
+  if (Object.keys(patch).length) await u.db.update(schema.transcripts).set(patch).where(eq(schema.transcripts.projectId, projectId));
 }
 
 /** Persist new flag lists, rebuild the cleaned words, re-render clips whose words changed around `f`. */
@@ -168,7 +187,7 @@ async function saveFlags(svc: Services, u: UnitOfWork, p: schema.Project, t: sch
   const raw = t.rawWords ?? t.words;
   const words = applyFlags(raw, flags);
   const segments = toSentences(words);
-  await db.update(schema.transcripts).set({ words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") }).where(eq(schema.transcripts.projectId, p.id));
+  await writeTranscript(u, p.id, t, { words, rawWords: raw, flags, deletedFlags, segments, text: segments.map((x) => x.text).join(" ") });
   const near = (ws: typeof words) => JSON.stringify(ws.filter((w) => w.end > f.start - 0.05 && w.start < f.end + 0.05));
   const changed = near(applyFlags(raw, t.flags)) !== near(words);
   const rerendered = rerender && changed ? await rerenderOverlapping(svc, u, p, [{ start: f.start, end: f.end }]) : 0;
@@ -517,34 +536,79 @@ export const appRouter = router({
       limits: { maxCpuPercent: ctx.svc.config.MAX_CPU_PERCENT, minFreeMemMB: ctx.svc.config.MIN_FREE_MEM_MB, minFreeDiskMB: ctx.svc.config.MIN_FREE_DISK_MB },
     })),
     users: router({
-      list: adminProcedure.input(z.object({ search: z.string().max(200).optional() }).optional()).query(async ({ ctx, input }) => {
-        const db = ctx.svc.database.db;
-        const q = input?.search?.trim().toLowerCase();
-        const rows = await db
-          .select({
-            id: schema.user.id,
-            name: schema.user.name,
-            email: schema.user.email,
-            role: schema.user.role,
-            approvedAt: schema.user.approvedAt,
-            banned: schema.user.banned,
-            banReason: schema.user.banReason,
-            createdAt: schema.user.createdAt,
-            projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')})`,
-            lastActive: sql<Date | null>`(select max(s.updated_at) from session s where s.user_id = ${sql.raw('"user"."id"')})`,
-          })
-          .from(schema.user)
-          .where(q ? sql`lower(${schema.user.email}) like ${"%" + q + "%"} or lower(${schema.user.name}) like ${"%" + q + "%"}` : undefined)
-          .orderBy(sql`${schema.user.approvedAt} is not null, ${schema.user.createdAt} desc`)
-          .limit(500);
-        return rows.map((r) => ({
-          ...r,
-          status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
-          approvedAt: r.approvedAt?.toISOString() ?? null,
-          createdAt: r.createdAt.toISOString(),
-          lastActive: r.lastActive ? new Date(r.lastActive).toISOString() : null,
-        }));
-      }),
+      /**
+       * Keyset page of accounts: pending first, then newest first (`approved, created_at desc, id desc`), with each
+       * account's all-time usage from one grouped query per metric table (see `usageByUser`).
+       */
+      list: adminProcedure
+        .input(z.object({ q: z.string().max(200).optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50) }).optional())
+        .query(async ({ ctx, input }) => {
+          const db = ctx.svc.database.db;
+          const limit = input?.limit ?? 50;
+          const ws = words(input?.q ?? "");
+          const U = schema.user;
+          // A search matches like the palette's (typo-tolerant, every word, best first) and returns the best
+          // SEARCH_USERS matches in one page: no cursor, the header says when more match. Without a search the
+          // list is the keyset-paged one: pending first, then newest.
+          const match = userMatch(ws);
+          const score = userScore(ws);
+          const approved = sql<number>`(case when ${U.approvedAt} is null then 0 else 1 end)`;
+          let after: SQL | undefined;
+          if (!ws.length && input?.cursor) {
+            const c = decodeCursor(input.cursor, 3);
+            if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
+            after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
+          }
+          const pageSize = ws.length ? SEARCH_USERS : limit;
+          const [fetched, [{ total }]] = await db.transaction(async (tx) => {
+            await setSearchThreshold(tx);
+            return Promise.all([
+              tx
+                .select({
+                  id: U.id,
+                  name: U.name,
+                  email: U.email,
+                  role: U.role,
+                  approvedAt: U.approvedAt,
+                  banned: U.banned,
+                  banReason: U.banReason,
+                  createdAt: U.createdAt,
+                  approved,
+                  ts: sql<string>`${U.createdAt}::text`,
+                })
+                .from(U)
+                .where(and(match, after))
+                .orderBy(...(score ? [desc(score)] : []), approved, desc(U.createdAt), desc(U.id))
+                .limit(pageSize + 1),
+              tx.select({ total: sql<number>`count(*)::int` }).from(U).where(match),
+            ]);
+          });
+          const { items, nextCursor } = ws.length ? { items: fetched.slice(0, pageSize), nextCursor: null } : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
+          const ids = items.map((r) => r.id);
+          const [usage, sessions] = await Promise.all([
+            usageByUser(db, null, ids),
+            ids.length ? db.select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` }).from(schema.session).where(inArray(schema.session.userId, ids)).groupBy(schema.session.userId) : [],
+          ]);
+          const usageOf = new Map(usage.map((u) => [u.id, u]));
+          const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
+          return {
+            items: items.map(({ approved: _a, ts: _t, ...r }) => {
+              const last = lastOf.get(r.id);
+              const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
+              return {
+                ...r,
+                projects: projectsTotal,
+                usage: u,
+                status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
+                approvedAt: r.approvedAt?.toISOString() ?? null,
+                createdAt: r.createdAt.toISOString(),
+                lastActive: last ? new Date(last).toISOString() : null,
+              };
+            }),
+            nextCursor,
+            total,
+          };
+        }),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
         const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
         return n;
@@ -653,63 +717,47 @@ export const appRouter = router({
     }),
   }),
 
-  /** ⌘K palette: everything searchable, small enough to fuzzy-match on the client. */
-  searchIndex: protectedProcedure.query(async ({ ctx }) => {
-    const db = ctx.svc.database.db;
-    const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), columns: { id: true, title: true, status: true, durationSec: true, sourceMeta: true, sourceUrl: true, updatedAt: true }, orderBy: desc(schema.projects.updatedAt), limit: 500 });
-    const ids = projects.map((p) => p.id);
-    const clips = ids.length
-      ? await db.query.clips.findMany({ where: inArray(schema.clips.projectId, ids), columns: { id: true, projectId: true, title: true, hook: true, caption: true, index: true, status: true, startSec: true, endSec: true, outputKey: true, thumbnailKey: true }, limit: 5000 })
-      : [];
-    const titleOf = new Map(projects.map((p) => [p.id, p.title]));
-    return {
-      projects: projects.map((p) => ({ id: p.id, title: p.title, status: p.status, durationSec: p.durationSec, sourceUrl: p.sourceUrl, updatedAt: p.updatedAt.toISOString(), thumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null })),
-      clips: clips.map((c) => ({ id: c.id, projectId: c.projectId, projectTitle: titleOf.get(c.projectId) ?? "", title: c.title, hook: c.hook, caption: c.caption, index: c.index, status: c.status, startSec: c.startSec, endSec: c.endSec, videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null, thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null })),
-    };
-  }),
+  /** ⌘K palette before anything is typed: the 20 projects changed most recently, with their clip counts. */
+  searchIndex: protectedProcedure.query(async ({ ctx }) => ({ projects: await recentProjects(ctx.svc.database.db, ctx.user.id, 20) })),
+
+  /**
+   * ⌘K and MCP search in SQL: every word must appear in a project title, or in a clip's title, hook or
+   * caption. At most 8 projects and `limit` clips, most recently changed first; `truncated` says more match.
+   * `links` instead lists projects whose source link contains one of the needles (a pasted link).
+   */
+  search: protectedProcedure
+    .input(z.object({ q: z.string().max(200), limit: z.number().int().min(1).max(50).default(SEARCH_CLIPS), links: z.array(z.string().min(1).max(300)).max(50).optional() }))
+    .query(({ ctx, input }) => searchLibrary(ctx.svc.database.db, ctx.user.id, input)),
 
   projects: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
-      const db = ctx.svc.database.db;
-      const rows = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), orderBy: desc(schema.projects.createdAt), limit: 200 });
-      const clipRows = rows.length
-        ? await db.query.clips.findMany({
-            where: inArray(schema.clips.projectId, rows.map((r) => r.id)),
-            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true, bumpers: true },
-          })
-        : [];
-      const bumperSummaries = await projectBumperSummaries(db, ctx.user.id, rows.map((p) => ({ id: p.id, settings: p.settings, clips: clipRows.filter((c) => c.projectId === p.id) })));
-      return rows.map((p) => {
-        const mine = clipRows.filter((c) => c.projectId === p.id);
-        const firstThumb = mine.find((c) => c.thumbnailKey);
-        const clipThumbs = mine
-          .filter((c) => c.thumbnailKey && c.status === "done")
-          .sort((a, b) => a.index - b.index)
-          .slice(0, 3)
-          .map((c) => `/media/clips/${p.id}/${c.id}.jpg`);
+    /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
+    list: protectedProcedure
+      .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status });
         return {
-          ...publicProject(p),
-          clipCount: mine.length,
-          clipsDone: mine.filter((c) => c.status === "done").length,
-          // the source's own thumbnail stays the card image; clip thumbnails stack on top of it
-          sourceThumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
-          clipThumbs,
-          bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
-          thumbnailUrl: firstThumb ? `/media/clips/${p.id}/${firstThumb.id}.jpg` : ((p.sourceMeta?.thumbnail as string | undefined) ?? null),
+          items: page.rows.map(({ p, ...card }) => ({ ...publicProject(p), ...card })),
+          nextCursor: page.nextCursor,
+          total: page.total,
         };
-      });
-    }),
+      }),
+    /** Header numbers: all projects, how many are processing, clips rendered. */
+    stats: protectedProcedure.query(({ ctx }) => projectStats(ctx.svc.database.db, ctx.user.id)),
+    /** Projects processing right now (id, status, stage, progress): the Projects page polls this, not the list. */
+    active: protectedProcedure.query(async ({ ctx }) => (await activeProjects(ctx.svc.database.db, ctx.user.id)).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }))),
 
     get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
-      const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, text: true, segments: true, words: true, rawWords: true, flags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true, deletedFlags: true } });
+      // facts only: the words, segments and flags come from transcripts.get, so a clip event never re-sends megabytes
+      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, flags: true } });
+      const transcript = t ? { language: t.language, flagCount: t.flags.length, pendingFlags: t.flags.filter((f) => f.status === "pending").length } : null;
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
       const bumpers = (await projectBumperSummaries(db, ctx.user.id, [{ id: p.id, settings: p.settings, clips }])).get(p.id)!;
-      return { ...publicProject(p), clips: clips.map(publicClip), transcript: transcript ?? null, estimates, bumpers };
+      return { ...publicProject(p), clips: clips.map(publicClip), transcript, estimates, bumpers };
     }),
 
     create: protectedProcedure.input(createProjectInputSchema).mutation(async ({ ctx, input }) => {
@@ -926,14 +974,23 @@ export const appRouter = router({
       return { ok: true };
     }),
 
-    /** SSE stream of project events; resumes from lastEventId after a reconnect. */
+    /**
+     * SSE stream of project events. It replays the newest `EVENT_REPLAY_LIMIT` non-progress events (after
+     * `lastEventId` on a reconnect), then one `events.replayed` message saying how many there are in all, then
+     * everything live, progress ticks included (they are never stored for replay).
+     */
     events: protectedProcedure.input(z.object({ id: z.string(), lastEventId: z.string().nullish() })).subscription(async function* ({ ctx, input, signal }) {
       const { svc } = ctx;
       await ownedProject(svc.database.db, ctx.user.id, input.id);
-      let lastId = Number(input.lastEventId ?? 0) || 0;
+      const after = Number(input.lastEventId ?? 0) || 0;
       const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
-      // page through everything after lastId: list() returns at most 500 rows, and a project's
-      // history (progress ticks included) is often much longer than that
+      const { headId, total } = await svc.events.stats(input.id);
+      const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
+      for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
+      const marker: EventsReplayed = { type: "events.replayed", shown: history.events.length, total, oldestId: history.events[0]?.id ?? null, hasMore: history.hasMore };
+      let lastId = Math.max(headId, after);
+      yield tracked(String(lastId), marker);
+      // from here on everything newer than the head, in pages: list() returns at most 500 rows
       const flush = async function* () {
         for (;;) {
           const page = await svc.events.list(input.id, lastId, 500);
@@ -946,12 +1003,30 @@ export const appRouter = router({
       };
       yield* flush();
       for await (const notice of live) {
-        if (notice.id > lastId) yield* flush();
+        // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
+        if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
+        else if (notice.id > lastId) yield* flush();
       }
     }),
+
+    /** Older events for the Activity panel: up to `limit` non-progress events with an id below `before`, oldest first. */
+    eventsPage: protectedProcedure.input(z.object({ id: z.string(), before: z.number().int().positive(), limit: z.number().int().min(1).max(500).default(200) })).query(async ({ ctx, input }) => {
+      await ownedProject(ctx.svc.database.db, ctx.user.id, input.id);
+      return ctx.svc.events.history(input.id, { limit: input.limit, before: input.before });
+    }),
+
+    /** Failed work across the account, for the palette's "Retry all failed clips / Resume failed projects". */
+    counts: protectedProcedure.query(({ ctx }) => failedCounts(ctx.svc.database.db, ctx.user.id)),
   }),
 
   transcripts: router({
+    /** The words, segments, flags and on-screen text of a project (megabytes for a long source), fetched apart from `projects.get`. */
+    get: protectedProcedure.input(z.object({ projectId: z.string() })).query(async ({ ctx, input }) => {
+      const db = ctx.svc.database.db;
+      const p = await ownedProject(db, ctx.user.id, input.projectId);
+      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, segments: true, words: true, rawWords: true, flags: true, deletedFlags: true, entities: true, refine: true, sceneCuts: true, overlays: true, textProfile: true } });
+      return t ?? null;
+    }),
     /**
      * Accept or reject flagged corrections. Rebuilds the transcript from the as-heard words and,
      * with rerender=true, re-renders every clip whose captions overlap a changed span.
@@ -987,10 +1062,7 @@ export const appRouter = router({
         for (const f of flags.filter((x) => x.subkind === "manual" && x.status === "rejected")) ({ flags: live, deletedFlags } = softDelete(live, deletedFlags, f.id));
         const words = applyFlags(raw, live);
         const segments = toSentences(words);
-        await db
-          .update(schema.transcripts)
-          .set({ words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") })
-          .where(eq(schema.transcripts.projectId, p.id));
+        await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
         const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
         await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
         return { ok: true, changed: changed.length, rerendered };
@@ -1022,7 +1094,8 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) =>
         withTranscript(ctx.svc, ctx.user.id, input.projectId, async (u, p, t) => {
         const svc = ctx.svc;
-        const d = t.deletedFlags?.find((x) => x.id === input.flagId);
+        // past the live cap (200) deleted fixes live in the archive (stage_artifacts); taking one from there removes it from there
+        const d = t.deletedFlags?.find((x) => x.id === input.flagId) ?? (await takeArchivedFlag<DeletedFlag>(u.db, p.id, input.flagId));
         if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Deleted fix not found" });
         const { deletedAt: _deletedAt, ...flag } = d;
         void _deletedAt;

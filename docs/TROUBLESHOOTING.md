@@ -97,6 +97,19 @@ is that line, not the gap between events. A run still `running` with no live job
   projects, and `tmp/hear-*` older than a day. The reconciler runs the same sweep about hourly; it skips files
   younger than an hour and any project with a live job or an unfinished status. The same sweep purges library intros/outros removed over 30 days ago that no project setting or clip uses (row, `bumpers/<id>/…` and local cache).  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
   project deletes it.
+- **Background work is bounded and resumable.** The hourly sweep reads project directories in name order, 1,000 per
+  database lookup, `stat`s 16 files at a time and stops after 60 s (10 s per directory); the rest continues next
+  hour from a cursor in `instance_settings` (`sweep_state`; `reelsaw storage` shows it and the last run time). A
+  manual `reelsaw storage sweep` has no budget. Retention and the bumper purge walk `(updated_at|deleted_at, id)`
+  in batches of 200 for up to 30 s per tick. History pruning (`prune_state`) deletes 5,000 rows per statement for up
+  to 60 s per tick, once a day per table; the first run on a big `project_events` table takes several ticks. Progress
+  ticks are persisted at most once per 10 s per stage and deleted when the stage completes or fails
+  (`reelsaw status <id>` shows event counts).
+- **Live job lookups use `singleton_key`** (project id for stage jobs, clip id for render/prepare), which the
+  exclusive queues index, instead of `data->>'projectId'`. Jobs enqueued before this change already carry the key
+  (it was set at enqueue), so nothing is missed; if a lookup ever looks empty for a job you can see in `pgboss.job`,
+  check its `singleton_key` and wait one reconciler cycle (5 min), which re-enqueues anything truly orphaned.
+- **Deleted fixes past 200** move to `stage_artifacts` (`stage=review`, `kind=deleted_flags`); Restore still finds them.
 - **Compose project name is pinned** (`name: reelsaw`), so volumes don't change when the checkout folder does.
 - **Resource governor** is stdlib-only (CPU utilisation from `os.cpus()` deltas, `process.availableMemory()`,
   `fs.statfs`), so it behaves the same on Linux, macOS and Windows; thresholds in Settings.
@@ -132,6 +145,18 @@ is that line, not the gap between events. A run still `running` with no live job
   re-running the detector (eval `overlays/mask-residual`): 0 frames with caption text left.
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
+
+## Measuring at scale
+
+To see how lists, search and event replay behave at 1,000 projects / 50,000 clips (plan:
+[specs/scale.md](specs/scale.md)), seed a **throwaway** database, never one you care about:
+`cd apps/server && SEED_SCALE=1 DATABASE_URL=postgres://<user>:<password>@localhost:5442/reelsaw npx tsx scripts/seed-scale.ts --users 20 --projects 1000 --clips 50 --hours 2`
+(5442 is the bench stack's Postgres, the app is on 3200; the script refuses without `SEED_SCALE=1` and has no default
+URL). It writes 2-hour transcripts with realistic word arrays, ~600 events per project (75% progress ticks) and
+no media files, using only ids that start with `seed-`; take timings with `EXPLAIN (ANALYZE, BUFFERS)`
+and `select octet_length(...)`, sign in as a user created through the app and assign the seeded
+projects to it with `update projects set user_id = '<id>' where id like 'seed-%'` to try the UI, and
+remove everything with the same command plus `--clean`.
 
 ## Investigating an issue report
 

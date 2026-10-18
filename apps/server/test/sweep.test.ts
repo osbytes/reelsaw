@@ -6,6 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { planSweep, parseClipFile, bumperPurgeable, BUMPER_PURGE_MS, SWEEP_GRACE_MS, HEAR_TMP_MAX_AGE_MS, type DbView, type ScratchProject } from "../src/storage/sweep.js";
+import { chunk, mapLimit, keysetLoop, deadlineIn } from "../src/lib/batch.js";
 import { duplicateSourceBytes, videoIdentity, youtubeId } from "../src/storage/usage.js";
 
 const NOW = 1_800_000_000_000;
@@ -107,5 +108,70 @@ describe("bumperPurgeable", () => {
     assert.ok(!bumperPurgeable({ deletedAt: new Date(NOW - BUMPER_PURGE_MS) }, false, NOW), "exactly 30 days is not yet over");
     assert.ok(!bumperPurgeable({ deletedAt: null }, false, NOW));
     assert.ok(!bumperPurgeable(gone(400), true, NOW));
+  });
+});
+
+describe("planSweep with a partial listing", () => {
+  it("never removes a whole directory from a listing that was cut short, but still judges single files", () => {
+    const gone: ScratchProject = { id: "p9", files: [f("source.mp4"), f("clips/x.1.mp4")], partial: true };
+    assert.deepEqual(plan([gone]), []);
+    assert.equal(plan([{ ...gone, partial: false }]).length, 1);
+    const known = plan([{ id: "p1", files: [f("clips/c1.1.mp4")], partial: true }]);
+    assert.equal(known.length, 1); // a stale generation is stale whatever else is unlisted
+  });
+});
+
+describe("chunk / mapLimit / keysetLoop", () => {
+  it("chunks 2,500 ids into 1,000 / 1,000 / 500", () => {
+    const sizes = chunk(Array.from({ length: 2500 }, (_, i) => i), 1000).map((c) => c.length);
+    assert.deepEqual(sizes, [1000, 1000, 500]);
+    assert.deepEqual(chunk([], 1000), []);
+  });
+  it("mapLimit never runs more than the limit at once and keeps order", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const out = await mapLimit(Array.from({ length: 100 }, (_, i) => i), 16, async (i) => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return i * 2;
+    });
+    assert.ok(peak <= 16 && peak > 1, `peak ${peak}`);
+    assert.deepEqual(out.slice(0, 3), [0, 2, 4]);
+  });
+  it("keysetLoop walks batches until a short one", async () => {
+    const all = Array.from({ length: 450 }, (_, i) => i + 1);
+    const seen: number[] = [];
+    const r = await keysetLoop<number, number>({
+      size: 200,
+      start: null,
+      fetch: async (c, n) => all.filter((x) => x > (c ?? 0)).slice(0, n),
+      cursorOf: (x) => x,
+      handle: async (rows) => void seen.push(rows.length),
+    });
+    assert.deepEqual(seen, [200, 200, 50]);
+    assert.equal(r.complete, true);
+    assert.equal(r.cursor, 450);
+  });
+  it("keysetLoop stops at the deadline and returns the cursor to resume from", async () => {
+    const r = await keysetLoop<number, number>({
+      size: 10,
+      deadline: deadlineIn(1),
+      start: 5,
+      fetch: async (c, n) => {
+        await new Promise((res) => setTimeout(res, 5));
+        return Array.from({ length: n }, (_, i) => (c ?? 0) + i + 1);
+      },
+      cursorOf: (x) => x,
+      handle: async () => {},
+    });
+    assert.equal(r.complete, false);
+    assert.equal(r.cursor, 15); // one batch ran, then the budget was gone
+  });
+  it("rows the query already excluded (still referenced) cannot use up a batch: the loop reaches those behind them", async () => {
+    const purgeable = Array.from({ length: 450 }, (_, i) => 1000 + i);
+    const seen: number[] = [];
+    await keysetLoop<number, number>({ size: 200, start: null, fetch: async (c, n) => purgeable.filter((x) => x > (c ?? -1)).slice(0, n), cursorOf: (x) => x, handle: async (r) => void seen.push(...r) });
+    assert.equal(seen.length, 450);
   });
 });

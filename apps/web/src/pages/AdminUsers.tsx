@@ -1,14 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, MoreButton, Select, Skeleton } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Skeleton } from "../components/ui";
 
-type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null };
-type Usage = { id: string; projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
+type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
+type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage };
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
 const STATUS: Record<Row["status"], { glyph: string; tone: string; word: string }> = {
@@ -17,7 +17,17 @@ const STATUS: Record<Row["status"], { glyph: string; tone: string; word: string 
   suspended: { glyph: "✕", tone: "text-err", word: "Suspended" },
 };
 
-const WINDOWS = [7, 30, 90, 365] as const;
+const PAGE = 50;
+
+/** `value`, but only after it has stopped changing for `ms`. */
+function useDebounced<T>(value: T, ms: number) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
 const num = new Intl.NumberFormat();
 const bytes = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
 
@@ -45,13 +55,18 @@ export function AdminUsersPage() {
   const qc = useQueryClient();
   const me = useMe();
   const [search, setSearch] = useState("");
-  const [days, setDays] = useState<(typeof WINDOWS)[number]>(30);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
-  const usage = useQuery({ ...trpc.admin.usage.queryOptions({ days }), placeholderData: keepPreviousData });
-  const list = useQuery({ ...trpc.admin.users.list.queryOptions({ search: search || undefined }), refetchInterval: 15_000, placeholderData: keepPreviousData });
+  const q = useDebounced(search.trim(), 200);
+  // server-side paging; each account carries its all-time usage, so there is no separate usage query
+  const list = useInfiniteQuery(
+    trpc.admin.users.list.infiniteQueryOptions(
+      { q: q || undefined, limit: PAGE },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
+    ),
+  );
   const done = (msg: string) => () => {
     toast(msg);
     void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
@@ -63,27 +78,30 @@ export function AdminUsersPage() {
   const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
   const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account removed"), onError: fail });
   const busy = approve.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending;
-  const byId = useMemo(() => new Map(((usage.data?.users ?? []) as Usage[]).map((u) => [u.id, u])), [usage.data]);
+  const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
+  const total = list.data?.pages[0]?.total ?? 0;
+  // sorting is client side, over the rows loaded so far
   const rows = useMemo(() => {
-    const base = (list.data ?? []) as Row[];
+    const base = loaded;
     if (!sort) return base;
     const val = (r: Row): string | number => {
       switch (sort.key) {
         case "name": return (r.name || r.email).toLowerCase();
         case "status": return r.status;
         case "lastActive": return r.lastActive ? new Date(r.lastActive).getTime() : 0;
-        case "projects": return byId.get(r.id)?.projects ?? -1;
-        default: return byId.get(r.id)?.[sort.key] ?? -1;
+        case "projects": return r.usage.projects;
+        default: return r.usage[sort.key];
       }
     };
     return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
-  }, [list.data, sort, byId]);
+  }, [loaded, sort]);
   const pending = rows.filter((r) => r.status === "pending").length;
 
-  const head = (k: SortKey, label: string, opts: { right?: boolean; className?: string } = {}) => (
+  const head = (k: SortKey, label: string, opts: { right?: boolean; className?: string; usage?: boolean } = {}) => (
     <th scope="col" className={`${TH} ${opts.right ? "text-right" : "text-left"} ${opts.className ?? ""}`} aria-sort={sort?.key === k ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
       <button
         type="button"
+        title={opts.usage ? "All time. Sorts the loaded rows" : "Sorts the loaded rows"}
         className={`inline-flex h-4 items-center gap-1 whitespace-nowrap align-middle leading-4 hover:text-ink ${opts.right ? "flex-row-reverse" : ""}`}
         onClick={() => setSort(sort?.key === k && sort.dir === -1 ? null : { key: k, dir: sort?.key === k ? -1 : k === "name" || k === "status" ? 1 : -1 })}
       >
@@ -100,22 +118,21 @@ export function AdminUsersPage() {
           <div>
             <h1 className="text-[28px] font-bold tracking-tight">Users</h1>
             <div className="mt-1 flex min-h-5 items-center text-sm text-ink2">
-              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `${rows.length} accounts${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
+              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Select className="w-[7.5rem]" ariaLabel="Usage window" value={String(days)} onValueChange={(v) => setDays(Number(v) as (typeof WINDOWS)[number])} options={WINDOWS.map((d) => ({ value: String(d), label: d === 365 ? "1 year" : `${d} days` }))} />
             <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
           </div>
         </div>
 
         <div className="min-h-10 text-[13px]">
           {list.error && <span className="text-err">✕ {list.error.message}</span>}
-          {list.data && rows.length === 0 && <span className="text-ink3">No accounts match.</span>}
+          {list.data && !list.isPlaceholderData && rows.length === 0 && <span className="text-ink3">No accounts match.</span>}
           {(rows.length > 0 || list.isPending) && (
             <div className="rounded-[16px] border border-line bg-panel">
               <table className="w-full table-fixed border-separate border-spacing-0">
-                <caption className="sr-only">Accounts, with usage over the last {days} days</caption>
+                <caption className="sr-only">Accounts, with all-time usage</caption>
                 <colgroup>
                   <col />
                   <col className={`${COL} min-[900px]:w-28`} />
@@ -130,10 +147,10 @@ export function AdminUsersPage() {
                   <tr>
                     {head("name", "Account", { className: "rounded-tl-[16px]" })}
                     {head("status", "Status", { className: FULL })}
-                    {head("projects", "Projects", { right: true, className: FULL })}
-                    {head("sourceMinutes", "Minutes", { right: true, className: FULL })}
-                    {head("clipsRendered", "Clips", { right: true, className: FULL })}
-                    {head("storedBytes", "Stored", { right: true, className: FULL })}
+                    {head("projects", "Projects", { right: true, className: FULL, usage: true })}
+                    {head("sourceMinutes", "Minutes", { right: true, className: FULL, usage: true })}
+                    {head("clipsRendered", "Clips", { right: true, className: FULL, usage: true })}
+                    {head("storedBytes", "Stored", { right: true, className: FULL, usage: true })}
                     {head("lastActive", "Active", { className: FULL })}
                     <th scope="col" className={`${TH} rounded-tr-[16px] text-right`}>
                       <span className="sr-only">Actions</span>
@@ -164,9 +181,9 @@ export function AdminUsersPage() {
                   {rows.map((r) => {
                     const st = STATUS[r.status];
                     const self = r.id === me.data?.id;
-                    const u = byId.get(r.id);
-                    const line = u ? `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${bytes(u.storedBytes)}` : "usage …";
-                    const model = u ? `Last ${days} days: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out` : undefined;
+                    const u = r.usage;
+                    const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${bytes(u.storedBytes)}`;
+                    const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
                     const cell = "border-t border-line px-3 align-middle";
                     const stateLabel = r.status === "pending" ? "Approve" : r.status === "suspended" ? "Reinstate" : "Suspend";
                     const stateOff = busy || (self && r.status === "active");
@@ -198,10 +215,10 @@ export function AdminUsersPage() {
                         <td className={`${cell} ${FULL} text-xs ${st.tone}`} title={r.banReason ?? undefined}>
                           {st.glyph} {st.word}
                         </td>
-                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{u ? num.format(u.projects) : "–"}</td>
-                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{u ? num.format(u.sourceMinutes) : "–"}</td>
-                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{u ? num.format(u.clipsRendered) : "–"}</td>
-                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{u ? bytes(u.storedBytes) : "–"}</td>
+                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{num.format(u.projects)}</td>
+                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{num.format(u.sourceMinutes)}</td>
+                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{num.format(u.clipsRendered)}</td>
+                        <td className={`${cell} ${FULL} text-right font-mono text-xs tabular-nums`}>{bytes(u.storedBytes)}</td>
                         <td className={`${cell} ${FULL} text-xs text-ink3`}>{ago(r.lastActive)}</td>
                         <td className={`${cell} text-right`}>
                           <div className="flex items-center justify-end gap-1.5">
@@ -255,6 +272,15 @@ export function AdminUsersPage() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+
+        {/* fixed-height footer so loading the next page never moves what is below */}
+        <div className="-mt-2 flex h-10 items-center justify-center">
+          {list.hasNextPage && (
+            <button type="button" className="btn-ghost h-9 min-w-[8rem]" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+              {list.isFetchingNextPage ? "Loading…" : `Load ${num.format(Math.min(PAGE, total - rows.length))} more`}
+            </button>
           )}
         </div>
 

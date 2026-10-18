@@ -207,6 +207,9 @@ them), so a single-user box stays as it is:
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
   projects; rows and history stay, the project page offers "fetch again" and clips re-render.
   `reelsaw retention` runs a sweep by hand.
+- **History pruning**: `EVENT_RETENTION_DAYS` (90), `LLM_USAGE_RETENTION_DAYS` (180) and
+  `ADMIN_EVENT_RETENTION_DAYS` (365) delete old rows in batches once a day (0 keeps everything);
+  a project's run skeleton (created, run started, done) is always kept.
 - **Bot protection**: `CAPTCHA_PROVIDER` (Cloudflare Turnstile, reCAPTCHA, hCaptcha) with site and
   secret keys puts a widget on sign-up and sign-in.
 - **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` and
