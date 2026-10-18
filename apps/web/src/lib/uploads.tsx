@@ -99,7 +99,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
             patch(key, { state: "creating", pct: 1 });
             const p = await create.mutateAsync({ uploadId, title: f.name.replace(/\.[^.]+$/, "") });
             patch(key, { state: "done", projectId: p.id });
-            void qc.invalidateQueries({ queryKey: trpc.projects.list.queryKey() });
+            void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
           } catch (err) {
             patch(key, { state: "failed", error: (err as Error).message.slice(0, 160) });
           }

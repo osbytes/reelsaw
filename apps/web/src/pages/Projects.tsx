@@ -1,5 +1,5 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
@@ -11,6 +11,7 @@ import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
 import { ago } from "../lib/time";
+import { useLoadMoreSentinel } from "../lib/useLoadMore";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
@@ -84,16 +85,66 @@ function NewProjectMenu() {
   );
 }
 
+const PAGE = 24;
+const num = new Intl.NumberFormat();
+
+/** A placeholder card with the real card's boxes, so a page arriving is a content swap, not a layout change. */
+function CardSkeleton({ i }: { i: number }) {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel">
+      <Skeleton className="aspect-video rounded-none" />
+      <div className="flex flex-col gap-1.5 p-3.5">
+        <Skeleton className={`h-[1.1rem] ${["w-4/5", "w-2/3", "w-full"][i % 3]}`} />
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className={`h-3.5 ${["w-3/5", "w-1/2", "w-2/3"][i % 3]}`} />
+      </div>
+    </div>
+  );
+}
+
 export function ProjectsPage() {
   const trpc = useTRPC();
-  const q = useQuery({
-    ...trpc.projects.list.queryOptions(),
-    placeholderData: keepPreviousData,
-    refetchInterval: (query) => (query.state.data?.some((p) => ACTIVE.has(p.status)) ? 3000 : false),
-  });
-  const projects = q.data ?? [];
-  const running = projects.filter((p) => ACTIVE.has(p.status)).length;
-  const clips = projects.reduce((a, p) => a + p.clipsDone, 0);
+  const qc = useQueryClient();
+  const q = useInfiniteQuery(
+    trpc.projects.list.infiniteQueryOptions(
+      { limit: PAGE },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
+    ),
+  );
+  // header numbers cover all projects, not the loaded pages; fetched once, refreshed when something finishes
+  const stats = useQuery({ ...trpc.projects.stats.queryOptions(), placeholderData: keepPreviousData });
+  const loaded = useMemo(() => q.data?.pages.flatMap((pg) => pg.items) ?? [], [q.data]);
+  const total = q.data?.pages[0]?.total ?? 0;
+
+  // Running projects stay live without polling the list: the list is fetched once per page (and again when
+  // uploads / creation invalidate it), and `projects.active` (id, status, stage, progress of projects that are
+  // processing, nothing else) is polled every 3 s only while something runs. Its values are merged over the
+  // cards below; when a project drops out of it (finished or failed) the list and stats are refetched once.
+  const anyRunning = (stats.data?.running ?? 0) > 0 || loaded.some((p) => ACTIVE.has(p.status));
+  const active = useQuery({ ...trpc.projects.active.queryOptions(), enabled: anyRunning, refetchInterval: 3000 });
+  const activeById = useMemo(() => new Map((active.data ?? []).map((a) => [a.id, a])), [active.data]);
+  const prevActive = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!active.data) return;
+    const now = new Set(active.data.map((a) => a.id));
+    const settled = [...prevActive.current].some((id) => !now.has(id));
+    prevActive.current = now;
+    if (settled) {
+      void qc.invalidateQueries({ queryKey: trpc.projects.list.infiniteQueryKey() });
+      void qc.invalidateQueries({ queryKey: trpc.projects.stats.queryKey() });
+    }
+  }, [active.data, qc, trpc]);
+
+  const projects = useMemo(
+    () => loaded.map((p) => {
+      const a = activeById.get(p.id);
+      return a ? { ...p, status: a.status, stage: a.stage, stageProgress: a.stageProgress } : p;
+    }),
+    [loaded, activeById],
+  );
+  const running = active.data ? active.data.length : (stats.data?.running ?? 0);
+  const remaining = Math.max(0, total - loaded.length);
+  const more = useLoadMoreSentinel(() => void q.fetchNextPage(), !!q.hasNextPage && !q.isFetching);
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -102,14 +153,14 @@ export function ProjectsPage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-bold tracking-tight">Projects</h1>
             {/* height reserved so the grid doesn't jump when the list arrives */}
-            {q.isPending ? (
+            {stats.isPending ? (
               <div className="mt-1 flex h-5 items-center">
                 <Skeleton className="h-3.5 w-52" />
               </div>
-            ) : projects.length > 0 ? (
+            ) : stats.data && stats.data.total > 0 ? (
               <p className="mt-1 min-h-5 text-sm text-ink2">
-                {projects.length} project{projects.length === 1 ? "" : "s"}
-                {running ? ` · ${running} processing` : ""} · {clips} clip{clips === 1 ? "" : "s"} ready
+                {num.format(stats.data.total)} project{stats.data.total === 1 ? "" : "s"}
+                {running ? ` · ${running} processing` : ""} · {num.format(stats.data.clipsDone)} clip{stats.data.clipsDone === 1 ? "" : "s"} ready
               </p>
             ) : (
               <p className="mt-1 min-h-5" />
@@ -120,7 +171,7 @@ export function ProjectsPage() {
 
         {q.error && <p className="text-err">{q.error.message}</p>}
 
-        {!q.isPending && !projects.length && !q.error && (
+        {!q.isPending && !q.isPlaceholderData && !projects.length && !q.error && (
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
             <span className="film h-[72px] w-[42px] rounded-[8px]" />
             <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
@@ -134,14 +185,7 @@ export function ProjectsPage() {
         {q.isPending && !q.error && (
           <SkeletonRegion label="Loading projects…" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
             {Array.from({ length: 6 }, (_, i) => (
-              <div key={i} className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel">
-                <Skeleton className="aspect-video rounded-none" />
-                <div className="flex flex-col gap-1.5 p-3.5">
-                  <Skeleton className={`h-[1.1rem] ${["w-4/5", "w-2/3", "w-full"][i % 3]}`} />
-                  <Skeleton className="h-4 w-20" />
-                  <Skeleton className={`h-3.5 ${["w-3/5", "w-1/2", "w-2/3"][i % 3]}`} />
-                </div>
-              </div>
+              <CardSkeleton key={i} i={i} />
             ))}
           </SkeletonRegion>
         )}
@@ -198,7 +242,21 @@ export function ProjectsPage() {
               </div>
             );
           })}
+          {q.isFetchingNextPage &&
+            Array.from({ length: Math.min(remaining, PAGE) }, (_, i) => <CardSkeleton key={`next-${i}`} i={i} />)}
         </div>
+
+        {/* fixed-height footer: the button, or the count once everything is loaded, never moves the page */}
+        {projects.length > 0 && (
+          <div ref={more} className="flex h-[5.5rem] flex-col items-center justify-center gap-1 text-xs text-ink3">
+            {q.hasNextPage ? (
+              <button type="button" className="btn-ghost h-9 min-w-[8rem]" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+                {q.isFetchingNextPage ? "Loading…" : "Load more"}
+              </button>
+            ) : null}
+            <span className="tabular-nums">Showing {num.format(projects.length)} of {num.format(total)}</span>
+          </div>
+        )}
       </main>
     </ScrollArea>
   );

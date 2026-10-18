@@ -56,7 +56,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
     }
   };
 
-  const projectSummary = (p: Awaited<ReturnType<typeof api.projects.list>>[number]) => ({
+  const projectSummary = (p: Awaited<ReturnType<typeof api.projects.list>>["items"][number]) => ({
     id: p.id,
     title: p.title,
     status: p.status,
@@ -93,8 +93,17 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request): Mc
 
   server.registerTool(
     "list_projects",
-    { title: "List projects", description: "Your projects, newest first, with pipeline status and how many clips are rendered.", annotations: { readOnlyHint: true } },
-    () => run(async () => (await api.projects.list()).map(projectSummary)),
+    {
+      title: "List projects",
+      description: "Your projects, most recently updated first, with pipeline status and how many clips are rendered. Returns up to `limit` (default 24, max 100) plus `total`; when `nextCursor` is not null, pass it as `cursor` to get the next page.",
+      inputSchema: { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(24) },
+      annotations: { readOnlyHint: true },
+    },
+    ({ cursor, limit }) =>
+      run(async () => {
+        const page = await api.projects.list({ cursor, limit });
+        return { projects: page.items.map(projectSummary), total: page.total, nextCursor: page.nextCursor };
+      }),
   );
 
   server.registerTool(

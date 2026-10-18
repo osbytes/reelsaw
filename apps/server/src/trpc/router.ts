@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -19,10 +19,12 @@ import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_
 import { projectBumperSummaries, bumperUsageCounts } from "../bumpers/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
-import { REFINE_STEPS } from "@reelsaw/shared";
+import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { needsPrepare, prepareModeOf } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
+import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
+import { decodeCursor, escapeLike, pageOf } from "../pagination.js";
 import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
@@ -517,34 +519,72 @@ export const appRouter = router({
       limits: { maxCpuPercent: ctx.svc.config.MAX_CPU_PERCENT, minFreeMemMB: ctx.svc.config.MIN_FREE_MEM_MB, minFreeDiskMB: ctx.svc.config.MIN_FREE_DISK_MB },
     })),
     users: router({
-      list: adminProcedure.input(z.object({ search: z.string().max(200).optional() }).optional()).query(async ({ ctx, input }) => {
-        const db = ctx.svc.database.db;
-        const q = input?.search?.trim().toLowerCase();
-        const rows = await db
-          .select({
-            id: schema.user.id,
-            name: schema.user.name,
-            email: schema.user.email,
-            role: schema.user.role,
-            approvedAt: schema.user.approvedAt,
-            banned: schema.user.banned,
-            banReason: schema.user.banReason,
-            createdAt: schema.user.createdAt,
-            projects: sql<number>`(select count(*)::int from projects p where p.user_id = ${sql.raw('"user"."id"')})`,
-            lastActive: sql<Date | null>`(select max(s.updated_at) from session s where s.user_id = ${sql.raw('"user"."id"')})`,
-          })
-          .from(schema.user)
-          .where(q ? sql`lower(${schema.user.email}) like ${"%" + q + "%"} or lower(${schema.user.name}) like ${"%" + q + "%"}` : undefined)
-          .orderBy(sql`${schema.user.approvedAt} is not null, ${schema.user.createdAt} desc`)
-          .limit(500);
-        return rows.map((r) => ({
-          ...r,
-          status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
-          approvedAt: r.approvedAt?.toISOString() ?? null,
-          createdAt: r.createdAt.toISOString(),
-          lastActive: r.lastActive ? new Date(r.lastActive).toISOString() : null,
-        }));
-      }),
+      /**
+       * Keyset page of accounts: pending first, then newest first (`approved, created_at desc, id desc`), with each
+       * account's usage over `window` days from one grouped query per metric table (see `usageByUser`).
+       */
+      list: adminProcedure
+        .input(z.object({ q: z.string().max(200).optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50), window: z.number().int().min(1).max(365).default(30) }).optional())
+        .query(async ({ ctx, input }) => {
+          const db = ctx.svc.database.db;
+          const limit = input?.limit ?? 50;
+          const q = input?.q?.trim().toLowerCase();
+          const U = schema.user;
+          const like = q ? "%" + escapeLike(q) + "%" : null;
+          const match = like ? sql`(lower(${U.email}) like ${like} escape '\\' or lower(${U.name}) like ${like} escape '\\')` : undefined;
+          const approved = sql<number>`(case when ${U.approvedAt} is null then 0 else 1 end)`;
+          let after: SQL | undefined;
+          if (input?.cursor) {
+            const c = decodeCursor(input.cursor, 3);
+            if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
+            after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
+          }
+          const [fetched, [{ total }]] = await Promise.all([
+            db
+              .select({
+                id: U.id,
+                name: U.name,
+                email: U.email,
+                role: U.role,
+                approvedAt: U.approvedAt,
+                banned: U.banned,
+                banReason: U.banReason,
+                createdAt: U.createdAt,
+                approved,
+                ts: sql<string>`${U.createdAt}::text`,
+              })
+              .from(U)
+              .where(and(match, after))
+              .orderBy(approved, desc(U.createdAt), desc(U.id))
+              .limit(limit + 1),
+            db.select({ total: sql<number>`count(*)::int` }).from(U).where(match),
+          ]);
+          const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
+          const ids = items.map((r) => r.id);
+          const [usage, sessions] = await Promise.all([
+            usageByUser(db, input?.window ?? 30, ids),
+            ids.length ? db.select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` }).from(schema.session).where(inArray(schema.session.userId, ids)).groupBy(schema.session.userId) : [],
+          ]);
+          const usageOf = new Map(usage.map((u) => [u.id, u]));
+          const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
+          return {
+            items: items.map(({ approved: _a, ts: _t, ...r }) => {
+              const last = lastOf.get(r.id);
+              const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
+              return {
+                ...r,
+                projects: projectsTotal,
+                usage: u,
+                status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
+                approvedAt: r.approvedAt?.toISOString() ?? null,
+                createdAt: r.createdAt.toISOString(),
+                lastActive: last ? new Date(last).toISOString() : null,
+              };
+            }),
+            nextCursor,
+            total,
+          };
+        }),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
         const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
         return n;
@@ -669,36 +709,21 @@ export const appRouter = router({
   }),
 
   projects: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
-      const db = ctx.svc.database.db;
-      const rows = await db.query.projects.findMany({ where: eq(schema.projects.userId, ctx.user.id), orderBy: desc(schema.projects.createdAt), limit: 200 });
-      const clipRows = rows.length
-        ? await db.query.clips.findMany({
-            where: inArray(schema.clips.projectId, rows.map((r) => r.id)),
-            columns: { projectId: true, status: true, thumbnailKey: true, id: true, index: true, bumpers: true },
-          })
-        : [];
-      const bumperSummaries = await projectBumperSummaries(db, ctx.user.id, rows.map((p) => ({ id: p.id, settings: p.settings, clips: clipRows.filter((c) => c.projectId === p.id) })));
-      return rows.map((p) => {
-        const mine = clipRows.filter((c) => c.projectId === p.id);
-        const firstThumb = mine.find((c) => c.thumbnailKey);
-        const clipThumbs = mine
-          .filter((c) => c.thumbnailKey && c.status === "done")
-          .sort((a, b) => a.index - b.index)
-          .slice(0, 3)
-          .map((c) => `/media/clips/${p.id}/${c.id}.jpg`);
+    /** Keyset page of the caller's projects, newest activity first: `(updated_at, id)` descending. */
+    list: protectedProcedure
+      .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status });
         return {
-          ...publicProject(p),
-          clipCount: mine.length,
-          clipsDone: mine.filter((c) => c.status === "done").length,
-          // the source's own thumbnail stays the card image; clip thumbnails stack on top of it
-          sourceThumbnailUrl: (p.sourceMeta?.thumbnail as string | undefined) ?? null,
-          clipThumbs,
-          bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
-          thumbnailUrl: firstThumb ? `/media/clips/${p.id}/${firstThumb.id}.jpg` : ((p.sourceMeta?.thumbnail as string | undefined) ?? null),
+          items: page.rows.map(({ p, ...card }) => ({ ...publicProject(p), ...card })),
+          nextCursor: page.nextCursor,
+          total: page.total,
         };
-      });
-    }),
+      }),
+    /** Header numbers: all projects, how many are processing, clips rendered. */
+    stats: protectedProcedure.query(({ ctx }) => projectStats(ctx.svc.database.db, ctx.user.id)),
+    /** Projects processing right now (id, status, stage, progress): the Projects page polls this, not the list. */
+    active: protectedProcedure.query(async ({ ctx }) => (await activeProjects(ctx.svc.database.db, ctx.user.id)).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }))),
 
     get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
