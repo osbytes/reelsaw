@@ -145,7 +145,7 @@ blind, fixed judge model), and gold labels from user decisions once the decision
 
 | suite | needs | what it checks |
 |---|---|---|
-| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md) |
+| `selection` | nothing | transcript chunking (coverage, overlap, size), `05:28 → 528` timestamp repair, candidates snapping to sentence boundaries; clips ending on a complete thought on word-level fixtures (`lonely-chapter`, see docs/SELECTION.md); the auto-mode score gate on synthetic stingy / generous / bimodal judges (`gate/*`: leader kept, sane share, affine invariance, absolute 45 shown collapsing a stingy judge) and PRP-Sliding-K placement with a fake judge (`pairwise/passes-*`) |
 | `framing` | nothing (committed face samples) | split crops centre each speaker and stay clear of burned-in caption bands; tripod camera settles on the face, no fast pans; a speaker beside an app screen or title card is a `stack` with the panel on top (`panel` cases commit face boxes, text boxes and a divider probe per frame) |
 | `overlays` | text model file + media | PP-OCR finds burned-in captions/handles on labelled frames; whole-video aggregation finds the overlays and does **not** flag scene text or people |
 | `cuts` | align model (Speaches) | real hard disfluency cuts: result graded clean / kept / broken by transcribing the cut audio |

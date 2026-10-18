@@ -25,7 +25,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Shot changes missing (layout, snapping, text filter act as if one shot) | `reelsaw scenes <projectId>` | Old fixed-threshold detector on dark footage; `--store` the adaptive result |
 | Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes after heartbeat expiry (~15 s) + retry backoff. Each restart burns a retry. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
-| Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under 45. |
+| Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under the run's gate (`candidates` artifact → `settings.gate`: rule, threshold, median, MAD). |
 | Face off-centre | Editor layout track; `reelsaw clip` → layout segments `cx` | Old render (pre-settle tracker) or detector found no face (`fit`). Drag the picture to re-centre. |
 | Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
