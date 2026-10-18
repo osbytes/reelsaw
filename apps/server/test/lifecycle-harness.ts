@@ -7,6 +7,8 @@
  * into the future (so the running app's workers never pick up a fake clip) and every other project looks like it
  * already has a live job (so reconcile() leaves real projects alone).
  */
+import fs from "node:fs";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { db } from "./helpers.js";
@@ -94,8 +96,10 @@ export function lifecycleHarness() {
    */
   async function ready(): Promise<string | null> {
     try {
-      const col = await pool.query(`select 1 from information_schema.columns where table_name = 'projects' and column_name = 'run_seq'`);
-      if (!col.rowCount) return "database schema is older than this checkout (projects.run_seq missing): rebuild the stack or set TEST_DATABASE_URL to a migrated database";
+      // every migration in this checkout's journal must be applied; drizzle records them in drizzle.__drizzle_migrations
+      const journal = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "drizzle", "meta", "_journal.json"), "utf8")) as { entries: unknown[] };
+      const applied = Number((await pool.query(`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => ({ rows: [{ n: 0 }] }))).rows[0].n);
+      if (applied < journal.entries.length) return `database schema is older than this checkout (${applied} of ${journal.entries.length} migrations applied): rebuild the stack or set TEST_DATABASE_URL to a migrated database`;
       if (!(await pool.query(`select to_regclass('pgboss.job') as t`)).rows[0].t) {
         await real.start();
         await real.boss.stop({ graceful: false, wait: true, close: false } as never);
