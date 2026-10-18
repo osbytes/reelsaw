@@ -11,6 +11,11 @@ RUN sh /tmp/download-models.sh /models
 
 # ---------- system: OS packages and media tools (shared by dev and runtime) ----------
 FROM node:22-bookworm-slim AS system
+# yt-dlp is pinned and verified. To bump: take the tag from https://github.com/yt-dlp/yt-dlp/releases,
+# then the linux `yt-dlp` line of that release's SHA2-256SUMS file, and update both args (and THIRD_PARTY.md).
+# The `yt-dlp` file is a Python zipapp, the same for amd64 and arm64.
+ARG YTDLP_VERSION=2026.08.19
+ARG YTDLP_SHA256=1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
 ENV DATA_DIR=/data \
     FACE_MODEL_PATH=/app/server/models/ultraface-rfb-320.onnx \
     TEXT_MODEL_PATH=/app/server/models/ppocrv4-det.onnx \
@@ -19,7 +24,8 @@ ENV DATA_DIR=/data \
     PORT=3000
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl python3 \
- && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+ && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
+ && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
  && chmod +x /usr/local/bin/yt-dlp \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=models /models /app/server/models
@@ -91,12 +97,14 @@ LABEL org.opencontainers.image.title="Reelsaw" \
       org.opencontainers.image.version="${REELSAW_VERSION}" \
       org.opencontainers.image.revision="${REELSAW_COMMIT}"
 WORKDIR /app
-COPY --from=server /out/server /app/server
-COPY --from=build /app/apps/server/drizzle /app/server/drizzle
-COPY --from=build /app/apps/web/dist /app/web
+# --chown on the copy (not a recursive chown afterwards) so the app layer is not stored twice
+COPY --from=server --chown=node:node /out/server /app/server
+COPY --from=build --chown=node:node /app/apps/server/drizzle /app/server/drizzle
+COPY --from=build --chown=node:node /app/apps/web/dist /app/web
+COPY --chown=node:node THIRD_PARTY.md /app/THIRD_PARTY.md
 # operator CLI: docker compose exec app reelsaw status <projectId>
 RUN printf '#!/bin/sh\nexec node /app/server/dist/cli.js "$@"\n' > /usr/local/bin/reelsaw && chmod +x /usr/local/bin/reelsaw \
- && mkdir -p /data && chown -R node:node /data /app
+ && mkdir -p /data && chown node:node /data /app
 USER node
 VOLUME ["/data"]
 EXPOSE 3000

@@ -71,7 +71,7 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
-the model (`qwen2.5:14b`, ~9 GB; `REELSAW_LLM=qwen2.5:7b` for less RAM), starts everything and waits
+the model (chosen by RAM: `qwen2.5:14b` ~9 GB from 24 GB, `qwen2.5:7b` from 12 GB, else `gemma3:4b`; the script prints its choice and `REELSAW_LLM=<model>` overrides it), starts everything and waits
 until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
 The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
 they are served from `main` (see [docs/RELEASING.md](docs/RELEASING.md)).
@@ -259,10 +259,10 @@ Server composition (`apps/server/src/services.ts`): `createServices()` builds `c
 ```
 [boot] config ok
 [boot] media tools (ffmpeg, ffprobe, yt-dlp) ok
-[boot] ai models (anthropic:claude-sonnet-4-5, deepgram:nova-3) ok
+[boot] ai model check (anthropic:claude-sonnet-4-5, deepgram:nova-3) ok
 [boot] storage (s3:reelsaw) ok
 ...
-[boot] startup failed at step "ai models (anthropic:claude-sonnet-4-5, anthropic:whisper)":
+[boot] startup failed at step "ai model check (anthropic:claude-sonnet-4-5, anthropic:whisper)":
   TRANSCRIPTION_MODEL: provider "anthropic" has no transcription models ("anthropic:whisper"). Use e.g. openai:whisper-1, deepgram:nova-3, ...
 ```
 
