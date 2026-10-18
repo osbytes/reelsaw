@@ -13,7 +13,7 @@ import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } f
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
+import { lockProjectClips, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
@@ -207,6 +207,7 @@ function restoreAbsorbed(f: TranscriptFlag): TranscriptFlag[] {
 async function rerenderOverlapping(svc: Services, u: UnitOfWork, p: schema.Project, ranges: Array<{ start: number; end: number }>) {
   if (!ranges.length) return 0;
   let n = 0;
+  await lockProjectClips(u, p.id);
   for (const c of await listClips(u.db, p.id)) {
     if (!ranges.some((r) => r.end > c.startSec && r.start < c.endSec)) continue;
     if ((await requestRender(svc, u, p.id, c.id)) !== null) n++;
@@ -233,6 +234,7 @@ async function setBumperDefault(db: Db, userId: string, slot: "intro" | "outro",
 
 async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: schema.Clip) => boolean = (c) => c.status === "done" || c.status === "failed") {
   let n = 0;
+  await lockProjectClips(u, projectId);
   for (const c of await listClips(u.db, projectId)) if (which(c) && (await requestRender(svc, u, projectId, c.id)) !== null) n++;
   return n;
 }
@@ -843,6 +845,7 @@ export const appRouter = router({
         else if (p.sourceKey) queue = QUEUES.transcribe;
 
         if (queue === QUEUES.render) {
+          await lockProjectClips(u, p.id); // clips before the project row, like a render completion
           await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
           for (const c of clips) {
             if (c.status === "done") continue;

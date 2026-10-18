@@ -113,11 +113,27 @@ export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOpti
 }
 
 /**
+ * Lock a project's clips in id order, before anything touches the project row. Any transaction that re-renders
+ * or deletes several clips calls this first, so it takes locks in the same order as a render completion (clip,
+ * then project) instead of project first and clip second, which deadlocks against a completion.
+ */
+export async function lockProjectClips(u: UnitOfWork, projectId: string): Promise<void> {
+  await u.db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, projectId)).orderBy(schema.clips.id).for("update");
+}
+
+/**
  * Marks a project done (or failed) once every clip is terminal. The project row is locked, so when
  * two clips finish at once exactly one transaction sees "all terminal" and emits project.done.
+ *
+ * The lock is `for no key update`, not `for update`: `u.emit` (the caller's `clip.done`) inserts a
+ * project_events row, whose foreign key takes `for key share` on the project. Two completions both hold
+ * key share by the time they get here, and `for update` conflicts with it, so each waited for the other
+ * to let go (deadlock). `for no key update` still serializes finalizers (it conflicts with itself) and
+ * still blocks the project row update in startRun, but never conflicts with key share. Lock order is
+ * clip, then project.
  */
 export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projectId: string) {
-  const [project] = await u.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("update");
+  const [project] = await u.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
   if (!project || project.status === "done" || project.status === "failed") return;
   const clips = await u.db.select({ status: schema.clips.status }).from(schema.clips).where(eq(schema.clips.projectId, projectId));
   if (!clips.length || !clips.every((c) => c.status === "done" || c.status === "failed")) return;
