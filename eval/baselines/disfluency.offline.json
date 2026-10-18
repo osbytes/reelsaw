@@ -1,5 +1,47 @@
 {
-  "updatedAt": "2026-10-18T15:53:55.261Z",
+  "updatedAt": "2026-10-18T16:55:53.211Z",
+  "acceptedRegressions": [
+    {
+      "metric": "precision",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "falsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "autoFalsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "dev.precision",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "dev.falsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "dev.autoFalsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "heldout.falsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    },
+    {
+      "metric": "heldout.autoFalsePositives",
+      "reason": "dataset grew: 48 caption-diff cases (51-98) not drawn from the detector's proposals; no existing case changed",
+      "at": "2026-10-18T16:55:53.211Z"
+    }
+  ],
   "cases": {
     "01-for-by-whatever-s-due": true,
     "02-the-car-payments-due": true,
@@ -50,19 +92,119 @@
     "47-into-like-your-oatmeal": true,
     "48-like-in-a-minute": true,
     "49-you-you-don-t-always": false,
-    "50-like-on-a-piece": true
+    "50-like-on-a-piece": true,
+    "51-uh-conquistadors-had-over": true,
+    "52-i-think-we-i": false,
+    "53-like-you-know-metal": false,
+    "54-obsidian-uh-obsidian-blades": true,
+    "55-i-just-i-just": true,
+    "56-that-that-adaptation-they": true,
+    "57-in-in-identifying-the": true,
+    "58-when-when-when-moctezuma-s": true,
+    "59-just-just-collapses-right": true,
+    "60-i-will-i-will": true,
+    "61-have-have-fallen-almost": true,
+    "62-or-or-an-expedition": true,
+    "63-um-my-friends-why": true,
+    "64-is-is-you-can-t": true,
+    "65-this-um-uh-another": true,
+    "66-the-the-shell-that": true,
+    "67-um-on-mac-os": true,
+    "68-um-either-the-windows": true,
+    "69-way-way-around-the": false,
+    "70-configures-configuring-uh-continuous": false,
+    "71-perhaps-uh-perhaps-unsurprisingly": true,
+    "72-why-doesn-t-why-don-t": false,
+    "73-where-they-re-where-they-re": true,
+    "74-there-uh-my-username": true,
+    "75-or-or-in-programs": true,
+    "76-and-that-s-enough-to": true,
+    "77-right-as-you-mentioned": true,
+    "78-and-they-watch-this": true,
+    "79-effectively-reinforcements-marches-back": true,
+    "80-go-capture-and-arrest": true,
+    "81-and-i-don-t-know": true,
+    "82-are-right-they-would": true,
+    "83-so-once-cort-s-has": true,
+    "84-very-very-clever-in": true,
+    "85-many-many-months-and": true,
+    "86-had-had-llamas-from": false,
+    "87-way-way-back-through": true,
+    "88-that-that-allows-for": false,
+    "89-like-this-before-um": true,
+    "90-dot-dot-so-dot": false,
+    "91-which-which-and-it": false,
+    "92-very-very-quick-recap": true,
+    "93-that-that-was-the": false,
+    "94-then-you-ll-be-told": true,
+    "95-and-now-you-see": true,
+    "96-like-it-there-are": true,
+    "97-kind-of-moved-on": true,
+    "98-sort-of-across-the": true
   },
   "metrics": {
     "precision": {
-      "value": 0.89,
+      "value": 0.84,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 36,
+        "n": 43
+      }
+    },
+    "recall": {
+      "value": 0.75,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 36,
+        "n": 48
+      }
+    },
+    "falsePositives": {
+      "value": 7,
+      "better": "lower"
+    },
+    "autoFalsePositives": {
+      "value": 5,
+      "better": "lower"
+    },
+    "dev.precision": {
+      "value": 0.87,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 20,
+        "n": 23
+      }
+    },
+    "dev.recall": {
+      "value": 0.8,
+      "better": "higher",
+      "tolerance": 0.03,
+      "ratio": {
+        "k": 20,
+        "n": 25
+      }
+    },
+    "dev.falsePositives": {
+      "value": 3,
+      "better": "lower"
+    },
+    "dev.autoFalsePositives": {
+      "value": 3,
+      "better": "lower"
+    },
+    "heldout.precision": {
+      "value": 0.8,
       "better": "higher",
       "tolerance": 0.03,
       "ratio": {
         "k": 16,
-        "n": 18
+        "n": 20
       }
     },
-    "recall": {
+    "heldout.recall": {
       "value": 0.7,
       "better": "higher",
       "tolerance": 0.03,
@@ -71,64 +213,12 @@
         "n": 23
       }
     },
-    "falsePositives": {
-      "value": 2,
-      "better": "lower"
-    },
-    "autoFalsePositives": {
-      "value": 0,
-      "better": "lower"
-    },
-    "dev.precision": {
-      "value": 1,
-      "better": "higher",
-      "tolerance": 0.03,
-      "ratio": {
-        "k": 9,
-        "n": 9
-      }
-    },
-    "dev.recall": {
-      "value": 0.75,
-      "better": "higher",
-      "tolerance": 0.03,
-      "ratio": {
-        "k": 9,
-        "n": 12
-      }
-    },
-    "dev.falsePositives": {
-      "value": 0,
-      "better": "lower"
-    },
-    "dev.autoFalsePositives": {
-      "value": 0,
-      "better": "lower"
-    },
-    "heldout.precision": {
-      "value": 0.78,
-      "better": "higher",
-      "tolerance": 0.03,
-      "ratio": {
-        "k": 7,
-        "n": 9
-      }
-    },
-    "heldout.recall": {
-      "value": 0.64,
-      "better": "higher",
-      "tolerance": 0.03,
-      "ratio": {
-        "k": 7,
-        "n": 11
-      }
-    },
     "heldout.falsePositives": {
-      "value": 2,
+      "value": 4,
       "better": "lower"
     },
     "heldout.autoFalsePositives": {
-      "value": 0,
+      "value": 2,
       "better": "lower"
     }
   }
