@@ -72,13 +72,18 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; artifact?: { data: unknown; models: Record<string, string> } },
+  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; artifact?: { data: unknown; models: Record<string, string> } },
 ) {
   // one unit: merged flags, step status, progress event and (if last) the hand-off to analyze
   await svc.tx(async (u) => {
     const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
     if (!t) return;
+    if (result.status === "failed" && result.error !== undefined) {
+      // a step that gave up: its stage.failed commits with the "failed" status it announces
+      const durationSec = await stageElapsed(tx, projectId, "refine");
+      await u.emit(projectId, "stage.failed", { stage: "refine", step, error: result.error.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
+    }
     if (result.artifact) await u.artifact(projectId, "refine", step, result.artifact.data, result.artifact.models);
     const raw = t.rawWords ?? t.words;
     let flags = t.flags;
@@ -141,12 +146,15 @@ export async function finishIfComplete(svc: Services, projectId: string, u?: Uni
   await u.enqueue(QUEUES.analyze, { projectId });
 }
 
+/** The step's status and its event commit together (atomic jsonb merge, so no row lock is needed for the write). */
 async function markRunning(ctx: StageContext, step: RefineStep) {
-  await ctx.db
-    .update(schema.transcripts)
-    .set({ refine: sql`coalesce(${schema.transcripts.refine}, '{}'::jsonb) || ${JSON.stringify({ [step]: "running" })}::jsonb` })
-    .where(eq(schema.transcripts.projectId, ctx.projectId));
-  await ctx.svc.events.emit(ctx.projectId, "stage.progress", { stage: "refine", step, message: `${step} running` });
+  await ctx.svc.tx(async (u) => {
+    await u.db
+      .update(schema.transcripts)
+      .set({ refine: sql`coalesce(${schema.transcripts.refine}, '{}'::jsonb) || ${JSON.stringify({ [step]: "running" })}::jsonb` })
+      .where(eq(schema.transcripts.projectId, ctx.projectId));
+    await u.emit(ctx.projectId, "stage.progress", { stage: "refine", step, message: `${step} running` });
+  });
 }
 
 async function loadTranscript(ctx: StageContext) {
@@ -261,7 +269,5 @@ export async function refineScenes(ctx: StageContext) {
 export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   svc.log.child({ module: "refine", projectId }).error({ step, err }, "refine step gave up");
-  const durationSec = await stageElapsed(svc.database.db, projectId, "refine");
-  await svc.events.emit(projectId, "stage.failed", { stage: "refine", step, error: message.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
-  await mergeRefine(svc, projectId, step, { status: "failed" });
+  await mergeRefine(svc, projectId, step, { status: "failed", error: message });
 }
