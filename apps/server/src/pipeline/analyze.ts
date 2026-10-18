@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { schema, type Db } from "../db/index.js";
 import { StageContext, modelsUsed } from "./common.js";
 import { fmtTs } from "./transcript.js";
-import { chunkTranscript, mapChunk, mapLimit, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type SelectContext } from "./select.js";
+import { chunkTranscript, mapChunk, mapLimit, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
 import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { finishThought } from "./thought.js";
@@ -17,8 +17,72 @@ export function clipCap(settings: ProjectSettings, durationSec: number) {
   return Math.max(1, Math.min(40, Math.floor(durationSec / Math.max(15, settings.minClipSeconds))));
 }
 
-/** Auto mode drops weak picks, but never everything. */
+/** The old fixed cutoff, kept as `ANALYZE_SCORE_RULE=absolute` for comparison. */
 export const AUTO_MIN_SCORE = 45;
+
+export interface ScoreGateOpts {
+  rule: "relative" | "absolute";
+  /** relative: never keep below this (rubric total; 25 ≈ the prompt's "2- = should not be posted") */
+  floor: number;
+  /** relative: how many MADs below the median still counts as a keeper */
+  k: number;
+}
+
+export interface ScoreGate {
+  rule: "relative" | "absolute";
+  /** effective cutoff on the rubric total; the leader is kept even below it */
+  threshold: number;
+  n: number;
+  median: number | null;
+  mad: number | null;
+  floor: number;
+  k: number;
+  /** per input total, in input order */
+  keep: boolean[];
+}
+
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length ? (s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2) : 0;
+};
+
+/**
+ * Auto mode drops weak picks, but never everything (the leader always stays).
+ *
+ * Pointwise LLM scores do not transfer across judges: the same clips get 20-40 from a stingy model
+ * and 60-95 from a generous one (and admins swap the model at runtime). A fixed cutoff therefore
+ * empties projects under the first and keeps every weak clip under the second. The relative rule
+ * is a robust z-score on this run's pooled totals: drop what sits more than k·MAD below the median.
+ * It is invariant to any shift or stretch of the judge's scale, so the count follows the shape of
+ * the distribution, not the judge's calibration. `floor` keeps one absolute anchor: a total under
+ * it means the judge called the clip unpostable, which no amount of relativity should rescue.
+ * (A fraction-of-the-top rule was rejected: it is not shift-invariant, and one generous outlier
+ * at the top drops everything else.) Pure, for the selection eval.
+ */
+export function scoreGate(totals: number[], o: ScoreGateOpts): ScoreGate {
+  const n = totals.length;
+  const best = n ? Math.max(...totals) : 0;
+  const leader = totals.indexOf(best);
+  if (o.rule === "absolute") return { rule: "absolute", threshold: AUTO_MIN_SCORE, n, median: null, mad: null, floor: o.floor, k: o.k, keep: totals.map((t, i) => i === leader || t >= AUTO_MIN_SCORE) };
+  const med = median(totals);
+  const mad = median(totals.map((t) => Math.abs(t - med)));
+  const threshold = Number(Math.max(o.floor, med - o.k * mad).toFixed(1));
+  return { rule: "relative", threshold, n, median: med, mad, floor: o.floor, k: o.k, keep: totals.map((t, i) => i === leader || t >= threshold) };
+}
+
+/** When fewer than this many scored clips survive the gate, unscored candidates may fill in. */
+const TINY_POOL = 3;
+
+/**
+ * Sentence-snap tolerance from the transcript's own rhythm: 0.4 × the median segment length, in
+ * [1, 4] s (≈2.5 s on podcasts with 6-7 s sentences, tighter on fast-cut speech). 2.5 s without segments.
+ */
+export function snapTolerance(segments: TranscriptSegment[]) {
+  const d = segments.map((s) => s.end - s.start).filter((x) => x > 0);
+  if (!d.length) return 2.5;
+  return Math.max(1, Math.min(4, 0.4 * median(d)));
+}
 
 function overlapRatio(a: ClipCandidate, b: ClipCandidate) {
   const inter = Math.max(0, Math.min(a.endSec, b.endSec) - Math.max(a.startSec, b.startSec));
@@ -50,12 +114,13 @@ export function snapCandidate(
   const starts = segments.map((s) => s.start);
   const ends = segments.map((s) => s.end);
   // Snap to sentence boundaries. Long sentences (6-7 s in podcasts) often leave the model's pick
-  // more than 2.5 s from any boundary; then use the sentence it falls inside: start at its start,
+  // further than the tolerance from any boundary; then use the sentence it falls inside: start at its start,
   // end at its end (extending), or at the previous sentence end if extending would break the max.
+  const tol = snapTolerance(segments);
   const inside = (t: number) => segments.find((sg) => t > sg.start && t < sg.end);
-  let start = nearest(starts, c.startSec, 2.5) ?? inside(c.startSec)?.start ?? c.startSec;
-  let end = nearest(ends, c.endSec, 2.5) ?? c.endSec;
-  if (nearest(ends, c.endSec, 2.5) === undefined) {
+  let start = nearest(starts, c.startSec, tol) ?? inside(c.startSec)?.start ?? c.startSec;
+  let end = nearest(ends, c.endSec, tol) ?? c.endSec;
+  if (nearest(ends, c.endSec, tol) === undefined) {
     const sg = inside(c.endSec);
     const prevEnd = ends.filter((e) => e <= c.endSec).pop();
     if (sg) end = sg.end - start <= settings.maxClipSeconds || prevEnd === undefined ? sg.end : prevEnd;
@@ -131,7 +196,8 @@ interface CandidateFate {
   modelScore: number;
   reasoning: string;
   total?: number;
-  scores?: Record<string, unknown>;
+  /** null: scoring failed for it; its map-pass guess is never compared with rubric totals */
+  scores?: Record<string, unknown> | null;
   rank?: number;
   overlaps?: number;
   clipId?: string;
@@ -171,14 +237,20 @@ export async function analyze(ctx: StageContext) {
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
   const selfHosted = isSelfHostedModel({ AI_MODEL: svc.models.get().language, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
-  const samples = svc.config.ANALYZE_SCORE_SAMPLES || (selfHosted ? 1 : 3);
-  const pairwise = svc.config.ANALYZE_PAIRWISE === "on" || (svc.config.ANALYZE_PAIRWISE === "auto" && !selfHosted);
+  // the judge (scoring + pairwise) may be a different model; its hosting decides the sampling cost
+  const judgeId = svc.config.ANALYZE_JUDGE_MODEL;
+  const judgeSelfHosted = judgeId ? isSelfHostedModel({ AI_MODEL: judgeId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl }) : selfHosted;
+  const samples = svc.config.ANALYZE_SCORE_SAMPLES || (judgeSelfHosted ? 1 : 3);
+  const pairwise = svc.config.ANALYZE_PAIRWISE === "on" || (svc.config.ANALYZE_PAIRWISE === "auto" && !judgeSelfHosted);
+  const passes = svc.config.ANALYZE_PAIRWISE_PASSES;
+  const gateOpts: ScoreGateOpts = { rule: svc.config.ANALYZE_SCORE_RULE, floor: svc.config.ANALYZE_MIN_SCORE_FLOOR, k: svc.config.ANALYZE_SCORE_MAD_K };
   const auto = !settings.maxClips;
   const cap = clipCap(settings, durationSec);
   const sc: SelectContext = { title: project.title, durationSec, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds, maxClips: settings.maxClips, focus: settings.focus, instructions: settings.instructions };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
+  const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
   const segments = transcript.segments;
-  log.info({ durationSec, segments: segments.length, model: svc.models.get().language, selfHosted, concurrency, samples, pairwise, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
+  log.info({ durationSec, segments: segments.length, model: svc.models.get().language, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
 
   // 1-2. chunk + map
   const chunks = chunkTranscript(segments);
@@ -225,9 +297,12 @@ export async function analyze(ctx: StageContext) {
   log.debug({ proposed: candidates.length, snapped: snapped.length, unusable: candidates.length - snapped.length, overlapDropped: snapped.length - pool.length, pooled: pooled.length, poolCapDropped: pool.length - pooled.length }, "candidate pool built");
   for (const i of poolIdx.slice(pooled.length)) fate[i]!.outcome = "pool-cap";
   // the candidates matter most when nothing survives ("no clips found"): keep them on failure too
-  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: AUTO_MIN_SCORE, focus: settings.focus ?? null, samples, pairwise }, chunks: chunks.map((c) => [c.start, c.end]), candidates: fate, ...extra });
+  let gate: (Omit<ScoreGate, "keep"> & { kept: number; dropped: number; unscored: number; unscoredKept: number }) | null = null;
+  // settings.minScore is the effective threshold of this run; settings.gate says how it was derived
+  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: gate?.threshold ?? null, gate, focus: settings.focus ?? null, samples, pairwise, pairwisePasses: pairwise ? passes : 0, judge: judgeId ?? null }, chunks: chunks.map((c) => [c.start, c.end]), candidates: fate, ...extra });
+  const artifactModels = () => ({ ...modelsUsed(svc, "language"), ...(judgeId ? { judge: judgeId } : {}) });
   const failWithCandidates = async (message: string): Promise<never> => {
-    await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), modelsUsed(svc, "language"))).catch(() => {});
+    await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), artifactModels())).catch(() => {});
     throw new Error(message);
   };
   if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
@@ -236,28 +311,47 @@ export async function analyze(ctx: StageContext) {
   // 4. rubric scoring
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c, segments) }));
   await ctx.progress(0.45, `Scoring ${pooled.length} candidate(s)${samples > 1 ? ` × ${samples} samples` : ""}`);
-  const scored = await scoreCandidates(o, inputs, sc, samples, concurrency, (d, t) => void ctx.progress(0.45 + 0.35 * (d / t), `Scoring candidates (${d}/${t})`).catch(() => {}));
-  let ranked = pooled.map((c, id) => ({ c, id, r: scored.get(id) })).map((x) => ({ ...x, total: x.r?.total ?? Math.round(x.c.score) }));
+  const scored = await scoreCandidates(judge, inputs, sc, samples, concurrency, (d, t) => void ctx.progress(0.45 + 0.35 * (d / t), `Scoring candidates (${d}/${t})`).catch(() => {}));
+  // unscored (scoring failed) keep their map-pass guess only to order them among themselves
+  type Ranked = { c: ClipCandidate; id: number; r: ScoreResult | undefined; total: number };
+  let ranked: Ranked[] = pooled.map((c, id) => ({ c, id, r: scored.get(id), total: scored.get(id)?.total ?? Math.round(c.score) }));
   const offTopic = settings.focus ? ranked.filter((x) => (x.r?.scores.relevance ?? 10) < 4).length : 0;
-  for (const x of ranked) Object.assign(fate[poolIdx[x.id]!]!, { total: x.total, scores: x.r?.scores, outcome: settings.focus && (x.r?.scores.relevance ?? 10) < 4 ? "off-topic" : "clip-cap" });
+  for (const x of ranked) Object.assign(fate[poolIdx[x.id]!]!, { total: x.r ? x.total : undefined, scores: x.r?.scores ?? null, outcome: settings.focus && (x.r?.scores.relevance ?? 10) < 4 ? "off-topic" : "clip-cap" });
   if (settings.focus) ranked = ranked.filter((x) => (x.r?.scores.relevance ?? 10) >= 4);
-  ranked.sort((a, b) => b.total - a.total);
-  const weak = auto ? ranked.filter((x, i) => i > 0 && x.total < AUTO_MIN_SCORE).length : 0;
-  if (auto) ranked.forEach((x, i) => i > 0 && x.total < AUTO_MIN_SCORE && (fate[poolIdx[x.id]!]!.outcome = "weak"));
-  let chosen = (auto ? ranked.filter((x, i) => i === 0 || x.total >= AUTO_MIN_SCORE) : ranked).slice(0, cap);
-  log.debug({ scored: scored.size, pooled: pooled.length, offTopic, weak, kept: chosen.length, cap, minScore: auto ? AUTO_MIN_SCORE : null, top: ranked.slice(0, 10).map((x) => ({ start: x.c.startSec, end: x.c.endSec, total: x.total, title: x.c.title.slice(0, 60) })) }, "candidates scored");
+  const byTotal = (a: Ranked, b: Ranked) => b.total - a.total;
+  const rated = ranked.filter((x) => x.r).sort(byTotal);
+  const unrated = ranked.filter((x) => !x.r).sort(byTotal);
+  let chosen: Ranked[];
+  let weak = 0;
+  if (auto) {
+    // the gate runs on rubric totals only; unscored candidates are gated among themselves (same
+    // rule on their map guesses) and fill in only when the scored pool is tiny
+    const g = scoreGate(rated.map((x) => x.total), gateOpts);
+    const keptRated = rated.filter((_, i) => g.keep[i]);
+    const gu = scoreGate(unrated.map((x) => x.total), gateOpts);
+    const keptUnrated = keptRated.length < TINY_POOL ? unrated.filter((_, i) => gu.keep[i]).slice(0, TINY_POOL - keptRated.length) : [];
+    const keptIds = new Set([...keptRated, ...keptUnrated].map((x) => x.id));
+    for (const x of [...rated, ...unrated]) if (!keptIds.has(x.id)) fate[poolIdx[x.id]!]!.outcome = "weak";
+    weak = rated.length + unrated.length - keptIds.size;
+    const { keep: _keep, ...stats } = rated.length ? g : gu;
+    gate = { ...stats, kept: keptRated.length, dropped: rated.length - keptRated.length, unscored: unrated.length, unscoredKept: keptUnrated.length };
+    chosen = [...keptRated, ...keptUnrated].slice(0, cap);
+  } else chosen = [...rated, ...unrated].slice(0, cap);
+  log.debug({ scored: scored.size, pooled: pooled.length, offTopic, weak, kept: chosen.length, cap, gate, top: rated.slice(0, 10).map((x) => ({ start: x.c.startSec, end: x.c.endSec, total: x.total, title: x.c.title.slice(0, 60) })) }, "candidates scored");
+  if (gate) log.info({ rule: gate.rule, threshold: gate.threshold, n: gate.n, median: gate.median, mad: gate.mad, dropped: gate.dropped, unscored: gate.unscored }, `score gate: dropped ${gate.dropped} below ${gate.threshold} (${gate.rule})`);
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
   let ranks: Map<number, number> | undefined;
   if (pairwise && chosen.length > 2 && !ctx.signal.aborted) {
-    const top = chosen.slice(0, Math.min(10, chosen.length));
+    // only scored clips are compared; an unscored fill-in keeps its place after them
+    const top = chosen.filter((x) => x.r).slice(0, 10);
     await ctx.progress(0.82, `Comparing the top ${top.length} clips head to head`);
-    const order = await pairwiseRank(o, top.map((x) => inputs[x.id]!), sc, (d, t) => void ctx.progress(0.82 + 0.15 * (d / t), `Comparing clips (${d}/${t})`).catch(() => {}));
+    const order = await pairwiseRank(judge, top.map((x) => inputs[x.id]!), sc, (d, t) => void ctx.progress(0.82 + 0.15 * (d / t), `Comparing clips (${d}/${t})`).catch(() => {}), passes);
     const byId = new Map(top.map((x) => [x.id, x]));
-    chosen = [...order.map((id) => byId.get(id)!), ...chosen.slice(top.length)];
+    chosen = [...order.map((id) => byId.get(id)!), ...chosen.filter((x) => !byId.has(x.id))];
     ranks = new Map(order.map((id, i) => [id, i + 1]));
-    log.debug({ compared: top.length, order }, "pairwise re-rank");
+    log.debug({ compared: top.length, passes, order }, "pairwise re-rank");
   }
 
   const rows = chosen.map(({ c, id, r, total }, index) => ({
@@ -280,9 +374,9 @@ export async function analyze(ctx: StageContext) {
   rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: index, rank: ranks?.get(chosen[index]!.id) }));
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit
-  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic } }, async (u) => {
+  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } }, async (u) => {
     if (rows.length) await u.db.insert(schema.clips).values(rows);
-    await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), modelsUsed(svc, "language"));
+    await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
     for (const r of rows) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
     await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
     for (const r of rows) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });

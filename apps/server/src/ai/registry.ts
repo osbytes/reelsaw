@@ -260,6 +260,7 @@ export function createAi(
       for (const [label, kind, id] of [
         ["AI_MODEL", "language", config.AI_MODEL],
         ["TRANSCRIPTION_MODEL", "transcription", config.TRANSCRIPTION_MODEL],
+        ...(config.ANALYZE_JUDGE_MODEL ? ([["ANALYZE_JUDGE_MODEL", "language", config.ANALYZE_JUDGE_MODEL]] as const) : []),
       ] as const) {
         try {
           await resolve(kind, id);

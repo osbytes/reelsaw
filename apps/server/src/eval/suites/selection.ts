@@ -1,8 +1,9 @@
 /**
  * selection: invariants of clip selection on a real stored transcript.
  *  - offline cases: transcript chunking (full coverage, bounded overlap and size, order), the
- *    "05:28 → 528" timestamp repair, and snapping candidates to sentence boundaries within the
- *    configured length.
+ *    "05:28 → 528" timestamp repair, snapping candidates to sentence boundaries within the
+ *    configured length, the auto-mode score gate under stingy / generous / bimodal judges, and
+ *    how many sliding pairwise passes it takes to place the top 3.
  *  - `selection-model` (needs models): one real map call per chunk sample; every returned candidate
  *    must land inside its chunk (after repair) and survive snapping. Catches prompt / parsing drift.
  */
@@ -10,8 +11,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { sentenceEndAfter } from "../../pipeline/thought.js";
-import { chunkTranscript, repairTimestamps, mapChunk, type LlmOpts, type SelectContext } from "../../pipeline/select.js";
-import { snapCandidate } from "../../pipeline/analyze.js";
+import { chunkTranscript, repairTimestamps, mapChunk, pairwiseRank, pairwiseCalls, type LlmOpts, type ScoreInput, type SelectContext } from "../../pipeline/select.js";
+import { scoreGate, snapCandidate } from "../../pipeline/analyze.js";
 import { isUnavailable, type CaseResult, type Suite, type EvalContext } from "../framework.js";
 import { evalAi } from "../asr.js";
 
@@ -41,6 +42,75 @@ async function fixtures(ctx: EvalContext) {
 
 const cand = (startSec: number, endSec: number): ClipCandidate => ({ title: "t", hook: "h", startSec, endSec, score: 50, reasoning: "", caption: "", hashtags: [] });
 
+/**
+ * The auto-mode score gate on synthetic rubric totals from judges with different calibration
+ * (pointwise scores do not transfer across models). The relative rule must keep the leader and a
+ * sane share under every judge; the old absolute 45 is run too, to show what it does to a stingy one.
+ */
+function gateCases(): CaseResult[] {
+  const dists: Record<string, number[]> = {
+    // the same kind of run, judged by a model that never gives more than 5/10
+    stingy: [48, 40, 38, 36, 35, 33, 31, 30, 28, 26, 24, 22],
+    // ... and by one that rarely gives less than 6/10
+    generous: [95, 92, 90, 88, 85, 82, 80, 77, 74, 70, 66, 62],
+    // strong moments plus a few the judge recognises as junk (intro, sponsor read)
+    bimodal: [85, 82, 80, 78, 75, 72, 70, 22, 20, 18, 15, 12],
+  };
+  const rel = { rule: "relative" as const, floor: 25, k: 1 };
+  const out: CaseResult[] = [];
+  for (const [name, totals] of Object.entries(dists)) {
+    for (const rule of ["relative", "absolute"] as const) {
+      const g = scoreGate(totals, { ...rel, rule });
+      const kept = g.keep.filter(Boolean).length;
+      const fails: string[] = [];
+      if (!g.keep[totals.indexOf(Math.max(...totals))]) fails.push("leader dropped");
+      if (rule === "relative") {
+        if (name === "bimodal") {
+          const strong = totals.filter((t) => t >= 50).length;
+          if (kept !== strong) fails.push(`kept ${kept}, expected the ${strong} strong ones`);
+        } else if (kept < 0.5 * totals.length || kept === totals.length) fails.push(`kept ${kept}/${totals.length}: not a sane share`);
+      }
+      // the point of the change: a fixed cutoff empties a stingy judge's project (and keeps everything from a generous one)
+      if (rule === "absolute" && name === "stingy" && kept >= 3) fails.push(`absolute kept ${kept}; expected it to collapse to the leader`);
+      if (rule === "absolute" && name === "generous" && kept !== totals.length) fails.push(`absolute kept ${kept}; expected every clip`);
+      out.push({ id: `gate/${name}/${rule}`, pass: !fails.length, metrics: { n: g.n, kept, threshold: g.threshold, median: g.median ?? -1, mad: g.mad ?? -1 }, notes: fails.join("; ") });
+    }
+  }
+  // the relative rule keeps the same clips when a judge shifts and stretches its scale
+  const base = dists.generous!;
+  const a = scoreGate(base, { ...rel, floor: 0 }).keep.join();
+  const b = scoreGate(base.map((t) => 0.5 * t - 10), { ...rel, floor: 0 }).keep.join();
+  out.push({ id: "gate/affine-invariant", pass: a === b, metrics: { n: base.length }, notes: a === b ? "" : "different clips kept after rescaling the totals" });
+  // degenerate pools: one clip, all equal
+  const one = scoreGate([12], rel);
+  const flat = scoreGate([50, 50, 50, 50], rel);
+  out.push({ id: "gate/degenerate", pass: one.keep[0] === true && flat.keep.every(Boolean), metrics: { single: Number(one.keep[0]), flatKept: flat.keep.filter(Boolean).length } });
+  return out;
+}
+
+/**
+ * PRP-Sliding-K with a noise-free judge and the true top 3 entered last (worst case): one pass
+ * only places the leader, three passes place the top 3. Calls are counted, memoised pairs reused.
+ */
+async function pairwiseCases(): Promise<CaseResult[]> {
+  const items: ScoreInput[] = Array.from({ length: 10 }, (_, i) => ({ id: i, durationSec: 30, text: "" })); // id = true quality, worst first
+  const sc: SelectContext = { title: "t", durationSec: 600, minSec: 20, maxSec: 60 };
+  const out: CaseResult[] = [];
+  for (const passes of [1, 3]) {
+    let calls = 0;
+    const judge = async (x: ScoreInput, y: ScoreInput) => {
+      calls += 2; // each judgment is asked twice, positions swapped
+      return x.id > y.id ? 1 : -1;
+    };
+    const order = await pairwiseRank({ model: undefined as never, telemetry: false }, items, sc, undefined, passes, judge);
+    const top3 = order.slice(0, 3).join(",");
+    const want = passes >= 3 ? "9,8,7" : "9";
+    const pass = top3.startsWith(want) && calls <= pairwiseCalls(items.length, passes);
+    out.push({ id: `pairwise/passes-${passes}`, pass, metrics: { calls, maxCalls: pairwiseCalls(items.length, passes), topPlaced: order.slice(0, 3).filter((id, i) => id === 9 - i).length }, notes: `top 3: ${top3}` });
+  }
+  return out;
+}
+
 export const selectionSuite: Suite = {
   name: "selection",
   description: "chunking, timestamp repair and sentence snapping invariants on a real transcript",
@@ -58,6 +128,7 @@ export const selectionSuite: Suite = {
       return Math.abs(r.startSec - ea) > 0.01 || Math.abs(r.endSec - eb) > 0.01;
     });
     out.push({ id: "repair-mmss", pass: !bad.length, metrics: { cases: repairCases.length }, notes: bad.map((b) => `${b[0]}-${b[1]}`).join(", ") });
+    out.push(...gateCases(), ...(await pairwiseCases()));
 
     for (const { name, t } of await fixtures(ctx)) {
       const segs = t.segments;

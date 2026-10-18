@@ -74,6 +74,14 @@ export const envSchema = z.object({
   ANALYZE_SCORE_SAMPLES: z.coerce.number().int().min(0).max(7).default(0),
   /** Pairwise re-ranking of the top clips with position swapping. auto = on for cloud models only. */
   ANALYZE_PAIRWISE: z.enum(["auto", "on", "off"]).default("auto"),
+  /** Sliding pairwise passes over the top 10 (pass p places rank p; 3 = the top 3 the user sees first). Cost: Σ(n-1-p) pairs × 2 calls. */
+  ANALYZE_PAIRWISE_PASSES: z.coerce.number().int().min(1).max(9).default(3),
+  /** Auto-mode score gate. relative (default): drop below max(FLOOR, median − K·MAD) of the run's rubric totals, so the count does not depend on how generous the judge is; absolute: the old fixed 45. */
+  ANALYZE_SCORE_RULE: z.enum(["relative", "absolute"]).default("relative"),
+  ANALYZE_MIN_SCORE_FLOOR: z.coerce.number().min(0).max(100).default(25),
+  ANALYZE_SCORE_MAD_K: z.coerce.number().min(0).max(5).default(1),
+  /** provider:model that scores and compares candidates (default: the language model). A different model avoids self-preference. */
+  ANALYZE_JUDGE_MODEL: z.string().optional(),
   /** Feed entities from the video metadata (channel, title, description, tags) to the transcriber as vocabulary hints. */
   TRANSCRIPT_BIAS: boolTrue,
   /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). */
