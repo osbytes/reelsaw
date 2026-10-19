@@ -24,7 +24,7 @@
     "models:download": "sh ../../scripts/download-models.sh models",
     "docs:gen": "tsx scripts/gen-docs.ts",
     "docs:check": "tsx scripts/gen-docs.ts --check",
-    "stripe:setup": "tsx scripts/stripe-setup.ts",
+    "stripe:setup": "pnpm --filter @reelsaw/shared build && tsx scripts/stripe-setup.ts",
     "stripe:mock": "tsx test/stripe-mock.ts"
   },
   "dependencies": {

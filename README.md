@@ -338,7 +338,7 @@ ships in the same image, and runs only with `REELSAW_EE=true` plus `STRIPE_SECRE
   `reelsaw billing <email>` shows the row, Stripe's view and the last webhook events.
 - A failed payment keeps the plan for `BILLING_GRACE_DAYS` (7), then the account is on Free.
   Admins can grant a plan without Stripe (Users → Limits → Plan, or `reelsaw billing set-plan`).
-- Setting up a Stripe account: `pnpm --filter @reelsaw/server stripe:setup --webhook --portal`
+- Setting up a Stripe account: `pnpm --filter @reelsaw/server stripe:setup --webhook --portal` (rebuilds `@reelsaw/shared` first)
   creates the products, prices (by lookup key), webhook endpoint and portal configuration from the
   plan list, idempotently. Developing without a Stripe account: `pnpm --filter @reelsaw/server
   stripe:mock` stands in for api.stripe.com (`STRIPE_API_BASE=http://host.docker.internal:4242`)
