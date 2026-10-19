@@ -192,6 +192,7 @@ a different image: `docker-compose.gpu.yml` reserves every NVIDIA device for `sp
 Docker Desktop on WSL2 with the Windows driver only). Then in `.env`:
 
 ```
+# Linux/macOS (colon). On Windows use a semicolon: docker-compose.yml;docker-compose.gpu.yml
 COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
 SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda
 WHISPER_MODEL=Systran/faster-whisper-large-v3      # or deepdml/faster-whisper-large-v3-turbo-ct2

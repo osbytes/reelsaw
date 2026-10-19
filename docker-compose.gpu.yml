@@ -1,14 +1,15 @@
 # NVIDIA GPU for the containers that can use one. An override: load it next to the main file.
 #
-#   .env:   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+#   .env:   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml   # Windows: use ; between the two paths
 #           SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda
 #           WHISPER_MODEL=Systran/faster-whisper-large-v3        # or deepdml/faster-whisper-large-v3-turbo-ct2
 #   then:   docker compose --profile local-ai up -d              # as usual; or pass -f twice instead of COMPOSE_FILE
 #
 # Host: the NVIDIA driver (`nvidia-smi` works) and the NVIDIA Container Toolkit
 # (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`). On Windows use
-# Docker Desktop with the WSL2 backend and the Windows driver only. macOS has no CUDA in Docker: run
-# Ollama natively for Metal; Speaches and ffmpeg stay on the CPU there.
+# Docker Desktop with the WSL2 backend and the Windows driver only (GPU appears as /dev/dxg inside
+# containers; nvidia-smi is often missing from the app image — trust `reelsaw machine`'s video encoder).
+# macOS has no CUDA in Docker: run Ollama natively for Metal; Speaches and ffmpeg stay on the CPU there.
 #
 # What each container does with the card:
 #   speaches  faster-whisper on CUDA (needs the :latest-cuda image). The big win: large-v3 runs faster than small on a CPU.
