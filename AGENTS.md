@@ -9,6 +9,7 @@ backed by the same service code as the screen.
 Layout: `apps/server` (Hono, tRPC, Drizzle, pg-boss workers), `apps/web` (Vite, React, Tailwind,
 Radix), `packages/shared` (zod schemas, shared geometry/caption helpers; rebuild with
 `pnpm --filter @reelsaw/shared build` after changing it).
+`website/` is reelsaw.com (Next.js, own lockfile, outside the pnpm workspace; see `website/README.md`).
 
 Everyday commands:
 

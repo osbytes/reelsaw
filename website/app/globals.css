@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* Design tokens, copied from apps/web/src/index.css so the site matches the app.
+   Light by default, dark under [data-theme=dark] (set before first paint in app/layout.tsx). */
+:root {
+  --bg: #f5f5f4;
+  --panel: #ffffff;
+  --sunk: #ededec;
+  --ink: #1c1c1e;
+  --ink2: #4f4f55;
+  --ink3: #6e6e74;
+  --line: #e2e2e0;
+  --line2: #cfcfcc;
+  --acc: oklch(0.58 0.17 295);
+  --acc-ink: #ffffff;
+  --acc-soft: oklch(0.94 0.035 295);
+  --acc-text: oklch(0.47 0.17 295);
+  --ok: oklch(0.52 0.13 150);
+  --ok-soft: oklch(0.94 0.04 150);
+  --warn: oklch(0.55 0.12 70);
+  --warn-soft: oklch(0.95 0.05 85);
+  --err: oklch(0.53 0.18 25);
+  --err-soft: oklch(0.95 0.03 25);
+  --shadow: 0 10px 30px rgba(20, 20, 25, 0.12), 0 2px 6px rgba(20, 20, 25, 0.06);
+  --film: #2a2a2e;
+  --film2: #323237;
+  --film-ink: #1c1c1e;
+  --film-text: #b9b9c0;
+  --snap: #ff5cc8;
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --bg: #131314;
+  --panel: #1c1c1e;
+  --sunk: #0f0f10;
+  --ink: #f1f1f2;
+  --ink2: #bcbcc1;
+  --ink3: #8e8e94;
+  --line: #2d2d30;
+  --line2: #3d3d41;
+  --acc: oklch(0.72 0.14 295);
+  --acc-ink: #17121f;
+  --acc-soft: oklch(0.3 0.06 295);
+  --acc-text: oklch(0.82 0.11 295);
+  --ok: oklch(0.76 0.13 150);
+  --ok-soft: oklch(0.3 0.05 150);
+  --warn: oklch(0.8 0.12 80);
+  --warn-soft: oklch(0.32 0.05 80);
+  --err: oklch(0.72 0.15 25);
+  --err-soft: oklch(0.32 0.06 25);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  --film: #202023;
+  --film2: #28282c;
+  --film-ink: #1c1c1e;
+  --film-text: #b9b9c0;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-sunk: var(--sunk);
+  --color-ink: var(--ink);
+  --color-ink2: var(--ink2);
+  --color-ink3: var(--ink3);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-acc: var(--acc);
+  --color-acc-ink: var(--acc-ink);
+  --color-acc-soft: var(--acc-soft);
+  --color-acc-text: var(--acc-text);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-film: var(--film);
+  --color-film-ink: var(--film-ink);
+  --color-film-text: var(--film-text);
+  --color-snap: var(--snap);
+  --shadow-pop: var(--shadow);
+}
+
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+body { @apply bg-bg font-sans text-[15px] text-ink antialiased; }
+@layer base {
+  :focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+  ::selection { background: var(--acc-soft); }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+}
+
+@utility film { background: repeating-linear-gradient(135deg, var(--film) 0 10px, var(--film2) 10px 11px); }
+
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-[10px] px-3 py-[7px] text-[13px] font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50; }
+@utility btn-primary { @apply btn bg-acc font-semibold text-acc-ink hover:brightness-110; }
+@utility btn-ink { @apply btn bg-ink font-semibold text-bg hover:opacity-90; }
+@utility btn-ghost { @apply btn border border-line bg-panel text-ink hover:bg-sunk; }
+@utility btn-quiet { @apply btn text-ink hover:bg-sunk; }
+@utility card { @apply rounded-[14px] border border-line bg-panel; }
+@utility chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap; }
+@utility kbd { @apply inline-grid min-w-[1.5em] place-items-center rounded-[4px] border border-current px-1 font-mono text-[10px] leading-[1.45] whitespace-nowrap opacity-75; }
+/* marketing-page additions */
+@utility container-page { @apply mx-auto w-full max-w-[1120px] px-5 sm:px-8; }
+@utility eyebrow { @apply text-xs font-semibold tracking-[0.08em] text-acc-text uppercase; }
+@utility prose-link { @apply text-acc-text underline decoration-acc-text/40 underline-offset-[3px] hover:decoration-acc-text; }
+
+/* pipeline diagram: an accent dash travelling along each edge */
+.pipeline-flow {
+  stroke-dasharray: 8 14;
+  animation: pipeline-flow 1.2s linear infinite;
+}
+@keyframes pipeline-flow {
+  to { stroke-dashoffset: -22; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-flow { animation: none; stroke-dasharray: none; opacity: 0.6; }
+}
