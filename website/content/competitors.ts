@@ -1,4 +1,5 @@
 import { CHECKED } from "./reelsaw";
+import { HOSTED } from "../lib/site";
 import type { Competitor } from "./types";
 
 const notStated = "Not stated on the pricing page";
@@ -367,17 +368,17 @@ export const COMPETITORS: Competitor[] = [
     h1: "Reelsaw vs OpenShorts: fully local, and any model you want",
     intro: [
       "Reelsaw exists for two reasons: the whole pipeline should run on your own hardware with no API key, and every model in it should be swappable for any vendor. OpenShorts is the other open-source clipper, and it gets most of the way there: MIT core, Docker Compose, an MCP server, and an OpenAI-compatible option for moment picking. But its README says Gemini is still required for layout picking and for silent videos, so a key and a Google account stay in the loop.",
-      "OpenShorts is wider: dubbing, AI UGC videos, a YouTube studio, publishing. Reelsaw is deeper on the thing both tools are for, turning long video into good clips: how moments are ranked, how filler cuts are verified, what the editor can override, and how a shared install runs. Both sell a hosted version at the same prices (Free, then $12, $29 and $59 a month, metered in minutes of source video). If the core capability and control over it are what you are choosing on, Reelsaw is the stronger pick; the rest of this page shows why, and where OpenShorts wins instead.",
+      "OpenShorts is wider: dubbing, AI UGC videos, a YouTube studio, publishing" + (HOSTED ? "" : ", a hosted tier") + ". Reelsaw is deeper on the thing both tools are for, turning long video into good clips: how moments are ranked, how filler cuts are verified, what the editor can override, and how a shared install runs." + (HOSTED ? " Both sell a hosted version at the same prices (Free, then $12, $29 and $59 a month, metered in minutes of source video)." : "") + " If the core capability and control over it are what you are choosing on, Reelsaw is the stronger pick; the rest of this page shows why, and where OpenShorts wins instead.",
     ],
     pricing: {
-      summary: "Both are free to self-host, and both sell a hosted version at the same four price points, metered in minutes of source video.",
+      summary: HOSTED ? "Both are free to self-host, and both sell a hosted version at the same four price points, metered in minutes of source video." : "Both are free to self-host. OpenShorts also sells a hosted version.",
       plans: [
-        { name: "Reelsaw self-hosted", price: "$0", includes: "AGPL-3.0, no keys needed. Docker, about 10 GB disk, 8 GB RAM with a hosted provider, more for a local language model (the installer picks one by RAM)" },
-        { name: "Reelsaw hosted (app.reelsaw.com)", price: "Free, then $12, $29 or $59/mo", includes: "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. No watermark on paid plans; yearly is two months free" },
+        { name: HOSTED ? "Reelsaw self-hosted" : "Reelsaw", price: "$0", includes: "AGPL-3.0, no keys needed. Docker, about 10 GB disk, 8 GB RAM with a hosted provider, more for a local language model (the installer picks one by RAM)" },
+        ...(HOSTED ? [{ name: "Reelsaw hosted (app.reelsaw.com)", price: "Free, then $12, $29 or $59/mo", includes: "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. No watermark on paid plans; yearly is two months free" }] : []),
         { name: "OpenShorts self-hosted", price: "$0, plus a Gemini key", includes: "MIT core; the cloud/ directory is source-available under a commercial licence. Docker, 8 GB+ RAM; about 5 to 8 minutes per 8-minute video on CPU, about a minute with an NVIDIA GPU" },
         { name: "OpenShorts Cloud", price: "Free, then $12, $29 or $59/mo", includes: "Free: first video up to 60 minutes, then 20 minutes a month, with a watermark and clips kept 7 days. Starter $12: 100 minutes. Creator $29: 300 minutes. Pro $59: 750 minutes and a priority queue. Gemini key and auto-posting included; yearly is two months free" },
       ],
-      note: "The hosted prices are the same on purpose: pick on the pipeline and the licence, not the bill.",
+      ...(HOSTED ? { note: "The hosted prices are the same on purpose: pick on the pipeline and the licence, not the bill." } : {}),
     },
     them: {
       local: "Partly. Moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and silent videos, so a Google API key stays required",
@@ -399,6 +400,7 @@ export const COMPETITORS: Competitor[] = [
     },
     betterAt: [
       "Breadth beyond clipping: voice dubbing, AI UGC videos with lip-synced actors, a YouTube title and thumbnail studio, and one-click publishing.",
+      ...(HOSTED ? [] : ["A hosted option for people who do not want to self-host, with a GPU behind it."]),
       "An optional Parakeet transcription backend (NVIDIA NeMo), about twice as fast as Whisper on the same card.",
       "A larger community: about 6.8k GitHub stars when checked.",
     ],
@@ -414,7 +416,7 @@ export const COMPETITORS: Competitor[] = [
       "Framing decided per segment, not per video: face, split, stack and fit can change inside one clip at scene cuts, with active-speaker following, and any section can be overridden in the editor.",
       "A real editor: multi-lane timeline, frame-accurate trims, layout sections, transitions, intros and outros, undo.",
       "Built for more than one person: accounts, admin approval, per-user quotas, usage, and pg-boss jobs that resume after a crash.",
-      "AGPL-3.0, so a hosted fork has to share its changes; Reelsaw's own hosted service runs the public code with the billing module as the only addition.",
+      HOSTED ? "AGPL-3.0, so a hosted fork has to share its changes; Reelsaw's own hosted service runs the public code with the billing module as the only addition." : "AGPL-3.0, so a hosted fork has to share its changes.",
     ],
     faqs: [
       { q: "Can OpenShorts run fully offline without any API key?", a: "Not according to its README on " + CHECKED + ": moment picking can use a local OpenAI-compatible server, but Gemini is still needed for layout picking and for silent videos. Reelsaw runs the whole pipeline locally with Ollama and a local Whisper, which is what its installer sets up by default." },
@@ -427,7 +429,7 @@ export const COMPETITORS: Competitor[] = [
     sources: [
       { href: "https://github.com/mutonby/openshorts", label: "OpenShorts README, checked " + CHECKED + " (Gemini requirement, providers, hardware, hosted pricing)" },
       { href: "https://www.openshorts.app/#/pricing", label: "OpenShorts hosted pricing, checked 2026-10-19" },
-      { href: "https://reelsaw.com/pricing", label: "Reelsaw hosted pricing" },
+      ...(HOSTED ? [{ href: "https://reelsaw.com/pricing", label: "Reelsaw hosted pricing" }] : []),
       { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
     ],
   },

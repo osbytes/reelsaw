@@ -6,7 +6,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
   {
     title: "Project",
     links: [
-      { href: "/pricing", label: "Pricing" },
+      ...(SITE.hosted ? [{ href: "/pricing", label: "Pricing" }] : []),
       { href: SITE.github, label: "Source on GitHub" },
       { href: SITE.releases, label: "Releases" },
       { href: SITE.docker, label: "Docker image (GHCR)" },
@@ -33,8 +33,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
       { href: SITE.issues, label: "Issues and feature requests" },
       { href: SITE.contributing, label: "Contributing" },
       { href: SITE.glama, label: "Glama MCP listing" },
-      { href: "/terms", label: "Terms of service" },
-      { href: "/privacy", label: "Privacy policy" },
+      ...(SITE.hosted ? [{ href: "/terms", label: "Terms of service" }, { href: "/privacy", label: "Privacy policy" }] : []),
     ],
   },
 ];

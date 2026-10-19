@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
 import { PRICING } from "@/content/pricing";
 import { Breadcrumbs } from "@/components/seo";
@@ -20,6 +21,8 @@ export const metadata: Metadata = {
 const gb = (mb: number) => (mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`);
 
 export default function PricingPage() {
+  // the hosted service is not announced until NEXT_PUBLIC_HOSTED_URL is set (lib/site.ts)
+  if (!SITE.hosted) notFound();
   return (
     <>
       <Header />

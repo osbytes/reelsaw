@@ -8,9 +8,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const checked = new Date(CHECKED);
   return [
     { url: `${SITE.url}/`, lastModified: checked, changeFrequency: "weekly", priority: 1 },
-    { url: `${SITE.url}/pricing`, lastModified: checked, changeFrequency: "monthly", priority: 0.8 },
-    { url: `${SITE.url}/terms`, lastModified: checked, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${SITE.url}/privacy`, lastModified: checked, changeFrequency: "yearly", priority: 0.3 },
+    ...(SITE.hosted
+      ? [
+          { url: `${SITE.url}/pricing`, lastModified: checked, changeFrequency: "monthly" as const, priority: 0.8 },
+          { url: `${SITE.url}/terms`, lastModified: checked, changeFrequency: "yearly" as const, priority: 0.3 },
+          { url: `${SITE.url}/privacy`, lastModified: checked, changeFrequency: "yearly" as const, priority: 0.3 },
+        ]
+      : []),
     { url: `${SITE.url}/alternatives`, lastModified: checked, changeFrequency: "monthly", priority: 0.8 },
     ...COMPETITORS.map((c) => ({ url: `${SITE.url}/alternatives/${c.slug}`, lastModified: new Date(c.checked), changeFrequency: "monthly" as const, priority: 0.7 })),
     ...GUIDES.map((g) => ({ url: `${SITE.url}/${g.slug}`, lastModified: checked, changeFrequency: "monthly" as const, priority: 0.7 })),

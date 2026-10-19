@@ -7,7 +7,7 @@ const NAV = [
   { href: "/#features", label: "Features" },
   { href: "/#agents", label: "Agents" },
   { href: "/alternatives", label: "Compare" },
-  { href: "/pricing", label: "Pricing" },
+  ...(SITE.hosted ? [{ href: "/pricing", label: "Pricing" }] : []),
   { href: "/#install", label: "Install" },
 ];
 
