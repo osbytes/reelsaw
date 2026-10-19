@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 /**
  * Instance context for issue reports: versions, machine resources, on-device models, queue state,
- * usage and recent errors. Self-hosted installs have no crash reporting service, so the instance's
- * own logs and job table are the error history; they are read on demand and redacted.
+ * usage and recent errors. Only included when reportCapabilities.system is true (self-host or
+ * admin): hosted non-admins must not see instance-wide queue/error data. Self-hosted installs
+ * often have no crash reporting service, so the instance's own logs and job table are the error
+ * history; they are read on demand and redacted.
  */
 import path from "node:path";
 import fsp from "node:fs/promises";

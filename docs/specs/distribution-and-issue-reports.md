@@ -21,8 +21,11 @@ About 2 days. Cut scope, not quality.
 ## Non-goals
 - Strong code protection (licence keys, bytecode, obfuscation beyond minification). Minified JS
   can be reversed by a determined person; this stops casual reading only.
-- Uploading reports anywhere. The user downloads the zip and sends it however they like.
-- Auto-update, telemetry, or crash reporting that phones home.
+- Uploading the reproduction zip anywhere. On self-host the user downloads it and sends it
+  however they like. On hosted (with Sentry/PostHog), "Report an issue" is feedback through
+  those channels — not a zip upload to Reelsaw.
+- Auto-update. Telemetry and crash reporting are optional (env keys) and separate from the
+  self-host zip path.
 - Including the source video by default (it can be gigabytes).
 
 ## Must-be (Kano)
@@ -54,17 +57,27 @@ About 2 days. Cut scope, not quality.
 
 ## Part B: issue reports
 
+### Hosted vs self-host
+- **Self-host**, and **admins on hosted**: zip download as below. Instance system info, queue
+  counts and recent errors are opt-in (`include.system`) and only allowed for these callers —
+  never for a hosted non-admin (instance-wide data must not leak across accounts).
+- **Hosted non-admin with Sentry/PostHog configured**: no zip. The dialog sends the description
+  through Sentry User Feedback and a PostHog `issue_reported` event (ids/counts only; the free
+  text stays in Sentry). Capabilities come from `me.get.report` (`report/capabilities.ts`).
+- **Hosted non-admin without telemetry**: zip of own project/account data only, system forced off.
+
 ### What the user does
 1. "Report an issue" (project ⋯ menu, failed clip card, user menu).
 2. Dialog: a text box "What went wrong?" (required, prefilled hint), optional clip picker (prefilled
-   when opened from a clip), and a contents list with checkboxes:
+   when opened from a clip). On zip mode, a contents list with checkboxes:
    - Project data and pipeline outputs (always)
+   - System info and recent errors (on when allowed; hidden for hosted non-admins)
    - Logs for this project (on)
    - Thumbnails and the selected clip's rendered video (on)
    - All rendered clips (off)
    - Source video file (off; shows size; required for uploaded files to be reproducible)
-3. "Download report" saves `reelsaw-report-<project>-<date>.zip` and shows where it went and
-   how to send it.
+3. Zip mode: "Download report" saves `reelsaw-report-<project>-<date>.zip`. Feedback mode: "Send
+   feedback" submits through telemetry.
 
 ### Zip layout (manifest version 1)
 ```
@@ -164,11 +177,12 @@ videos, titles, model outputs and logs can carry text aimed at whoever (or whate
   dialog that the report can't reproduce media-dependent problems without it.
 
 ## Auth matrix
-| Action | Anonymous | Owner | Other user |
-|---|---|---|---|
-| Download report for a project | 401 | 200 | 404 |
-| Global report (no project) | 401 | 200 (own account context only) | - |
-| `import-report` (CLI) | operator only | - | - |
+| Action | Anonymous | Owner (self-host / admin / hosted without telemetry) | Hosted non-admin with telemetry | Other user |
+|---|---|---|---|---|
+| Download report for a project | 401 | 200 | 403 | 404 |
+| Global report (no project) | 401 | 200 (own account context only) | 403 | - |
+| System info in zip | - | allowed when opted in | never | - |
+| `import-report` (CLI) | operator only | - | - | - |
 
 ## Metrics
 - Time from receiving a zip to a local reproduction: under 5 minutes (measure on the first 3 reports).

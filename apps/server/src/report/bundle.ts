@@ -18,8 +18,13 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { REPORT_FORMAT, type ReportRequest } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
+import { applyReportInclude, reportCapabilities, type ReportCapabilities } from "./capabilities.js";
 import { configForReport, makeRedactor } from "./redact.js";
 import { queueInfo, recentErrors, systemInfo, usageInfo } from "./system.js";
+import type { UserRole } from "../db/schema.js";
+
+export type { ReportCapabilities };
+export { reportCapabilities };
 
 const MAX_LOG_LINES = 20000;
 
@@ -165,13 +170,17 @@ function providerSecrets(svc: Services): string[] {
 
 export async function createReportZip(
   svc: Services,
-  userId: string,
+  user: { id: string; role: UserRole },
   projectId: string | null,
   req: ReportRequest,
 ): Promise<{ stream: Readable; filename: string } | null> {
   const db = svc.database.db;
+  const caps = reportCapabilities(svc, user);
+  if (!caps.zip) return null;
+  const include = applyReportInclude(caps, req.include);
+  const reqSafe = { ...req, include };
   const redact = makeRedactor(svc.config, providerSecrets(svc));
-  const project = projectId ? await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)) }) : null;
+  const project = projectId ? await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, user.id)) }) : null;
   if (projectId && !project) return null;
 
   const manifest: ReportManifest = {
@@ -181,7 +190,7 @@ export async function createReportZip(
     kind: project ? "project" : "account",
     projectId: project?.id ?? null,
     clipIds: [],
-    include: req.include,
+    include,
     files: [],
     notes: [],
   };
@@ -212,7 +221,7 @@ export async function createReportZip(
     try {
       addText("README.md", readme(manifest));
       addJson("config.json", configForReport(svc.config));
-      addJson("client.json", JSON.parse(redact(JSON.stringify(req.client))));
+      addJson("client.json", JSON.parse(redact(JSON.stringify(reqSafe.client))));
 
       if (project) {
         const [transcript, chunks, clips, events, artifacts] = await Promise.all([
@@ -222,7 +231,7 @@ export async function createReportZip(
           db.query.projectEvents.findMany({ where: eq(schema.projectEvents.projectId, project.id), orderBy: asc(schema.projectEvents.id) }),
           db.query.stageArtifacts.findMany({ where: eq(schema.stageArtifacts.projectId, project.id), orderBy: asc(schema.stageArtifacts.id) }),
         ]);
-        const picked = new Set(req.clipIds);
+        const picked = new Set(reqSafe.clipIds);
         manifest.clipIds = clips.filter((c) => picked.has(c.id)).map((c) => c.id); // only this project's clips
         const { userId: owner, sourceMeta, error, ...rest } = project;
         addJson("project.json", { ...rest, error: error ? redact(error) : null, ownerHash: sha256(owner).slice(0, 12), sourceMeta: sourceMeta ? JSON.parse(redact(JSON.stringify(sourceMeta))) : null });
@@ -232,37 +241,37 @@ export async function createReportZip(
         addJson("artifacts.json", artifacts);
         addJsonl("events.jsonl", events.map((e) => redact(JSON.stringify(e))));
         if (!artifacts.length) manifest.notes.push("No stage artifacts: the project was processed before they were recorded.");
-        if (req.include.logs) {
+        if (include.logs) {
           const lines = await logLines(svc, [project.id, ...clips.map((c) => c.id)], redact);
           addJsonl("logs.jsonl", lines);
           if (!svc.config.LOG_FILE) manifest.notes.push("LOG_FILE is not set on this instance, so no logs could be included.");
           else manifest.notes.push(`logs.jsonl holds the last 7 days of lines mentioning this project or its clips, at the log level in force (${svc.logLevel.state().effective}); debug lines are only there if that level included them.`);
           if (svc.config.LLM_TRACE?.includes("logs") !== true) manifest.notes.push("LLM_TRACE does not include logs: model prompts/responses are not in logs.jsonl.");
         }
-        if (req.include.previews) for (const c of clips) if (c.thumbnailKey) await addStored(`media/thumbnails/${String(c.index + 1).padStart(2, "0")}-${c.id}.jpg`, c.thumbnailKey).catch(() => manifest.notes.push(`thumbnail of clip ${c.index + 1} missing`));
+        if (include.previews) for (const c of clips) if (c.thumbnailKey) await addStored(`media/thumbnails/${String(c.index + 1).padStart(2, "0")}-${c.id}.jpg`, c.thumbnailKey).catch(() => manifest.notes.push(`thumbnail of clip ${c.index + 1} missing`));
         for (const c of clips) {
-          if (!c.outputKey || !(req.include.allClips || (req.include.previews && manifest.clipIds.includes(c.id)))) continue;
+          if (!c.outputKey || !(include.allClips || (include.previews && manifest.clipIds.includes(c.id)))) continue;
           await addStored(`media/clips/${String(c.index + 1).padStart(2, "0")}-${c.id}.mp4`, c.outputKey).catch(() => manifest.notes.push(`render of clip ${c.index + 1} missing`));
         }
-        if (req.include.source && project.sourceKey) await addStored(`media/source${path.extname(project.sourceKey) || ".mp4"}`, project.sourceKey).catch(() => manifest.notes.push("source video missing from storage"));
-        if (!req.include.source && project.sourceType === "upload") manifest.notes.push("Uploaded source not included: media-dependent problems can't be reproduced without it.");
-        addText("report.md", reportMd(req, manifest, project.title));
+        if (include.source && project.sourceKey) await addStored(`media/source${path.extname(project.sourceKey) || ".mp4"}`, project.sourceKey).catch(() => manifest.notes.push("source video missing from storage"));
+        if (!include.source && project.sourceType === "upload") manifest.notes.push("Uploaded source not included: media-dependent problems can't be reproduced without it.");
+        addText("report.md", reportMd(reqSafe, manifest, project.title));
       } else {
-        const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, userId), orderBy: desc(schema.projects.updatedAt), limit: 50, columns: { id: true, title: true, status: true, stage: true, error: true, sourceType: true, sourceUrl: true, durationSec: true, createdAt: true, updatedAt: true } });
+        const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, user.id), orderBy: desc(schema.projects.updatedAt), limit: 50, columns: { id: true, title: true, status: true, stage: true, error: true, sourceType: true, sourceUrl: true, durationSec: true, createdAt: true, updatedAt: true } });
         addJson("projects.json", projects);
         const ids = projects.map((p) => p.id);
         const failures = ids.length
           ? await db.query.projectEvents.findMany({ where: and(inArray(schema.projectEvents.projectId, ids), inArray(schema.projectEvents.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[])), orderBy: desc(schema.projectEvents.id), limit: 100 })
           : [];
         addJsonl("events.jsonl", failures.map((e) => redact(JSON.stringify(e))));
-        addText("report.md", reportMd(req, manifest, null));
+        addText("report.md", reportMd(reqSafe, manifest, null));
       }
-      if (req.include.system) {
-        const own = (await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.userId, userId))).map((p) => p.id);
+      if (include.system) {
+        const own = (await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.userId, user.id))).map((p) => p.id);
         const ownClips = own.length ? (await db.select({ id: schema.clips.id }).from(schema.clips).where(inArray(schema.clips.projectId, own))).map((c) => c.id) : [];
         addJson("system.json", { ...(await systemInfo(svc)), logLevel: svc.logLevel.state() });
         addJson("queue.json", JSON.parse(redact(JSON.stringify(await queueInfo(svc, project ? [project.id] : own)))));
-        addJson("usage.json", await usageInfo(svc, userId));
+        addJson("usage.json", await usageInfo(svc, user.id));
         addJsonl("errors.jsonl", await recentErrors(svc, { projectIds: own, clipIds: ownClips }, redact));
       }
       // last: the manifest covers every other file

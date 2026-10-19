@@ -125,4 +125,16 @@ describe("issue reports", () => {
     const projects = JSON.parse(files.get("projects.json")!.toString()) as Array<{ id: string }>;
     assert.deepEqual(projects.map((p) => p.id), [projectId]);
   });
+
+  it("omits system.json / queue / errors when include.system is false", async () => {
+    const res = await post(`/api/projects/${projectId}/report`, owner.cookie, {
+      ...req,
+      include: { logs: false, system: false, previews: false, allClips: false, source: false },
+    });
+    assert.equal(res.status, 200);
+    const files = await readZip(Buffer.from(await res.arrayBuffer()));
+    for (const name of ["system.json", "queue.json", "usage.json", "errors.jsonl"]) assert.ok(!files.has(name), `${name} must not be present`);
+    const manifest = JSON.parse(files.get("manifest.json")!.toString()) as { include: { system: boolean } };
+    assert.equal(manifest.include.system, false);
+  });
 });
