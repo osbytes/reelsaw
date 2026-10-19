@@ -54,3 +54,16 @@ Modelled on the "alternatives" pages hosted clippers rank with. All copy is data
 Adding a competitor or guide is a new object in the matching file; the route, sitemap and link
 lists pick it up. Re-check vendor pricing before bumping `CHECKED`: every claim on these pages is
 either from a vendor's public pricing page or from the Reelsaw README.
+
+## IndexNow
+
+`.github/workflows/indexnow.yml` tells Bing, Yandex and the other IndexNow engines which pages
+changed. It runs after a successful production deployment (Vercel reports one as a GitHub
+`deployment_status` event) or by hand from the Actions tab, reads the live `sitemap.xml` and submits
+every URL.
+
+The key is `public/indexnow-key.txt`. It is public by design: the engines fetch it from the site to
+verify that the submitter controls the host, and knowing it only lets someone submit URLs on this
+host. To rotate it, write a new 8 to 128 character string of letters and digits to that file
+(`openssl rand -hex 16`) and deploy. Optional repository variable `SITE_URL` overrides
+`https://reelsaw.com`. Google does not use IndexNow; submit the sitemap in Search Console for it.

@@ -1,0 +1,72 @@
+# Tell Bing, Yandex, Naver, Seznam and the other IndexNow engines which reelsaw.com pages changed.
+# Runs after a successful production deployment (Vercel reports one through the GitHub
+# deployment_status event), or by hand. It reads the live sitemap and submits every URL in it;
+# IndexNow ignores URLs that did not change. The key is website/public/indexnow-key.txt: it is public
+# by design (the engines fetch it from the site to verify the host), so it lives in the repo, not in
+# a secret. Knowing it only lets someone submit URLs on this host.
+name: indexnow
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "URLs to submit, one per line (default: every URL in the live sitemap)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    # deployment_status fires for every state; only act on a finished production deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       contains(github.event.deployment.environment, 'roduction'))
+    runs-on: ubuntu-latest
+    env:
+      SITE_URL: ${{ vars.SITE_URL || 'https://reelsaw.com' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: website/public/indexnow-key.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Check the key is live
+        run: |
+          key=$(tr -d '[:space:]' < website/public/indexnow-key.txt)
+          [ -n "$key" ] || { echo "::error::website/public/indexnow-key.txt is empty"; exit 1; }
+          echo "INDEXNOW_KEY=$key" >> "$GITHUB_ENV"
+          key_url="$SITE_URL/indexnow-key.txt"
+          served=$(curl -fsS --max-time 20 "$key_url" | tr -d '[:space:]' || true)
+          if [ "$served" != "$key" ]; then
+            echo "::error::$key_url does not serve the key in website/public/indexnow-key.txt (is the latest deploy live?)"
+            exit 1
+          fi
+
+      - name: Collect URLs
+        run: |
+          if [ -n "${{ inputs.urls }}" ]; then
+            printf '%s\n' "${{ inputs.urls }}" | sed '/^[[:space:]]*$/d' > urls.txt
+          else
+            curl -fsS --max-time 20 "$SITE_URL/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's#</\?loc>##g' > urls.txt
+          fi
+          count=$(wc -l < urls.txt | tr -d ' ')
+          [ "$count" -gt 0 ] || { echo "::error::no URLs found"; exit 1; }
+          echo "Submitting $count URL(s):"; cat urls.txt
+
+      - name: Submit to IndexNow
+        run: |
+          host=$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#/.*$##')
+          jq -n --arg host "$host" --arg key "$INDEXNOW_KEY" --arg loc "$SITE_URL/indexnow-key.txt" \
+            --rawfile urls urls.txt \
+            '{host: $host, key: $key, keyLocation: $loc, urlList: ($urls | split("\n") | map(select(length > 0)))}' > payload.json
+          status=$(curl -sS -o response.txt -w '%{http_code}' --max-time 30 \
+            -X POST 'https://api.indexnow.org/indexnow' \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data-binary @payload.json)
+          echo "IndexNow responded $status"; cat response.txt; echo
+          # 200 = OK, 202 = accepted, key validation pending
+          case "$status" in 200|202) ;; *) echo "::error::IndexNow rejected the submission ($status)"; exit 1 ;; esac
