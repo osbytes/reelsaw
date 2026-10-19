@@ -14,6 +14,27 @@ pnpm typecheck
 pnpm build && pnpm start
 ```
 
+## The pipeline film
+
+`components/pipeline-film.tsx` is the animation under "How it works": one video going through the five
+queues, with a worker restart that resumes from its checkpoint. It is a single element tree rendered
+as a pure function of authored time, so the home page plays it with `requestAnimationFrame` (looping,
+paused while off screen, with a pause button, and opening on a still frame under
+`prefers-reduced-motion`), and the same component makes the README video:
+
+```bash
+pnpm build && pnpm start          # or pnpm dev; the dev overlay is hidden in the frames
+pnpm render:film                  # ../docs/assets/pipeline.{mp4,gif} + pipeline-poster.jpg
+```
+
+`scripts/render-pipeline-film.mjs` opens `/pipeline-film` (the film at 1920×1080 with its clock off,
+`noindex`), steps time one frame at a time through `window.__pipelineFilm.seek`, and pipes the
+screenshots into ffmpeg (H.264, 30 fps), then makes the GIF the README shows from the MP4
+(GitHub's video player never autoplays, a GIF does; a per-film palette keeps the dark UI to a few
+MB). It drives the installed Google Chrome through `playwright-core`, so there is no browser
+download; ffmpeg must be on `PATH`. Re-run it after changing the film so the README and the site
+stay the same animation.
+
 ## SEO
 
 - `app/layout.tsx`: title template, description, keywords, canonical, Open Graph and Twitter cards,

@@ -20,16 +20,23 @@ Self-hosted, AI-powered long-form → short-form video clipper. Paste a YouTube 
 Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step deploy with Docker Compose.
 
 <p align="center">
+  <img src="docs/assets/pipeline.gif" alt="Animated walkthrough of the pipeline: a video is ingested, transcribed in parallel chunks, refined by three jobs, its best moments are ranked pairwise, and five vertical clips are rendered; a worker restarts mid-render and resumes from its last checkpoint" width="920">
+</p>
+<p align="center">
+  <sub>One video through the five queues: ingest → transcribe → refine ×3 → pick moments → render. A worker restarts mid-render and resumes from its last save. <a href="docs/assets/pipeline.mp4">Full-quality MP4</a>, or <a href="https://reelsaw.com/#how-it-works">play it on reelsaw.com</a>.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/workspace.png" alt="Project workspace with source player, transcript, and rendered clips" width="920">
+</p>
+
+<p align="center">
   <video src="docs/assets/demo-framing.mp4" poster="docs/assets/demo-framing-poster.jpg" width="280" controls playsinline>
     <a href="docs/assets/demo-framing.mp4">demo-framing.mp4</a>
   </video>
 </p>
 <p align="center">
   <sub>Auto reframing in one clip: split → face → stack → fit</sub>
-</p>
-
-<p align="center">
-  <img src="docs/assets/workspace.png" alt="Project workspace with source player, transcript, and rendered clips" width="920">
 </p>
 
 <p align="center">

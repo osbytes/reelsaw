@@ -21,7 +21,7 @@ import editor from "@/public/editor.png";
 import transcriptFixes from "@/public/transcript-fixes.png";
 import workspace from "@/public/workspace.png";
 import { Code, Command } from "@/components/command";
-import { PipelineDiagram } from "@/components/pipeline";
+import { PipelineFilm } from "@/components/pipeline-film";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { GitHubMark } from "@/components/logo";
@@ -223,7 +223,12 @@ export default function HomePage() {
                 </li>
               ))}
             </ol>
-            <PipelineDiagram />
+            <figure className="card overflow-hidden shadow-pop">
+              <PipelineFilm />
+              <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">
+                One video through the five queues: <span className="font-mono text-[11px]">project.ingest → project.transcribe → refine.* ×3 → project.analyze → clip.render ×N</span>. Every box is a pg-boss queue in Postgres; a worker restarts mid-render and resumes from its last save.
+              </figcaption>
+            </figure>
           </div>
         </section>
 
