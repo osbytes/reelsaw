@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.10.1
+
+### Patch Changes
+
+- [#45](https://github.com/osbytes/reelsaw/pull/45) [`eeb1933`](https://github.com/osbytes/reelsaw/commit/eeb1933b430ccbd3a7d6e7ef317aba4887a76da7) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Link downloads now report progress ("Downloading 42% of 1.57GiB at 5.00MiB/s"): yt-dlp's `--print-json` silenced its progress lines, and they were read from the wrong stream. "Download finished in …" shows the download's wall clock instead of the video's length, and processing-time estimates no longer learn from the bad ingest samples.
+
 ## 0.10.0
 
 ### Minor Changes
