@@ -102,9 +102,10 @@ either; `pnpm docs:check` fails when this file is stale.
 | `ANALYZE_SCORE_MAD_K` | `1` | With the relative rule: how many median absolute deviations below the median still count as a keeper. |
 | `ANALYZE_JUDGE_MODEL` | unset | Model that scores and compares candidates, as `provider:model` (e.g. `anthropic:claude-sonnet-4-5`). Unset: the language model. |
 | `TRANSCRIPT_BIAS` | `true` | Feed entities from the video metadata (channel, title, description, tags) and the project's "Names & terms" to the transcriber as vocabulary hints. Set false and those per-project hints are silently ignored. |
-| `TRANSCRIPT_CORRECTION` | `true` | After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). |
-| `DISFLUENCY_REMOVAL` | `true` | Detect fillers, repetitions and false starts and cut them from captions. Set false and the per-project disfluency settings are silently ignored. |
-| `DISFLUENCY_LLM` | `true` | Add a model pass to the rule-based disfluency pass. false skips the slowest refine step on small local models. |
+| `TRANSCRIPT_CORRECTION` | `false` | After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). Off by default. Instance ceiling: projects opt in via `refineEntities` when this is on. Runtime setting: admins can change it under Settings → System without a restart. |
+| `DISFLUENCY_REMOVAL` | `false` | Detect fillers, repetitions and false starts and cut them from captions. Off by default. Instance ceiling: projects opt in via `refineDisfluency` when this is on. Runtime setting: admins can change it under Settings → System without a restart. |
+| `DISFLUENCY_LLM` | `false` | Add a model pass to the rule-based disfluency pass. Off by default. Instance ceiling: projects opt in via `disfluencyLlm` when this is on. Runtime setting: admins can change it under Settings → System without a restart. |
+| `REFINE_SCENES` | `false` | Detect scene cuts and on-screen text during refine. Off by default. Instance ceiling: projects opt in via `refineScenes` when this is on. Runtime setting: admins can change it under Settings → System without a restart. |
 | `TRANSCRIPT_AUTO_FIX_CONFIDENCE` | `0.85` | Corrections at or above this model confidence are applied automatically; the rest wait for the user. |
 | `FACE_DETECTION` | `true` | Face detection for automatic layout (follow crop, stacked webcam). false = fit only. |
 | `LAYOUT_MIN_FACE_RATIO` | `0.6` | Share of sampled frames that must contain a face before a clip gets a face-following layout. |

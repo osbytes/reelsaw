@@ -7,10 +7,15 @@ import { toast } from "sonner";
 import { useMe } from "../lib/account";
 import { Link } from "react-router";
 import { useBumperLibrary } from "./BumperField";
+import { RefineDefaultsFields } from "./RefineToggles";
 
-type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no" };
+type RefineForm = { refineEntities: "" | "yes" | "no"; refineDisfluency: "" | "yes" | "no"; disfluencyLlm: "" | "yes" | "no"; refineScenes: "" | "yes" | "no" };
+type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no" } & RefineForm;
 
-const EMPTY: Form = { language: "", vocabulary: "", instructions: "", focus: "", pauses: "", sourceText: "", minClipSeconds: "", maxClipSeconds: "", maxClips: "", highlightColor: "", wordsPerLine: "", uppercase: "" };
+const EMPTY: Form = { language: "", vocabulary: "", instructions: "", focus: "", pauses: "", sourceText: "", minClipSeconds: "", maxClipSeconds: "", maxClips: "", highlightColor: "", wordsPerLine: "", uppercase: "", refineEntities: "", refineDisfluency: "", disfluencyLlm: "", refineScenes: "" };
+
+const yn = (v: boolean | undefined): "" | "yes" | "no" => (v === undefined ? "" : v ? "yes" : "no");
+const fromYn = (v: "" | "yes" | "no") => (v === "" ? undefined : v === "yes");
 
 function fromSaved(d: UserProjectDefaults): Form {
   return {
@@ -27,6 +32,10 @@ function fromSaved(d: UserProjectDefaults): Form {
     highlightColor: d.highlightColor ?? "",
     wordsPerLine: d.wordsPerLine?.toString() ?? "",
     uppercase: d.uppercase === undefined ? "" : d.uppercase ? "yes" : "no",
+    refineEntities: yn(d.refineEntities),
+    refineDisfluency: yn(d.refineDisfluency),
+    disfluencyLlm: yn(d.disfluencyLlm),
+    refineScenes: yn(d.refineScenes),
   };
 }
 
@@ -45,6 +54,10 @@ function toSaved(f: Form): UserProjectDefaults {
     highlightColor: f.highlightColor.trim() || undefined,
     wordsPerLine: num(f.wordsPerLine),
     uppercase: f.uppercase === "" ? undefined : f.uppercase === "yes",
+    refineEntities: fromYn(f.refineEntities),
+    refineDisfluency: fromYn(f.refineDisfluency),
+    disfluencyLlm: fromYn(f.disfluencyLlm),
+    refineScenes: fromYn(f.refineScenes),
   };
 }
 
@@ -138,6 +151,16 @@ export function ProjectDefaultsSection() {
           Uppercase captions
           <Select ariaLabel="Uppercase captions" value={f.uppercase} onValueChange={pick("uppercase")} options={[{ value: "", label: `built-in (${b?.uppercase ? "yes" : "no"})` }, { value: "yes", label: "yes" }, { value: "no", label: "no" }]} />
         </label>
+        <RefineDefaultsFields
+          value={{
+            refineEntities: fromYn(f.refineEntities),
+            refineDisfluency: fromYn(f.refineDisfluency),
+            disfluencyLlm: fromYn(f.disfluencyLlm),
+            refineScenes: fromYn(f.refineScenes),
+          }}
+          builtIn={b}
+          onChange={(key, v) => setF((p) => ({ ...p, [key]: yn(v) }))}
+        />
         <div className="flex items-center gap-2 sm:col-span-2">
           <button className="btn-ink min-w-[8rem]" type="submit" disabled={!dirty || save.isPending}>
             {save.isPending ? "Saving…" : "Save defaults"}

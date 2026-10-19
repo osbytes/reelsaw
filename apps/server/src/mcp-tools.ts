@@ -19,7 +19,7 @@ Bumpers are short intro/outro videos or images (max 10 s) from your library (lis
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 You only see and change your own projects and library. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
-const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses).");
+const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, refine steps off). Set refineEntities / refineDisfluency / disfluencyLlm / refineScenes true to opt into polish (instance Pipeline gates must be on).");
 
 /** Ids and scalars only, never bodies (captions, transcripts, prompts): enough to find what a tool touched. */
 export function argSummary(args: unknown): Record<string, unknown> {
@@ -80,7 +80,7 @@ export const TOOLS = {
   },
   update_project: {
     title: "Update project",
-    description: "Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses); only the fields you pass change. Does not re-pick clips or re-render: reanalyze_project picks again with the new selection settings, rerender_clips applies style changes. Returns { changed, needsReanalyze, needsRerender, hint }.",
+    description: "Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. Does not re-pick clips or re-render: reanalyze_project picks again with the new selection settings, refine_project applies refine toggles, rerender_clips applies style changes. Returns { changed, needsReanalyze, needsRefine, needsRerender, hint }.",
     inputSchema: {
       id: projectId(),
       title: z.string().trim().min(1).max(200).optional().describe("New title"),

@@ -12,7 +12,7 @@ import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
-import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
+import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -24,6 +24,7 @@ const SYSTEM_SECTIONS = [
   ["models", "Models"],
   ["access", "Access"],
   ["limits", "Limits"],
+  ["pipeline", "Pipeline"],
   ["retention", "Retention"],
   ["operations", "Operations"],
   ["log-level", "Log level"],
@@ -52,7 +53,7 @@ export function SettingsPage() {
               <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
             </div>
             <p className="mt-1 min-h-5 text-sm text-ink2">
-              {system ? "This machine and this instance. Models, access, limits, retention and operations change here without a restart; the rest comes from .env." : "Your account, your defaults for new projects, and keys for agents and tools."}
+              {system ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env." : "Your account, your defaults for new projects, and keys for agents and tools."}
             </p>
           </div>
           {/* the tab row keeps its height for everyone, so the page does not jump when the role loads */}
@@ -280,6 +281,12 @@ function SystemTab() {
 
         <InstanceSettingsGroup id="access" title="Access" intro="Who gets in and what the sign-up form asks for. Applies to the next sign-up or sign-in." fields={ACCESS_FIELDS} />
         <InstanceSettingsGroup id="limits" title="Limits" intro="Per-account quotas (0 = unlimited; override one account on the Users page) and what a source may weigh." fields={LIMIT_FIELDS} />
+        <InstanceSettingsGroup
+          id="pipeline"
+          title="Pipeline"
+          intro="Refine-stage ceilings for every account. Off by default. Turn a gate on so projects (and Project defaults) may opt into that step; leave off to keep every account on the fast path."
+          fields={PIPELINE_FIELDS}
+        />
         <InstanceSettingsGroup id="retention" title="Retention" intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep." fields={RETENTION_FIELDS} />
         <InstanceSettingsGroup id="operations" title="Operations" intro="Watchdog, update checks and what the health endpoint tells anonymous callers." fields={OPERATIONS_FIELDS} />
 
