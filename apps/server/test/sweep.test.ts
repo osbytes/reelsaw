@@ -166,7 +166,7 @@ describe("chunk / mapLimit / keysetLoop", () => {
       handle: async () => {},
     });
     assert.equal(r.complete, false);
-    assert.equal(r.cursor, 15); // one batch ran, then the budget was gone
+    assert.equal(r.cursor, 15); // one batch always runs (even with the budget already spent), then it stops
   });
   it("rows the query already excluded (still referenced) cannot use up a batch: the loop reaches those behind them", async () => {
     const purgeable = Array.from({ length: 450 }, (_, i) => 1000 + i);
