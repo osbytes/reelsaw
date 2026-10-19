@@ -7,7 +7,7 @@
  *   - a per-account request rate on mutations and MCP tool calls (`checkRequestRate`): one upsert per call
  *     into `user_rate` minute buckets, so it holds across replicas;
  *   - flagging (`flagAccounts`, hourly from the reconciler): accounts that share a sign-up IP, sign-up bursts,
- *     disposable domains that slipped through, heavy first-day use. Flags are shown on the Users page and
+ *     disposable domains that slipped through. Flags are shown on the Users page and
  *     audited (`user.flagged`); nothing is suspended automatically. The hard caps (quotas, plans) do the
  *     containing; flags tell the admin where to look.
  *
@@ -22,7 +22,7 @@ import type { RuntimeSettings } from "./instance-settings.js";
 import { limitsFor, type Entitlements, type InstanceLimits } from "./quota.js";
 import type { Logger } from "./log.js";
 
-const DISPOSABLE = new Set<string>(disposable as string[]);
+const DISPOSABLE = new Set<string>(disposable);
 
 /**
  * The client's address. Behind a reverse proxy (Caddy, Cloudflare; TRUST_PROXY=true, the default for the
@@ -111,14 +111,14 @@ export async function checkRequestRate(db: Db, instance: InstanceLimits, userId:
   const s = await limitsFor(db, instance, userId, ent);
   if (s.MAX_REQUESTS_PER_MINUTE <= 0 && s.MAX_REQUESTS_PER_HOUR <= 0) return;
   const [row] = (
-    await db.execute(sql`
+    await db.execute<{ minute: number; hour: number }>(sql`
       with up as (
         insert into user_rate (user_id, bucket, n) values (${userId}, date_trunc('minute', now()), 1)
         on conflict (user_id, bucket) do update set n = user_rate.n + 1
         returning n
       )
       select (select n from up) as minute, (select coalesce(sum(n), 0)::int from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour') as hour`)
-  ).rows as Array<{ minute: number; hour: number }>;
+  ).rows;
   const minute = Number(row?.minute ?? 0);
   const hour = Number(row?.hour ?? 0);
   if (s.MAX_REQUESTS_PER_MINUTE > 0 && minute > s.MAX_REQUESTS_PER_MINUTE) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `More than ${s.MAX_REQUESTS_PER_MINUTE} changes in a minute from this account. Slow down and try again shortly.` });
@@ -131,13 +131,12 @@ export async function pruneRequestRate(db: Db): Promise<number> {
   return Number(r.rowCount ?? 0);
 }
 
-export const ABUSE_FLAGS = ["shared_ip", "signup_burst", "disposable_email", "heavy_first_day"] as const;
+export const ABUSE_FLAGS = ["shared_ip", "signup_burst", "disposable_email"] as const;
 export type AbuseFlag = (typeof ABUSE_FLAGS)[number];
 export const FLAG_HELP: Record<AbuseFlag, string> = {
   shared_ip: "three or more accounts signed up from the same address in the last 7 days",
   signup_burst: "five or more accounts from the same address within one hour",
   disposable_email: "the email domain is a known temporary-address service",
-  heavy_first_day: "an hour or more of source video in the account's first 24 hours",
 };
 
 /**
@@ -151,16 +150,8 @@ export async function flagAccounts(svc: Pick<Services, "database" | "log" | "tx"
   const since = sql`now() - interval '30 days'`;
   const recent = await db.select({ id: schema.user.id, email: schema.user.email, signupIp: schema.user.signupIp, flags: schema.user.flags, role: schema.user.role }).from(schema.user).where(sql`${schema.user.createdAt} >= ${since}`).limit(5000);
   if (!recent.length) return { checked: 0, flagged: 0, changed: 0 };
-  const sharedIps = new Set((await db.execute(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip having count(*) >= 3`)).rows.map((r) => (r as { signup_ip: string }).signup_ip));
-  const burstIps = new Set((await db.execute(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= 5`)).rows.map((r) => (r as { signup_ip: string }).signup_ip));
-  const heavy = new Set(
-    (
-      await db.execute(sql`
-        select p.user_id from projects p join "user" u on u.id = p.user_id
-        where u.created_at >= ${since} and p.created_at <= u.created_at + interval '24 hours'
-        group by p.user_id having coalesce(sum(p.duration_sec), 0) >= 3600`)
-    ).rows.map((r) => (r as { user_id: string }).user_id),
-  );
+  const sharedIps = new Set((await db.execute<{ signup_ip: string }>(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip having count(*) >= 3`)).rows.map((r) => r.signup_ip));
+  const burstIps = new Set((await db.execute<{ signup_ip: string }>(sql`select signup_ip from "user" where created_at >= now() - interval '7 days' and signup_ip is not null group by signup_ip, date_trunc('hour', created_at) having count(*) >= 5`)).rows.map((r) => r.signup_ip));
   let flagged = 0;
   let changed = 0;
   for (const u of recent) {
@@ -169,7 +160,6 @@ export async function flagAccounts(svc: Pick<Services, "database" | "log" | "tx"
     if (u.signupIp && sharedIps.has(u.signupIp)) next.push("shared_ip");
     if (u.signupIp && burstIps.has(u.signupIp)) next.push("signup_burst");
     if (isDisposable(u.email)) next.push("disposable_email");
-    if (heavy.has(u.id)) next.push("heavy_first_day");
     if (next.length) flagged++;
     const cur = [...(u.flags ?? [])].sort().join(",");
     if (cur === [...next].sort().join(",")) continue;

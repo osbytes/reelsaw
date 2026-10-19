@@ -13,7 +13,6 @@ const FLAG_HELP: Record<string, string> = {
   shared_ip: "Three or more accounts signed up from the same address in the last 7 days",
   signup_burst: "Five or more accounts from the same address within one hour",
   disposable_email: "The email domain is a known temporary-address service",
-  heavy_first_day: "An hour or more of source video in the account's first 24 hours",
 };
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
@@ -129,7 +128,7 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`} aria-pressed={flaggedOnly} onClick={() => setFlaggedOnly(!flaggedOnly)} title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains, heavy first day">
+            <button type="button" className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`} aria-pressed={flaggedOnly} onClick={() => setFlaggedOnly(!flaggedOnly)} title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains">
               {flaggedOnly ? "◆ Flagged only" : "◇ Flagged only"}
             </button>
             <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />

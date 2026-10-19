@@ -13,6 +13,7 @@ import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
 import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
+import { BILLING_PATH } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
@@ -45,7 +46,7 @@ export function SettingsPage() {
   const isAdmin = me.data?.role === "admin";
   const hasBilling = !!me.data?.ee?.billing;
   const system = loc.pathname.endsWith("/system") && isAdmin;
-  const billing = loc.pathname.endsWith("/billing") && hasBilling;
+  const billing = loc.pathname === BILLING_PATH && hasBilling;
   const tab = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
 
   return (
@@ -69,7 +70,7 @@ export function SettingsPage() {
               </NavLink>
             )}
             {hasBilling && (
-              <NavLink to="/settings/billing" className={tab}>
+              <NavLink to={BILLING_PATH} className={tab}>
                 Billing
               </NavLink>
             )}

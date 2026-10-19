@@ -105,9 +105,8 @@ describe("mapSubscription", () => {
     assert.equal(m.interval, "year");
     assert.equal(m.unknownPrice, true);
   });
-  it("accepts the legacy period fields on the subscription itself", () => {
-    const m = mapSubscription(sub({ items: { data: [{ id: "si_1", price: { id: "p", lookup_key: "creator_yearly" } }] }, current_period_end: 1_762_600_000 }));
-    assert.equal(m.periodEnd?.getTime(), 1_762_600_000 * 1000);
+  it("a status this SDK does not know grants nothing", () => {
+    assert.equal(mapSubscription(sub({ status: "some_future_status" })).status, "incomplete");
   });
 });
 
@@ -118,7 +117,8 @@ describe("subscriptionIdOf", () => {
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: "sub_b" })), "sub_b");
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: { id: "sub_b2" } })), "sub_b2");
     assert.equal(subscriptionIdOf(ev("invoice.payment_failed", { parent: { subscription_details: { subscription: "sub_c" } } })), "sub_c");
-    assert.equal(subscriptionIdOf(ev("invoice.paid", { subscription: "sub_d" })), "sub_d");
+    // the pre-2025 `invoice.subscription` field is not read: the SDK's typed shape is the parent
+    assert.equal(subscriptionIdOf(ev("invoice.paid", { subscription: "sub_d" })), null);
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: null })), null);
     assert.equal(subscriptionIdOf(ev("payment_intent.succeeded", { id: "pi_1" })), null);
   });

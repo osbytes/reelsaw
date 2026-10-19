@@ -20,11 +20,13 @@ import Stripe from "stripe";
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "../../db/index.js";
-import type { BillingInterval, BillingStatus, BillingSubscriptionRow } from "../../db/schema.js";
+import { BILLING_STATUSES, type BillingInterval, type BillingStatus, type BillingSubscriptionRow } from "../../db/schema.js";
 import type { Services } from "../../services.js";
 import type { UnitOfWork } from "../../uow.js";
 import type { Logger } from "../../log.js";
 import { limitsDetail, limitUsage, watermarkFor } from "../../quota.js";
+import { takeTxLock, txLock } from "../../locks.js";
+import { billingPath } from "@reelsaw/shared";
 import { ALL_LOOKUP_KEYS, PAID_PLANS, PLANS, planByLookupKey, planOf, publicPlan, type Interval } from "./plans.js";
 import { createEntitlements, effectivePlan, LIVE_STATUSES } from "./entitlements.js";
 
@@ -38,20 +40,36 @@ export interface SyncJob {
 }
 
 /** Event types that carry a subscription we track (also what scripts/stripe-setup.ts subscribes the endpoint to). Anything else is recorded and marked processed at once. */
-export const TRACKED_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.trial_will_end", "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required"] as const;
-const TRACKED = new Set<string>(TRACKED_EVENTS);
+export const TRACKED_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.trial_will_end", "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required"] as const satisfies readonly Stripe.Event.Type[];
 
+/** Stripe's statuses are a subset of ours (ours adds `complimentary`); a status this SDK does not know grants nothing. */
+export function toBillingStatus(s: string): BillingStatus {
+  const known = BILLING_STATUSES.find((k) => k === s);
+  return known ?? "incomplete";
+}
+
+/** Stripe references an object by id or by the expanded object; either way, its id. */
 const idOf = (v: string | { id: string } | null | undefined): string | null => (typeof v === "string" ? v : (v?.id ?? null));
 
-/** The subscription id an event is about, for the kinds we track. */
+/** The subscription id an event is about, for the kinds we track. `Stripe.Event` is a discriminated union, so each branch is typed. */
 export function subscriptionIdOf(event: Stripe.Event): string | null {
-  if (!TRACKED.has(event.type)) return null;
-  const o = event.data.object as unknown as Record<string, unknown>;
-  if (event.type.startsWith("customer.subscription.")) return typeof o.id === "string" ? o.id : null;
-  if (event.type === "checkout.session.completed") return idOf(o.subscription as string | { id: string } | null);
-  // invoices: the parent subscription (2025+ API shape), or the legacy field
-  const parent = o.parent as { subscription_details?: { subscription?: string | { id: string } | null } | null } | null | undefined;
-  return idOf(parent?.subscription_details?.subscription) ?? idOf(o.subscription as string | { id: string } | null | undefined);
+  switch (event.type) {
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+    case "customer.subscription.paused":
+    case "customer.subscription.resumed":
+    case "customer.subscription.trial_will_end":
+      return event.data.object.id;
+    case "checkout.session.completed":
+      return idOf(event.data.object.subscription);
+    case "invoice.paid":
+    case "invoice.payment_failed":
+    case "invoice.payment_action_required":
+      return idOf(event.data.object.parent?.subscription_details?.subscription);
+    default:
+      return null;
+  }
 }
 
 type Mapped = Pick<BillingSubscriptionRow, "stripeSubscriptionId" | "stripeCustomerId" | "plan" | "status" | "interval" | "priceId" | "periodStart" | "periodEnd" | "cancelAtPeriodEnd" | "endedAt">;
@@ -62,17 +80,20 @@ export function mapSubscription(sub: Stripe.Subscription): Mapped & { unknownPri
   const price = item?.price;
   const found = planByLookupKey(price?.lookup_key);
   const sec = (n: number | null | undefined) => (n ? new Date(n * 1000) : null);
-  // 2025+ API versions keep the period on the item; older objects carried it on the subscription
-  const legacy = sub as unknown as { current_period_start?: number; current_period_end?: number };
+  const recurring = price?.recurring?.interval;
+  // Stripe types its string unions with an escape hatch for values newer than the SDK; narrow to what we store
+  const interval: BillingInterval | null = found?.interval ?? (recurring === "year" ? "year" : recurring === "month" ? "month" : null);
+  const status = toBillingStatus(sub.status);
   return {
     stripeSubscriptionId: sub.id,
-    stripeCustomerId: idOf(sub.customer as string | { id: string }),
+    stripeCustomerId: idOf(sub.customer),
     plan: found?.plan.name ?? `unknown:${price?.id ?? "none"}`,
-    status: sub.status as BillingStatus,
-    interval: (found?.interval ?? (price?.recurring?.interval === "year" ? "year" : price?.recurring?.interval === "month" ? "month" : null)) as BillingInterval | null,
+    status,
+    interval,
     priceId: price?.id ?? null,
-    periodStart: sec(item?.current_period_start ?? legacy.current_period_start),
-    periodEnd: sec(item?.current_period_end ?? legacy.current_period_end),
+    // the period lives on the item (API versions from 2025 on)
+    periodStart: sec(item?.current_period_start),
+    periodEnd: sec(item?.current_period_end),
     cancelAtPeriodEnd: !!sub.cancel_at_period_end,
     endedAt: sec(sub.ended_at),
     unknownPrice: !found,
@@ -87,7 +108,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   const { config } = svc;
   const base = config.STRIPE_API_BASE ? new URL(config.STRIPE_API_BASE) : null;
   const stripe = new Stripe(config.STRIPE_SECRET_KEY!, {
-    appInfo: { name: "Reelsaw", version: config.REELSAW_VERSION, url: "https://reelsaw.com" },
+    appInfo: { name: "Reelsaw", version: config.REELSAW_VERSION, url: config.APP_URL },
     maxNetworkRetries: 2,
     // development only: a stripe-mock or test/stripe-mock.ts instead of api.stripe.com
     ...(base ? { host: base.hostname, port: Number(base.port || (base.protocol === "https:" ? 443 : 80)), protocol: base.protocol === "https:" ? "https" : "http" } : {}),
@@ -142,8 +163,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       if (!item) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The subscription has no item to change; contact support." });
       const session = await stripe.billingPortal.sessions.create({
         customer,
-        return_url: url("/settings/billing"),
-        flow_data: { type: "subscription_update_confirm", subscription_update_confirm: { subscription: sub.id, items: [{ id: item.id, price, quantity: 1 }] }, after_completion: { type: "redirect", redirect: { return_url: url("/settings/billing?checkout=changed") } } },
+        return_url: url(billingPath()),
+        flow_data: { type: "subscription_update_confirm", subscription_update_confirm: { subscription: sub.id, items: [{ id: item.id, price, quantity: 1 }] }, after_completion: { type: "redirect", redirect: { return_url: url(billingPath("changed")) } } },
       });
       log.info({ userId: user.id, plan, interval, subscriptionId: sub.id }, "plan change started");
       return { url: session.url, kind: "change" };
@@ -154,8 +175,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       customer,
       client_reference_id: user.id,
       line_items: [{ price, quantity: 1 }],
-      success_url: url("/settings/billing?checkout=success"),
-      cancel_url: url("/settings/billing?checkout=canceled"),
+      success_url: url(billingPath("success")),
+      cancel_url: url(billingPath("canceled")),
       allow_promotion_codes: true,
       subscription_data: { metadata: { userId: user.id, plan } },
       metadata: { userId: user.id, plan, interval },
@@ -169,7 +190,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   async function portal(user: { id: string; email: string; name: string }): Promise<{ url: string }> {
     const have = await db().query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) });
     if (!have) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No billing account yet: pick a plan first." });
-    const session = await stripe.billingPortal.sessions.create({ customer: have.stripeCustomerId, return_url: url("/settings/billing") });
+    const session = await stripe.billingPortal.sessions.create({ customer: have.stripeCustomerId, return_url: url(billingPath()) });
     return { url: session.url };
   }
 
@@ -189,7 +210,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const r = await svc.tx(async (u) => {
       const inserted = await u.db
         .insert(schema.billingEvents)
-        .values({ id: event.id, type: event.type, subscriptionId, created: new Date(event.created * 1000), payload: event.data.object as unknown as Record<string, unknown>, processedAt: subscriptionId ? null : new Date() })
+        .values({ id: event.id, type: event.type, subscriptionId, created: new Date(event.created * 1000), payload: event.data.object, processedAt: subscriptionId ? null : new Date() })
         .onConflictDoNothing()
         .returning({ id: schema.billingEvents.id });
       if (!inserted.length) return { duplicate: true, queued: false };
@@ -207,7 +228,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   async function userIdFor(d: Db, sub: Stripe.Subscription | null, subscriptionId: string): Promise<string | null> {
     const meta = sub?.metadata?.userId;
     if (meta) return meta;
-    const customerId = sub ? idOf(sub.customer as string | { id: string }) : null;
+    const customerId = sub ? idOf(sub.customer) : null;
     if (customerId) {
       const c = await d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.stripeCustomerId, customerId) });
       if (c) return c.userId;
@@ -226,14 +247,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     try {
       sub = await stripe.subscriptions.retrieve(subscriptionId);
     } catch (err) {
-      const e = err as Stripe.errors.StripeError;
-      if (e.code === "resource_missing" || e.statusCode === 404) sub = null;
+      if (err instanceof Stripe.errors.StripeError && (err.code === "resource_missing" || err.statusCode === 404)) sub = null;
       else throw err;
     }
     const userId = await userIdFor(db(), sub, subscriptionId);
     if (!userId) {
       // nobody we know: record it so the reconcile can list orphans, then stop
-      slog.warn({ customerId: sub ? idOf(sub.customer as string | { id: string }) : null }, "subscription without a Reelsaw account");
+      slog.warn({ customerId: sub ? idOf(sub.customer) : null }, "subscription without a Reelsaw account");
       await db()
         .update(schema.billingEvents)
         .set({ processedAt: new Date(), error: "no account for this subscription" })
@@ -244,7 +264,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     if (mapped?.unknownPrice) slog.error({ priceId: mapped.priceId }, "subscription price has no plan (lookup key unknown); the account gets Free until it is fixed");
     const graceDays = config.BILLING_GRACE_DAYS;
     return svc.tx(async (u) => {
-      await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`billing:${userId}`}))`);
+      await takeTxLock(u.db, txLock.billing(userId));
       const [cur] = await u.db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId)).for("update");
       const user = await u.db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { email: true } });
       const now = new Date();
@@ -272,7 +292,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         .values(values)
         .onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       const before = effectivePlan(cur, graceDays, now);
-      const after = effectivePlan({ ...(cur ?? ({} as BillingSubscriptionRow)), ...values, createdAt: cur?.createdAt ?? now } as BillingSubscriptionRow, graceDays, now);
+      const after = effectivePlan(values, graceDays, now);
       const changed = !cur || cur.status !== next.status || cur.plan !== next.plan || cur.interval !== next.interval || cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd || cur.periodEnd?.getTime() !== next.periodEnd?.getTime() || cur.stripeSubscriptionId !== next.stripeSubscriptionId;
       const email = user?.email ?? "";
       const base = { actorId: null, userId, email };
@@ -303,7 +323,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    */
   async function reconcile(opts: { userId?: string } = {}): Promise<{ checked: number; synced: number; orphans: string[]; pendingEvents: number }> {
     const d = db();
-    const out = { checked: 0, synced: 0, orphans: [] as string[], pendingEvents: 0 };
+    const orphans: string[] = [];
+    const out = { checked: 0, synced: 0, orphans, pendingEvents: 0 };
     const seen = new Set<string>();
     const wanted = opts.userId ? await entitlements.rowFor(d, opts.userId) : null;
     if (opts.userId && !wanted?.stripeSubscriptionId) {
@@ -425,7 +446,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   async function setComplimentary(actorId: string, userId: string, plan: string | null) {
     if (plan && !PLANS.some((p) => p.name === plan)) throw new TRPCError({ code: "BAD_REQUEST", message: `No plan named ${plan}` });
     return svc.tx(async (u) => {
-      await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`billing:${userId}`}))`);
+      await takeTxLock(u.db, txLock.billing(userId));
       const user = await u.db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { email: true } });
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
       const [cur] = await u.db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId)).for("update");

@@ -102,7 +102,7 @@ Decisions, in order of how hard they are to reverse:
   Added 2026-10-19 for the free tier (`abuse.ts`): accounts per IP per day, disposable-domain
   refusal, one account per real mailbox (`user.email_key`, unique), a per-account mutation rate
   (`user_rate` minute buckets, DB-counted), and hourly flags (`user.flags`: shared_ip,
-  signup_burst, disposable_email, heavy_first_day) with an admin event and a Users-page filter.
+  signup_burst, disposable_email) with an admin event and a Users-page filter.
   Flags inform; the plan caps contain. Cloudflare in front of app.reelsaw.com adds edge rate
   limits and bot scoring (infra runbook `abuse.md`).
 - **yt-dlp from a datacentre IP** gets blocked by YouTube: `YTDLP_PROXY` and `YTDLP_COOKIES_FILE`

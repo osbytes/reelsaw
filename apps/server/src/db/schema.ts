@@ -588,7 +588,8 @@ export const billingEvents = pgTable(
     subscriptionId: text("subscription_id"),
     /** Stripe's event time */
     created: timestamp("created", { withTimezone: true }).notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** the event's object as Stripe sent it, for forensics; never read to decide state */
+    payload: jsonb("payload").$type<unknown>().notNull().default({}),
     receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     error: text("error"),

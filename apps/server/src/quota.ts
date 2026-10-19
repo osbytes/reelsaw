@@ -12,6 +12,7 @@ import { schema, type Db } from "./db/index.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
 import type { UserRole } from "./db/schema.js";
+import { takeTxLock, txLock } from "./locks.js";
 
 export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_SOURCE_MINUTES_PER_MONTH", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB", "MAX_REQUESTS_PER_MINUTE", "MAX_REQUESTS_PER_HOUR"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
@@ -107,7 +108,7 @@ const hint = (d: LimitsDetail) => (d.grants?.upgrade ? ` ${d.grants.upgrade.text
  * and N parallel requests can't all pass a cap they jointly exceed. (Without `lock` it is only an early, advisory check.)
  */
 export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId: string, o: { lock?: boolean; ent?: Entitlements | null } = {}) {
-  if (o.lock) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`);
+  if (o.lock) await takeTxLock(db, txLock.quota(userId));
   const d = await limitsDetail(db, instance, userId, o.ent);
   const l = d.limits;
   if (l.MAX_STORAGE_MB > 0) checkStorage(l, await storedBytes(db, userId), hint(d));
@@ -185,12 +186,14 @@ function checkStorage(l: Limits, bytes: number, upgrade = "") {
  * `output_key` is set (a re-render or retention clears the key); clips rendered before it existed count 0.
  */
 export async function storedBytes(db: Db, userId: string): Promise<number> {
-  const [r] = (await db.execute(sql`
+  const [r] = (
+    await db.execute<{ bytes: string | number }>(sql`
     select
       coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
       + coalesce((select sum(size_bytes) from uploads where user_id = ${userId}), 0)
       + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
-      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)).rows as Array<{ bytes: string | number }>;
+      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)
+  ).rows;
   return Number(r?.bytes ?? 0);
 }
 
@@ -234,11 +237,13 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.projects)
     .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, new Date(Date.now() - 3_600_000))));
-  const [jobs] = (await db.execute(sql`
+  const [jobs] = (
+    await db.execute<{ live: number; renders: number }>(sql`
     select
       (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'userId' = ${userId}) as live,
-      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)).rows as Array<{ live: number; renders: number }>;
-  const [rate] = (await db.execute(sql`select coalesce(sum(n) filter (where bucket = date_trunc('minute', now())), 0)::int as minute, coalesce(sum(n), 0)::int as hour from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour'`)).rows as Array<{ minute: number; hour: number }>;
+      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)
+  ).rows;
+  const [rate] = (await db.execute<{ minute: number; hour: number }>(sql`select coalesce(sum(n) filter (where bucket = date_trunc('minute', now())), 0)::int as minute, coalesce(sum(n), 0)::int as hour from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour'`)).rows;
   return {
     MAX_REQUESTS_PER_MINUTE: Number(rate?.minute ?? 0),
     MAX_REQUESTS_PER_HOUR: Number(rate?.hour ?? 0),

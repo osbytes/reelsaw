@@ -19,6 +19,7 @@ import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
+import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
 
@@ -124,7 +125,7 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
             const limits = await limitsFor(db, instanceLimits(), a.userId, entitlements());
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
               // one admission at a time per user, counted again under the lock, so two requests can't both take the last slot
-              await client.query("select pg_advisory_xact_lock(hashtext($1))", [`jobs:${a.userId}`]);
+              await client.query(TX_LOCK_SQL, [txLock.jobs(a.userId)]);
               a = await queue.admission(data, exec);
               try {
                 checkJobLimits(limits, a, USER_RENDER_QUEUES.includes(q));

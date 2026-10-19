@@ -63,7 +63,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
  *   limits  <email>                         an account's quotas: instance value, plan, override, in force, in use now
  *   abuse   [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts,
- *                                           temporary domains, heavy first day); --run recomputes the flags now
+ *                                           temporary domains); --run recomputes the flags now
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
  *                                           hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its
  *                                           last webhook events; `sync` re-reads Stripe for one account or every

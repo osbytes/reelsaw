@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
+import { CHECKOUT_PARAM, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM } from "@reelsaw/shared";
 import { Skeleton, SkeletonRegion } from "../../components/ui";
 
 const num = new Intl.NumberFormat();
@@ -44,8 +45,8 @@ export default function BillingSection() {
   });
 
   // arriving with a plan picked on the website (/signup?plan=): go straight to Checkout once the state is known
-  const wanted = new URLSearchParams(loc.search).get("plan");
-  const wantedInterval: Interval = new URLSearchParams(loc.search).get("interval") === "year" ? "year" : "month";
+  const wanted = new URLSearchParams(loc.search).get(PLAN_PARAM);
+  const wantedInterval: Interval = new URLSearchParams(loc.search).get(INTERVAL_PARAM) === "year" ? "year" : "month";
   const started = useRef(false);
   useEffect(() => {
     if (!wanted || !q.data || started.current) return;
@@ -61,7 +62,8 @@ export default function BillingSection() {
   }, [wanted, !!q.data]);
 
   // back from Stripe: say so once, then poll a few times until the sync has landed (the webhook races the redirect)
-  const outcome = new URLSearchParams(loc.search).get("checkout");
+  const raw = new URLSearchParams(loc.search).get(CHECKOUT_PARAM);
+  const outcome = isCheckoutOutcome(raw) ? raw : null;
   const polled = useRef(0);
   useEffect(() => {
     if (!outcome) return;

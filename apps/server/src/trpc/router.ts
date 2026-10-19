@@ -38,6 +38,7 @@ import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
 import { generateText } from "ai";
+import { takeTxLock, txLock } from "../locks.js";
 
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
@@ -493,7 +494,7 @@ export const appRouter = router({
           const contentHash = await sha256File(local);
           const row = await svc.tx(async (u) => {
             // one upload of a given file at a time per user, so two racing copies cannot both insert
-            await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bumper:${ctx.user.id}:${contentHash}`}))`);
+            await takeTxLock(u.db, txLock.bumper(ctx.user.id, contentHash));
             const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
             if (same) {
               const wasRemoved = !!same.deletedAt;

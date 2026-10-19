@@ -5,6 +5,7 @@ import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
 import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
+import { billingPlanPath, INTERVAL_PARAM, PLAN_PARAM } from "@reelsaw/shared";
 import { ScrollArea } from "../components/scroll-area";
 
 /** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
@@ -35,10 +36,10 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   // /signup?plan=pro&interval=year from the pricing page: remembered now, used after the first sign-in
   const [plan] = useState(() => {
     const q = new URLSearchParams(window.location.search);
-    const plan = q.get("plan");
+    const plan = q.get(PLAN_PARAM);
     if (!plan || !/^[a-z0-9_-]{1,40}$/.test(plan)) return null;
-    const interval = q.get("interval") === "year" ? "year" : "month";
-    rememberAfterSignIn(`/settings/billing?plan=${plan}&interval=${interval}`);
+    const interval = q.get(INTERVAL_PARAM) === "year" ? "year" : "month";
+    rememberAfterSignIn(billingPlanPath(plan, interval));
     return plan;
   });
   const [email, setEmail] = useState("");

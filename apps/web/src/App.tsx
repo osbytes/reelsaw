@@ -11,6 +11,7 @@ import { useTheme } from "./lib/theme";
 import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
+import { BILLING_PATH } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
@@ -301,7 +302,7 @@ export function App() {
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
-      <Route path="/settings/billing" element={<Protected><SettingsPage /></Protected>} />
+      <Route path={BILLING_PATH} element={<Protected><SettingsPage /></Protected>} />
       <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />

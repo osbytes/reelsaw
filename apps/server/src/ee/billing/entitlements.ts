@@ -8,6 +8,7 @@ import { schema, type Db } from "../../db/index.js";
 import type { BillingSubscriptionRow } from "../../db/schema.js";
 import type { Entitlements, Grants } from "../../quota.js";
 import { FREE, planOf, type Plan } from "./plans.js";
+import { billingPath } from "@reelsaw/shared";
 
 /** Statuses under which the plan is in force (past_due only inside the grace period). */
 export const LIVE_STATUSES = new Set(["trialing", "active", "past_due", "complimentary"]);
@@ -16,7 +17,10 @@ export const LIVE_STATUSES = new Set(["trialing", "active", "past_due", "complim
  * The plan in force for a row: active and trialing grant it; past_due keeps it for `graceDays` after the first
  * failed payment; complimentary always; everything else (canceled, unpaid, incomplete, paused, no row) is Free.
  */
-export function effectivePlan(row: BillingSubscriptionRow | null | undefined, graceDays: number, now = new Date()): { plan: Plan; reason: "none" | "active" | "trialing" | "complimentary" | "grace" | "lapsed" | "ended" } {
+/** What the plan decision reads: a full row, or the values a sync is about to write. */
+export type PlanInput = Pick<BillingSubscriptionRow, "status" | "plan" | "pastDueSince" | "updatedAt">;
+
+export function effectivePlan(row: PlanInput | null | undefined, graceDays: number, now = new Date()): { plan: Plan; reason: "none" | "active" | "trialing" | "complimentary" | "grace" | "lapsed" | "ended" } {
   if (!row) return { plan: FREE, reason: "none" };
   switch (row.status) {
     case "active":
@@ -47,7 +51,7 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
     firstVideoFreeMinutes: plan.firstVideoFreeMinutes,
     queuePriority: plan.queuePriority,
     period,
-    ...(next ? { upgrade: { text: `${next.label} gives ${nextMinutes ? `${nextMinutes.toLocaleString("en-US")} minutes a month` : "more"}`, url: new URL("/settings/billing", appUrl).toString() } } : {}),
+    ...(next ? { upgrade: { text: `${next.label} gives ${nextMinutes ? `${nextMinutes.toLocaleString("en-US")} minutes a month` : "more"}`, url: new URL(billingPath(), appUrl).toString() } } : {}),
   };
 }
 

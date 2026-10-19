@@ -15,6 +15,7 @@ import type { Logger } from "./log.js";
 import type { InstanceSettings } from "./instance-settings.js";
 import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
 import type { Telemetry } from "./telemetry.js";
+import { FIRST_ADMIN_LOCK } from "./locks.js";
 
 /** The MCP endpoint as OAuth clients see it (token audience). */
 export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_URL).toString();
@@ -22,8 +23,6 @@ export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_UR
 /** API keys look like `rs_…`; agents send them as `Authorization: Bearer rs_…` (or `x-api-key`). */
 export const API_KEY_PREFIX = "rs_";
 
-/** Serialises the "first account becomes admin" decision (arbitrary constant, used only here). */
-const FIRST_ADMIN_LOCK = 7_203_104_001;
 
 export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):

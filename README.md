@@ -308,8 +308,7 @@ them), so a single-user box stays as it is:
   account per real mailbox (`john.doe+x@gmail.com` is `johndoe@gmail.com`); `MAX_REQUESTS_PER_MINUTE`
   / `_HOUR` cap changes (API mutations, MCP tool calls) per account, with plan and per-user
   overrides like the other quotas. An hourly pass flags accounts that
-  share a sign-up address, arrive in bursts, use a temporary domain or clip an hour of video on day
-  one; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
+  share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
   suspended automatically. Every refusal is a sentence.
 - **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` and
   `YTDLP_COOKIES_FILE` help; a blocked download fails with "upload the file instead".
@@ -461,7 +460,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email>` | an account's quotas: instance value, plan, override, in force, in use now |
-| `reelsaw abuse` | [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains, heavy first day); --run recomputes the flags now |
+| `reelsaw abuse` | [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
 | `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |

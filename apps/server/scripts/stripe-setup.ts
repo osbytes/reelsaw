@@ -60,17 +60,20 @@ async function main() {
     const url = new URL("/api/billing/webhook", appUrl).toString();
     const existing = (await stripe.webhookEndpoints.list({ limit: 100 })).data.find((w) => w.url === url);
     if (existing) {
-      await stripe.webhookEndpoints.update(existing.id, { enabled_events: TRACKED_EVENTS as never });
+      await stripe.webhookEndpoints.update(existing.id, { enabled_events: [...TRACKED_EVENTS] });
       console.log(`webhook ${existing.id} already points at ${url}; events updated (the secret is only shown at creation; roll it in the Dashboard if lost)`);
     } else {
-      const w = await stripe.webhookEndpoints.create({ url, enabled_events: TRACKED_EVENTS as never, description: "Reelsaw billing" });
+      const w = await stripe.webhookEndpoints.create({ url, enabled_events: [...TRACKED_EVENTS], description: "Reelsaw billing" });
       console.log(`webhook ${w.id} -> ${url}\nSTRIPE_WEBHOOK_SECRET=${w.secret}`);
     }
   }
 
   if (args.includes("--portal")) {
     const products = PAID_PLANS.map((p) => ({ product: "", prices: [priceIds.get(p.lookupKeys!.month)!, priceIds.get(p.lookupKeys!.year)!] }));
-    for (const [i, p] of PAID_PLANS.entries()) products[i]!.product = (await stripe.prices.retrieve(priceIds.get(p.lookupKeys!.month)!)).product as string;
+    for (const [i, p] of PAID_PLANS.entries()) {
+      const { product } = await stripe.prices.retrieve(priceIds.get(p.lookupKeys!.month)!);
+      products[i]!.product = typeof product === "string" ? product : product.id;
+    }
     const conf = await stripe.billingPortal.configurations.create({
       business_profile: { headline: "Reelsaw", ...(appUrl ? { privacy_policy_url: "https://reelsaw.com/privacy", terms_of_service_url: "https://reelsaw.com/terms" } : {}) },
       features: {
