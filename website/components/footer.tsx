@@ -59,9 +59,22 @@ export function Footer() {
         ))}
       </div>
       <div className="border-t border-line">
-        <div className="container-page flex flex-col gap-2 py-5 text-xs text-ink3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="container-page flex flex-col gap-3 py-5 text-xs text-ink3 sm:flex-row sm:items-center sm:justify-between">
           <p>Reelsaw is free software released under the GNU AGPL-3.0. Run it anywhere; share your changes.</p>
-          <p>Not affiliated with YouTube, TikTok or Meta.</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <a
+              href={SITE.osbytes}
+              target="_blank"
+              rel="noreferrer"
+              title="osbytes — open source bytes"
+              className="inline-flex items-center gap-2 text-ink2 hover:text-ink"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`${SITE.osbytes}/badge.svg`} alt="osbytes — open source bytes" width={24} height={24} className="size-6" />
+              <span>osbytes</span>
+            </a>
+            <p>Not affiliated with YouTube, TikTok or Meta.</p>
+          </div>
         </div>
       </div>
     </footer>
