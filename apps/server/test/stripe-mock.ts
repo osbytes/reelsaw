@@ -120,6 +120,10 @@ const server = http.createServer(async (req, res) => {
     const keys = [...url.searchParams.entries()].filter(([k]) => k.startsWith("lookup_keys")).map(([, v]) => v);
     return json(res, 200, { object: "list", data: [...prices.values()].filter((x) => !keys.length || keys.includes(x.lookup_key as string)), has_more: false });
   }
+  if (m === "GET" && p === "/v1/customers") {
+    const email = url.searchParams.get("email");
+    return json(res, 200, { object: "list", data: [...customers.values()].filter((c) => !email || c.email === email), has_more: false });
+  }
   if (m === "POST" && p === "/v1/customers") {
     const c = { id: id("cus"), object: "customer", email: form.email, name: form.name, metadata: form.metadata ?? {} };
     customers.set(c.id, c);

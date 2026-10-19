@@ -61,10 +61,12 @@ async function main() {
     const existing = (await stripe.webhookEndpoints.list({ limit: 100 })).data.find((w) => w.url === url);
     if (existing) {
       await stripe.webhookEndpoints.update(existing.id, { enabled_events: [...TRACKED_EVENTS] });
-      console.log(`webhook ${existing.id} already points at ${url}; events updated (the secret is only shown at creation; roll it in the Dashboard if lost)`);
+      const note = existing.api_version && existing.api_version !== Stripe.API_VERSION ? `; its API version is ${existing.api_version}, the SDK's is ${Stripe.API_VERSION}: recreate it so event payloads match` : "";
+      console.log(`webhook ${existing.id} already points at ${url}; events updated (the secret is only shown at creation; roll it in the Dashboard if lost)${note}`);
     } else {
-      const w = await stripe.webhookEndpoints.create({ url, enabled_events: [...TRACKED_EVENTS], description: "Reelsaw billing" });
-      console.log(`webhook ${w.id} -> ${url}\nSTRIPE_WEBHOOK_SECRET=${w.secret}`);
+      // events are shaped by the endpoint's API version, not the SDK's: pin it so invoice events carry `parent`
+      const w = await stripe.webhookEndpoints.create({ url, enabled_events: [...TRACKED_EVENTS], description: "Reelsaw billing", api_version: Stripe.API_VERSION });
+      console.log(`webhook ${w.id} -> ${url} (API version ${Stripe.API_VERSION})\nSTRIPE_WEBHOOK_SECRET=${w.secret}`);
     }
   }
 

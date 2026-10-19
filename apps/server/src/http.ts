@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { trpcServer } from "@hono/trpc-server";
@@ -117,8 +118,9 @@ export function createApp(svc: Services) {
   // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
   // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
   if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(c.req.raw));
-  // Stripe webhooks (ee): raw body, signature checked inside; 2xx only once the event and its sync job committed
-  if (svc.ee) app.post("/api/billing/webhook", (c) => svc.ee!.webhook(c));
+  // Stripe webhooks (ee): raw body (bounded: events are a few hundred KB at most, and the signature is checked only after
+  // the body is read), 2xx only once the event and its sync job committed
+  if (svc.ee) app.post("/api/billing/webhook", bodyLimit({ maxSize: 1024 * 1024 }), (c) => svc.ee!.webhook(c));
   app.use("/api/trpc/*", trpcServer({ router: appRouter, endpoint: "/api/trpc", createContext: contextFactory(svc),
       onError: ({ error, path, type, ctx }) => {
         const c = ctx as Ctx | undefined;

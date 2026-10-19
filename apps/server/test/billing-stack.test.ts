@@ -165,6 +165,49 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(f.limits.MAX_SOURCE_MINUTES_PER_MONTH, 20);
   });
 
+  it("a complimentary grant survives a late event of the ended subscription, and admin sync keeps it", async () => {
+    const r = await trpc(user.cookie, "admin.billing.setPlan", { id: user.userId, plan: "creator" }).catch(() => null);
+    // the account is not an admin yet; grant through the database helper the admin UI uses once promoted below
+    await pool.query(`update "user" set role = 'admin' where id = $1`, [user.userId]);
+    const set = await trpc(user.cookie, "admin.billing.setPlan", { id: user.userId, plan: "creator" });
+    assert.equal(set.error, undefined, set.error?.message ?? String(r));
+    assert.equal((await state()).reason, "complimentary");
+    const re = await mock(`/_mock/redeliver/${subscriptionId}`);
+    assert.match(re.delivered[0]!.body, /"duplicate":true|"queued":true/);
+    await mock(`/_mock/cancel/${subscriptionId}`); // a fresh deleted event for the ended subscription
+    await new Promise((res) => setTimeout(res, 2500));
+    const s = await state();
+    assert.equal(s.reason, "complimentary");
+    assert.equal(s.plan.name, "creator");
+    const sync = await trpc(user.cookie, "admin.billing.sync", { id: user.userId });
+    assert.equal(sync.error, undefined, sync.error?.message);
+    assert.equal((await state()).reason, "complimentary", "admin sync does not wipe the grant");
+    await trpc(user.cookie, "admin.billing.setPlan", { id: user.userId, plan: null });
+    await pool.query(`update "user" set role = 'user' where id = $1`, [user.userId]);
+  });
+
+  it("events for a removed account are recorded as orphans, not retried forever", async () => {
+    const victim = await signUp();
+    const r = await trpc(victim.cookie, "billing.checkout", { plan: "starter", interval: "month" });
+    const sessionId = /\/_mock\/checkout\/(cs_[a-z0-9]+)/.exec((r.data as { url: string }).url)![1];
+    const done = await mock(`/_mock/complete/${sessionId}`);
+    const victimSub = done.subscription!;
+    await until(async () => (await trpc(victim.cookie, "billing.get", undefined, "GET")).data as State, (x) => x.plan.name === "starter");
+    await pool.query(`update "user" set role = 'admin' where id = $1`, [user.userId]);
+    const removed = await trpc(user.cookie, "admin.users.remove", { id: victim.userId });
+    assert.equal(removed.error, undefined, removed.error?.message);
+    await new Promise((res) => setTimeout(res, 1500)); // the after-commit cancel at Stripe
+    const late = await mock(`/_mock/cancel/${victimSub}`);
+    assert.equal(late.delivered[0]!.status, 200);
+    const ev = await until(
+      async () => (await pool.query(`select processed_at is not null as done, error from billing_events where subscription_id = $1 order by received_at desc limit 1`, [victimSub])).rows[0] as { done: boolean; error: string | null },
+      (x) => x.done,
+    );
+    assert.equal(ev.done, true);
+    assert.match(ev.error ?? "", /account was removed|no account/);
+    await pool.query(`update "user" set role = 'user' where id = $1`, [user.userId]);
+  });
+
   it("reconcile finds nothing to fix afterwards", async () => {
     await pool.query(`update "user" set role = 'admin' where id = $1`, [user.userId]);
     const r = await trpc(user.cookie, "admin.billing.sync", { id: user.userId });

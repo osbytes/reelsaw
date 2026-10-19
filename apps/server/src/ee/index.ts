@@ -28,7 +28,7 @@ export async function createEE(svc: Pick<Services, "config" | "database" | "tx" 
     async webhook(c) {
       const raw = await c.req.text();
       try {
-        const r = await billing.recordWebhook(raw, c.req.header("stripe-signature") ?? null);
+        const r = await billing.recordWebhook(raw, c.req.header("stripe-signature") ?? null, c.get("log"));
         return c.json({ received: true, ...r });
       } catch (err) {
         if (err instanceof SignatureError) {

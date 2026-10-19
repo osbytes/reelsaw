@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { effectivePlan, grantsOf } from "../src/ee/billing/entitlements.js";
+import { allowanceWindow, effectivePlan, grantsOf } from "../src/ee/billing/entitlements.js";
 import { mapSubscription, subscriptionIdOf } from "../src/ee/billing/service.js";
 import { PLANS, planByLookupKey, planOf, ALL_LOOKUP_KEYS } from "../src/ee/billing/plans.js";
 import { periodFor, type Grants } from "../src/quota.js";
@@ -79,6 +79,25 @@ describe("grants and the quota chain", () => {
   });
 });
 
+describe("allowanceWindow", () => {
+  const start = new Date("2026-01-31T10:00:00Z");
+  const end = new Date("2027-01-31T10:00:00Z");
+  it("a monthly subscription counts in its billing period", () => {
+    assert.deepEqual(allowanceWindow(start, new Date("2026-02-28T10:00:00Z"), "month", new Date("2026-02-10T00:00:00Z")), { start, end: new Date("2026-02-28T10:00:00Z") });
+  });
+  it("a yearly subscription counts in the current month of the year, anchored on the period start", () => {
+    assert.deepEqual(allowanceWindow(start, end, "year", new Date("2026-02-10T00:00:00Z")), { start, end: new Date("2026-02-28T10:00:00Z") });
+    assert.deepEqual(allowanceWindow(start, end, "year", new Date("2026-03-15T00:00:00Z")), { start: new Date("2026-02-28T10:00:00Z"), end: new Date("2026-03-31T10:00:00Z") });
+    const last = allowanceWindow(start, end, "year", new Date("2027-01-20T00:00:00Z"));
+    assert.equal(last.end.toISOString(), end.toISOString(), "the last month ends with the period");
+  });
+  it("grants expose the window, so a yearly Pro gets 750 minutes a month", () => {
+    const g = grantsOf(row({ plan: "pro", interval: "year", periodStart: start, periodEnd: end }), 7, "https://app.example.com", new Date("2026-06-05T00:00:00Z"));
+    assert.equal(g.limits.MAX_SOURCE_MINUTES_PER_MONTH, 750);
+    assert.ok(g.period && g.period.end.getTime() - g.period.start.getTime() < 32 * 86_400_000, "about a month, not a year");
+  });
+});
+
 describe("mapSubscription", () => {
   const sub = (o: Record<string, unknown> = {}) =>
     ({
@@ -92,7 +111,8 @@ describe("mapSubscription", () => {
       ...o,
     }) as never;
   it("reads the plan from the price lookup key and the period from the item", () => {
-    const m = mapSubscription(sub());
+    const m = mapSubscription(sub({ created: 1_760_000_100 }));
+    assert.equal(m.stripeCreated?.getTime(), 1_760_000_100 * 1000);
     assert.equal(m.plan, "pro");
     assert.equal(m.interval, "month");
     assert.equal(m.unknownPrice, false);
@@ -117,8 +137,9 @@ describe("subscriptionIdOf", () => {
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: "sub_b" })), "sub_b");
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: { id: "sub_b2" } })), "sub_b2");
     assert.equal(subscriptionIdOf(ev("invoice.payment_failed", { parent: { subscription_details: { subscription: "sub_c" } } })), "sub_c");
-    // the pre-2025 `invoice.subscription` field is not read: the SDK's typed shape is the parent
-    assert.equal(subscriptionIdOf(ev("invoice.paid", { subscription: "sub_d" })), null);
+    // an account on a pre-2025 API version sends the top-level field instead of `parent`
+    assert.equal(subscriptionIdOf(ev("invoice.paid", { subscription: "sub_d" })), "sub_d");
+    assert.equal(subscriptionIdOf(ev("invoice.paid", { subscription: { id: "sub_e" } })), "sub_e");
     assert.equal(subscriptionIdOf(ev("checkout.session.completed", { subscription: null })), null);
     assert.equal(subscriptionIdOf(ev("payment_intent.succeeded", { id: "pi_1" })), null);
   });

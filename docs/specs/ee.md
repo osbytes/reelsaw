@@ -114,9 +114,32 @@ Haiku-class selection and refinement), before compute and storage.
      vs our rows, rows Stripe no longer lists, and events pending for over an hour. Orphans
      (subscriptions with no account) are listed, never guessed.
    - **Two live subscriptions** for one account (two checkouts racing) are logged as an error with
-     both ids; the newer sync owns the row, the operator cancels the other in Stripe.
+     both ids; the one Stripe created later owns the row (`stripe_created`), whichever event arrives
+     last; the operator cancels the other in Stripe.
+   - **Events during an active sync.** The sync queue is `stately` (one queued and one active job per
+     subscription), and a sync only marks events received before its own read of Stripe, so an event
+     that lands while a sync runs queues the next sync instead of being swallowed.
+   - **Complimentary grants** outrank the history of an ended Stripe subscription: a late `deleted`
+     for the old subscription, or an admin "sync", leaves the grant in place.
+   - **Removed accounts.** A subscription whose account no longer exists is handled like one with
+     no account: its events are marked processed with a reason and the reconcile lists it as an
+     orphan (the after-commit cancel at Stripe normally ends it first).
+   - **Reconcile scope.** The daily walk lists only the statuses that matter (active, trialing,
+     past_due, unpaid, paused), never every subscription the account ever had, and refuses to cancel
+     rows en masse when more than a few are unknown to Stripe (a wrong or rotated key).
+   - **Yearly plans** count their minutes per month of the year (anchored on the period start), not
+     once per year.
+   - **The webhook body is capped** at 1 MB before it is read; the signature is checked after.
    - **Account removal** cancels the Stripe subscription after commit (best effort, logged); the
      reconcile lists what remains.
+   - **Checked against Stripe's docs (2026-10-19):** ordering is not guaranteed and `created` must not
+     be used to order (we key on event id and retrieve the object); respond 2xx before complex work
+     (we commit one row + one job, then answer); handle events asynchronously (pg-boss); verify the
+     signature on the raw body (`constructEventAsync`, 5-minute tolerance); events follow the
+     endpoint's API version, not the SDK's (the setup script pins it; invoice parsing also accepts
+     the pre-2025 `subscription` field); idempotency keys expire after 24 hours (customer creation
+     also looks the customer up by email + metadata); IP allowlisting is recommended on top of
+     signatures (infra runbook).
 3. **A plan is config, not a row.** `ee/billing/plans.ts` holds the plan list: name, Stripe price
    lookup keys (monthly, yearly), the limits it grants, and the marketing line. The lookup keys
    are stable; the Stripe prices behind them can be rotated without a deploy. Free is in the same
@@ -238,8 +261,8 @@ in `uow.ts`. Retention per plan (OpenShorts keeps free clips 7 days) still needs
   app" buttons to `https://app.reelsaw.com`, `/terms` and `/privacy` pages (the app's
   `TERMS_URL` / `PRIVACY_URL` point at them). The copy that says there is "no hosted plan to
   upsell you to" (`website/content/reelsaw.ts`) becomes "self-host for free, or let us host it".
-- Stripe: products Creator and Pro with monthly and yearly prices under lookup keys
-  `creator_monthly`, `creator_yearly`, `pro_monthly`, `pro_yearly`; tax code SaaS personal use
+- Stripe: products Starter, Creator and Pro with monthly and yearly prices under lookup keys
+  `starter_monthly`, `starter_yearly`, `creator_*`, `pro_*` (six prices; `pnpm stripe:setup`); tax code SaaS personal use
   (`txcd_10103000`); Managed Payments requested for the account; Customer Portal configured to
   allow plan switching among the four prices, cancellation at period end, invoice history.
 - Environment, hosted only: `REELSAW_EE=true`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,

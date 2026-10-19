@@ -553,6 +553,8 @@ export const billingSubscriptions = pgTable(
     /** null = complimentary (no Stripe subscription behind it) */
     stripeSubscriptionId: text("stripe_subscription_id").unique(),
     stripeCustomerId: text("stripe_customer_id"),
+    /** Stripe's `created`; when two live subscriptions exist for one account the newer one owns the row */
+    stripeCreated: timestamp("stripe_created", { withTimezone: true }),
     /** plan name from ee/billing/plans.ts, resolved from the price's lookup key */
     plan: text("plan").notNull(),
     status: text("status").$type<BillingStatus>().notNull(),

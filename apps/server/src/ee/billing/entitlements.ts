@@ -5,7 +5,7 @@
  */
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "../../db/index.js";
-import type { BillingSubscriptionRow } from "../../db/schema.js";
+import type { BillingInterval, BillingSubscriptionRow } from "../../db/schema.js";
 import type { Entitlements, Grants } from "../../quota.js";
 import { FREE, planOf, type Plan } from "./plans.js";
 import { billingPath } from "@reelsaw/shared";
@@ -38,10 +38,31 @@ export function effectivePlan(row: PlanInput | null | undefined, graceDays: numb
   }
 }
 
+/** `k` calendar months after `anchor`, the day clamped to the target month's length (31 Jan + 1 → 28/29 Feb, + 2 → 31 Mar). */
+function monthsAfter(anchor: Date, k: number): Date {
+  const y = anchor.getUTCFullYear();
+  const m = anchor.getUTCMonth() + k;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(anchor.getUTCDate(), last), anchor.getUTCHours(), anchor.getUTCMinutes(), anchor.getUTCSeconds()));
+}
+
+/**
+ * The window a plan's monthly minutes count in. Monthly subscriptions: the billing period. Yearly ones: the
+ * current month of the year, each anchored on the period start's day (the allowance is per month, not 12× at
+ * once); the last one ends with the period.
+ */
+export function allowanceWindow(periodStart: Date, periodEnd: Date, interval: BillingInterval | null, now: Date): { start: Date; end: Date } {
+  if (interval !== "year") return { start: periodStart, end: periodEnd };
+  let k = 0;
+  while (monthsAfter(periodStart, k + 1) <= now && monthsAfter(periodStart, k + 1) < periodEnd) k++;
+  const end = monthsAfter(periodStart, k + 1);
+  return { start: monthsAfter(periodStart, k), end: end < periodEnd ? end : periodEnd };
+}
+
 export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDays: number, appUrl: string, now = new Date()): Grants {
   const { plan, reason } = effectivePlan(row, graceDays, now);
   const next = plan.next ? planOf(plan.next) : null;
-  const period = row && plan !== FREE && row.periodStart && row.periodEnd && reason !== "complimentary" ? { start: row.periodStart, end: row.periodEnd } : null;
+  const period = row && plan !== FREE && row.periodStart && row.periodEnd && reason !== "complimentary" ? allowanceWindow(row.periodStart, row.periodEnd, row.interval, now) : null;
   const nextMinutes = next?.limits.MAX_SOURCE_MINUTES_PER_MONTH;
   return {
     plan: plan.name,
