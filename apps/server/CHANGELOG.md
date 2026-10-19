@@ -1,5 +1,25 @@
 # @reelsaw/server
 
+## 0.11.0
+
+### Minor Changes
+
+- [#53](https://github.com/osbytes/reelsaw/pull/53) [`1ac8156`](https://github.com/osbytes/reelsaw/commit/1ac815672b7ddd9c4e183302442c141aa05d5eb3) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Plans and billing for hosted instances (enterprise edition), a monthly minutes quota, and a watermark for accounts that are not admins.
+  
+  - `MAX_SOURCE_MINUTES_PER_MONTH` joins the quotas: minutes of source video per billing period (or UTC calendar month), with the usual refusal sentence and per-user override.
+  - `WATERMARK_NON_ADMINS` (default on) burns `WATERMARK_TEXT` into the clips of non-admin accounts through the caption file; admins switch it per user on the Users page (Limits), a paid plan removes it, and each clip records whether it was rendered with it. **Upgrade:** multi-user installs that do not want this set `WATERMARK_NON_ADMINS=false` (Settings → System → Limits works without a restart).
+  - `REELSAW_EE=true` with `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` loads `apps/server/src/ee` (its own licence, see LICENSING.md): Free / Starter / Creator / Pro plans (priced like OpenShorts Cloud) whose limits sit between the instance setting and the admin's per-user override, Stripe Checkout and Billing Portal from Settings → Billing, `get_billing` / `billing_checkout_url` over MCP, `reelsaw billing` on the CLI. Webhooks are recorded and queued in one transaction and the account's row is rewritten from Stripe by a job, so late, duplicate or reordered events converge; a daily reconcile and `reelsaw billing sync` repair lost ones. `pnpm stripe:setup` creates the Stripe objects; `pnpm stripe:mock` stands in for Stripe in development. Self-hosted installs are unchanged apart from the two settings above.
+  - Free-tier abuse guards, off unless set: `MAX_SIGNUPS_PER_IP_PER_DAY`, `BLOCK_DISPOSABLE_EMAILS`, one account per real mailbox (`user.email_key`, backfilled by the migration), `MAX_REQUESTS_PER_MINUTE` / `_HOUR` on changes per account, and hourly abuse flags on the Users page (`reelsaw abuse`). `TRUST_PROXY` (default on) names which headers carry the client address.
+  - Optional Sentry (`SENTRY_DSN`) and PostHog (`POSTHOG_KEY`, `POSTHOG_HOST`) across server and web: errors from boot, 5xx API calls, final job failures and render crashes; product events for sign-ups, projects, billing and abuse flags; page views and a few actions in the browser. Off unless set.
+
+- [#51](https://github.com/osbytes/reelsaw/pull/51) [`defa355`](https://github.com/osbytes/reelsaw/commit/defa355d665e4d95dbf9a4ae5f2f6faf8b830269) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Refine after transcription (name fixes, filler removal, the filler model pass, and scene cuts) is opt-in: turn steps on per project or in Project defaults, with instance ceilings under Settings → System → Pipeline.
+  
+  **Upgrade:** `TRANSCRIPT_CORRECTION`, `DISFLUENCY_REMOVAL`, `DISFLUENCY_LLM` and `REFINE_SCENES` now default to off (was on). New projects skip refine unless you open those gates and opt the project in. To keep the old behaviour, set them to `true` in `.env` or Settings → System → Pipeline, and turn the matching toggles on in Project defaults.
+
+### Patch Changes
+
+- [#57](https://github.com/osbytes/reelsaw/pull/57) [`57528f2`](https://github.com/osbytes/reelsaw/commit/57528f2e3de406830e0d0372670325a865a9bf2d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - CTC forced alignment no longer treats adjacent repeated letters without a blank as a valid path, so words like "hello" get legal letter spans at cut seams.
+
 ## 0.10.2
 
 ### Patch Changes
