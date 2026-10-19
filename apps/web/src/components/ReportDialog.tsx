@@ -4,6 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import type { ReportInclude } from "@reelsaw/shared";
 import { Modal, Skeleton } from "./ui";
+import { ScrollArea } from "./scroll-area";
 import { MultiCombobox } from "./MultiCombobox";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
@@ -110,66 +111,70 @@ export function ReportDialog() {
   const uploadWithoutSource = preview?.sourceType === "upload" && !inc.source;
   return (
     <Modal open={open} onOpenChange={(o) => !o && !busy && closeReport()} title="Report an issue" width={520}>
-      <Dialog.Description className="-mt-1 text-sm text-ink2">
-        {projectId ? <>About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>. </> : null}
-        Saves a zip you can send to the Reelsaw team. API keys and passwords are never included.
-      </Dialog.Description>
+      <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+        <div className="flex flex-col gap-3 pr-3">
+          <Dialog.Description className="-mt-1 text-sm text-ink2">
+            {projectId ? <>About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>. </> : null}
+            Saves a zip you can send to the Reelsaw team. API keys and passwords are never included.
+          </Dialog.Description>
 
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm font-semibold">What went wrong?</span>
-        <textarea
-          className="input min-h-[96px] resize-y"
-          autoFocus
-          maxLength={10000}
-          placeholder="What you did, what you expected, and what happened instead. Timestamps help (e.g. “clip 3 at 0:42”)."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void download();
-          }}
-        />
-      </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-semibold">What went wrong?</span>
+            <textarea
+              className="input min-h-[96px] resize-y"
+              autoFocus
+              maxLength={10000}
+              placeholder="What you did, what you expected, and what happened instead. Timestamps help (e.g. “clip 3 at 0:42”)."
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void download();
+              }}
+            />
+          </label>
 
-      {projectId && project.isPending && (
-        <div className="flex flex-col gap-1.5" role="status">
-          <span className="sr-only">Loading clips…</span>
-          <span className="text-sm font-semibold">Clips</span>
-          <Skeleton className="h-[38px] w-full rounded-[10px]" />
+          {projectId && project.isPending && (
+            <div className="flex flex-col gap-1.5" role="status">
+              <span className="sr-only">Loading clips…</span>
+              <span className="text-sm font-semibold">Clips</span>
+              <Skeleton className="h-[38px] w-full rounded-[10px]" />
+            </div>
+          )}
+          {projectId && clips.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-semibold">Clips</span>
+              <MultiCombobox
+                label="Clips the problem shows up in"
+                placeholder="None in particular"
+                searchPlaceholder="Search clips by number or title…"
+                empty="No clip matches"
+                value={clipIds}
+                onChange={setClipIds}
+                options={clips.map((c) => ({ value: c.id, prefix: String(c.index + 1), label: c.title, hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined }))}
+              />
+            </div>
+          )}
+
+          <fieldset className="flex flex-col gap-2 rounded-[12px] border border-line p-3">
+            <legend className="px-1 text-xs font-semibold text-ink2">Included</legend>
+            <span className="text-xs text-ink2">
+              {projectId ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history" : "Your projects' status and recent failures"}, the app's settings (secrets shown only as set/unset), and your description.
+            </span>
+            {row("system", "System info and recent errors", "Versions, CPU/memory/disk, job queue, usage, and this instance's error log from the last week")}
+            {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn't keep a log file" : "Pipeline log lines, including model calls when they're recorded", !!preview && !preview.logs)}
+            {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
+            {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}
+            {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : <Skeleton className="mt-0.5 inline-block h-3 w-40" />)}
+          </fieldset>
         </div>
-      )}
-      {projectId && clips.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-semibold">Clips</span>
-          <MultiCombobox
-            label="Clips the problem shows up in"
-            placeholder="None in particular"
-            searchPlaceholder="Search clips by number or title…"
-            empty="No clip matches"
-            value={clipIds}
-            onChange={setClipIds}
-            options={clips.map((c) => ({ value: c.id, prefix: String(c.index + 1), label: c.title, hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined }))}
-          />
-        </div>
-      )}
-
-      <fieldset className="flex flex-col gap-2 rounded-[12px] border border-line p-3">
-        <legend className="px-1 text-xs font-semibold text-ink2">Included</legend>
-        <span className="text-xs text-ink2">
-          {projectId ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history" : "Your projects' status and recent failures"}, the app's settings (secrets shown only as set/unset), and your description.
-        </span>
-        {row("system", "System info and recent errors", "Versions, CPU/memory/disk, job queue, usage, and this instance's error log from the last week")}
-        {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn't keep a log file" : "Pipeline log lines, including model calls when they're recorded", !!preview && !preview.logs)}
-        {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
-        {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}
-        {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : <Skeleton className="mt-0.5 inline-block h-3 w-40" />)}
-      </fieldset>
+      </ScrollArea>
 
       {/* one reserved line for notes and errors, so the buttons never move */}
-      <p className={`min-h-[18px] text-xs ${error ? "text-err" : "text-ink3"}`} role={error ? "alert" : undefined}>
+      <p className={`min-h-[18px] shrink-0 text-xs ${error ? "text-err" : "text-ink3"}`} role={error ? "alert" : undefined}>
         {error ?? (uploadWithoutSource ? "Without the source video, problems that depend on the video itself can't be reproduced." : "")}
       </p>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex shrink-0 items-center justify-end gap-2">
         <button className="btn-ghost" disabled={busy} onClick={closeReport}>
           Cancel
         </button>
