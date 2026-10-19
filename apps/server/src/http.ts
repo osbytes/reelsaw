@@ -22,7 +22,7 @@ import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
-import { createReportZip, reportPreview } from "./report/bundle.js";
+import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
 import { reportRequestSchema } from "@reelsaw/shared";
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
@@ -288,19 +288,24 @@ export function createApp(svc: Services) {
     return c.body(Readable.toWeb(stream) as ReadableStream);
   });
 
-  // "Report an issue": zip of the project's (or account's) data for local reproduction; owner only
+  // "Report an issue": zip of the project's (or account's) data for local reproduction; owner only.
+  // Hosted non-admins with telemetry use Sentry/PostHog feedback instead (reportCapabilities).
   app.get("/api/projects/:projectId/report/preview", async (c) => {
     const session = await actor(c);
     if (!session) return c.json({ error: "unauthorized" }, 401);
+    const caps = reportCapabilities(svc, session.user);
+    if (!caps.zip) return c.json({ error: "Send feedback from the app instead of downloading a report on this instance." }, 403);
     const info = await reportPreview(svc, session.user.id, c.req.param("projectId"));
     return info ? c.json(info) : c.json({ error: "not found" }, 404);
   });
   const sendReport = async (c: Context, projectId: string | null) => {
     const session = await actor(c);
     if (!session) return c.json({ error: "unauthorized" }, 401);
+    const caps = reportCapabilities(svc, session.user);
+    if (!caps.zip) return c.json({ error: "Send feedback from the app instead of downloading a report on this instance." }, 403);
     const parsed = reportRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid report" }, 400);
-    const zip = await createReportZip(svc, session.user.id, projectId, parsed.data);
+    const zip = await createReportZip(svc, session.user, projectId, parsed.data);
     if (!zip) return c.json({ error: "not found" }, 404);
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${zip.filename}"`);

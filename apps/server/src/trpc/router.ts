@@ -34,6 +34,7 @@ import { checkProjectQuota, limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usa
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
+import { reportCapabilities } from "../report/capabilities.js";
 import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
@@ -363,6 +364,8 @@ export const appRouter = router({
         },
         /** which enterprise features this instance runs (ee/); the web shows the Billing tab from this */
         ee: { billing: !!ctx.svc.ee },
+        /** zip vs Sentry/PostHog feedback for "Report an issue" (report/capabilities.ts) */
+        report: reportCapabilities(ctx.svc, ctx.user),
         /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
       };
