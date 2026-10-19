@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.11.1
+
+### Patch Changes
+
+- [#62](https://github.com/osbytes/reelsaw/pull/62) [`673bd6d`](https://github.com/osbytes/reelsaw/commit/673bd6d0ad2bdbdff788868caa04bc840364f8d0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The image entrypoint now `chown`s a volume-mounted `DATA_DIR` (e.g. Railway) before dropping to `node`, so boot no longer fails with `EACCES` on `/data/uploads`.
+
+- [#60](https://github.com/osbytes/reelsaw/pull/60) [`df7d4ab`](https://github.com/osbytes/reelsaw/commit/df7d4ab57a515bd128e28808623854c5b5929a40) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A budgeted batch loop (retention sweeps, purges) always makes one batch of progress before honouring its deadline, so a budget that is already spent when the loop starts cannot leave the cursor in place forever. Also fixes the timing-sensitive unit test that failed on a slow CI runner.
+
 ## 0.11.0
 
 ### Minor Changes
