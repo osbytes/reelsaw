@@ -94,7 +94,12 @@ export function runsOf(log: LogEvent[]): Run[] {
       cur.stageStart[stage] ??= t;
     } else if (e.type === "stage.completed" && isStage(stage)) {
       if (cur.run.stages[stage] === undefined) {
-        const sec = num(p.durationSec) ?? (cur.stageStart[stage] !== undefined ? (t - cur.stageStart[stage]!) / 1000 : undefined);
+        // the payload's clock is the precise one, but a stage cannot outlast the events around it: before
+        // the fix in ingest, its payload carried the video's length as durationSec, and the wall clock is
+        // the only thing that keeps those projects out of the time estimates
+        const wall = cur.stageStart[stage] !== undefined ? (t - cur.stageStart[stage]!) / 1000 : undefined;
+        const reported = num(p.durationSec);
+        const sec = reported !== undefined && wall !== undefined ? Math.min(reported, wall) : (reported ?? wall);
         if (sec !== undefined) cur.run.stages[stage] = r1(sec);
       }
       if (stage === "analyze") cur.renderFrom = t;

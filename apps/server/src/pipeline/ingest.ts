@@ -26,10 +26,13 @@ export async function ingest(ctx: StageContext) {
       // web and MCP both land here, so one check covers every way of adding a link
       await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
       let stderrTail = "";
+      let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
       const { stdout } = await svc.media.ytdlp(
         [
           "--no-playlist",
           "--no-warnings",
+          // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
+          "--progress",
           "--newline",
           "--print-json",
           // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
@@ -48,8 +51,12 @@ export async function ingest(ctx: StageContext) {
           signal: ctx.signal,
           onStderr: (line) => {
             stderrTail = (stderrTail + "\n" + line).slice(-4000);
-            const m = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
-            if (m) void ctx.progress((Number(m[1]) / 100) * 0.6, "Downloading").catch(() => {});
+          },
+          onStdout: (line) => {
+            const tick = parseDownloadTick(line);
+            if (!tick) return;
+            downloaded = Math.max(downloaded, tick.fraction);
+            void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
           },
         },
       ).catch((err: Error) => {
@@ -103,7 +110,7 @@ export async function ingest(ctx: StageContext) {
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
-  await ctx.complete({ durationSec: probe.durationSec, title }, async (u) => {
+  await ctx.complete({ sourceDurationSec: probe.durationSec, title }, async (u) => {
     await u.db
       .update(schema.projects)
       .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
@@ -111,6 +118,20 @@ export async function ingest(ctx: StageContext) {
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;
+}
+
+/**
+ * A yt-dlp `--newline` progress line ("[download]  12.3% of ~ 1.57GiB at 5.00MiB/s ETA 04:00") as a
+ * fraction and a short message for the activity bar. Null for every other line.
+ */
+export function parseDownloadTick(line: string): { fraction: number; message: string } | null {
+  const m = /^\[download\]\s+(\d+(?:\.\d+)?)%(?:\s+of\s+~?\s*(\S+))?(?:\s+at\s+(\S+))?/.exec(line);
+  if (!m) return null;
+  const pct = Number(m[1]);
+  const parts = [`Downloading ${Math.floor(pct)}%`];
+  if (m[2]) parts.push(`of ${m[2]}`);
+  if (m[3] && m[3] !== "Unknown") parts.push(`at ${m[3]}`);
+  return { fraction: Math.max(0, Math.min(1, Math.round(pct * 100) / 10_000)), message: parts.join(" ") };
 }
 
 /**

@@ -89,7 +89,8 @@ export class StageContext {
     await this.svc.tx(async (u) => {
       const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
       await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
-      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...(durationSec !== undefined ? { durationSec } : {}), ...extra });
+      // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
+      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra, ...(durationSec !== undefined ? { durationSec } : {}) });
       if (handoff) await handoff(u);
     });
   }
