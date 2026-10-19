@@ -7,6 +7,7 @@ import { ArticleHeader, DataTable, FaqSection, LinkList, TryIt } from "@/compone
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
+import { socialMeta } from "@/lib/social-meta";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -24,8 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: g.metaTitle,
     description: g.metaDescription,
     alternates: { canonical: path },
-    openGraph: { title: g.metaTitle, description: g.metaDescription, url: path, type: "article" },
-    twitter: { title: g.metaTitle, description: g.metaDescription },
+    ...socialMeta({ title: g.metaTitle, description: g.metaDescription, url: path, type: "article" }),
   };
 }
 

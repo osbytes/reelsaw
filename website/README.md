@@ -39,7 +39,13 @@ stay the same animation.
 
 - `app/layout.tsx`: title template, description, keywords, canonical, Open Graph and Twitter cards,
   robots directives. `NEXT_PUBLIC_SITE_URL` (default `https://reelsaw.com`) is the `metadataBase`.
-- `app/opengraph-image.tsx` renders the social card at build time from `public/logo-dark.png`.
+- Open Graph images (Next.js file convention, built with `next/og` via `lib/og.tsx`):
+  - `app/opengraph-image.tsx` — home page and site-wide fallback for any route without its own card
+  - `app/alternatives/opengraph-image.tsx` — alternatives hub
+  - `app/alternatives/[slug]/opengraph-image.tsx` — one card per competitor (`h1` + blurb)
+  - `app/(guides)/[slug]/opengraph-image.tsx` — one card per guide
+  Twitter large-image cards reuse the same files. `/pipeline-film` is `noindex` and inherits the
+  fallback. Page metadata uses `lib/social-meta.ts` so the Twitter `card` type is never dropped.
 - `app/robots.ts`, `app/sitemap.ts`, `app/manifest.ts`, `app/icon.svg`, `app/apple-icon.png`.
 - `app/page.tsx` carries JSON-LD (`SoftwareApplication`, `SoftwareSourceCode`, `WebSite`), one `h1`,
   section landmarks with headings, descriptive alt text, and `next/image` for the screenshots.

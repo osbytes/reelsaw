@@ -7,6 +7,7 @@ import { Breadcrumbs, LinkList, TryIt } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
+import { socialMeta } from "@/lib/social-meta";
 
 const title = "Reelsaw vs Opus Clip, Klap, Vizard, Submagic and more";
 const description =
@@ -16,8 +17,7 @@ export const metadata: Metadata = {
   title,
   description,
   alternates: { canonical: "/alternatives" },
-  openGraph: { title, description, url: "/alternatives" },
-  twitter: { title, description },
+  ...socialMeta({ title, description, url: "/alternatives" }),
 };
 
 export default function AlternativesIndex() {
