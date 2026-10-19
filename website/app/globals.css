@@ -106,15 +106,3 @@ body { @apply bg-bg font-sans text-[15px] text-ink antialiased; }
 @utility container-page { @apply mx-auto w-full max-w-[1120px] px-5 sm:px-8; }
 @utility eyebrow { @apply text-xs font-semibold tracking-[0.08em] text-acc-text uppercase; }
 @utility prose-link { @apply text-acc-text underline decoration-acc-text/40 underline-offset-[3px] hover:decoration-acc-text; }
-
-/* pipeline diagram: an accent dash travelling along each edge */
-.pipeline-flow {
-  stroke-dasharray: 8 14;
-  animation: pipeline-flow 1.2s linear infinite;
-}
-@keyframes pipeline-flow {
-  to { stroke-dashoffset: -22; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .pipeline-flow { animation: none; stroke-dasharray: none; opacity: 0.6; }
-}
