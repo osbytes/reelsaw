@@ -24,10 +24,11 @@ ENV DATA_DIR=/data \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=3000
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl python3 \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl python3 gosu \
  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
  && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
  && chmod +x /usr/local/bin/yt-dlp \
+ && gosu nobody true \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=models /models /app/server/models
 
@@ -103,11 +104,16 @@ COPY --from=server --chown=node:node /out/server /app/server
 COPY --from=build --chown=node:node /app/apps/server/drizzle /app/server/drizzle
 COPY --from=build --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node THIRD_PARTY.md /app/THIRD_PARTY.md
-# operator CLI: docker compose exec app reelsaw status <projectId>
-RUN printf '#!/bin/sh\nexec node /app/server/dist/cli.js "$@"\n' > /usr/local/bin/reelsaw && chmod +x /usr/local/bin/reelsaw \
+# operator CLI: docker compose exec app reelsaw status <projectId> (drops to node when invoked as root)
+RUN printf '%s\n' '#!/bin/sh' 'if [ "$(id -u)" = "0" ]; then exec gosu node node /app/server/dist/cli.js "$@"; fi' 'exec node /app/server/dist/cli.js "$@"' > /usr/local/bin/reelsaw \
+ && chmod +x /usr/local/bin/reelsaw \
  && mkdir -p /data && chown node:node /data /app
-USER node
+# Root entrypoint chowns volume-mounted DATA_DIR (Railway etc.), then gosu node. Process still runs as node.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+USER root
 VOLUME ["/data"]
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD gosu node node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "/app/server/dist/main.js"]

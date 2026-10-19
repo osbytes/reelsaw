@@ -12,6 +12,7 @@ download tool below, each under its own licence. Weights are fetched at image bu
 | Silero VAD v5.1.2 (`silero-vad.onnx`) | voice activity, silence trimming | [snakers4/silero-vad](https://github.com/snakers4/silero-vad/tree/v5.1.2) | MIT (Copyright (c) 2020-present Silero Team) |
 | wav2vec2-base-960h, int8 ONNX (`wav2vec2-base-960h/`) | CTC forced alignment of cut boundaries | [Xenova/wav2vec2-base-960h](https://huggingface.co/Xenova/wav2vec2-base-960h/tree/a19f851b3d42865797e410752b4c570c871e4825), converted from facebook/wav2vec2-base-960h | Apache-2.0 (facebook/wav2vec2-base-960h model card; the Xenova conversion declares no licence of its own) |
 | DejaVu fonts (Debian `fonts-dejavu-core`) | caption rendering fallback | Debian package in the base image | Bitstream Vera licence with DejaVu changes (public domain); free to use, embed and redistribute, not to be sold on their own |
+| gosu (Debian `gosu`) | drop from root to `node` after fixing volume-mounted `DATA_DIR` | Debian package in the base image | Apache-2.0 (Debian package; upstream [tianon/gosu](https://github.com/tianon/gosu)) |
 | yt-dlp | downloading source videos | [yt-dlp/yt-dlp 2026.08.19](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19), sha256-pinned in the Dockerfile | Unlicense (public domain) |
 
 Not bundled but used at run time: ffmpeg (Debian package, LGPL/GPL depending on build), Ollama and
