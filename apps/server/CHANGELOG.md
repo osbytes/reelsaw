@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.10.2
+
+### Patch Changes
+
+- [#47](https://github.com/osbytes/reelsaw/pull/47) [`8dfaeae`](https://github.com/osbytes/reelsaw/commit/8dfaeaec5d637997ba22b9ed1751ad538705711f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Add `local-qwen14-cpu` / `local-qwen14-gpu` bench profiles and `bench:e2e --gpu` (NVENC for the isolated bench app). Fix the e2e driver on Windows (`fileURLToPath` for the repo root cwd, resolve `docker.exe` via `where.exe`).
+
 ## 0.10.1
 
 ### Patch Changes
