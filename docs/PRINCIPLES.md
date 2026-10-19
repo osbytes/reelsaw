@@ -18,15 +18,18 @@ project already hit the problem it prevents.
   after 8 tries: it clipped the next word"), with the raw detail one click away. Say
   "disfluencies", not "stutters".
 - **One precedence chain per setting, written down.** Models, provider keys and instance settings
-  (sign-up policy, quotas, retention, …; `instance-settings.ts`): `.env`, then the admin's runtime
-  override, read at the point of use and never captured at boot; stage knobs (`TRANSCRIPT_BIAS`, `DISFLUENCY_*`, detectors): `.env` only,
-  and an off gate silently disables the matching per-project setting; a project: shared defaults,
-  the user's defaults, the create input, frozen into `projects.settings`; style: project, then clip;
-  framing: auto, project, clip, section; quotas and the watermark: `.env`, then the instance setting,
-  then what the account's plan grants (`svc.entitlements`, hosted only), then per-user limits an
-  admin set. A new setting says where it sits in this chain (README, "Settings and precedence"). A
-  value an operator may want to change while the box runs (policy, limits, retention) is a runtime
-  setting with its environment variable as the default, not a new env-only variable.
+  (sign-up policy, quotas, refine gates, retention, …; `instance-settings.ts`): `.env`, then the
+  admin's runtime override, read at the point of use and never captured at boot; refine steps
+  (`TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `REFINE_SCENES`): that instance value is a ceiling
+  (defaults off), then the project's `refineEntities` / `refineDisfluency` / `disfluencyLlm` /
+  `refineScenes` (from user defaults or the create form) must opt in to run a step; other stage knobs (`TRANSCRIPT_BIAS`,
+  detectors, concurrency): `.env` only; a project: shared defaults, the user's defaults, the create
+  input, frozen into `projects.settings`; style: project, then clip; framing: auto, project, clip,
+  section; quotas and the watermark: `.env`, then the instance setting, then what the account's plan
+  grants (`svc.entitlements`, hosted only), then per-user limits an admin set. A new setting says where
+  it sits in this chain (README, "Settings and precedence"). A value an operator may want to change
+  while the box runs (policy, limits, retention, refine ceilings) is a runtime setting with its
+  environment variable as the default, not a new env-only variable.
 
 ## Backend
 

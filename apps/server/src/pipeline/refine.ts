@@ -1,7 +1,7 @@
 import { detectOverlays } from "./overlays.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { schema } from "../db/index.js";
+import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
@@ -11,6 +11,7 @@ import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
 import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
+import { refineStepOn, resolveRefineOptions, type RefineOptions } from "./refine-options.js";
 
 /**
  * Refine stage = three independent jobs after transcription:
@@ -21,6 +22,9 @@ import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag }
  * overlapping flags (entity wins), recomputes words/segments, and enqueues analyze once every step
  * is done or has given up. A step that exhausts its retries is marked failed but never blocks the
  * project: these are enhancements, not requirements.
+ *
+ * Which steps run: instance gates (env → Settings → System → Pipeline) then the project's
+ * refineEntities / refineDisfluency / disfluencyLlm / refineScenes (see refine-options.ts).
  */
 
 export const REFINE_QUEUE: Record<RefineStep, (typeof QUEUES)[keyof typeof QUEUES]> = {
@@ -29,10 +33,9 @@ export const REFINE_QUEUE: Record<RefineStep, (typeof QUEUES)[keyof typeof QUEUE
   scenes: QUEUES.refineScenes,
 };
 
-export function stepEnabled(svc: Services, step: RefineStep): boolean {
-  if (step === "entities") return svc.config.TRANSCRIPT_CORRECTION;
-  if (step === "disfluency") return svc.config.DISFLUENCY_REMOVAL;
-  return true;
+async function optionsFor(svc: Services, db: Db, projectId: string): Promise<RefineOptions> {
+  const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { settings: true } });
+  return resolveRefineOptions(svc.settings.get(), p?.settings ?? {});
 }
 
 /** Mark the project as refining and queue every enabled step that is not already done. */
@@ -41,9 +44,10 @@ export async function enqueueRefine(svc: Services, projectId: string, steps: rea
   const db = u.db;
   const [t] = await db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
   if (!t) throw new Error("no transcript to refine");
+  const opts = await optionsFor(svc, db, projectId);
   const refine: RefineStatus = { ...t.refine };
-  const toRun = steps.filter((s) => stepEnabled(svc, s) && refine[s] !== "done");
-  for (const s of REFINE_STEPS) if (!stepEnabled(svc, s)) refine[s] = "done"; // disabled steps count as done
+  const toRun = steps.filter((s) => refineStepOn(opts, s) && refine[s] !== "done");
+  for (const s of REFINE_STEPS) if (!refineStepOn(opts, s)) refine[s] = "done"; // disabled steps count as done
   for (const s of toRun) refine[s] = "queued";
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
   await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
@@ -242,11 +246,13 @@ export async function refineDisfluency(ctx: StageContext) {
     return mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", skipped: skip });
   }
   await markRunning(ctx, "disfluency");
+  const opts = await optionsFor(svc, svc.database.db, ctx.projectId);
+  const useLlm = opts.disfluencyLlm;
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
   for (const f of t.flags) if (f.kind === "entity" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const trace: DisfluencyTraceEntry[] = [];
-  const flags = await detectDisfluencies(svc.config.DISFLUENCY_LLM ? await svc.ai.languageModel() : null, raw, {
+  const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
@@ -255,11 +261,11 @@ export async function refineDisfluency(ctx: StageContext) {
   }, trace);
   const byOutcome: Record<string, number> = {};
   for (const e of trace) byOutcome[e.outcome] = (byOutcome[e.outcome] ?? 0) + 1;
-  ctx.log.debug({ candidates: trace.length, rules: trace.filter((e) => e.source === "rule").length, model: trace.filter((e) => e.source === "model").length, byOutcome, reservedWords: reserved.size }, "disfluency candidates");
+  ctx.log.debug({ candidates: trace.length, rules: trace.filter((e) => e.source === "rule").length, model: trace.filter((e) => e.source === "model").length, byOutcome, reservedWords: reserved.size, llm: useLlm }, "disfluency candidates");
   // every cut accepted or rejected, and why (bounded; the stage artifact keeps the full list)
   for (const e of trace.slice(0, 200)) ctx.log.trace({ wordIndex: e.wordIndex, text: e.text, subkind: e.subkind, source: e.source, why: e.why, prior: e.prior, verdict: e.verdict ?? null, outcome: e.outcome }, "disfluency decision");
   ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: svc.config.DISFLUENCY_LLM ? modelsUsed(svc, "language") : { language: "none (rules only)" } } });
+  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } });
 }
 
 export async function refineScenes(ctx: StageContext) {

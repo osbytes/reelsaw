@@ -10,6 +10,7 @@ export const SITE = {
   releases: "https://github.com/osbytes/reelsaw/releases",
   issues: "https://github.com/osbytes/reelsaw/issues",
   docker: "https://github.com/osbytes/reelsaw/pkgs/container/reelsaw",
+  osbytes: "https://www.osbytes.io",
   glama: "https://glama.ai/mcp/servers/osbytes/reelsaw",
   license: "https://github.com/osbytes/reelsaw/blob/main/LICENSE",
   contributing: "https://github.com/osbytes/reelsaw/blob/main/CONTRIBUTING.md",

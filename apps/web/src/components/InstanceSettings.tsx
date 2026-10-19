@@ -66,6 +66,13 @@ export const RETENTION_FIELDS: Field[] = [
   { key: "ADMIN_EVENT_RETENTION_DAYS", label: "Keep the admin log", kind: "int", unit: "days", zero: "forever" },
 ];
 
+export const PIPELINE_FIELDS: Field[] = [
+  { key: "TRANSCRIPT_CORRECTION", label: "Name fixes after transcription", kind: "bool", on: "On", off: "Off" },
+  { key: "DISFLUENCY_REMOVAL", label: "Filler and repeat removal", kind: "bool", on: "On", off: "Off" },
+  { key: "DISFLUENCY_LLM", label: "Model pass for fillers", kind: "bool", on: "On", off: "Rules only" },
+  { key: "REFINE_SCENES", label: "Scene cuts and on-screen text", kind: "bool", on: "On", off: "Off" },
+];
+
 export const OPERATIONS_FIELDS: Field[] = [
   { key: "STALL_MINUTES", label: "Stall watchdog", kind: "int", min: 2, max: 1440, unit: "minutes" },
   { key: "UPDATE_CHECK", label: "Update check", kind: "bool", on: "On", off: "Off" },

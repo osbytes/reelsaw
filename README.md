@@ -8,6 +8,7 @@
 # Reelsaw
 
 <p align="center">
+  <a href="https://www.osbytes.io" target="_blank" rel="noopener noreferrer" title="osbytes — open source bytes"><img src="https://www.osbytes.io/badge.svg" alt="osbytes — open source bytes" width="24" height="24"></a>
   <a href="https://github.com/osbytes/reelsaw/releases"><img src="https://img.shields.io/github/v/release/osbytes/reelsaw?label=release" alt="Latest release"></a>
   <a href="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml"><img src="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/osbytes/reelsaw/pkgs/container/reelsaw"><img src="https://img.shields.io/badge/ghcr.io-osbytes%2Freelsaw-2496ED?logo=docker&logoColor=white" alt="Docker image on GHCR"></a>
@@ -377,7 +378,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `list_projects` | Your projects, most recently updated first. |
 | `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
 | `create_project` | Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). |
-| `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses); only the fields you pass change. |
+| `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. |
 | `wait_for_project` | Block until the project is done or failed, or timeoutSeconds pass. |
 | `get_transcript` | The project's transcript as timed lines "[m:ss] text", optionally only a time range. |
 | `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
@@ -474,8 +475,9 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | --- | --- |
 | Models (language, transcription, alignment) | `.env` (`AI_MODEL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPT_ALIGN_MODEL`) then the admin's runtime override (Settings → System → Models, stored in `instance_settings`). A stage already running keeps the model it started with. |
 | Provider keys and URLs | `.env` then the encrypted keys admins enter in Settings. |
-| Instance settings (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) | `.env` then the admin's runtime override (Settings → System, `reelsaw settings`, `set_instance_settings`; stored in `instance_settings`, applied by every process within seconds). An override whose precondition goes away (email verification without an email driver) is ignored and shown as such. |
-| Stage knobs (`TRANSCRIPT_BIAS`, `TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
+| Instance settings (sign-up mode, email verification, captcha, legal links, quotas, upload limits, refine-stage gates, retention, stall watchdog, update check, health details) | `.env` then the admin's runtime override (Settings → System, `reelsaw settings`, `set_instance_settings`; stored in `instance_settings`, applied by every process within seconds). An override whose precondition goes away (email verification without an email driver) is ignored and shown as such. |
+| Refine gates (`TRANSCRIPT_CORRECTION`, `DISFLUENCY_REMOVAL`, `DISFLUENCY_LLM`, `REFINE_SCENES`) | `.env` then the instance setting (Settings → System → Pipeline). Defaults **off**. That value is a **ceiling**: when off, every project skips the step. When on, each project's `refineEntities` / `refineDisfluency` / `disfluencyLlm` / `refineScenes` (and the user's Project defaults) must opt in (`true`) to run the step. |
+| Other stage knobs (`TRANSCRIPT_BIAS`, `VAD`, `ALIGNER`, `FACE_DETECTION`, `TEXT_DETECTION`, concurrency) | `.env` only. No UI or per-project override exists. |
 | A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |
 | A clip's style | the project's style, then the clip's own override (`clips.style`). `updateStyle` clears clip overrides unless told to keep them. |
 | Framing | `auto` (face detection decides), then the project's `reframe`, then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i].mode`). |
@@ -484,7 +486,7 @@ Where a value comes from, from the weakest source to the strongest (a later link
 
 Two things to know:
 
-- **An env gate wins silently.** `TRANSCRIPT_BIAS=false` ignores the project's vocabulary hints and `DISFLUENCY_REMOVAL=false` skips the disfluency settings; neither tells the user. If a project setting seems to do nothing, check the gate first ([TROUBLESHOOTING](docs/TROUBLESHOOTING.md), "A project or clip setting has no effect").
+- **An env / instance refine gate wins.** `DISFLUENCY_REMOVAL=false` (or the matching Pipeline setting) skips filler removal for everyone even when a project asks for it; the new-project form disables that toggle and says so. `TRANSCRIPT_BIAS=false` still silently ignores vocabulary hints (`.env` only). If a project setting seems to do nothing, check the gate first ([TROUBLESHOOTING](docs/TROUBLESHOOTING.md), "A project or clip setting has no effect").
 - **Existing projects keep their frozen settings.** Changing your Project defaults affects new projects only.
 
 Code: `apps/server/src/pipeline/settings.ts` (project), `resolveStyle` in `packages/shared/src/index.ts` (style), `apps/server/src/pipeline/render.ts` (framing), `apps/server/src/ai/models.ts` (models), `apps/server/src/quota.ts` (quotas).

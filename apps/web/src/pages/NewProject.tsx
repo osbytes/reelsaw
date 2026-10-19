@@ -13,6 +13,7 @@ import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
+import { RefineToggles } from "../components/RefineToggles";
 import { youtubeId } from "../lib/links";
 
 const LENGTHS = [
@@ -425,6 +426,11 @@ export function NewProjectPage() {
                       <span className="text-[13px] text-ink2">Detected automatically. You can turn this off per project later.</span>
                     </span>
                   </label>
+                  <div className="flex flex-col gap-1.5 border-t border-line pt-4">
+                    <span className="text-[13px] font-semibold text-ink2">Refine after transcription</span>
+                    <span className="text-xs text-ink3">Off by default for speed and cost. Turn steps on for name fixes, filler cuts, or scene detection (the server must allow them under Settings → System → Pipeline).</span>
+                    <RefineToggles compact value={s} onChange={patch} />
+                  </div>
                 </div>
               )}
             </section>

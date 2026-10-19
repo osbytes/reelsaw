@@ -341,21 +341,31 @@ export const appRouter = router({
 
   /** The signed-in account, also while waiting for approval or suspended. */
   me: router({
-    get: signedInProcedure.query(async ({ ctx }) => ({
-      id: ctx.user.id,
-      name: ctx.user.name,
-      email: ctx.user.email,
-      role: ctx.user.role,
-      approved: !!ctx.user.approvedAt,
-      blocked: ctx.who.blocked,
-      via: ctx.who.via,
-      projectDefaults: ctx.who.blocked ? {} : await userDefaults(ctx.svc.database.db, ctx.user.id),
-      builtInDefaults: defaultProjectSettings,
-      /** which enterprise features this instance runs (ee/); the web shows the Billing tab from this */
-      ee: { billing: !!ctx.svc.ee },
-      /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
-      watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, ctx.svc.settings.get(), ctx.user, ctx.svc.entitlements),
-    })),
+    get: signedInProcedure.query(async ({ ctx }) => {
+      const s = ctx.svc.settings.get();
+      return {
+        id: ctx.user.id,
+        name: ctx.user.name,
+        email: ctx.user.email,
+        role: ctx.user.role,
+        approved: !!ctx.user.approvedAt,
+        blocked: ctx.who.blocked,
+        via: ctx.who.via,
+        projectDefaults: ctx.who.blocked ? {} : await userDefaults(ctx.svc.database.db, ctx.user.id),
+        builtInDefaults: defaultProjectSettings,
+        /** Instance ceilings for refine steps (env → Settings → System → Pipeline). Off means the project toggle cannot turn the step on. */
+        refineGates: {
+          entities: s.TRANSCRIPT_CORRECTION,
+          disfluency: s.DISFLUENCY_REMOVAL,
+          disfluencyLlm: s.DISFLUENCY_LLM,
+          scenes: s.REFINE_SCENES,
+        },
+        /** which enterprise features this instance runs (ee/); the web shows the Billing tab from this */
+        ee: { billing: !!ctx.svc.ee },
+        /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
+        watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
+      };
+    }),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
       const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`

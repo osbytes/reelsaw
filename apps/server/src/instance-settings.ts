@@ -1,12 +1,13 @@
 /**
  * Instance settings an admin changes at runtime: who may sign up, email verification, captcha,
- * legal links, quotas, upload limits, retention, the stall watchdog, the update check and whether
- * /api/health shows machine numbers. One precedence chain (README, "Settings and precedence"): the
- * environment (config.ts) is the default; a value stored in `instance_settings` (key `runtime`)
- * overrides it; `null` in a patch removes the override and the environment applies again. Every
- * process polls the row like ai/models.ts, so a change made through the API reaches workers within
- * seconds and no restart is needed. The captcha secret is encrypted at rest with the same box as
- * provider keys (ai/crypto.ts) and never leaves the server; the UI sees whether it is set.
+ * legal links, quotas, upload limits, refine-stage gates (name fixes, disfluency, scenes),
+ * retention, the stall watchdog, the update check and whether /api/health shows machine numbers.
+ * One precedence chain (README, "Settings and precedence"): the environment (config.ts) is the
+ * default; a value stored in `instance_settings` (key `runtime`) overrides it; `null` in a patch
+ * removes the override and the environment applies again. Every process polls the row like
+ * ai/models.ts, so a change made through the API reaches workers within seconds and no restart is
+ * needed. The captcha secret is encrypted at rest with the same box as provider keys (ai/crypto.ts)
+ * and never leaves the server; the UI sees whether it is set.
  *
  * Settings → System, the `settings` CLI command and the get/set_instance_settings MCP tools all go
  * through `set()` here, so validation, cross-checks and the audit event are the same everywhere.
@@ -23,6 +24,7 @@ import { createSecretBox } from "./ai/crypto.js";
 export const SETTING_GROUPS = [
   ["access", "Access"],
   ["limits", "Limits"],
+  ["pipeline", "Pipeline"],
   ["retention", "Retention"],
   ["operations", "Operations"],
 ] as const;
@@ -69,6 +71,11 @@ export const RUNTIME_SETTINGS = {
   MAX_UPLOAD_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest accepted file upload, in MB."),
   MAX_SOURCE_FILE_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest file a link source may download (yt-dlp --max-filesize), in MB."),
   ALLOW_PRIVATE_SOURCE_URLS: def("limits", z.boolean(), "Let link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard)."),
+
+  TRANSCRIPT_CORRECTION: def("pipeline", z.boolean(), "After transcription, fix misheard names with the language model. Off by default (ceiling closed); turn on so projects may opt in via refineEntities."),
+  DISFLUENCY_REMOVAL: def("pipeline", z.boolean(), "Detect fillers, repetitions and false starts after transcription. Off by default; turn on so projects may opt in via refineDisfluency."),
+  DISFLUENCY_LLM: def("pipeline", z.boolean(), "Model pass on top of rule-based disfluency detection. Off by default. Ignored when disfluency removal is off. Turn on so projects may opt in via disfluencyLlm."),
+  REFINE_SCENES: def("pipeline", z.boolean(), "Detect scene cuts and on-screen text during refine. Off by default; turn on so projects may opt in via refineScenes."),
 
   SOURCE_RETENTION_DAYS: def("retention", int0, days("Delete stored source videos this many days after upload; the project stays and Retry re-fetches.")),
   CLIP_RETENTION_DAYS: def("retention", int0, days("Delete rendered clip files this many days after rendering; the clip stays and can be re-rendered.")),
