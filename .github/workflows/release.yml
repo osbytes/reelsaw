@@ -118,7 +118,7 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           mkdir -p out/reelsaw
-          cp deploy/docker-compose.yml deploy/.env.example deploy/README.md deploy/install.sh deploy/install.ps1 out/reelsaw/
+          cp deploy/docker-compose.yml deploy/docker-compose.gpu.yml deploy/.env.example deploy/README.md deploy/install.sh deploy/install.ps1 out/reelsaw/
           sed -i "s#ghcr.io/osbytes/reelsaw:latest#${GHCR_IMAGE}:${VERSION}#g" out/reelsaw/install.sh out/reelsaw/install.ps1
           # pin the default image to this release
           sed -i "s#\${REELSAW_IMAGE:-[^}]*}#\${REELSAW_IMAGE:-${GHCR_IMAGE}:${VERSION}}#" out/reelsaw/docker-compose.yml

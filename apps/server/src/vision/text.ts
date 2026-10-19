@@ -7,6 +7,7 @@
  * Input: 640×352 RGB frame. Output: text boxes in normalized [0..1] coordinates.
  */
 import fs from "node:fs/promises";
+import { createOnnxSession, type OnnxOptions, type OnnxProvider } from "../onnx.js";
 
 export const TEXT_INPUT_W = 640;
 export const TEXT_INPUT_H = 352;
@@ -23,6 +24,8 @@ export interface TextDetector {
   /** `rgb` is packed RGB24 of exactly TEXT_INPUT_W×TEXT_INPUT_H. */
   detect(rgb: Uint8Array): Promise<TextBox[]>;
   release(): Promise<void>;
+  /** onnxruntime execution provider the model runs on (ONNX_EXECUTION_PROVIDER, or cpu after a fallback) */
+  readonly provider: OnnxProvider;
 }
 
 const MEAN = [0.485, 0.456, 0.406];
@@ -80,11 +83,11 @@ export function boxesFromProbMap(prob: Float32Array, w: number, h: number, opts 
   return out;
 }
 
-export async function loadTextDetector(modelPath: string): Promise<TextDetector> {
+export async function loadTextDetector(modelPath: string, opts: OnnxOptions = {}): Promise<TextDetector> {
   await fs.access(modelPath);
   const ort = await import("onnxruntime-node");
   ort.env.logLevel = "error";
-  const session = await ort.InferenceSession.create(modelPath, { graphOptimizationLevel: "all", intraOpNumThreads: 2, logSeverityLevel: 3 });
+  const { session, provider } = await createOnnxSession(ort, modelPath, { graphOptimizationLevel: "all", intraOpNumThreads: 2, logSeverityLevel: 3 }, opts);
   const inputName = session.inputNames[0]!;
   const outputName = session.outputNames[0]!;
   const n = TEXT_INPUT_W * TEXT_INPUT_H;
@@ -107,5 +110,6 @@ export async function loadTextDetector(modelPath: string): Promise<TextDetector>
       return boxesFromProbMap(prob, TEXT_INPUT_W, TEXT_INPUT_H);
     },
     release: () => session.release(),
+    provider,
   };
 }

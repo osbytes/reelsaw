@@ -25,6 +25,7 @@ import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
 import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
+import type { VideoEncoder } from "../media.js";
 import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
 
 const OUT_W = 1080;
@@ -509,7 +510,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   return { graph, audioMap };
   };
-  const encode = async (withBumpers: boolean) => {
+  const encodeWith = async (withBumpers: boolean, encoder: VideoEncoder) => {
   const { graph, audioMap } = buildGraph(withBumpers);
   const introSec = withBumpers && bumpers.intro ? bumpers.intro.sec : 0;
   const outroSec = withBumpers && bumpers.outro ? bumpers.outro.sec : 0;
@@ -521,7 +522,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       "-filter_complex", graph,
       "-map", "[v]", ...audioMap,
       "-threads", String(svc.resources.ffmpegThreads()),
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-r", "30",
+      ...svc.media.videoEncodeArgs(encoder), "-pix_fmt", "yuv420p", "-r", "30",
       "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
       "-movflags", "+faststart", "-f", "mp4", tmpOut,
     ],
@@ -529,6 +530,18 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     { signal: ctx.signal, onProgress: (sec) => void ctx.progress(sec / (introSec + outDuration + outroSec), `Rendering clip ${clip.index + 1}`, { clipId }).catch(() => {}) },
   );
   return { introSec, outroSec };
+  };
+  // a hardware encoder can fail where the probe passed (NVENC session limit, VRAM, a driver reset): the
+  // clip is then encoded on the CPU rather than failed, and the line says so
+  const encode = async (withBumpers: boolean) => {
+    const encoder = svc.media.encoder().name;
+    try {
+      return await encodeWith(withBumpers, encoder);
+    } catch (err) {
+      if (encoder === "libx264" || ctx.signal.aborted) throw err;
+      log.warn({ err, encoder }, "hardware encoder failed; encoding this clip with libx264");
+      return await encodeWith(withBumpers, "libx264");
+    }
   };
   let attached: { introSec: number; outroSec: number };
   let usedBumpers = !!(bumpers.intro || bumpers.outro);
@@ -636,7 +649,7 @@ async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: stri
       // an image lasts as long as this clip or project says, else its own default; a video keeps its length
       const used = asset.kind === "image" && secs[slot] ? { ...asset, durationSec: secs[slot]! } : asset;
       const file = await ensureNormalised(
-        { ffmpeg: (args, o) => svc.media.ffmpeg(args, o), storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") },
+        { ffmpeg: (args, o) => svc.media.ffmpeg(args, o), encodeArgs: svc.media.videoEncodeArgs(), log: ctx.log, storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") },
         used,
         { width: OUT_W, height: OUT_H, fitChain: FIT_CHAIN(OUT_W, OUT_H) },
         ctx.signal,

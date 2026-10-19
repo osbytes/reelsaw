@@ -5,6 +5,7 @@
  * Model: https://github.com/onnx/models/tree/main/validated/vision/body_analysis/ultraface (MIT)
  */
 import fs from "node:fs/promises";
+import { createOnnxSession, type OnnxOptions, type OnnxProvider } from "../onnx.js";
 
 export const FACE_INPUT_W = 320;
 export const FACE_INPUT_H = 240;
@@ -22,6 +23,8 @@ export interface FaceDetector {
   detect(rgb: Uint8Array, threshold?: number): Promise<FaceBox[]>;
   /** Free the ONNX session. Must run before process exit or onnxruntime aborts on teardown. */
   release(): Promise<void>;
+  /** onnxruntime execution provider the model runs on (ONNX_EXECUTION_PROVIDER, or cpu after a fallback) */
+  readonly provider: OnnxProvider;
 }
 
 type Ort = typeof import("onnxruntime-node");
@@ -43,11 +46,11 @@ export function nms(boxes: FaceBox[], iouThreshold = 0.4): FaceBox[] {
   return keep;
 }
 
-export async function loadFaceDetector(modelPath: string): Promise<FaceDetector> {
+export async function loadFaceDetector(modelPath: string, opts: OnnxOptions = {}): Promise<FaceDetector> {
   await fs.access(modelPath);
   const ort: Ort = await import("onnxruntime-node");
   ort.env.logLevel = "error"; // the published UltraFace graph triggers harmless initializer warnings
-  const session = await ort.InferenceSession.create(modelPath, { graphOptimizationLevel: "all", intraOpNumThreads: 1, logSeverityLevel: 3 });
+  const { session, provider } = await createOnnxSession(ort, modelPath, { graphOptimizationLevel: "all", intraOpNumThreads: 1, logSeverityLevel: 3 }, opts);
   const inputName = session.inputNames[0]!;
   const n = FACE_INPUT_W * FACE_INPUT_H;
 
@@ -81,5 +84,6 @@ export async function loadFaceDetector(modelPath: string): Promise<FaceDetector>
       return nms(found);
     },
     release: () => session.release(),
+    provider,
   };
 }

@@ -21,6 +21,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
  *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
+ *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
+ *                                           where each on-device model runs (same as Settings → System → Overview)
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
@@ -245,6 +247,30 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         stored: formatBytes(u.storedBytes),
       })),
     );
+  },
+  /**
+   * What this box runs on and what the pipeline can use of it: CPUs, memory, disk, the GPU the process
+   * sees, the ffmpeg encoder in use and why, and the execution provider of each on-device model. The
+   * same facts as Settings → System → Overview; `--json` for scripts.
+   */
+  async machine(svc) {
+    const r = await svc.resources.snapshot();
+    const gpu = svc.resources.gpu();
+    const enc = svc.media.encoder();
+    const onDevice = { requested: svc.config.ONNX_EXECUTION_PROVIDER, faces: svc.faces?.provider ?? null, text: svc.text?.provider ?? null, vad: svc.vad ? "cpu" : null, aligner: svc.aligner?.provider ?? null };
+    const renders = { ...svc.resources.renders(), max: svc.resources.maxRenders() };
+    if (args.includes("--json")) return void console.log(JSON.stringify({ resources: r, gpu, videoEncoder: enc, onDevice, renders, models: svc.models.get() }, null, 2));
+    const line = (k: string, v: string) => console.log(`${k.padEnd(16)} ${v}`);
+    line("platform", `${r.platform} ${process.arch}, node ${process.version}`);
+    line("cpu", `${r.cpus} cores, ${r.cpuPercent}% busy${r.load1 !== null ? `, load ${r.load1}` : ""}`);
+    line("memory", `${r.memAvailableMB} MB free of ${r.memTotalMB} MB`);
+    line("disk", r.diskFreeMB >= 0 ? `${r.diskFreeMB} MB free of ${r.diskTotalMB} MB` : "not measurable on this filesystem");
+    line("gpu", gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device present, no driver tools"}\n${"".padEnd(17)}${gpu.note}` : "none visible to this process (Docker: start with docker-compose.gpu.yml to hand an NVIDIA card over)");
+    line("video encoder", `${enc.name} (FFMPEG_ENCODER=${enc.requested}): ${enc.reason}`);
+    line("renders", renders.mode === "auto" ? `${renders.running} running, up to ${renders.max} (RENDER_CONCURRENCY=auto)` : `${renders.running} running, fixed ${renders.max}`);
+    line("on-device", `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`);
+    line("models", `${svc.models.get().language}, ${svc.models.get().transcription}${svc.models.get().align ? `, align ${svc.models.get().align}` : ""}`);
+    console.log("\nSpeech-to-text and the language model run in their own containers: Speaches uses the GPU with SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda, Ollama when its container has the device (docker-compose.gpu.yml).");
   },
   /** One account's quotas (0 = unlimited). Change them in Users → Limits. */
   async limits(svc) {
@@ -754,7 +780,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

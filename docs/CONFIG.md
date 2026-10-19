@@ -119,6 +119,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |
 | `VAD` | `true` | Silero voice activity detection for tightening long pauses. false = never trim silence. |
 | `ALIGNER` | `true` | wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search. |
+| `ONNX_EXECUTION_PROVIDER` | `cpu` | Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu \| cuda \| coreml \| dml`. Values: `cpu | cuda | coreml | dml`. |
 | `ALIGN_MODEL_DIR` | `./models/wav2vec2-base-960h` | wav2vec2 model directory. |
 | `VAD_MODEL_PATH` | `./models/silero-vad.onnx` | Silero VAD ONNX model. |
 | `TEXT_MODEL_PATH` | `./models/ppocrv4-det.onnx` | PP-OCRv4 text detector ONNX model. |
@@ -188,6 +189,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary. |
+| `FFMPEG_ENCODER` | `auto` | H.264 encoder for clips, intros/outros and previews. `auto` probes `h264_nvenc` (NVIDIA, container started with docker-compose.gpu.yml) then `h264_videotoolbox` (macOS, outside Docker) at boot and keeps `libx264` otherwise; naming one makes boot fail if it cannot encode. A hardware encoder that fails mid-render is retried on libx264. Settings → System and `reelsaw machine` show the one in use and why. Values: `auto \| libx264 \| h264_nvenc \| h264_videotoolbox`. Values: `auto | libx264 | h264_nvenc | h264_videotoolbox`. |
 | `FFPROBE_PATH` | `ffprobe` | ffprobe binary. |
 | `YTDLP_PATH` | `yt-dlp` | yt-dlp binary. |
 | `YTDLP_PROXY` | unset | Route yt-dlp through a proxy. YouTube blocks many datacentre IPs. |
@@ -200,7 +202,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | `reelsaw` | Database password used by both the db and app containers (compose only). |
 | `REELSAW_IMAGE` | `ghcr.io/osbytes/reelsaw:latest` | Image the compose file runs (compose only). |
-| `WHISPER_MODEL` | `Systran/faster-whisper-small` | Speech model the Speaches container downloads (`Systran/faster-whisper-large-v3` on a GPU). Compose only. |
+| `WHISPER_MODEL` | `Systran/faster-whisper-small` | Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only. |
+| `SPEACHES_IMAGE` | `ghcr.io/speaches-ai/speaches:latest-cpu` | Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`; the installer picks it). Compose only. |
 | `RUN_WORKERS_IN_APP` | `true` | Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs. |
 | `OTEL_SERVICE_NAME` | `reelsaw` | OpenTelemetry service name (read by otel.ts). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP collector, e.g. `http://otel-collector:4318`. |

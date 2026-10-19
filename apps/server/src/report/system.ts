@@ -31,7 +31,10 @@ export async function systemInfo(svc: Services) {
     runtime: { node: process.version, platform: process.platform, arch: process.arch, uptimeSec: Math.round(process.uptime()), rssMB: Math.round(process.memoryUsage().rss / 1048576) },
     resources: await svc.resources.snapshot().catch(() => null),
     tools: { ffmpeg: await toolVersion(c.FFMPEG_PATH, ["-version"]), ytDlp: await toolVersion("yt-dlp", ["--version"]) },
-    onDevice: { faces: !!svc.faces, text: !!svc.text, vad: !!svc.vad, aligner: !!svc.aligner },
+    gpu: svc.resources.gpu(),
+    videoEncoder: svc.media.encoder(),
+    // the execution provider each on-device model runs on (null = off); the VAD is always on the cpu
+    onDevice: { requested: c.ONNX_EXECUTION_PROVIDER, faces: svc.faces?.provider ?? null, text: svc.text?.provider ?? null, vad: svc.vad ? "cpu" : null, aligner: svc.aligner?.provider ?? null },
     storage: svc.storage.driver,
     roles: { http: c.RUN_HTTP, workers: c.RUN_WORKERS },
   };

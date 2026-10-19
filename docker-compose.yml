@@ -106,7 +106,8 @@ services:
     #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
 
   speaches:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu   # use :latest-cuda with an NVIDIA GPU
+    # SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda in .env with an NVIDIA GPU (docker-compose.gpu.yml hands the card over)
+    image: ${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu}
     profiles: ["local-ai"]
     restart: unless-stopped
     environment:

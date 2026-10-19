@@ -104,6 +104,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   VAD_MODEL_PATH: ["local", "Silero VAD ONNX model."],
   ALIGNER: ["local", "wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search."],
   ALIGN_MODEL_DIR: ["local", "wav2vec2 model directory."],
+  ONNX_EXECUTION_PROVIDER: ["local", "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`."],
   ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot."],
 
   STORAGE_DRIVER: ["storage", "`local` (inside DATA_DIR) or `s3`."],
@@ -151,6 +152,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   OTEL_ENABLED: ["observability", "OpenTelemetry traces and metrics over OTLP/HTTP (see the OTEL_* variables at the end)."],
 
   FFMPEG_PATH: ["tools", "ffmpeg binary."],
+  FFMPEG_ENCODER: ["tools", "H.264 encoder for clips, intros/outros and previews. `auto` probes `h264_nvenc` (NVIDIA, container started with docker-compose.gpu.yml) then `h264_videotoolbox` (macOS, outside Docker) at boot and keeps `libx264` otherwise; naming one makes boot fail if it cannot encode. A hardware encoder that fails mid-render is retried on libx264. Settings → System and `reelsaw machine` show the one in use and why. Values: `auto | libx264 | h264_nvenc | h264_videotoolbox`."],
   FFPROBE_PATH: ["tools", "ffprobe binary."],
   YTDLP_PATH: ["tools", "yt-dlp binary."],
   YTDLP_PROXY: ["tools", "Route yt-dlp through a proxy. YouTube blocks many datacentre IPs."],
@@ -159,7 +161,8 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   POSTGRES_PASSWORD: ["compose", "Database password used by both the db and app containers (compose only)."],
   REELSAW_IMAGE: ["compose", "Image the compose file runs (compose only)."],
-  WHISPER_MODEL: ["compose", "Speech model the Speaches container downloads (`Systran/faster-whisper-large-v3` on a GPU). Compose only."],
+  WHISPER_MODEL: ["compose", "Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only."],
+  SPEACHES_IMAGE: ["compose", "Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`; the installer picks it). Compose only."],
   RUN_WORKERS_IN_APP: ["compose", "Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs."],
   OTEL_SERVICE_NAME: ["compose", "OpenTelemetry service name (read by otel.ts)."],
   OTEL_EXPORTER_OTLP_ENDPOINT: ["compose", "OTLP/HTTP collector, e.g. `http://otel-collector:4318`."],
@@ -174,6 +177,7 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
   POSTGRES_PASSWORD: "reelsaw",
   REELSAW_IMAGE: "ghcr.io/osbytes/reelsaw:latest",
   WHISPER_MODEL: "Systran/faster-whisper-small",
+  SPEACHES_IMAGE: "ghcr.io/speaches-ai/speaches:latest-cpu",
   RUN_WORKERS_IN_APP: "true",
   OTEL_SERVICE_NAME: "reelsaw",
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",

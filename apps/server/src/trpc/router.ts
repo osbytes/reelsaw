@@ -550,6 +550,10 @@ export const appRouter = router({
       mcpUrl: new URL("/api/mcp", ctx.svc.config.APP_URL).toString(),
       maxUploadMb: ctx.svc.settings.get().MAX_UPLOAD_MB,
       renderConcurrency: { ...ctx.svc.resources.renders(), max: ctx.svc.resources.maxRenders() },
+      /** the GPU this process sees, the ffmpeg encoder renders use and where each on-device model runs (ONNX_EXECUTION_PROVIDER; the VAD is always cpu) */
+      gpu: ctx.svc.resources.gpu(),
+      videoEncoder: ctx.svc.media.encoder(),
+      onDevice: { requested: ctx.svc.config.ONNX_EXECUTION_PROVIDER, faces: ctx.svc.faces?.provider ?? null, text: ctx.svc.text?.provider ?? null, vad: ctx.svc.vad ? ("cpu" as const) : null, aligner: ctx.svc.aligner?.provider ?? null },
       otel: ctx.svc.otel.enabled,
       defaults: defaultProjectSettings,
       resources: await ctx.svc.resources.snapshot(),
