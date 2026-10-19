@@ -20,9 +20,9 @@ import on the server, a lazy chunk in the browser), so a self-hosted install has
 loads it. Having it there is allowed by its licence (copying for development and testing is free;
 only production use needs an agreement), and a self-hosted install never uses it in production.
 
-Combining AGPL code with the separately licensed `ee/` in one distributed work is only possible
-while osbytes holds the copyright on the AGPL part. Contributions carry a DCO sign-off
-([CONTRIBUTING.md](CONTRIBUTING.md)), which certifies the right to submit under the AGPL; it does
-not grant osbytes the right to combine or relicense a contribution. Before the first outside
-contribution is merged, the project adds a contributor licence agreement (as Cal.com and GitLab do)
-or moves `ee/` out of the public image into a separate build of the hosted service.
+Combining AGPL code with the separately licensed `ee/` in one distributed work needs the right to
+distribute every contribution under both licences. A DCO sign-off alone certifies the right to
+submit under the AGPL; it does not grant that. So contributors sign the
+[Contributor License Agreement](CLA.md) once (a line in `.github/cla-signatures.json` in their
+first pull request; they keep their copyright), and every commit still carries the DCO sign-off.
+CI enforces both (`.github/workflows/contributors.yml`), and `main` requires those checks.

@@ -30,12 +30,18 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
   `.env.example`, `docs/CONFIG.md` and the command/suite tables are generated from the code.
 - Keep docs current: `README.md`, `docs/CONFIG.md` (generated), `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`.
 
-## Licensing and the Developer Certificate of Origin
+## Licensing: the CLA and the Developer Certificate of Origin
 
-Reelsaw is licensed under the [GNU AGPL-3.0](LICENSE). By contributing you agree that your
-contribution is licensed under the same terms, and you certify the
-[Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the
-change or have the right to submit it under the project licence.
+Reelsaw's core is licensed under the [GNU AGPL-3.0](LICENSE) and the `ee/` folders under the
+Reelsaw Enterprise License ([LICENSING.md](LICENSING.md)). Two things keep that possible, and CI
+checks both on every pull request (`contributors` workflow: `DCO` and `CLA`):
+
+1. **Sign the [Contributor License Agreement](CLA.md) once.** In your first pull request, add a
+   line with your GitHub login to `.github/cla-signatures.json`. The CLA is a licence, not an
+   assignment: you keep your copyright and grant osbytes the right to distribute your contribution
+   under the project's licences, which is what lets the AGPL part and `ee/` ship as one program.
+2. **Certify the [Developer Certificate of Origin 1.1](https://developercertificate.org/) on every
+   commit:** that you wrote the change or have the right to submit it.
 
 Sign off every commit to say so:
 
@@ -43,8 +49,8 @@ Sign off every commit to say so:
 git commit -s -m "Describe the change"
 ```
 
-This adds a `Signed-off-by: Your Name <you@example.com>` trailer. No CLA, no paperwork.
+This adds a `Signed-off-by: Your Name <you@example.com>` trailer; the email must be the commit's
+author email. Forgot? `git rebase --signoff origin/main && git push --force-with-lease`.
 
-Code under a future `ee/` directory (hosted-only features such as billing) is licensed
-separately; contributions there are accepted under its own licence terms, stated in that
-directory. Everything else, including every feature in this repository today, is AGPL.
+Contributions to `apps/server/src/ee` and `apps/web/src/ee` are accepted under the Reelsaw
+Enterprise License in those folders; everything else is AGPL.
