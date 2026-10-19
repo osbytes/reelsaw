@@ -351,7 +351,7 @@ Push-Location $Dir
 try {
 
 $composeYaml = @'
-# Reelsaw (written by install.ps1). Start/stop: docker compose up -d / down (profiles come from .env)
+# Reelsaw (written by the installer). Start/stop: docker compose up -d / down (profiles come from .env)
 name: reelsaw
 
 x-app: &app

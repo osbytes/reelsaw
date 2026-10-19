@@ -410,7 +410,7 @@ mkdir -p "$DIR"
 cd "$DIR"
 
 cat > docker-compose.yml <<'YAML'
-# Reelsaw (written by install.sh). Start/stop: docker compose up -d / down (profiles come from .env)
+# Reelsaw (written by the installer). Start/stop: docker compose up -d / down (profiles come from .env)
 name: reelsaw
 
 x-app: &app
