@@ -14,7 +14,10 @@ export interface RunResult {
 }
 export interface RunOptions {
   signal?: AbortSignal;
+  /** each complete stderr line (split on \n or \r, so carriage-return progress bars arrive as lines) */
   onStderr?: (line: string) => void;
+  /** each complete stdout line; yt-dlp writes its `[download]` progress here, not to stderr */
+  onStdout?: (line: string) => void;
   cwd?: string;
 }
 export interface ProbeInfo {
@@ -101,23 +104,35 @@ export function parseProgressTime(line: string): number | undefined {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+/** Feeds complete lines (split on \n or \r) to `onLine`, buffering the unfinished tail across chunks. */
+export function lineSplitter(onLine?: (line: string) => void): (chunk: string) => void {
+  if (!onLine) return () => {};
+  let partial = "";
+  return (chunk) => {
+    partial += chunk;
+    const lines = partial.split(/\r?\n|\r/);
+    partial = lines.pop() ?? "";
+    for (const l of lines) onLine(l);
+  };
+}
+
 function runRaw(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { signal: opts.signal, cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    let partial = "";
-    child.stdout.on("data", (d) => (stdout += d.toString()));
+    const outLines = lineSplitter(opts.onStdout);
+    const errLines = lineSplitter(opts.onStderr);
+    child.stdout.on("data", (d) => {
+      const s = d.toString();
+      stdout += s;
+      outLines(s);
+    });
     child.stderr.on("data", (d) => {
       const s = d.toString();
       stderr += s;
       if (stderr.length > 200_000) stderr = stderr.slice(-100_000);
-      if (opts.onStderr) {
-        partial += s;
-        const lines = partial.split(/\r?\n|\r/);
-        partial = lines.pop() ?? "";
-        for (const l of lines) opts.onStderr(l);
-      }
+      errLines(s);
     });
     child.on("error", reject);
     child.on("close", (code) => (code === 0 ? resolve({ stdout, stderr }) : reject(new CommandError(bin, code, stderr))));

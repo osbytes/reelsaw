@@ -77,6 +77,21 @@ describe("runsOf", () => {
     assert.equal(r!.finishedAt, null);
   });
 
+  it("a stage's reported time is capped by the wall clock around it (ingest once reported the video's length)", () => {
+    const log = [
+      at(0, "project.created", { title: "T" }),
+      at(0, "run.started", { seq: 1, reason: "created" }),
+      at(1, "stage.started", { stage: "ingest" }),
+      at(241, "stage.completed", { stage: "ingest", durationSec: 5848 }), // 4 min download, 1:37:28 video
+      at(241, "stage.started", { stage: "transcribe" }),
+      at(541, "stage.completed", { stage: "transcribe", durationSec: 299.6 }), // precise clock stays when it fits
+      at(600, "project.done", { clips: 3, failed: 0, runSeq: 1, runReason: "created", runSec: 600 }),
+    ];
+    const run = runsOf(log)[0]!;
+    assert.equal(run.stages.ingest, 240);
+    assert.equal(run.stages.transcribe, 299.6);
+  });
+
   it("old events without durationSec or run.started still give durations and runs", () => {
     const log = [
       at(0, "project.created", { title: "old" }),
