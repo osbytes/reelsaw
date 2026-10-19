@@ -162,7 +162,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   POSTGRES_PASSWORD: ["compose", "Database password used by both the db and app containers (compose only)."],
   REELSAW_IMAGE: ["compose", "Image the compose file runs (compose only)."],
   WHISPER_MODEL: ["compose", "Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only."],
-  SPEACHES_IMAGE: ["compose", "Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`; the installer picks it). Compose only."],
+  SPEACHES_IMAGE: ["compose", "Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` on Linux/macOS, `;` instead of `:` on Windows; the installer picks it). Compose only."],
   RUN_WORKERS_IN_APP: ["compose", "Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs."],
   OTEL_SERVICE_NAME: ["compose", "OpenTelemetry service name (read by otel.ts)."],
   OTEL_EXPORTER_OTLP_ENDPOINT: ["compose", "OTLP/HTTP collector, e.g. `http://otel-collector:4318`."],

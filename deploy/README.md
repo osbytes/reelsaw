@@ -93,6 +93,7 @@ on the host (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemc
 Windows: Docker Desktop on WSL2 with the Windows driver), then add to `.env`:
 
 ```
+# Linux/macOS (colon). On Windows use a semicolon: docker-compose.yml;docker-compose.gpu.yml
 COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
 SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda
 WHISPER_MODEL=Systran/faster-whisper-large-v3
@@ -102,6 +103,8 @@ TRANSCRIPTION_MODEL=openai:Systran/faster-whisper-large-v3
 and start as usual. Speaches then transcribes on the card with the large model, Ollama in a
 container uses it for the language model, and renders encode with NVENC. Check with
 `docker compose exec app reelsaw machine` or Settings → System → Overview (GPU, video encoder).
+On Docker Desktop (Windows), `gpu` may show `/dev/dxg` rather than a named card, and
+`nvidia-smi` is usually not in the app image — trust `video encoder: h264_nvenc` instead.
 macOS has no CUDA in Docker: run Ollama natively (Metal) and leave Speaches on the CPU.
 
 ## Configuration

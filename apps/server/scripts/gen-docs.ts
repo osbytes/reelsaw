@@ -45,7 +45,8 @@ async function envRows(): Promise<Row[]> {
     if (!doc) problems.push(`env ${name} has no group: add it to DOCS in apps/server/scripts/docs-meta.ts`);
     const v = parsed[name];
     let def = v === undefined ? "" : String(v);
-    def = def.split(process.cwd() + path.sep).join("./").split(process.cwd()).join(".");
+    // schema defaults use path.resolve, so Windows emits `\`; docs always show POSIX relative paths
+    def = def.split(process.cwd() + path.sep).join("./").split(process.cwd()).join(".").replace(/\\/g, "/");
     if (name === "DATA_DIR") def = "./data";
     let values: string | undefined;
     let t = field;

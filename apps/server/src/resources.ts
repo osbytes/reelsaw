@@ -30,7 +30,7 @@ export interface ResourceSnapshot {
   ok: { cpu: boolean; memory: boolean; disk: boolean };
 }
 
-/** The GPU this process can see, found once at boot (nvidia-smi, /dev/nvidia*, or the Apple chip). */
+/** The GPU this process can see, found once at boot (nvidia-smi, /dev/nvidia*, /dev/dxg, or the Apple chip). */
 export interface GpuInfo {
   vendor: "nvidia" | "apple";
   /** device names, e.g. "NVIDIA GeForce RTX 4060 (8188 MB)" or "Apple M2 Pro" */
@@ -41,7 +41,20 @@ export interface GpuInfo {
 
 const execFileAsync = promisify(execFile);
 
-/** nvidia-smi inside the container means the NVIDIA runtime handed the GPU over; a bare /dev/nvidia0 means the device without the driver tools. */
+/**
+ * Which NVIDIA device node is mapped into this process, if any.
+ * Docker Desktop on Windows (WSL2) exposes the GPU as `/dev/dxg`, not `/dev/nvidia0`.
+ * `access` is injectable for tests.
+ */
+export async function nvidiaDeviceNode(
+  access: (path: string) => Promise<boolean> = (p) => fs.access(p).then(() => true, () => false),
+): Promise<"nvidia0" | "dxg" | null> {
+  if (await access("/dev/nvidia0")) return "nvidia0";
+  if (await access("/dev/dxg")) return "dxg";
+  return null;
+}
+
+/** nvidia-smi inside the container means the NVIDIA runtime handed the GPU over; a bare device node means the card without the driver tools. */
 export async function detectGpu(platform: NodeJS.Platform = process.platform, arch = process.arch): Promise<GpuInfo | null> {
   try {
     const { stdout } = await execFileAsync("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], { timeout: 5000 });
@@ -57,8 +70,18 @@ export async function detectGpu(platform: NodeJS.Platform = process.platform, ar
   } catch {
     /* no nvidia-smi: not an NVIDIA machine, or the container was started without the GPU */
   }
-  if (platform === "linux" && (await fs.access("/dev/nvidia0").then(() => true, () => false))) {
-    return { vendor: "nvidia", devices: [], note: "/dev/nvidia0 is present but nvidia-smi is not: the device is mapped without the NVIDIA runtime's tools" };
+  if (platform === "linux") {
+    const node = await nvidiaDeviceNode();
+    if (node === "nvidia0") {
+      return { vendor: "nvidia", devices: [], note: "/dev/nvidia0 is present but nvidia-smi is not: the device is mapped without the NVIDIA runtime's tools" };
+    }
+    if (node === "dxg") {
+      return {
+        vendor: "nvidia",
+        devices: [],
+        note: "/dev/dxg is present (Docker Desktop on WSL2): NVENC works when FFMPEG_ENCODER allows it; this image usually has no nvidia-smi",
+      };
+    }
   }
   if (platform === "darwin" && arch === "arm64") {
     return { vendor: "apple", devices: [os.cpus()[0]?.model ?? "Apple silicon"], note: "Metal is used by a native Ollama; ffmpeg can use VideoToolbox outside Docker (FFMPEG_ENCODER)" };

@@ -200,8 +200,12 @@ and list it in `SUPPORTED` in `language.ts`.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
 - **"The GPU is not used."** `reelsaw machine` (or Settings → System → Overview) says what the app process sees.
   `gpu: none` inside Docker means the container was started without the device: `.env` needs
-  `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` and the host the NVIDIA Container Toolkit
-  (`docker compose exec app nvidia-smi -L` must list the card). `video encoder: libx264 … no hardware encoder
+  `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` (on Windows use a semicolon,
+  `docker-compose.yml;docker-compose.gpu.yml` — a colon is the drive-letter separator and Compose
+  treats the value as one broken path) and the host the NVIDIA Container Toolkit. On Linux,
+  `docker compose exec app nvidia-smi -L` should list the card; on Docker Desktop (Windows/WSL2)
+  the GPU shows up as `/dev/dxg` and the published image usually has no `nvidia-smi` — check
+  `video encoder: h264_nvenc` instead. `video encoder: libx264 … no hardware encoder
   available (h264_nvenc: …)` quotes ffmpeg's reason; the usual ones are the missing device or
   `NVIDIA_DRIVER_CAPABILITIES` without `video` (the override sets it). Speaches on the GPU is a separate matter:
   it needs `SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda`, and `docker compose logs speaches` says which device it loaded the
