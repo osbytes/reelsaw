@@ -73,8 +73,9 @@ export async function loadAligner(dir: string, opts: OnnxOptions = {}): Promise<
 }
 
 /**
- * Viterbi over the CTC trellis for the fixed token sequence "W O R D | W O R D …", then token spans →
- * word spans. Exported for tests.
+ * Viterbi over the CTC lattice for the fixed token sequence "W O R D | W O R D …", then token spans →
+ * word spans. Uses the standard blank-interleaved state sequence so adjacent repeated letters must
+ * go through a blank (a direct L→L advance is not a valid CTC path). Exported for tests.
  */
 export function forceAlign(emit: Float32Array, T: number, C: number, words: string[], vocab: Record<string, number>, blank: number, sep: number): WordSpan[] {
   // tokens with the word each belongs to (-1 for separators)
@@ -95,46 +96,67 @@ export function forceAlign(emit: Float32Array, T: number, C: number, words: stri
   const J = tokens.length;
   const out: WordSpan[] = words.map((text) => ({ text }));
   if (!J || T < J) return out;
-  // trellis[t][j]: best log-prob of emitting tokens[0..j-1] in frames [0..t-1]
+
+  // CTC states: blank, t0, blank, t1, …, blank, t_{J-1}, blank. Skip-blank (s←s−2) is only legal
+  // when the destination is a non-blank label different from the label two back — so "LL" cannot
+  // advance without emitting blank between the two L states.
+  const S = 2 * J + 1;
+  const state = new Int32Array(S);
+  for (let i = 0; i < S; i += 2) state[i] = blank;
+  for (let i = 0; i < J; i++) state[2 * i + 1] = tokens[i]!;
+
   const NEG = -1e30;
-  const trellis = new Float64Array((T + 1) * (J + 1)).fill(NEG);
+  // trellis[t][s]: best log-prob of being in state s after consuming frames [0..t-1]
+  const trellis = new Float64Array((T + 1) * S).fill(NEG);
   trellis[0] = 0;
   for (let t = 0; t < T; t++) {
-    trellis[(t + 1) * (J + 1)] = trellis[t * (J + 1)]! + emit[t * C + blank]!;
-    for (let j = 1; j <= J; j++) {
-      const stay = trellis[t * (J + 1) + j]! + emit[t * C + blank]!;
-      const stayTok = trellis[t * (J + 1) + j]! + emit[t * C + tokens[j - 1]!]!; // repeat of the same token
-      const move = trellis[t * (J + 1) + j - 1]! + emit[t * C + tokens[j - 1]!]!;
-      trellis[(t + 1) * (J + 1) + j] = Math.max(stay, stayTok, move);
+    for (let s = 0; s < S; s++) {
+      const e = emit[t * C + state[s]!]!;
+      let best = trellis[t * S + s]! + e; // stay
+      if (s > 0) best = Math.max(best, trellis[t * S + s - 1]! + e); // advance from previous state
+      // skip the intervening blank only when this label differs from the one before that blank
+      if (s >= 2 && state[s]! !== blank && state[s]! !== state[s - 2]!) {
+        best = Math.max(best, trellis[t * S + s - 2]! + e);
+      }
+      trellis[(t + 1) * S + s] = best;
     }
   }
-  // backtrack: for each token, the frames where it was emitted
+
+  // end on the last label or the final blank
+  const endLastTok = trellis[T * S + (S - 2)]!;
+  const endBlank = trellis[T * S + (S - 1)]!;
+  if (endLastTok <= NEG && endBlank <= NEG) return out;
+  let s = endBlank >= endLastTok ? S - 1 : S - 2;
+
   const first = new Int32Array(J).fill(-1);
   const last = new Int32Array(J).fill(-1);
   const prob = new Float64Array(J);
-  let j = J;
-  for (let t = T; t > 0 && j > 0; t--) {
-    const tok = tokens[j - 1]!;
-    const move = trellis[(t - 1) * (J + 1) + j - 1]! + emit[(t - 1) * C + tok]!;
-    const stayTok = trellis[(t - 1) * (J + 1) + j]! + emit[(t - 1) * C + tok]!;
-    const stayBlank = trellis[(t - 1) * (J + 1) + j]! + emit[(t - 1) * C + blank]!;
-    const best = Math.max(move, stayTok, stayBlank);
-    if (best === stayBlank && stayBlank > move) continue; // blank frame, same token position
-    // this frame emits token j-1
-    if (last[j - 1] === -1) last[j - 1] = t - 1;
-    first[j - 1] = t - 1;
-    prob[j - 1] += emit[(t - 1) * C + tok]!;
-    if (best === move) j--;
+  for (let t = T; t > 0 && s >= 0; t--) {
+    const e = emit[(t - 1) * C + state[s]!]!;
+    const stay = trellis[(t - 1) * S + s]! + e;
+    const from1 = s > 0 ? trellis[(t - 1) * S + s - 1]! + e : NEG;
+    const from2 = s >= 2 && state[s]! !== blank && state[s]! !== state[s - 2]! ? trellis[(t - 1) * S + s - 2]! + e : NEG;
+    const best = Math.max(stay, from1, from2);
+    if (state[s]! !== blank) {
+      const k = (s - 1) >> 1;
+      if (last[k]! === -1) last[k] = t - 1;
+      first[k] = t - 1;
+      prob[k]! += e;
+    }
+    // ties keep the current state (longer dwell), matching the previous decoder's stay preference
+    if (best === from2 && from2 > stay && from2 >= from1) s -= 2;
+    else if (best === from1 && from1 > stay) s -= 1;
   }
+
   // token spans → word spans
   for (let k = 0; k < J; k++) {
     const wi = owner[k]!;
     if (wi < 0 || first[k]! < 0) continue;
     const w = out[wi]!;
-    const s = first[k]! * STRIDE_SEC;
-    const e = (last[k]! + 1) * STRIDE_SEC;
-    w.start = w.start === undefined ? s : Math.min(w.start, s);
-    w.end = w.end === undefined ? e : Math.max(w.end, e);
+    const start = first[k]! * STRIDE_SEC;
+    const end = (last[k]! + 1) * STRIDE_SEC;
+    w.start = w.start === undefined ? start : Math.min(w.start, start);
+    w.end = w.end === undefined ? end : Math.max(w.end, end);
     w.score = (w.score ?? 0) + prob[k]!;
   }
   return out.map((w) => (w.start === undefined ? w : { ...w, start: Number(w.start.toFixed(3)), end: Number(w.end!.toFixed(3)), score: Number((w.score! / Math.max(1, [...w.text].length)).toFixed(3)) }));
