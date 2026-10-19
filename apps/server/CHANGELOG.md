@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.11.2
+
+### Patch Changes
+
+- [#64](https://github.com/osbytes/reelsaw/pull/64) [`c093611`](https://github.com/osbytes/reelsaw/commit/c0936116cdf7f12563d75ccc993c49a78c9a4b3f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Transactional emails (verify, reset password, approved, waiting for approval) now send branded HTML with a clear button, plus the same links in plain text. No tracking.
+
+- [#65](https://github.com/osbytes/reelsaw/pull/65) [`bbbae38`](https://github.com/osbytes/reelsaw/commit/bbbae387d6457283f58fac6141f304abfbdbc258) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `pnpm stripe:setup` rebuilds `@reelsaw/shared` first so a stale shared build cannot miss exports like `billingPath`.
+
 ## 0.11.1
 
 ### Patch Changes
