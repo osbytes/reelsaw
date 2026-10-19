@@ -1,0 +1,99 @@
+# Two guards on every pull request, no external actions:
+#   DCO  every non-bot commit carries a Signed-off-by trailer naming its author (developercertificate.org)
+#   CLA  every non-bot author of the PR's commits is in .github/cla-signatures.json at the PR head
+#        (contributors sign CLA.md by adding themselves in their first PR), unless allowlisted
+# Both are required status checks on main (branch protection). Forks get a read-only token, so the
+# verdict and the fix are written to the job summary and the failing step, not as a PR comment.
+name: contributors
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  # accounts that do not sign: the maintainer and the bots that open PRs
+  ALLOWLIST: "dillonstreator,github-actions[bot],dependabot[bot]"
+
+jobs:
+  DCO:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r sha; do
+            email=$(git log -1 --format='%ae' "$sha" | tr '[:upper:]' '[:lower:]')
+            name=$(git log -1 --format='%an' "$sha")
+            case "$name" in *"[bot]"*) continue;; esac
+            trailers=$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha" | tr '[:upper:]' '[:lower:]')
+            if ! grep -q "<$email>" <<<"$trailers"; then
+              echo "::error::commit ${sha:0:10} ($name) has no Signed-off-by trailer for <$email>"
+              missing=$((missing+1))
+            fi
+          done < <(git rev-list --no-merges "$BASE..$HEAD")
+          if [ "$missing" -gt 0 ]; then
+            {
+              echo "## DCO: $missing commit(s) without a matching Signed-off-by"
+              echo
+              echo 'Every commit certifies the [Developer Certificate of Origin](https://developercertificate.org/). Fix with:'
+              echo
+              echo '```'
+              echo "git rebase --signoff $BASE && git push --force-with-lease"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "all commits signed off" >> "$GITHUB_STEP_SUMMARY"
+
+  CLA:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: every author has signed CLA.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          test -f .github/cla-signatures.json || { echo "::error::.github/cla-signatures.json is missing"; exit 1; }
+          signed=$(jq -r '.signatures[].login | ascii_downcase' .github/cla-signatures.json)
+          IFS=',' read -ra allow <<<"$ALLOWLIST"
+          unsigned=""
+          for login in $(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[] | (.author.login // ("unmapped:" + .commit.author.email))' | sort -u); do
+            l=$(tr '[:upper:]' '[:lower:]' <<<"$login")
+            skip=0
+            for a in "${allow[@]}"; do [ "$(tr '[:upper:]' '[:lower:]' <<<"$a")" = "$l" ] && skip=1; done
+            case "$l" in *"[bot]") skip=1;; esac
+            [ "$skip" = 1 ] && continue
+            if ! grep -qx "$l" <<<"$signed"; then unsigned="$unsigned $login"; fi
+          done
+          if [ -n "$unsigned" ]; then
+            {
+              echo "## CLA: not signed by$unsigned"
+              echo
+              echo 'Read [CLA.md](../blob/main/CLA.md), then add a line for your GitHub login to `.github/cla-signatures.json` in this pull request:'
+              echo
+              echo '```json'
+              echo '{ "login": "your-login", "signedAt": "YYYY-MM-DD" }'
+              echo '```'
+              echo
+              echo 'A commit author shown as `unmapped:<email>` has no GitHub account linked to that email: add the email to your GitHub account, or commit with the address GitHub knows.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::CLA not signed by:$unsigned (see the job summary)"
+            exit 1
+          fi
+          echo "every author has signed the CLA" >> "$GITHUB_STEP_SUMMARY"
