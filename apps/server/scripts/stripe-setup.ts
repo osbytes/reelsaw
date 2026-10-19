@@ -2,7 +2,10 @@
  * One-time Stripe setup for a hosted instance, from the plan list the server enforces (src/ee/billing/plans.ts).
  * Idempotent: re-running finds what exists by lookup key / metadata and changes only what differs.
  *
- *   STRIPE_SECRET_KEY=sk_test_… APP_URL=https://app.example.com tsx scripts/stripe-setup.ts [--tax-code txcd_10103000] [--webhook] [--portal] [--live]
+ *   STRIPE_SECRET_KEY=sk_test_… APP_URL=https://app.example.com pnpm stripe:setup [--tax-code txcd_10103000] [--webhook] [--portal] [--live]
+ *
+ * Prefer `pnpm stripe:setup` (rebuilds @reelsaw/shared first). Running tsx on this file directly
+ * needs a fresh `pnpm --filter @reelsaw/shared build` after shared changes.
  *
  *   - products: one per paid plan (metadata.plan = name) with the tax code (SaaS, personal use by default;
  *     Managed Payments needs an eligible code)
