@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.11.3
+
+### Patch Changes
+
+- [#67](https://github.com/osbytes/reelsaw/pull/67) [`4ca10a5`](https://github.com/osbytes/reelsaw/commit/4ca10a5db563bcf4da39a8fb69791e135b847df2) Thanks [@dillonstreator](https://github.com/dillonstreator)! - On hosted instances with Sentry or PostHog, "Report an issue" sends feedback through those channels instead of a zip download. Instance system info and recent errors stay available only for self-host and admins, so a hosted account cannot export another user's diagnostics.
+
 ## 0.11.2
 
 ### Patch Changes
