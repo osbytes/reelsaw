@@ -51,6 +51,24 @@ jobs:
       - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
         run: pnpm exec changeset status --since=origin/main
 
+  # reelsaw.com (website/): its own pnpm root with its own lockfile, so it is checked on its own
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+
   # TODO(stack tests): boot the compose stack, curl /api/health and run the stack tests (the test
   # files that import test/helpers.ts). Not enabled because it has never run in CI; what has to be
   # proven first is listed in docs/EVALS.md ("Stack tests in CI"). Sketch:

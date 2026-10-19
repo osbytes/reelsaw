@@ -1,0 +1,6 @@
+# Makes website/ its own pnpm root: it is deployed separately and must not join the app workspace
+# (the app Dockerfile and CI run `pnpm install --frozen-lockfile` and `pnpm -r build` at the repo root).
+packages: []
+# core-js (via next/og) has a postinstall that only prints a banner; nothing needs it to run
+allowBuilds:
+  core-js: false
