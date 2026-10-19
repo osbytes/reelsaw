@@ -1,0 +1,22 @@
+The Reelsaw Enterprise License (the "Enterprise License")
+Copyright (c) 2026 osbytes
+
+With regard to the Reelsaw software in this directory and its subdirectories (the "Software"):
+
+This Software may only be used in production if you (and any entity you represent) have agreed
+to, and are in compliance with, a Reelsaw subscription or other agreement governing the use of the
+Software, as agreed between you and osbytes. Subject to that, you are free to modify this Software
+and publish patches to it; osbytes retains all right, title and interest in and to such
+modifications and patches, which may only be used, copied, modified, displayed, distributed or
+otherwise exploited under a valid agreement. Notwithstanding the foregoing, you may copy and modify
+the Software for development and testing purposes without an agreement. You are granted no other
+rights, and it is forbidden to copy, merge, publish, distribute, sublicense or sell the Software
+except as stated here.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Third-party components incorporated into the Software remain under their original licences.

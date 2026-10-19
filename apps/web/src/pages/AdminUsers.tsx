@@ -5,10 +5,15 @@ import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, MoreButton, Skeleton } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Skeleton, Select } from "../components/ui";
 
 type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
-type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage };
+type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage; /** the plan in force (hosted); null when this instance has no plans */ plan: string | null; /** abuse flags from the hourly pass (abuse.ts) */ flags: string[]; signupIp: string | null };
+const FLAG_HELP: Record<string, string> = {
+  shared_ip: "Three or more accounts signed up from the same address in the last 7 days",
+  signup_burst: "Five or more accounts from the same address within one hour",
+  disposable_email: "The email domain is a known temporary-address service",
+};
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
 const STATUS: Record<Row["status"], { glyph: string; tone: string; word: string }> = {
@@ -55,6 +60,7 @@ export function AdminUsersPage() {
   const qc = useQueryClient();
   const me = useMe();
   const [search, setSearch] = useState("");
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
@@ -63,7 +69,7 @@ export function AdminUsersPage() {
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { q: q || undefined, limit: PAGE },
+      { q: q || undefined, flagged: flaggedOnly || undefined, limit: PAGE },
       { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
     ),
   );
@@ -122,6 +128,9 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button type="button" className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`} aria-pressed={flaggedOnly} onClick={() => setFlaggedOnly(!flaggedOnly)} title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains">
+              {flaggedOnly ? "◆ Flagged only" : "◇ Flagged only"}
+            </button>
             <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
           </div>
         </div>
@@ -202,6 +211,12 @@ export function AdminUsersPage() {
                           <div className="flex items-center gap-2">
                             <span className="min-w-0 truncate font-semibold">{r.name || r.email}</span>
                             {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
+                            {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
+                            {r.flags.map((f) => (
+                              <span key={f} className="chip shrink-0 bg-warn-soft text-warn" title={`${FLAG_HELP[f] ?? f}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}`}>
+                                ⚑ {f.replace(/_/g, " ")}
+                              </span>
+                            ))}
                             {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
                           </div>
                           <div className="truncate text-xs text-ink2">{r.email}</div>
@@ -319,42 +334,102 @@ export function AdminUsersPage() {
   );
 }
 
-type LimitKey = "MAX_PROJECTS_PER_USER" | "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_NEW_PROJECTS_PER_HOUR" | "MAX_LIVE_JOBS_PER_USER" | "MAX_RERENDERS_PER_HOUR" | "MAX_STORAGE_MB";
+type LimitKey = "MAX_PROJECTS_PER_USER" | "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_SOURCE_MINUTES_PER_MONTH" | "MAX_NEW_PROJECTS_PER_HOUR" | "MAX_LIVE_JOBS_PER_USER" | "MAX_RERENDERS_PER_HOUR" | "MAX_STORAGE_MB" | "MAX_REQUESTS_PER_MINUTE" | "MAX_REQUESTS_PER_HOUR";
 const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string }> = [
   { key: "MAX_PROJECTS_PER_USER", label: "Projects kept", window: "all projects the account has now", unit: "projects" },
   { key: "MAX_SOURCE_MINUTES_PER_DAY", label: "Minutes of video per day", window: "since 00:00 UTC today", unit: "minutes" },
+  { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: "Minutes of video per month", window: "this billing period, or the calendar month", unit: "minutes" },
   { key: "MAX_NEW_PROJECTS_PER_HOUR", label: "New projects per hour", window: "the last 60 minutes", unit: "projects" },
   { key: "MAX_LIVE_JOBS_PER_USER", label: "Jobs at once", window: "queued or running now", unit: "jobs" },
   { key: "MAX_RERENDERS_PER_HOUR", label: "Renders asked for per hour", window: "re-renders and new clips, the last 60 minutes", unit: "renders" },
   { key: "MAX_STORAGE_MB", label: "Storage", window: "sources, uploads, renders and intros/outros kept now", unit: "MB" },
+  { key: "MAX_REQUESTS_PER_MINUTE", label: "Changes per minute", window: "API mutations and MCP tool calls, this minute", unit: "requests" },
+  { key: "MAX_REQUESTS_PER_HOUR", label: "Changes per hour", window: "the last 60 minutes", unit: "requests" },
 ];
 
-/** Per-user quota overrides, each next to what the account has used. Empty = the instance setting (0 = unlimited). */
+const WATERMARK_OPTIONS = [
+  { value: "default", label: "Follow the plan and instance setting" },
+  { value: "on", label: "Always" },
+  { value: "off", label: "Never" },
+];
+
+/**
+ * Per-user quota overrides, each next to what the account has used and where the value in force comes from
+ * (instance, plan, override); the watermark decision; and, on a hosted instance, a complimentary plan.
+ * Empty = the instance setting or the plan (0 = unlimited).
+ */
 function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const q = useQuery(trpc.admin.users.limits.queryOptions({ id: row.id }));
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const [wmDraft, setWmDraft] = useState<string | null>(null);
+  const [planDraft, setPlanDraft] = useState<string | null>(null);
   const values = draft ?? Object.fromEntries(Object.entries(q.data?.overrides ?? {}).map(([k, v]) => [k, String(v)]));
-  const save = useMutation({
-    ...trpc.admin.users.setLimits.mutationOptions(),
-    onSuccess: () => {
-      toast("Limits saved");
-      void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
-      onClose();
-    },
-    onError: (e) => toast.error(e.message),
-  });
+  const wmCurrent = q.data?.watermark.override === true ? "on" : q.data?.watermark.override === false ? "off" : "default";
+  const wm = wmDraft ?? wmCurrent;
+  const hasPlans = row.plan !== null;
+  const planCurrent = q.data?.plan ?? "free";
+  const plan = planDraft ?? planCurrent;
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.admin.billing.pathKey() });
+  };
+  const fail = (e: { message: string }) => toast.error(e.message);
+  const save = useMutation({ ...trpc.admin.users.setLimits.mutationOptions(), onError: fail });
+  const saveWm = useMutation({ ...trpc.admin.users.setWatermark.mutationOptions(), onError: fail });
+  const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
+  const busy = save.isPending || saveWm.isPending || savePlan.isPending;
+  const sourceWord = (k: LimitKey) => (q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance");
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={`Limits for ${row.email}`} width={460}>
       <form
         className="flex flex-col gap-4"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           const limits = Object.fromEntries(LIMITS.map(({ key }) => [key, values[key]?.trim() ? Number(values[key]) : null])) as Record<LimitKey, number | null>;
-          save.mutate({ id: row.id, limits });
+          try {
+            if (draft) await save.mutateAsync({ id: row.id, limits });
+            if (wmDraft !== null && wm !== wmCurrent) await saveWm.mutateAsync({ id: row.id, watermark: wm === "default" ? null : wm === "on" });
+            if (hasPlans && planDraft !== null && plan !== planCurrent) await savePlan.mutateAsync({ id: row.id, plan: plan === "free" ? null : plan });
+          } catch {
+            return; // the toast said why; keep the dialog open
+          }
+          toast("Saved");
+          invalidate();
+          onClose();
         }}
       >
+        {hasPlans && (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="limit-plan" className="text-xs font-semibold text-ink2">
+              Plan
+            </label>
+            {q.isPending ? (
+              <Skeleton className="h-[38px] w-full rounded-[10px]" />
+            ) : (
+              <Select
+                value={plan}
+                onValueChange={setPlanDraft}
+                ariaLabel="Plan"
+                options={[
+                  { value: "free", label: "Free (no grant)" },
+                  { value: "starter", label: "Starter, complimentary" },
+                  { value: "creator", label: "Creator, complimentary" },
+                  { value: "pro", label: "Pro, complimentary" },
+                ]}
+              />
+            )}
+            <span className="min-h-4 text-xs text-ink3">{q.data ? (q.data.plan && q.data.plan !== "free" ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.` : "Free. A complimentary grant gives a plan without Stripe.") : ""}</span>
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="limit-watermark" className="text-xs font-semibold text-ink2">
+            Watermark
+          </label>
+          {q.isPending ? <Skeleton className="h-[38px] w-full rounded-[10px]" /> : <Select value={wm} onValueChange={setWmDraft} ariaLabel="Watermark" options={WATERMARK_OPTIONS} />}
+          <span className="min-h-4 text-xs text-ink3">{q.data ? `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).` : ""}</span>
+        </div>
         {LIMITS.map(({ key, label, window, unit }) => {
           const used = q.data?.usage?.[key];
           const typed = values[key]?.trim();
@@ -363,8 +438,9 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           const state = ratio >= 1 ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" } : ratio >= 0.8 ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" } : null;
           return (
             <div key={key} className="flex flex-col gap-1.5">
-              <label htmlFor={`limit-${key}`} className="text-xs font-semibold text-ink2">
+              <label htmlFor={`limit-${key}`} className="flex items-baseline justify-between text-xs font-semibold text-ink2">
                 {label}
+                <span className="font-normal text-ink3">{q.data && !typed ? sourceWord(key) : ""}</span>
               </label>
               {q.isPending ? (
                 <Skeleton className="h-[38px] w-full rounded-[10px]" />
@@ -375,7 +451,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                 type="number"
                 min={0}
                 value={values[key] ?? ""}
-                placeholder={q.data ? `instance: ${q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]}` : ""}
+                placeholder={q.data ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}` : ""}
                 onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
               />
               )}
@@ -395,13 +471,13 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
             </div>
           );
         })}
-        <p className="text-xs text-ink3">0 = unlimited. Empty = use the instance setting.</p>
+        <p className="text-xs text-ink3">0 = unlimited. Empty = the plan's value, else the instance setting. An override wins over the plan.</p>
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn-ink min-w-[5rem]" disabled={save.isPending || !q.data}>
-            {save.isPending ? "…" : "Save"}
+          <button className="btn-ink min-w-[5rem]" disabled={busy || !q.data}>
+            {busy ? "…" : "Save"}
           </button>
         </div>
       </form>

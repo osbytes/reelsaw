@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
@@ -9,7 +9,9 @@ import { useSession, signOut } from "./lib/auth";
 import { useTRPC } from "./lib/trpc";
 import { useTheme } from "./lib/theme";
 import { MOD, useShortcuts } from "./lib/shortcuts";
-import { LoginPage } from "./pages/Login";
+import { LoginPage, takeAfterSignIn } from "./pages/Login";
+import { identify, initTelemetry, pageview } from "./lib/telemetry";
+import { BILLING_PATH } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
@@ -224,6 +226,9 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   // waiting for approval or suspended: one page, nothing else (the server refuses everything anyway)
   if (me.data?.blocked) return <PendingPage />;
   if (admin && me.data?.role !== "admin") return <Navigate to="/" replace />;
+  // a plan picked on the website before sign-up (Login.tsx); an email verification link lands here, not on the login page
+  const after = takeAfterSignIn();
+  if (after && after !== window.location.pathname + window.location.search) return <Navigate to={after} replace />;
   // the editor hides the global bar so the timeline gets the room
   if (bare)
     return (
@@ -258,6 +263,26 @@ function AppToaster() {
   );
 }
 
+/** Sentry / PostHog in the browser, only when the server hands out keys (lib/telemetry.ts): init once, identify, page views. */
+function TelemetryBridge() {
+  const status = useSystemStatus();
+  const { data: session } = useSession();
+  const me = useMe(!!session);
+  const loc = useLocation();
+  const t = status.data?.telemetry;
+  useEffect(() => {
+    if (t) void initTelemetry(t);
+  }, [t]);
+  useEffect(() => {
+    if (!session) identify(null);
+    else if (me.data) identify({ id: me.data.id, email: me.data.email, name: me.data.name, role: me.data.role });
+  }, [session, me.data]);
+  useEffect(() => {
+    pageview(loc.pathname);
+  }, [loc.pathname]);
+  return null;
+}
+
 export function App() {
   useShortcuts("Everywhere", [
     ["Search, jump or run an action", `${MOD}K`],
@@ -265,15 +290,19 @@ export function App() {
     ["Show this list", "?"],
   ]);
   return (
+    <>
+    <TelemetryBridge />
     <UploadsProvider>
     <CommandPaletteProvider>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<LoginPage signup />} />
       <Route path="/consent" element={<ConsentPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+      <Route path={BILLING_PATH} element={<Protected><SettingsPage /></Protected>} />
       <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
       <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
@@ -284,5 +313,6 @@ export function App() {
     <AppToaster />
     </CommandPaletteProvider>
     </UploadsProvider>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { reportClientError } from "../lib/diagnostics";
+import { captureException } from "../lib/telemetry";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -8,6 +9,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   }
   componentDidCatch(error: Error) {
     reportClientError("render", error, { send: true });
+    captureException(error, { where: "render" });
   }
   render() {
     if (!this.state.error) return this.props.children;

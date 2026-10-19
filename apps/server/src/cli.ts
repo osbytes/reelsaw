@@ -61,7 +61,14 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --store saves them (renders then hide them)
  *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
- *   limits  <email>                         an account's quotas: instance value, override, in force, in use now
+ *   limits  <email>                         an account's quotas: instance value, plan, override, in force, in use now
+ *   abuse   [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts,
+ *                                           temporary domains); --run recomputes the flags now
+ *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
+ *                                           hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its
+ *                                           last webhook events; `sync` re-reads Stripe for one account or every
+ *                                           subscription (the daily reconcile, by hand); `set-plan` grants a plan
+ *                                           without Stripe (none removes it)
  *   settings [KEY=value…] [--clear KEY…]    instance settings in force (sign-up mode, quotas, retention, …): .env default,
  *                                           admin override, effective; KEY=value changes one without a restart,
  *                                           --clear KEY goes back to .env (same as Settings → System and set_instance_settings)
@@ -71,13 +78,14 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  */
 import { projectBumperSummaries } from "./bumpers/service.js";
 import { describeCoverage } from "./bumpers/summary.js";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
 import { sampleClipText } from "./pipeline/overlays.js";
 import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
+import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole } from "./accounts.js";
@@ -221,6 +229,44 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const dry = args.includes("--dry-run");
     const r = await purgeDeleted(svc, { dryRun: dry });
     console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
+  },
+  abuse: async (svc) => {
+    if (args.includes("--run")) {
+      const r = await flagAccounts(svc);
+      console.log(`checked ${r.checked} recent accounts: ${r.flagged} flagged, ${r.changed} changed`);
+    }
+    const rows = await svc.database.db.select({ email: schema.user.email, flags: schema.user.flags, signupIp: schema.user.signupIp, banned: schema.user.banned, createdAt: schema.user.createdAt }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0`).orderBy(desc(schema.user.createdAt)).limit(200);
+    table(rows.map((r) => ({ email: r.email, flags: r.flags.join(","), signupIp: r.signupIp ?? "", status: r.banned ? "suspended" : "active", created: r.createdAt.toISOString().slice(0, 10) })));
+    if (rows.length) console.log("\nflags: " + Object.entries(FLAG_HELP).map(([k, v]) => `${k} = ${v}`).join("; "));
+  },
+  billing: async (svc) => {
+    if (!svc.ee) throw new Error("billing is not enabled on this instance (REELSAW_EE is off)");
+    const b = svc.ee.billing;
+    const sub = pos[0];
+    if (sub === "sync") {
+      const user = pos[1] ? await userByEmail(svc, pos[1]) : null;
+      const r = await b.reconcile(user ? { userId: user.id } : {});
+      console.log(`checked ${r.checked} subscription(s), synced ${r.synced}, pending events retried ${r.pendingEvents}${r.orphans.length ? `, orphans (no account): ${r.orphans.join(", ")}` : ""}`);
+      return;
+    }
+    if (sub === "set-plan") {
+      const user = await userByEmail(svc, pos[1]);
+      const plan = pos[2];
+      if (!plan) throw new Error("usage: reelsaw billing set-plan <email> <plan|none>");
+      const r = await b.setComplimentary("cli", user.id, plan === "none" ? null : plan);
+      console.log(r.plan ? `${user.email} now has ${r.plan} (complimentary)` : `${user.email}: complimentary plan removed`);
+      return;
+    }
+    const user = await userByEmail(svc, sub);
+    const i = await b.inspect(user.id);
+    console.log(`${user.email}: ${i.effective.plan.label} (${i.effective.reason})`);
+    console.log(`customer: ${i.customer ?? "none"}`);
+    if (i.row) table([{ subscription: i.row.stripeSubscriptionId ?? "(complimentary)", plan: i.row.plan, status: i.row.status, interval: i.row.interval ?? "", periodEnd: i.row.periodEnd?.toISOString() ?? "", cancelAtPeriodEnd: i.row.cancelAtPeriodEnd, pastDueSince: i.row.pastDueSince?.toISOString() ?? "", syncedAt: i.row.syncedAt.toISOString() }]);
+    else console.log("no subscription row (Free)");
+    console.log("\nStripe:");
+    table(i.stripe.map((s) => ({ id: s.id, status: s.status, price: s.price ?? "", cancelAtPeriodEnd: s.cancelAtPeriodEnd })));
+    console.log("\nwebhook events:");
+    table(i.events.map((e) => ({ id: e.id, type: e.type, created: e.created.toISOString(), processed: e.processedAt ? "yes" : "PENDING", error: e.error ?? "" })));
   },
   "make-admin": async (svc) => {
     const u = await userByEmail(svc, pos[0]);
@@ -780,7 +826,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

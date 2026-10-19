@@ -28,6 +28,9 @@ import { createLogger, type Logger } from "./log.js";
 import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
 import { createUpdateChecker, type UpdateChecker } from "./updates.js";
 import { createInstanceSettings, type InstanceSettings } from "./instance-settings.js";
+import type { Entitlements } from "./quota.js";
+import type { EE } from "./ee/index.js";
+import { createTelemetry, type Telemetry } from "./telemetry.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
@@ -71,6 +74,12 @@ export interface Services {
   text: TextDetector | null;
   /** null when FACE_DETECTION=false; then "auto" layout degrades to "fit". */
   faces: FaceDetector | null;
+  /** Sentry + PostHog, each a no-op without its key (telemetry.ts) */
+  telemetry: Telemetry;
+  /** the enterprise edition (billing), loaded only with REELSAW_EE=true (ee/index.ts); null self-hosted */
+  ee: EE | null;
+  /** what each account's plan grants (quotas, watermark); null = no plans on this instance */
+  entitlements: Entitlements | null;
 }
 
 export class StartupError extends Error {
@@ -114,6 +123,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
   const paths = makePaths(config.DATA_DIR);
+  const telemetry = createTelemetry(config, log.child({ module: "telemetry" }));
 
   await step("data dir", async () => {
     for (const d of [paths.uploads, paths.projects, paths.tmp]) await fs.mkdir(d, { recursive: true });
@@ -298,10 +308,16 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return e;
   });
 
-  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings));
+  const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
 
-  const tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get());
-  return { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx, auth, email, resources, updates, faces, text, vad, aligner };
+  const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
+  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
+  if (config.REELSAW_EE) {
+    // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads
+    svc.ee = await step("enterprise edition (billing)", async () => (await import("./ee/index.js")).createEE(svc));
+    svc.entitlements = svc.ee.entitlements;
+  }
+  return svc;
 }
 
 export async function shutdownServices(s: Services) {
@@ -316,6 +332,7 @@ export async function shutdownServices(s: Services) {
   await s.vad?.release().catch(() => {});
   await s.aligner?.release().catch(() => {});
   await s.llmTrace.shutdown();
+  await s.telemetry.shutdown();
   await s.events.stop().catch(() => {});
   await s.database.close().catch(() => {});
   await s.otel.shutdown().catch(() => {});

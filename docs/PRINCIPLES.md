@@ -25,7 +25,8 @@ project already hit the problem it prevents.
   `refineScenes` (from user defaults or the create form) must opt in to run a step; other stage knobs (`TRANSCRIPT_BIAS`,
   detectors, concurrency): `.env` only; a project: shared defaults, the user's defaults, the create
   input, frozen into `projects.settings`; style: project, then clip; framing: auto, project, clip,
-  section; quotas: `.env`, then the instance setting, then per-user limits. A new setting says where
+  section; quotas and the watermark: `.env`, then the instance setting, then what the account's plan
+  grants (`svc.entitlements`, hosted only), then per-user limits an admin set. A new setting says where
   it sits in this chain (README, "Settings and precedence"). A value an operator may want to change
   while the box runs (policy, limits, retention, refine ceilings) is a runtime setting with its
   environment variable as the default, not a new env-only variable.
@@ -102,6 +103,16 @@ project already hit the problem it prevents.
   in the same transaction as the write.
 - **Migrations come from the schema.** Change `db/schema.ts`, then run
   `npx drizzle-kit generate --name <what>`. Never edit an applied migration.
+- **No type ascriptions in application code.** `x as T` (and `x as unknown as T`) tells the checker
+  to trust you, and it stops checking the thing most likely to be wrong: data from outside (a webhook
+  payload, a query row, an SDK object). Narrow it instead: a discriminated union (`switch (event.type)`),
+  a type guard, `instanceof`, zod at the edge, a typed query (`db.execute<Row>(…)`), or a smaller
+  parameter type (`Pick<Row, …>`) so the caller can pass what it has. `as const` and `satisfies` are
+  fine; `{} as Record<Key, V>` while filling a record is tolerated; test fixtures may cast. A cast that
+  stays needs a comment saying what guarantees it.
+- **Locks have names.** Every advisory lock is taken through `locks.ts` (`txLock.quota(userId)`,
+  `txLock.billing(userId)`, …), never by spelling a key string at the call site, so two paths that
+  must exclude each other cannot drift apart.
 - **Don't rebuild what exists.** Before writing a utility, matcher, parser, retry loop or UI
   primitive, look in this order: something in the repo already does it (`apps/*/src/lib`,
   `components`, `packages/shared`, the `reelsaw` CLI); a dependency already in a `package.json`

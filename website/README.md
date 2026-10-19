@@ -52,6 +52,11 @@ stay the same animation.
 
 ## Analytics (optional)
 
+The hosted service is not announced unless `NEXT_PUBLIC_HOSTED_URL` is set (e.g.
+`https://app.reelsaw.com`): without it there is no `/pricing`, `/terms` or `/privacy`, no links to
+them, and every comparison speaks of self-hosting only. Set it on Vercel and redeploy once the app
+is live; the plan list itself lives in `content/pricing.ts` and mirrors the server's.
+
 PostHog is off unless `NEXT_PUBLIC_POSTHOG_KEY` is set. With a key:
 
 - `components/analytics.tsx` loads `posthog-js` with `api_host: "/ingest"`, pageviews on history

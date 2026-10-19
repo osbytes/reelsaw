@@ -1,28 +1,84 @@
 /**
- * Quotas: instance-wide numbers (0 = unlimited) from the runtime settings (the environment or the
- * admin's override, instance-settings.ts), overridable per user by an admin (`user_settings.limits`). Refusals are sentences the user can act on. Checked where the
- * number is known: project count and rate at creation, source minutes once ffprobe has run.
+ * Quotas: one precedence chain per number (README, "Settings and precedence"): the environment, then the
+ * admin's runtime override (instance-settings.ts), then what the account's plan grants (`Entitlements`,
+ * provided by ee/ on a hosted instance; null self-hosted), then an admin's per-user override
+ * (`user_settings.limits`). 0 = unlimited. Refusals are sentences the user can act on, with the plan's
+ * upgrade hint when there is one. Checked where the number is known: project count and rate at creation,
+ * source minutes once ffprobe has run, storage at upload. The watermark follows the same chain.
  */
 import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "./db/index.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
+import type { UserRole } from "./db/schema.js";
+import { takeTxLock, txLock } from "./locks.js";
 
-export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB"] as const;
+export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_SOURCE_MINUTES_PER_MONTH", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB", "MAX_REQUESTS_PER_MINUTE", "MAX_REQUESTS_PER_HOUR"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
 /** The instance-wide numbers in force (`svc.settings.get()`): the environment, or the admin's runtime override. */
-export type InstanceLimits = Pick<RuntimeSettings, LimitKey>;
+export type InstanceLimits = Pick<RuntimeSettings, LimitKey | "WATERMARK_NON_ADMINS" | "WATERMARK_TEXT">;
 
-export async function limitsFor(db: Db, instance: InstanceLimits, userId: string): Promise<Limits> {
-  const row = await db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { limits: true } });
-  const out = {} as Limits;
+/** What an account's plan grants (ee/billing/entitlements.ts). `null` for a key = the plan says nothing about it. */
+export interface Grants {
+  plan: string;
+  planLabel: string;
+  limits: Partial<Limits>;
+  /** false = the plan removes the watermark; null = the plan says nothing */
+  watermark: boolean | null;
+  /** the account's first video is free of the monthly count when it is at most this long (0 = none) */
+  firstVideoFreeMinutes?: number;
+  /** added to the fair-share priority of the account's jobs (0 = none) */
+  queuePriority?: number;
+  /** the billing period, when the account has one; monthly allowances count inside it */
+  period: { start: Date; end: Date } | null;
+  /** appended to a refusal: "Pro gives 1,200 minutes a month" and where to go */
+  upgrade?: { text: string; url: string };
+}
+export interface Entitlements {
+  /** Read at the point of use, inside the caller's transaction when it has one. Never cached across requests. */
+  grantsFor(db: Db, userId: string): Promise<Grants | null>;
+}
+
+export type LimitSource = "instance" | "plan" | "override";
+export interface LimitsDetail {
+  limits: Limits;
+  source: Record<LimitKey, LimitSource>;
+  plan: string | null;
+  grants: Grants | null;
+}
+
+/** The numbers in force for one account, with where each came from. One read of the override row and one of the plan. */
+export async function limitsDetail(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null): Promise<LimitsDetail> {
+  const [row, grants] = await Promise.all([db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { limits: true } }), ent ? ent.grantsFor(db, userId) : null]);
+  const limits = {} as Limits;
+  const source = {} as Record<LimitKey, LimitSource>;
   for (const k of LIMIT_KEYS) {
     const o = row?.limits?.[k];
-    out[k] = typeof o === "number" && o >= 0 ? o : instance[k];
+    const g = grants?.limits[k];
+    if (typeof o === "number" && o >= 0) [limits[k], source[k]] = [o, "override"];
+    else if (typeof g === "number" && g >= 0) [limits[k], source[k]] = [g, "plan"];
+    else [limits[k], source[k]] = [instance[k], "instance"];
   }
-  return out;
+  return { limits, source, plan: grants?.plan ?? null, grants };
+}
+
+export async function limitsFor(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null): Promise<Limits> {
+  return (await limitsDetail(db, instance, userId, ent)).limits;
+}
+
+/**
+ * Whether this account's renders carry the watermark, and why: an admin's per-user choice wins, then the plan
+ * (a paid plan removes it), then the instance setting (non-admins get it, admins never do by default).
+ */
+export async function watermarkFor(db: Db, instance: InstanceLimits, user: { id: string; role: UserRole }, ent?: Entitlements | null): Promise<{ on: boolean; text: string; source: LimitSource | "admin" }> {
+  const text = instance.WATERMARK_TEXT;
+  const [row, grants] = await Promise.all([db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, user.id), columns: { watermark: true } }), ent ? ent.grantsFor(db, user.id) : null]);
+  if (typeof row?.watermark === "boolean") return { on: row.watermark, text, source: "override" };
+  if (typeof grants?.watermark === "boolean") return { on: grants.watermark, text, source: "plan" };
+  if (user.role === "admin") return { on: false, text, source: "admin" };
+  return { on: instance.WATERMARK_NON_ADMINS, text, source: "instance" };
 }
 
 export class QuotaError extends TRPCError {
@@ -33,16 +89,29 @@ export class QuotaError extends TRPCError {
 
 const nextMidnightUtc = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime() + 86_400_000;
 const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16) + " UTC";
+const dayOf = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+
+/** The window a monthly allowance counts in: the billing period when the account has one, else the UTC calendar month. */
+export function periodFor(grants: Grants | null, now = new Date()): { start: Date; end: Date; source: "billing" | "calendar" } {
+  if (grants?.period && grants.period.start <= now && now < grants.period.end) return { ...grants.period, source: "billing" };
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return { start, end, source: "calendar" };
+}
+
+/** "Upgrade to Pro for 1,200 minutes a month: https://…" when the plan offers a next step, else nothing. */
+const hint = (d: LimitsDetail) => (d.grants?.upgrade ? ` ${d.grants.upgrade.text}: ${d.grants.upgrade.url}` : "");
 
 /**
  * Before creating a project. Pass the creating unit of work's `u.db` with `lock: true`: a per-user transaction lock
  * then serialises concurrent creates of one user, so the counts below include every project committed before this one
  * and N parallel requests can't all pass a cap they jointly exceed. (Without `lock` it is only an early, advisory check.)
  */
-export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId: string, o: { lock?: boolean } = {}) {
-  if (o.lock) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`);
-  const l = await limitsFor(db, instance, userId);
-  if (l.MAX_STORAGE_MB > 0) checkStorage(l, await storedBytes(db, userId));
+export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId: string, o: { lock?: boolean; ent?: Entitlements | null } = {}) {
+  if (o.lock) await takeTxLock(db, txLock.quota(userId));
+  const d = await limitsDetail(db, instance, userId, o.ent);
+  const l = d.limits;
+  if (l.MAX_STORAGE_MB > 0) checkStorage(l, await storedBytes(db, userId), hint(d));
   if (l.MAX_PROJECTS_PER_USER > 0) {
     // a deleted project frees its slot at once (it is only kept for undo)
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
@@ -57,6 +126,34 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
     const used = await minutesToday(db, userId);
     if (used >= l.MAX_SOURCE_MINUTES_PER_DAY) throw new QuotaError(`Daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes of video reached (${Math.round(used)} used); resets at ${hhmm(nextMidnightUtc())}.`);
   }
+  if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
+    const period = periodFor(d.grants);
+    const m = await monthlyMinutes(db, userId, period.start, d.grants);
+    // a first video on the house is checked for real once its length is known (sourceMinutesExceeded)
+    if (m.used >= l.MAX_SOURCE_MINUTES_PER_MONTH && !m.firstPending) throw new QuotaError(`Monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes of video reached (${Math.round(m.used)} used); resets on ${dayOf(period.end)}.${hint(d)}`);
+  }
+}
+
+/**
+ * Minutes that count against the monthly allowance: every project created since `start`, minus the first-video
+ * allowance when the plan has one (the account's earliest project, up to `firstVideoFreeMinutes`, is free).
+ * `firstPending` = the allowance is still unused (no project yet), so a creation must not be refused on the cap.
+ */
+export async function monthlyMinutes(db: Db, userId: string, start: Date, grants: Grants | null, exceptProjectId?: string): Promise<{ used: number; firstFree: number; firstPending: boolean }> {
+  const total = await minutesSince(db, userId, start, exceptProjectId);
+  const free = grants?.firstVideoFreeMinutes ?? 0;
+  if (!free) return { used: total, firstFree: 0, firstPending: false };
+  const [first] = await db
+    .select({ id: schema.projects.id, durationSec: schema.projects.durationSec, createdAt: schema.projects.createdAt })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.userId, userId), exceptProjectId ? sql`${schema.projects.id} <> ${exceptProjectId}` : undefined))
+    .orderBy(schema.projects.createdAt)
+    .limit(1);
+  if (!first) return { used: total, firstFree: free, firstPending: true };
+  // the first video was longer than the allowance: it counts whole (the check that admitted it said so)
+  const firstMinutes = (first.durationSec ?? 0) / 60;
+  const credit = first.createdAt >= start && firstMinutes <= free ? firstMinutes : 0;
+  return { used: Math.max(0, total - credit), firstFree: free, firstPending: false };
 }
 
 /**
@@ -72,15 +169,15 @@ export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
 }
 
 /** Before an upload or a new project: what the account stores now (sources, uploads, renders, intros/outros) plus what is arriving. */
-export async function checkStorageQuota(db: Db, instance: InstanceLimits, userId: string, incomingBytes = 0) {
-  const l = await limitsFor(db, instance, userId);
-  if (l.MAX_STORAGE_MB > 0) checkStorage(l, (await storedBytes(db, userId)) + incomingBytes);
+export async function checkStorageQuota(db: Db, instance: InstanceLimits, userId: string, incomingBytes = 0, ent?: Entitlements | null) {
+  const d = await limitsDetail(db, instance, userId, ent);
+  if (d.limits.MAX_STORAGE_MB > 0) checkStorage(d.limits, (await storedBytes(db, userId)) + incomingBytes, hint(d));
 }
 
-function checkStorage(l: Limits, bytes: number) {
+function checkStorage(l: Limits, bytes: number, upgrade = "") {
   if (l.MAX_STORAGE_MB <= 0) return;
   const mb = Math.round(bytes / 1_048_576);
-  if (mb >= l.MAX_STORAGE_MB) throw new QuotaError(`This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Delete projects or uploads to make room.`);
+  if (mb >= l.MAX_STORAGE_MB) throw new QuotaError(`This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Delete projects or uploads to make room.${upgrade}`);
 }
 
 /**
@@ -89,27 +186,43 @@ function checkStorage(l: Limits, bytes: number) {
  * `output_key` is set (a re-render or retention clears the key); clips rendered before it existed count 0.
  */
 export async function storedBytes(db: Db, userId: string): Promise<number> {
-  const [r] = (await db.execute(sql`
+  const [r] = (
+    await db.execute<{ bytes: string | number }>(sql`
     select
       coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
       + coalesce((select sum(size_bytes) from uploads where user_id = ${userId}), 0)
       + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
-      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)).rows as Array<{ bytes: string | number }>;
+      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)
+  ).rows;
   return Number(r?.bytes ?? 0);
 }
 
 /** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
-export async function sourceMinutesExceeded(db: Db, instance: InstanceLimits, userId: string, projectId: string, durationSec: number): Promise<string | null> {
-  const l = await limitsFor(db, instance, userId);
-  if (l.MAX_SOURCE_MINUTES_PER_DAY <= 0) return null;
-  const used = await minutesToday(db, userId, projectId);
-  const total = used + durationSec / 60;
-  if (total <= l.MAX_SOURCE_MINUTES_PER_DAY) return null;
-  return `This video is ${Math.round(durationSec / 60)} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.`;
+export async function sourceMinutesExceeded(db: Db, instance: InstanceLimits, userId: string, projectId: string, durationSec: number, ent?: Entitlements | null): Promise<string | null> {
+  const d = await limitsDetail(db, instance, userId, ent);
+  const l = d.limits;
+  const mins = Math.round(durationSec / 60);
+  if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
+    const used = await minutesToday(db, userId, projectId);
+    if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY) return `This video is ${mins} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.`;
+  }
+  if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
+    const period = periodFor(d.grants);
+    const m = await monthlyMinutes(db, userId, period.start, d.grants, projectId);
+    // the account's first video is on the house up to the plan's allowance
+    if (m.firstPending && durationSec / 60 <= m.firstFree) return null;
+    if (m.used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_MONTH) {
+      const firstNote = m.firstPending ? ` (a first video is free up to ${m.firstFree} minutes; this one is longer)` : "";
+      return `This video is ${mins} minutes; with ${Math.round(m.used)} already used this period that passes the monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes${firstNote}. Resets on ${dayOf(period.end)}.${hint(d)}`;
+    }
+  }
+  return null;
 }
 
-async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
-  const start = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+const minutesToday = (db: Db, userId: string, exceptProjectId?: string) => minutesSince(db, userId, new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z"), exceptProjectId);
+
+/** Minutes of source video the account added since `start` (by project creation time; a project counts once its length is known). */
+export async function minutesSince(db: Db, userId: string, start: Date, exceptProjectId?: string) {
   const [{ m }] = await db
     .select({ m: sql<number>`coalesce(sum(${schema.projects.durationSec}), 0) / 60.0` })
     .from(schema.projects)
@@ -117,20 +230,26 @@ async function minutesToday(db: Db, userId: string, exceptProjectId?: string) {
   return Number(m);
 }
 
-/** What each limit counts right now, for the admin Limits dialog: kept projects, minutes since 00:00 UTC, projects in the last hour, jobs in flight, renders asked for in the last hour, MB stored. */
-export async function limitUsage(db: Db, userId: string): Promise<Record<LimitKey, number>> {
+/** What each limit counts right now, for the admin Limits dialog and the Billing page: kept projects, minutes since 00:00 UTC and since the period started, projects in the last hour, jobs in flight, renders asked for in the last hour, MB stored. */
+export async function limitUsage(db: Db, userId: string, grants: Grants | null = null): Promise<Record<LimitKey, number>> {
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
   const [{ hour }] = await db
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.projects)
     .where(and(eq(schema.projects.userId, userId), gte(schema.projects.createdAt, new Date(Date.now() - 3_600_000))));
-  const [jobs] = (await db.execute(sql`
+  const [jobs] = (
+    await db.execute<{ live: number; renders: number }>(sql`
     select
       (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'userId' = ${userId}) as live,
-      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)).rows as Array<{ live: number; renders: number }>;
+      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)
+  ).rows;
+  const [rate] = (await db.execute<{ minute: number; hour: number }>(sql`select coalesce(sum(n) filter (where bucket = date_trunc('minute', now())), 0)::int as minute, coalesce(sum(n), 0)::int as hour from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour'`)).rows;
   return {
+    MAX_REQUESTS_PER_MINUTE: Number(rate?.minute ?? 0),
+    MAX_REQUESTS_PER_HOUR: Number(rate?.hour ?? 0),
     MAX_PROJECTS_PER_USER: total,
     MAX_SOURCE_MINUTES_PER_DAY: Math.round(await minutesToday(db, userId)),
+    MAX_SOURCE_MINUTES_PER_MONTH: Math.round((await monthlyMinutes(db, userId, periodFor(grants).start, grants)).used),
     MAX_NEW_PROJECTS_PER_HOUR: hour,
     MAX_LIVE_JOBS_PER_USER: Number(jobs?.live ?? 0),
     MAX_RERENDERS_PER_HOUR: Number(jobs?.renders ?? 0),

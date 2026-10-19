@@ -21,14 +21,19 @@ async function main() {
       signupMode: svc.settings.get().SIGNUP_MODE,
       email: config.EMAIL_DRIVER,
       otel: svc.otel.enabled,
+      ee: !!svc.ee,
     },
     "started",
   );
 
   // a rejection nobody awaited is a bug worth a line (and a stack); an uncaught exception leaves unknown state
-  process.on("unhandledRejection", (err) => log.error({ err }, "unhandled rejection"));
+  process.on("unhandledRejection", (err) => {
+    log.error({ err }, "unhandled rejection");
+    svc.telemetry.captureException(err, { where: "unhandledRejection" });
+  });
   process.on("uncaughtException", (err) => {
     log.fatal({ err }, "uncaught exception");
+    svc.telemetry.captureException(err, { where: "uncaughtException" });
     setTimeout(() => process.exit(1), 100).unref();
   });
 
@@ -46,6 +51,7 @@ async function main() {
   }
   if (config.RUN_WORKERS) {
     await startWorkers(svc);
+    if (svc.ee) await svc.ee.startWorkers();
     stopReconciler = startReconciler(svc);
   }
 

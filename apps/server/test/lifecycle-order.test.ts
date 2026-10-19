@@ -43,7 +43,8 @@ describe("lock order of API mutations against render completions", () => {
     userId = `test-${randomUUID()}`;
     await pool.query(`insert into "user" (id, name, email, approved_at) values ($1, 'Test', $2, now())`, [userId, `${userId}@example.test`]);
     // only what these procedures reach: the unit of work and (after commit) file deletes of superseded renders
-    svc = { tx, database: { db: drizzle(pool, { schema }) as unknown as Db, pool }, storage: { delete: async () => {} }, paths: { project: () => "/nonexistent" }, log: quiet } as unknown as Services;
+    // settings: the per-account request rate (abuse.ts) reads the instance caps on every mutation; none here
+    svc = { tx, database: { db: drizzle(pool, { schema }) as unknown as Db, pool }, storage: { delete: async () => {} }, paths: { project: () => "/nonexistent" }, log: quiet, settings: { get: () => ({}) }, entitlements: null } as unknown as Services;
   });
   after(async () => {
     for (const id of projects) await pool.query("delete from projects where id = $1", [id]);

@@ -6,6 +6,7 @@ import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
 import { asUserRequest } from "../uow.js";
+import { checkRequestRate } from "../abuse.js";
 
 export type Context = {
   svc: Services;
@@ -42,8 +43,17 @@ export const signedInProcedure = t.procedure.use(({ ctx, next }) => {
 });
 
 /** An approved, not suspended account: everything that touches user data. */
-export const protectedProcedure = signedInProcedure.use(({ ctx, next }) => {
+export const protectedProcedure = signedInProcedure.use(async ({ ctx, next, type }) => {
   if (ctx.who.blocked) throw new TRPCError({ code: "FORBIDDEN", message: ctx.who.blocked.reason });
+  // changes are rate-limited per account (abuse.ts; off unless MAX_REQUESTS_PER_* is set); reads are not
+  if (type === "mutation") {
+    try {
+      await checkRequestRate(ctx.svc.database.db, ctx.svc.settings.get(), ctx.who.user.id, ctx.svc.entitlements);
+    } catch (err) {
+      ctx.log.warn({ reason: (err as Error).message }, "request rate limit reached");
+      throw err;
+    }
+  }
   // jobs this call enqueues for the user's own projects are their requests: fair-share limits apply (uow.ts)
   return asUserRequest(ctx.who.user.id, () => next({ ctx }));
 });

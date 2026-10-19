@@ -9,6 +9,7 @@ import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
 import { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
+import { watermarkFor } from "../quota.js";
 import { buildAss } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare } from "./manual.js";
@@ -439,10 +440,15 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     .filter((w) => !cuts.some((c) => w.start >= c.start - 0.001 && w.end <= c.end + 0.001))
     .map((w) => ({ text: w.text, start: plan.mapTime(w.start), end: Math.max(plan.mapTime(w.start) + 0.05, plan.mapTime(w.end)) }));
   if (cuts.length) log.info({ cuts: cuts.length, inSec: Number(duration.toFixed(2)), outSec: Number(outDuration.toFixed(2)) }, "applying jump cuts");
+  // decided at render time from the owner's plan and the admin's choice, never frozen into the project: a
+  // re-render after an upgrade drops it
+  const owner = await db.query.user.findFirst({ where: eq(schema.user.id, project.userId), columns: { id: true, role: true } });
+  const watermark = owner ? await watermarkFor(db, svc.settings.get(), owner, svc.entitlements) : { on: false, text: "", source: "instance" as const };
+  if (watermark.on) log.debug({ source: watermark.source }, "watermark on");
   const assPath = path.join(clipsDir, `${clip.id}.ass`);
   await fs.writeFile(
     assPath,
-    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style: resolveStyle(settings, clip.style), hook: clip.hook, emphasis: clip.emphasis ?? [] }),
+    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style: resolveStyle(settings, clip.style), hook: clip.hook, emphasis: clip.emphasis ?? [], ...(watermark.on ? { watermark: watermark.text } : {}) }),
     "utf8",
   );
 
@@ -596,7 +602,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const committed = await svc.tx(async (u) => {
     const [cur] = await u.db.select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!cur || cur.gen !== gen) return false;
-    await u.db.update(schema.clips).set({ status: "done", outputKey, outputBytes, thumbnailKey, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    await u.db.update(schema.clips).set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(projectId, "clip.done", { clipId, index: clip.index });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded

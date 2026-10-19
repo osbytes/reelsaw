@@ -12,6 +12,7 @@ import {
   numeric,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
@@ -32,6 +33,12 @@ export const user = pgTable("user", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   banned: boolean("banned").default(false).notNull(),
   banReason: text("ban_reason"),
+  /** one key per real mailbox (abuse.ts `emailKey`); unique, so `a.b+x@gmail.com` cannot register twice */
+  emailKey: text("email_key"),
+  /** the address the sign-up came from (behind the proxy's headers); null when unknown */
+  signupIp: text("signup_ip"),
+  /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
+  flags: jsonb("flags").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 },
@@ -39,7 +46,20 @@ export const user = pgTable("user", {
   // admin Users search: ILIKE '%q%' and word similarity on name and email
   index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
   index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
+  uniqueIndex("user_email_key_idx").on(t.emailKey),
+  index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
 ]);
+
+/** Per-account request counter for the mutation rate limit (abuse.ts `checkRequestRate`): one row per user and minute, pruned hourly. */
+export const userRate = pgTable(
+  "user_rate",
+  {
+    userId: text("user_id").notNull(),
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    n: integer("n").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.bucket] })],
+);
 
 export const session = pgTable(
   "session",
@@ -128,7 +148,26 @@ export const apikey = pgTable(
 );
 
 /** Account-level audit trail: sign-ups, approvals, role changes, bans, model changes (admin page, email). */
-export const ADMIN_EVENT_TYPES = ["user.signed_up", "user.approved", "user.role_changed", "user.limits_changed", "user.banned", "user.unbanned", "user.removed", "models.changed", "provider.changed", "settings.changed"] as const;
+export const ADMIN_EVENT_TYPES = [
+  "user.signed_up",
+  "user.approved",
+  "user.role_changed",
+  "user.limits_changed",
+  "user.watermark_changed",
+  "user.flagged",
+  "user.banned",
+  "user.unbanned",
+  "user.removed",
+  "models.changed",
+  "provider.changed",
+  "settings.changed",
+  // billing (ee/): written by the subscription sync, never by a webhook handler directly
+  "billing.subscribed",
+  "billing.changed",
+  "billing.payment_failed",
+  "billing.canceled",
+  "billing.complimentary",
+] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
   "admin_events",
@@ -227,6 +266,8 @@ export const userSettings = pgTable("user_settings", {
   projectDefaults: jsonb("project_defaults").$type<UserProjectDefaults>().notNull().default({}),
   /** admin-set overrides of the instance quotas (hosted); keys match the MAX_* settings */
   limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
+  /** admin's per-user watermark decision: true / false; null = follow the plan and the instance setting (quota.ts `watermarkFor`) */
+  watermark: boolean("watermark"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;
@@ -396,6 +437,8 @@ export const clips = pgTable(
     outputKey: text("output_key"),
     /** size of the rendered file at output_key, for the per-user storage total (null: rendered before it was kept) */
     outputBytes: bigint("output_bytes", { mode: "number" }),
+    /** the last render burned the instance watermark in (quota.ts `watermarkFor` at render time); a re-render after an upgrade clears it */
+    watermark: boolean("watermark").notNull().default(false),
     thumbnailKey: text("thumbnail_key"),
     layout: text("layout"),
     layoutInfo: jsonb("layout_info").$type<{ reason: string; faceRatio: number; faceSize: number }>(),
@@ -477,3 +520,82 @@ export const stageArtifacts = pgTable(
 );
 
 export * from "./oauth-schema.js";
+
+// ---------- Enterprise edition (apps/server/src/ee, loaded with REELSAW_EE=true) ----------
+// The tables exist on every install so there is one schema and one migration history (Cal.com, PostHog do the
+// same); self-hosted they stay empty and nothing reads them.
+
+/** One Stripe customer per account, created at the first checkout (ee/billing/service.ts). */
+export const billingCustomers = pgTable("billing_customers", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Stripe's subscription statuses plus `complimentary` (an admin granted the plan without Stripe). */
+export const BILLING_STATUSES = ["trialing", "active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused", "complimentary"] as const;
+export type BillingStatus = (typeof BILLING_STATUSES)[number];
+export type BillingInterval = "month" | "year";
+
+/**
+ * The account's subscription as last read from Stripe (the source of truth): a cache the `billing.sync` job
+ * rewrites whole from `subscriptions.retrieve`, never patched from a webhook payload, so events arriving out of
+ * order or twice converge on Stripe's state. One row per account.
+ */
+export const billingSubscriptions = pgTable(
+  "billing_subscriptions",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** null = complimentary (no Stripe subscription behind it) */
+    stripeSubscriptionId: text("stripe_subscription_id").unique(),
+    stripeCustomerId: text("stripe_customer_id"),
+    /** Stripe's `created`; when two live subscriptions exist for one account the newer one owns the row */
+    stripeCreated: timestamp("stripe_created", { withTimezone: true }),
+    /** plan name from ee/billing/plans.ts, resolved from the price's lookup key */
+    plan: text("plan").notNull(),
+    status: text("status").$type<BillingStatus>().notNull(),
+    interval: text("interval").$type<BillingInterval>(),
+    priceId: text("price_id"),
+    periodStart: timestamp("period_start", { withTimezone: true }),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    /** first time the status became past_due; the grace period (BILLING_GRACE_DAYS) counts from here */
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** when the row was last rewritten from Stripe */
+    syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("billing_subscriptions_customer_idx").on(t.stripeCustomerId)],
+);
+export type BillingSubscriptionRow = typeof billingSubscriptions.$inferSelect;
+
+/**
+ * Every Stripe webhook event, keyed by Stripe's event id: the insert is the idempotency check (a redelivery
+ * conflicts and is acknowledged without a second job). Written in the same transaction as the `billing.sync`
+ * job it enqueues, so an acknowledged event always has its job. `processed_at` is set by the sync that
+ * read Stripe after it; a pending row older than an hour is picked up by the daily reconcile.
+ */
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    /** the Stripe subscription the event concerns, when it has one */
+    subscriptionId: text("subscription_id"),
+    /** Stripe's event time */
+    created: timestamp("created", { withTimezone: true }).notNull(),
+    /** the event's object as Stripe sent it, for forensics; never read to decide state */
+    payload: jsonb("payload").$type<unknown>().notNull().default({}),
+    receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    error: text("error"),
+  },
+  (t) => [index("billing_events_subscription_idx").on(t.subscriptionId, t.created), index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`)],
+);
+export type BillingEventRow = typeof billingEvents.$inferSelect;

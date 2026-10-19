@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
-import { approveUser, banUser, removeUser, setUserLimits, setUserRole, unbanUser } from "../accounts.js";
+import { approveUser, banUser, removeUser, setUserLimits, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
 import { schema, type Db } from "../db/index.js";
@@ -30,7 +30,7 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { decodeCursor, pageOf } from "../pagination.js";
-import { checkProjectQuota, limitsFor, LIMIT_KEYS, limitUsage, usageByUser } from "../quota.js";
+import { checkProjectQuota, limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
@@ -38,6 +38,7 @@ import { logControl } from "../log.js";
 import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.js";
 import { providerOf } from "../ai/registry.js";
 import { generateText } from "ai";
+import { takeTxLock, txLock } from "../locks.js";
 
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
@@ -72,6 +73,8 @@ function publicClip(c: schema.Clip) {
     error: c.error,
     layout: c.layout,
     layoutInfo: c.layoutInfo,
+    /** the last render burned the watermark in; a re-render after an upgrade drops it */
+    watermark: c.watermark,
     videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null,
     thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null,
     createdAt: c.createdAt.toISOString(),
@@ -276,6 +279,15 @@ async function ownedClip(u: UnitOfWork, userId: string, clipId: string): Promise
 }
 
 const actorOf = (user: { id: string; role?: string | null }): Actor => ({ id: user.id, admin: user.role === "admin" });
+/** The billing service, or the sentence a self-hosted instance answers with. */
+function billingOf(svc: Services) {
+  if (!svc.ee) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Billing is not enabled on this Reelsaw (REELSAW_EE is off)." });
+  return svc.ee.billing;
+}
+const periodOf = (g: Parameters<typeof periodFor>[0]) => {
+  const p = periodFor(g);
+  return { start: p.start.toISOString(), end: p.end.toISOString(), source: p.source };
+};
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 
@@ -322,6 +334,8 @@ export const appRouter = router({
         captcha: s.CAPTCHA_PROVIDER && s.CAPTCHA_SITE_KEY && s.CAPTCHA_SECRET_KEY ? { provider: s.CAPTCHA_PROVIDER, siteKey: s.CAPTCHA_SITE_KEY } : null,
         /** heavy jobs wait for the machine; the word says what is short, never the numbers */
         paused,
+        /** public keys for the browser's Sentry / PostHog (telemetry.ts); null = off */
+        telemetry: ctx.svc.telemetry.public,
       };
     }),
   }),
@@ -347,6 +361,10 @@ export const appRouter = router({
           disfluencyLlm: s.DISFLUENCY_LLM,
           scenes: s.REFINE_SCENES,
         },
+        /** which enterprise features this instance runs (ee/); the web shows the Billing tab from this */
+        ee: { billing: !!ctx.svc.ee },
+        /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
+        watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
       };
     }),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
@@ -366,6 +384,19 @@ export const appRouter = router({
     }),
   }),
 
+  /**
+   * Billing (enterprise edition). On an instance without it every procedure answers PRECONDITION_FAILED with a
+   * sentence; the web never shows the tab (me.get `ee.billing`). Money moves only on Stripe-hosted pages: the
+   * procedures hand back URLs.
+   */
+  billing: router({
+    /** Your plan, subscription, period, the limits in force and what you have used, the watermark decision, and the plan list. */
+    get: protectedProcedure.query(({ ctx }) => billingOf(ctx.svc).stateFor(ctx.user)),
+    /** A Stripe Checkout URL for a plan (or, with a live subscription, the Billing Portal's confirm-change page). Open it in a browser. */
+    checkout: protectedProcedure.input(z.object({ plan: z.string().min(1).max(40), interval: z.enum(["month", "year"]).default("month") })).mutation(({ ctx, input }) => billingOf(ctx.svc).checkout(ctx.user, input.plan, input.interval)),
+    /** The Stripe Billing Portal (invoices, card, cancel at period end). */
+    portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
+  }),
   /** The user's library of intro/outro videos and images (docs/specs/bumpers.md). Files arrive through POST /api/upload first. */
   bumpers: router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
@@ -463,7 +494,7 @@ export const appRouter = router({
           const contentHash = await sha256File(local);
           const row = await svc.tx(async (u) => {
             // one upload of a given file at a time per user, so two racing copies cannot both insert
-            await u.db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bumper:${ctx.user.id}:${contentHash}`}))`);
+            await takeTxLock(u.db, txLock.bumper(ctx.user.id, contentHash));
             const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
             if (same) {
               const wasRemoved = !!same.deletedAt;
@@ -603,12 +634,14 @@ export const appRouter = router({
        * account's all-time usage from one grouped query per metric table (see `usageByUser`).
        */
       list: adminProcedure
-        .input(z.object({ q: z.string().max(200).optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50) }).optional())
+        .input(z.object({ q: z.string().max(200).optional(), flagged: z.boolean().optional(), cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(50) }).optional())
         .query(async ({ ctx, input }) => {
           const db = ctx.svc.database.db;
           const limit = input?.limit ?? 50;
           const ws = words(input?.q ?? "");
           const U = schema.user;
+          // flagged only: accounts the hourly abuse pass marked (abuse.ts)
+          const onlyFlagged = input?.flagged ? sql`jsonb_array_length(${U.flags}) > 0` : undefined;
           // A search matches like the palette's (typo-tolerant, every word, best first) and returns the best
           // SEARCH_USERS matches in one page: no cursor, the header says when more match. Without a search the
           // list is the keyset-paged one: pending first, then newest.
@@ -634,22 +667,25 @@ export const appRouter = router({
                   approvedAt: U.approvedAt,
                   banned: U.banned,
                   banReason: U.banReason,
+                  flags: U.flags,
+                  signupIp: U.signupIp,
                   createdAt: U.createdAt,
                   approved,
                   ts: sql<string>`${U.createdAt}::text`,
                 })
                 .from(U)
-                .where(and(match, after))
+                .where(and(match, onlyFlagged, after))
                 .orderBy(...(score ? [desc(score)] : []), approved, desc(U.createdAt), desc(U.id))
                 .limit(pageSize + 1),
-              tx.select({ total: sql<number>`count(*)::int` }).from(U).where(match),
+              tx.select({ total: sql<number>`count(*)::int` }).from(U).where(and(match, onlyFlagged)),
             ]);
           });
           const { items, nextCursor } = ws.length ? { items: fetched.slice(0, pageSize), nextCursor: null } : pageOf(fetched, limit, (r) => [r.approved, r.ts, r.id]);
           const ids = items.map((r) => r.id);
-          const [usage, sessions] = await Promise.all([
+          const [usage, sessions, plans] = await Promise.all([
             usageByUser(db, null, ids),
             ids.length ? db.select({ userId: schema.session.userId, last: sql<Date>`max(${schema.session.updatedAt})` }).from(schema.session).where(inArray(schema.session.userId, ids)).groupBy(schema.session.userId) : [],
+            ctx.svc.ee ? ctx.svc.ee.billing.plansOf(ids) : new Map<string, { plan: string; status: string }>(),
           ]);
           const usageOf = new Map(usage.map((u) => [u.id, u]));
           const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
@@ -662,6 +698,8 @@ export const appRouter = router({
                 projects: projectsTotal,
                 usage: u,
                 status: r.banned ? ("suspended" as const) : r.approvedAt ? ("active" as const) : ("pending" as const),
+                /** the plan in force (ee); null when this instance has no plans */
+                plan: ctx.svc.ee ? (plans.get(r.id)?.plan ?? "free") : null,
                 approvedAt: r.approvedAt?.toISOString() ?? null,
                 createdAt: r.createdAt.toISOString(),
                 lastActive: last ? new Date(last).toISOString() : null,
@@ -671,6 +709,10 @@ export const appRouter = router({
             total,
           };
         }),
+      flaggedCount: adminProcedure.query(async ({ ctx }) => {
+        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
+        return n;
+      }),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
         const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
         return n;
@@ -681,13 +723,35 @@ export const appRouter = router({
       unban: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => unbanUser(ctx.svc, ctx.user.id, input.id)),
       remove: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => removeUser(ctx.svc, ctx.user.id, input.id)),
       /** Per-user quota overrides; null = back to the instance setting. */
+      /** One account's numbers: the instance values, the plan's, the overrides, what is in force and why, what is used now; plus the watermark decision. */
       limits: adminProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-        const row = await ctx.svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true } });
-        return { instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.settings.get()[k]])), overrides: row?.limits ?? {}, effective: await limitsFor(ctx.svc.database.db, ctx.svc.settings.get(), input.id), usage: await limitUsage(ctx.svc.database.db, input.id) };
+        const db = ctx.svc.database.db;
+        const [row, user] = await Promise.all([db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, input.id), columns: { limits: true, watermark: true } }), db.query.user.findFirst({ where: eq(schema.user.id, input.id), columns: { id: true, role: true } })]);
+        if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
+        const d = await limitsDetail(db, ctx.svc.settings.get(), input.id, ctx.svc.entitlements);
+        const wm = await watermarkFor(db, ctx.svc.settings.get(), user, ctx.svc.entitlements);
+        return {
+          instance: Object.fromEntries(LIMIT_KEYS.map((k) => [k, ctx.svc.settings.get()[k]])) as Record<(typeof LIMIT_KEYS)[number], number>,
+          plan: d.plan,
+          planLimits: d.grants?.limits ?? {},
+          overrides: row?.limits ?? {},
+          effective: d.limits,
+          source: d.source,
+          usage: await limitUsage(db, input.id, d.grants),
+          period: periodOf(d.grants),
+          watermark: { override: row?.watermark ?? null, effective: wm.on, source: wm.source },
+        };
       }),
       setLimits: adminProcedure
         .input(z.object({ id: z.string(), limits: z.partialRecord(z.enum(LIMIT_KEYS), z.number().int().min(0).nullable()) }))
         .mutation(({ ctx, input }) => setUserLimits(ctx.svc, ctx.user.id, input.id, input.limits)),
+      /** true = always watermark, false = never, null = follow the plan and the instance setting */
+      setWatermark: adminProcedure.input(z.object({ id: z.string(), watermark: z.boolean().nullable() })).mutation(({ ctx, input }) => setUserWatermark(ctx.svc, ctx.user.id, input.id, input.watermark)),
+    }),
+    /** Billing administration (ee): complimentary grants, and a re-read of Stripe for one account. */
+    billing: router({
+      setPlan: adminProcedure.input(z.object({ id: z.string(), plan: z.string().min(1).max(40).nullable() })).mutation(({ ctx, input }) => billingOf(ctx.svc).setComplimentary(ctx.user.id, input.id, input.plan)),
+      sync: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => billingOf(ctx.svc).reconcile({ userId: input.id })),
     }),
     /** Usage per user over the last `days`: projects, minutes of source, clips rendered, model calls and tokens, stored bytes. */
     usage: adminProcedure.input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional()).query(async ({ ctx, input }) => {
@@ -859,7 +923,7 @@ export const appRouter = router({
         throw err;
       };
       // early refusal before the URL peek; the binding check runs again, locked, in the transaction that inserts
-      await checkProjectQuota(db, svc.settings.get(), ctx.user.id).catch(quotaReached);
+      await checkProjectQuota(db, svc.settings.get(), ctx.user.id, { ent: svc.entitlements }).catch(quotaReached);
       let sourceMeta: schema.Project["sourceMeta"] = null;
       let title = input.title?.trim() || "";
       if (input.uploadId) {
@@ -877,7 +941,7 @@ export const appRouter = router({
       // row, event and first job together: never a "queued" project with no job behind it
       const p = await svc.tx(async (u) => {
         // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
-        await checkProjectQuota(u.db, svc.settings.get(), ctx.user.id, { lock: true }).catch(quotaReached);
+        await checkProjectQuota(u.db, svc.settings.get(), ctx.user.id, { lock: true, ent: svc.entitlements }).catch(quotaReached);
         // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
         const settings = await resolveProjectSettings(u.db, ctx.user.id, input.settings);
         if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });

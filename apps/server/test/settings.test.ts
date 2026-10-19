@@ -36,7 +36,7 @@ describe("settings", () => {
     assert.equal(sys.status, 200);
     assert.ok((sys.data as { resources: { cpus: number } }).resources.cpus > 0);
     const pub = (await trpc("", "system.status", undefined, "GET")).data as Record<string, unknown>;
-    assert.deepEqual(Object.keys(pub).sort(), ["captcha", "emailEnabled", "maxUploadMb", "paused", "privacyUrl", "signupMode", "termsUrl", "version"]);
+    assert.deepEqual(Object.keys(pub).sort(), ["captcha", "emailEnabled", "maxUploadMb", "paused", "privacyUrl", "signupMode", "telemetry", "termsUrl", "version"]);
   });
 
   it("shows machine numbers in /api/health to admins only", async () => {

@@ -1,6 +1,8 @@
 import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
 
 export interface CaptionOptions {
+  /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
+  watermark?: string;
   width: number;
   height: number;
   font: string;
@@ -76,6 +78,7 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${captionStyle}
 Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,1
+Style: Watermark,${font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -83,6 +86,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const events: string[] = [];
   const clipEnd = words.length ? words[words.length - 1]!.end : 0;
+
+  // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed
+  if (opts.watermark) events.push(`Dialogue: 2,${assTime(0)},${assTime(Math.max(clipEnd, 1) + 3600)},Watermark,,0,0,0,,${pos(0.5, 0.91)}${esc(opts.watermark)}`);
 
   if (style.showHook && opts.hook && style.hookSeconds > 0) {
     const end = Math.min(style.hookSeconds, Math.max(clipEnd, style.hookSeconds));

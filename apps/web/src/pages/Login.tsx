@@ -4,12 +4,44 @@ import { authClient, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
 import { useSystemStatus } from "../lib/account";
+import { track } from "../lib/telemetry";
+import { billingPlanPath, INTERVAL_PARAM, PLAN_PARAM } from "@reelsaw/shared";
 import { ScrollArea } from "../components/scroll-area";
 
-export function LoginPage() {
+/** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
+export const AFTER_SIGN_IN_KEY = "reelsaw.afterSignIn";
+export function takeAfterSignIn(): string | null {
+  try {
+    const raw = localStorage.getItem(AFTER_SIGN_IN_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(AFTER_SIGN_IN_KEY);
+    const { to, at } = JSON.parse(raw) as { to: string; at: number };
+    return typeof to === "string" && to.startsWith("/") && Date.now() - at < 86_400_000 ? to : null;
+  } catch {
+    return null;
+  }
+}
+function rememberAfterSignIn(to: string) {
+  try {
+    localStorage.setItem(AFTER_SIGN_IN_KEY, JSON.stringify({ to, at: Date.now() }));
+  } catch {
+    /* private mode: the user lands on the projects page instead */
+  }
+}
+
+export function LoginPage({ signup = false }: { signup?: boolean }) {
   const { data } = useSession();
   const nav = useNavigate();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup">(signup ? "signup" : "login");
+  // /signup?plan=pro&interval=year from the pricing page: remembered now, used after the first sign-in
+  const [plan] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    const plan = q.get(PLAN_PARAM);
+    if (!plan || !/^[a-z0-9_-]{1,40}$/.test(plan)) return null;
+    const interval = q.get(INTERVAL_PARAM) === "year" ? "year" : "month";
+    rememberAfterSignIn(billingPlanPath(plan, interval));
+    return plan;
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -46,7 +78,8 @@ export function LoginPage() {
       return setError(r.error?.message ?? "Could not continue the authorization");
     }
     setBusy(false);
-    nav("/", { replace: true });
+    track(mode === "signup" ? "signup_completed" : "signin_completed", { plan: plan ?? undefined });
+    nav(takeAfterSignIn() ?? "/", { replace: true });
   }
 
   return (
@@ -73,6 +106,7 @@ export function LoginPage() {
           <label className="label">Password</label>
           <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
+        {mode === "signup" && plan && <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>}
         {mode === "signup" && signupMode === "approval" && <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>}
         {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
           <p className="text-xs leading-relaxed text-ink3">

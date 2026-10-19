@@ -283,10 +283,15 @@ first sign-in. Without it everything else works; approvals are handled on the Us
 Everything below is off by default and switched on by environment (`deploy/.env.example` lists
 them), so a single-user box stays as it is:
 
-- **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_NEW_PROJECTS_PER_HOUR`
-  (0 = unlimited), with per-user overrides on the Users page. A refusal is a sentence that says
-  what to do ("Daily limit of 120 minutes reached; resets at 00:00 UTC"). Length is checked once
-  the video is probed, so an over-long download fails the project with that reason.
+- **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_SOURCE_MINUTES_PER_MONTH`,
+  `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB` (0 = unlimited), with per-user overrides on the Users
+  page. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
+  used); resets on 1 November"). The monthly window is the account's billing period when it has a
+  plan, else the UTC calendar month. Length is checked once the video is probed, so an over-long
+  download fails the project with that reason.
+- **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns `WATERMARK_TEXT` ("reelsaw.com") into
+  the clips of accounts that are not admins; a paid plan removes it, and an admin can switch it per
+  user on the Users page (Limits). Decided at render time, so a re-render after the change applies it.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
@@ -297,6 +302,14 @@ them), so a single-user box stays as it is:
   a project's run skeleton (created, run started, done) is always kept.
 - **Bot protection**: `CAPTCHA_PROVIDER` (Cloudflare Turnstile, reCAPTCHA, hCaptcha) with site and
   secret keys puts a widget on sign-up and sign-in.
+- **Free-tier abuse** (all off unless set; `apps/server/src/abuse.ts`): `MAX_SIGNUPS_PER_IP_PER_DAY`
+  caps accounts per network address (behind a proxy, `TRUST_PROXY` reads `CF-Connecting-IP`,
+  `X-Real-IP`, `X-Forwarded-For`); `BLOCK_DISPOSABLE_EMAILS` refuses temporary-address domains; one
+  account per real mailbox (`john.doe+x@gmail.com` is `johndoe@gmail.com`); `MAX_REQUESTS_PER_MINUTE`
+  / `_HOUR` cap changes (API mutations, MCP tool calls) per account, with plan and per-user
+  overrides like the other quotas. An hourly pass flags accounts that
+  share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
+  suspended automatically. Every refusal is a sentence.
 - **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` and
   `YTDLP_COOKIES_FILE` help; a blocked download fails with "upload the file instead".
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` appear on the sign-up form.
@@ -305,6 +318,33 @@ them), so a single-user box stays as it is:
   page in the browser, discovery at `/.well-known/oauth-protected-resource/api/mcp` (which names
   the issuer, `<APP_URL>/api/auth`, whose metadata is at
   `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs.
+
+## Billing (enterprise edition)
+
+The hosted service at app.reelsaw.com adds plans and billing through Stripe. That code lives in
+`apps/server/src/ee` and `apps/web/src/ee` under its own licence ([LICENSING.md](LICENSING.md)),
+ships in the same image, and runs only with `REELSAW_EE=true` plus `STRIPE_SECRET_KEY` and
+`STRIPE_WEBHOOK_SECRET`. Nothing else changes for a self-hosted install.
+
+- A plan is a named set of the limits above (`ee/billing/plans.ts`); the account's plan sits between
+  the instance setting and the admin's per-user override. Free is a plan too: what an account with
+  no, or a lapsed, subscription gets.
+- Stripe is the source of truth. A webhook (`POST /api/billing/webhook`) is acknowledged only once
+  its event row and a `billing.sync` job have committed together; the job rewrites the account's
+  row from Stripe, so events that arrive late, twice or out of order converge. A daily reconcile
+  and `reelsaw billing sync` repair anything a lost webhook left behind.
+- Settings → Billing shows the plan, the period's usage and the plan grid; Checkout and the
+  Billing Portal are Stripe's pages. `get_billing` and `billing_checkout_url` do the same over MCP;
+  `reelsaw billing <email>` shows the row, Stripe's view and the last webhook events.
+- A failed payment keeps the plan for `BILLING_GRACE_DAYS` (7), then the account is on Free.
+  Admins can grant a plan without Stripe (Users → Limits → Plan, or `reelsaw billing set-plan`).
+- Setting up a Stripe account: `pnpm --filter @reelsaw/server stripe:setup --webhook --portal`
+  creates the products, prices (by lookup key), webhook endpoint and portal configuration from the
+  plan list, idempotently. Developing without a Stripe account: `pnpm --filter @reelsaw/server
+  stripe:mock` stands in for api.stripe.com (`STRIPE_API_BASE=http://host.docker.internal:4242`)
+  and `test/billing-stack.test.ts` drives the whole lifecycle through signed webhooks.
+
+Design and decisions: [docs/specs/ee.md](docs/specs/ee.md).
 
 ## MCP: drive Reelsaw from an agent
 
@@ -366,6 +406,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
+| `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. |
+| `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
 <!-- /generated -->
 
 `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
@@ -417,7 +459,9 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
-| `reelsaw limits <email>` | an account's quotas: instance value, override, in force, in use now |
+| `reelsaw limits <email>` | an account's quotas: instance value, plan, override, in force, in use now |
+| `reelsaw abuse` | [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
+| `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
 | `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |
 <!-- /generated -->
@@ -436,7 +480,8 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | A project's settings | built-in defaults, then the user's **Project defaults**, then what the create form or agent sent. The result is frozen into `projects.settings`; later changes (`updateStyle`, re-analyze with new settings) patch that row. |
 | A clip's style | the project's style, then the clip's own override (`clips.style`). `updateStyle` clears clip overrides unless told to keep them. |
 | Framing | `auto` (face detection decides), then the project's `reframe`, then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i].mode`). |
-| Quotas | `.env` `MAX_*` (0 = unlimited), then the instance setting an admin saved under Settings → System → Limits, then a per-user limit set on the Users page. |
+| Quotas | `.env` `MAX_*` (0 = unlimited), then the instance setting an admin saved under Settings → System → Limits, then what the account's plan grants (hosted, `REELSAW_EE`), then a per-user limit set on the Users page. The Users page says which applies. |
+| Watermark | An admin's per-user choice (Users → Limits), else the plan (a paid plan removes it), else `WATERMARK_NON_ADMINS` for everyone who is not an admin. |
 
 Two things to know:
 
@@ -541,6 +586,16 @@ Every variable, with its default and meaning, is in [docs/CONFIG.md](docs/CONFIG
 
 ## Observability
 
+**Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports boot
+failures, 5xx API errors and a job's final failed attempt; the web app reports render errors.
+`POSTHOG_KEY` (and `POSTHOG_HOST`, EU cloud or self-hosted) turns on PostHog: the server sends
+sign-ups, project created / done / failed, billing and abuse-flag events; the web app sends page
+views and a handful of product events (`lib/telemetry.ts`), people identified by user id with email
+and name on the profile, no autocapture and no session recording. Both are off unless set, the
+browser gets the public keys from `system.status`, and the SDK chunks are only requested when on.
+Prompts, transcripts and media never go through either (`apps/server/src/telemetry.ts`).
+
+
 ```
 OTEL_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318   # OTLP/HTTP; traces + metrics
@@ -614,8 +669,9 @@ See [docs/RESEARCH.md](docs/RESEARCH.md) for the competitor audit and research r
 
 Reelsaw is free software under the [GNU Affero General Public License v3.0](LICENSE). You can run
 it, change it and host it; if you offer a modified version as a network service you must make
-your modifications available under the same licence. Hosted-only additions (billing, for example)
-will live under `ee/` with their own licence; nothing in the repository is there yet. Contributions
-need a DCO sign-off (`git commit -s`), see [CONTRIBUTING.md](CONTRIBUTING.md).
+your modifications available under the same licence. The hosted service's additions (billing)
+live in `apps/server/src/ee` and `apps/web/src/ee` under the Reelsaw Enterprise License and load
+only with `REELSAW_EE=true`; see [LICENSING.md](LICENSING.md). Contributions need a DCO sign-off
+(`git commit -s`), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Copyright (C) 2026 osbytes

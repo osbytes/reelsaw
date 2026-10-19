@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { trpcServer } from "@hono/trpc-server";
@@ -117,8 +118,15 @@ export function createApp(svc: Services) {
   // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
   // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
   if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(c.req.raw));
+  // Stripe webhooks (ee): raw body (bounded: events are a few hundred KB at most, and the signature is checked only after
+  // the body is read), 2xx only once the event and its sync job committed
+  if (svc.ee) app.post("/api/billing/webhook", bodyLimit({ maxSize: 1024 * 1024 }), (c) => svc.ee!.webhook(c));
   app.use("/api/trpc/*", trpcServer({ router: appRouter, endpoint: "/api/trpc", createContext: contextFactory(svc),
-      onError: ({ error, path, type, ctx }) => logTrpcError((ctx as Ctx | undefined)?.log ?? svc.log.child({ module: "http" }), { path, type, code: error.code, requestId: (ctx as Ctx | undefined)?.requestId, userId: (ctx as Ctx | undefined)?.who?.user.id, err: error }),
+      onError: ({ error, path, type, ctx }) => {
+        const c = ctx as Ctx | undefined;
+        logTrpcError(c?.log ?? svc.log.child({ module: "http" }), { path, type, code: error.code, requestId: c?.requestId, userId: c?.who?.user.id, err: error });
+        if (error.code === "INTERNAL_SERVER_ERROR") svc.telemetry.captureException(error.cause ?? error, { procedure: path, type, requestId: c?.requestId, userId: c?.who?.user.id });
+      },
     }));
 
   // MCP (agents): API key in the Authorization header; see README "MCP" and src/mcp.ts
@@ -162,7 +170,7 @@ export function createApp(svc: Services) {
       return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
     }
     try {
-      await checkStorageQuota(db, svc.settings.get(), session.user.id, length);
+      await checkStorageQuota(db, svc.settings.get(), session.user.id, length, svc.entitlements);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       return c.json({ error: (err as Error).message }, 413);

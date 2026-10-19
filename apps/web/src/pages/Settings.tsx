@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, useLocation } from "react-router";
 import { useTRPC } from "../lib/trpc";
@@ -13,6 +13,10 @@ import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
 import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
+import { BILLING_PATH } from "@reelsaw/shared";
+
+// enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
+const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
 
 function gb(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
@@ -40,7 +44,9 @@ export function SettingsPage() {
   const status = useSystemStatus();
   const loc = useLocation();
   const isAdmin = me.data?.role === "admin";
+  const hasBilling = !!me.data?.ee?.billing;
   const system = loc.pathname.endsWith("/system") && isAdmin;
+  const billing = loc.pathname === BILLING_PATH && hasBilling;
   const tab = ({ isActive }: { isActive: boolean }) => `rounded-[9px] px-3 py-[7px] text-[13px] whitespace-nowrap no-underline ${isActive ? "bg-sunk font-semibold text-ink" : "text-ink2 hover:text-ink"}`;
 
   return (
@@ -53,25 +59,41 @@ export function SettingsPage() {
               <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
             </div>
             <p className="mt-1 min-h-5 text-sm text-ink2">
-              {system ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env." : "Your account, your defaults for new projects, and keys for agents and tools."}
+              {system ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env." : billing ? "Your plan, what you have used this period, and the plans on offer." : "Your account, your defaults for new projects, and keys for agents and tools."}
             </p>
           </div>
           {/* the tab row keeps its height for everyone, so the page does not jump when the role loads */}
           <nav className="flex min-h-[34px] gap-1" aria-label="Settings tabs">
+            {(isAdmin || hasBilling) && (
+              <NavLink to="/settings" end className={tab}>
+                Account
+              </NavLink>
+            )}
+            {hasBilling && (
+              <NavLink to={BILLING_PATH} className={tab}>
+                Billing
+              </NavLink>
+            )}
             {isAdmin && (
-              <>
-                <NavLink to="/settings" end className={tab}>
-                  Account
-                </NavLink>
-                <NavLink to="/settings/system" className={tab}>
-                  System
-                </NavLink>
-              </>
+              <NavLink to="/settings/system" className={tab}>
+                System
+              </NavLink>
             )}
           </nav>
         </div>
         {system ? (
           <SystemTab />
+        ) : billing ? (
+          <Suspense
+            fallback={
+              <SkeletonRegion className="flex flex-col gap-6">
+                <Skeleton className="h-40 w-full rounded-[16px]" />
+                <Skeleton className="h-72 w-full rounded-[16px]" />
+              </SkeletonRegion>
+            }
+          >
+            <BillingSection />
+          </Suspense>
         ) : (
           <>
             <AccountSection />

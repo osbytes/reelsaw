@@ -84,12 +84,33 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     if (userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own account from here." });
     if (user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin." });
     const projects = await u.db.query.projects.findMany({ where: eq(schema.projects.userId, userId), columns: { id: true } });
+    // hosted: the Stripe subscription must stop billing too; read what to cancel before the rows cascade away
+    const cancelAtStripe = svc.ee ? await svc.ee.billing.detachUser(u, userId) : null;
     // removing an account is final: its projects (deleted ones included) go now, not after the restore window
     for (const p of projects) await purgeProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
     await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
     audit(svc, u, "user.removed", actorId, userId);
+    // after commit, best effort: a failure is logged and the daily reconcile lists the orphan
+    if (cancelAtStripe) u.afterCommit(cancelAtStripe);
     return { ok: true, projects: projects.length };
+  });
+}
+
+/**
+ * The admin's per-user watermark decision: true (always), false (never) or null (follow the plan and the
+ * instance setting). Applies to the next render; existing clips keep what they were rendered with.
+ */
+export async function setUserWatermark(svc: Services, actorId: string, userId: string, watermark: boolean | null) {
+  return svc.tx(async (u) => {
+    const user = await lockedUser(u, userId);
+    await u.db
+      .insert(schema.userSettings)
+      .values({ userId, watermark })
+      .onConflictDoUpdate({ target: schema.userSettings.userId, set: { watermark, updatedAt: new Date() } });
+    await u.db.insert(schema.adminEvents).values({ type: "user.watermark_changed", actorId, userId, email: user.email, payload: { watermark } });
+    audit(svc, u, "user.watermark_changed", actorId, userId);
+    return { ok: true, watermark };
   });
 }
 

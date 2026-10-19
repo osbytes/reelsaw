@@ -46,8 +46,9 @@ Decisions, in order of how hard they are to reverse:
 4. **Licence: AGPL-3.0 for the core (decided 2026-10-17).** Anyone may host it; anyone who hosts a
    modified version must publish the modifications (section 13 closes the SaaS loophole), which
    removes the incentive to fork-and-host privately. Most open-core SaaS (Plausible, Cal.com,
-   Twenty, Infisical) chose it. Contributions carry a DCO sign-off so the project keeps the right
-   to dual-license. `ee/` later gets a commercial licence.
+   Twenty, Infisical) chose it. Contributions carry a DCO sign-off (the right to submit under the
+   AGPL; it does not let the project relicense a contribution: a CLA is needed before outside
+   contributions are combined with `ee/`, see LICENSING.md). `ee/` later gets a commercial licence.
 5. **Config over editions.** No `EDITION=cloud` switch that changes behaviour in many places. Each
    hosted need is its own setting with a self-hosted default (`SIGNUP_MODE`, `EMAIL_DRIVER`,
    `SOURCE_RETENTION_DAYS`, `YTDLP_PROXY`). The hosted deployment is just a particular `.env`.
@@ -99,6 +100,12 @@ Decisions, in order of how hard they are to reverse:
   deletes stored sources / renders past the age, keeps rows, and the UI offers "re-fetch".
 - **Abuse**: email verification required when `EMAIL_DRIVER` is set, Better Auth `captcha`
   plugin behind `CAPTCHA_PROVIDER`, rate limits on sign-up and project creation per user.
+  Added 2026-10-19 for the free tier (`abuse.ts`): accounts per IP per day, disposable-domain
+  refusal, one account per real mailbox (`user.email_key`, unique), a per-account mutation rate
+  (`user_rate` minute buckets, DB-counted), and hourly flags (`user.flags`: shared_ip,
+  signup_burst, disposable_email) with an admin event and a Users-page filter.
+  Flags inform; the plan caps contain. Cloudflare in front of app.reelsaw.com adds edge rate
+  limits and bot scoring (infra runbook `abuse.md`).
 - **yt-dlp from a datacentre IP** gets blocked by YouTube: `YTDLP_PROXY` and `YTDLP_COOKIES_FILE`
   settings, and "upload the file" as the first-class fallback with a clear error.
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` shown on sign-up when set.
@@ -124,5 +131,6 @@ Decisions, in order of how hard they are to reverse:
 - Deploys honour `SHUTDOWN_GRACE_SECONDS`; roll one worker at a time.
 
 ## Later (needs the above first)
-- Billing in `ee/` (Stripe, plan → quota), organisations (Better Auth `organization` plugin:
-  projects get an `organizationId`), SSO.
+- Billing in `ee/` (Stripe, plan → quota): specified in [ee.md](ee.md), plan in
+  [ee.plan.md](ee.plan.md). Then organisations (Better Auth `organization` plugin: projects get
+  an `organizationId`), SSO.

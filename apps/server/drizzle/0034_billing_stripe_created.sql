@@ -1,0 +1,1 @@
+ALTER TABLE "billing_subscriptions" ADD COLUMN "stripe_created" timestamp with time zone;

@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { sourceMinutesExceeded } from "../quota.js";
+import { takeTxLock, txLock } from "../locks.js";
 import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
@@ -101,16 +102,19 @@ export async function ingest(ctx: StageContext) {
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
-  const over = await sourceMinutesExceeded(ctx.db, svc.settings.get(), project.userId, projectId, probe.durationSec);
-  if (over) {
-    ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "daily source-minutes limit reached");
-    throw new Error(over);
-  }
   ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
   await ctx.complete({ sourceDurationSec: probe.durationSec, title }, async (u) => {
+    // the binding minutes check: under the account's quota lock, in the unit that records this length, so two
+    // ingests of one account cannot both pass a cap they jointly exceed (the create-side check is only advisory)
+    await takeTxLock(u.db, txLock.quota(project.userId));
+    const over = await sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, probe.durationSec, svc.entitlements);
+    if (over) {
+      ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "source-minutes limit reached");
+      throw new Error(over);
+    }
     await u.db
       .update(schema.projects)
       .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })

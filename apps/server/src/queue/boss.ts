@@ -80,7 +80,9 @@ export interface Queue {
    * Enqueue a stage job. Deduped per project/clip via singletonKey + exclusive policy. Carries the owner's
    * `userId` and a fair `priority` (see `fairPriority`); pass `admission` when the caller already looked it up.
    */
-  enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission }): Promise<string | null>;
+  enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission; priorityBoost?: number }): Promise<string | null>;
+  /** A job on any queue the caller created itself (ee/ billing): plain pg-boss send on the transaction's connection when given. */
+  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string }): Promise<string | null>;
   /** The job owner's in-flight work (see `Admission`), on the transaction's connection when given. */
   admission(data: JobData, opts?: TxOpts): Promise<Admission>;
   /** True if a job for this key is created, retrying, or active. */
@@ -151,11 +153,13 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       started = false;
     },
     admission,
+    send: (queue, data, opts) => boss.send(queue, data, { ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}), ...(opts?.db ? { db: opts.db } : {}) }),
     async enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
       const a = opts?.admission ?? (await admission(data, opts));
       const payload = a.userId ? { ...data, userId: a.userId } : data;
-      return boss.send(queue, payload, { singletonKey, priority: fairPriority(a.live), ...(opts?.db ? { db: opts.db } : {}) });
+      // a plan's boost (ee) lifts the account above others with the same backlog, never above an idle account's first job by more than the boost
+      return boss.send(queue, payload, { singletonKey, priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0), ...(opts?.db ? { db: opts.db } : {}) });
     },
     async hasLiveJob(queue, key, opts) {
       const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
