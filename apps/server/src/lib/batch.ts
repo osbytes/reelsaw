@@ -45,7 +45,9 @@ export async function keysetLoop<Row, Cursor>(opts: {
   let rows = 0;
   const deadline = opts.deadline ?? Infinity;
   for (;;) {
-    if (expired(deadline)) return { batches, rows, complete: false, cursor };
+    // a budgeted call always makes one batch of progress: a budget that is already spent when the loop starts (a
+    // slow machine, a long first fetch elsewhere) must not leave the cursor where it was forever
+    if (batches > 0 && expired(deadline)) return { batches, rows, complete: false, cursor };
     const page = await opts.fetch(cursor, opts.size);
     if (!page.length) return { batches, rows, complete: true, cursor };
     await opts.handle(page);
