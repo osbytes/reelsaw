@@ -6,13 +6,13 @@ export const GUIDES: Guide[] = [
     slug: "free-ai-clip-generator-no-watermark",
     metaTitle: "Free AI clip generator with no watermark (self-hosted)",
     metaDescription:
-      "Most free AI clip generators watermark your clips until you pay. Reelsaw is open-source software you run yourself, so clips are free and never watermarked. How each tool handles watermarks, checked " +
+      "Most free AI clip generators watermark your clips until you pay. Reelsaw is open-source software you can run yourself, so clips are free and never watermarked (its hosted Free plan watermarks like everyone else's). How each tool handles watermarks, checked " +
       CHECKED +
       ".",
     h1: "A free AI clip generator with no watermark, and why that is rare",
     intro: [
       "Every hosted clipping service pays for GPUs, storage and bandwidth on your behalf, so its free tier has to push you toward a plan. The watermark is how: it makes the free clips unusable in public while still showing you the product works.",
-      "The structural exception is software you run yourself. Reelsaw is an open-source AI clipper that installs with one command, has no plans, and never writes a watermark, because there is nothing to upsell.",
+      "The structural exception is software you run yourself. Reelsaw is an open-source AI clipper that installs with one command; on your own machine it has no plans and never writes a watermark, because there is nothing to upsell. (Its hosted service at app.reelsaw.com is a normal hosted product: the Free plan watermarks, paid plans from $12 a month do not.)",
     ],
     sections: [
       {
@@ -34,7 +34,8 @@ export const GUIDES: Guide[] = [
           columns: ["Tool", "Free tier", "Cheapest way to lose the watermark"],
           rows: [
             ["Reelsaw", "Everything, self-hosted", "There is none. $0"],
-            ["OpenShorts", "Self-hosted: none. Cloud: 20 min/mo with watermark", "Self-host ($0) or Cloud from $12/mo"],
+            ["Reelsaw", "Self-hosted: none, ever. Hosted: first video up to 60 min, then 20 min/mo with watermark", "Self-host ($0) or Starter, $12/mo"],
+            ["OpenShorts", "Self-hosted: none. Cloud: first video up to 60 min, then 20 min/mo with watermark", "Self-host ($0) or Cloud from $12/mo"],
             ["Opus Clip", "Captions with watermark, exports expire after 3 days", "Starter, $15/mo"],
             ["Vizard", "60 upload min/mo, 720p, 3-day storage; 'No watermark' is a Creator feature", "Creator, priced by yearly credit bundle"],
             ["2short.ai", "30 min of analysis/mo", "Page says 'goodbye to watermarks' without a plan; Lite is $9.90/mo"],
@@ -56,8 +57,8 @@ export const GUIDES: Guide[] = [
       },
     ],
     faqs: [
-      { q: "Is there a free AI clip generator without a watermark?", a: "Yes: self-hosted software. Reelsaw is open source under the AGPL-3.0, installs with one command, and never watermarks because it has no paid tier. OpenShorts, also open source, is watermark-free when self-hosted." },
-      { q: "Do any hosted free plans skip the watermark?", a: "Among the tools checked on " + CHECKED + ", Submagic lists no watermark on any plan but has no free plan; 2short.ai makes a general 'no watermarks' claim without tying it to a plan. Opus Clip and OpenShorts Cloud watermark their free tiers; Vizard lists watermark removal as a paid feature." },
+      { q: "Is there a free AI clip generator without a watermark?", a: "Yes: self-hosted software. Reelsaw is open source under the AGPL-3.0, installs with one command, and never watermarks on your own machine. OpenShorts, also open source, is watermark-free when self-hosted. Both hosted services watermark their free plans." },
+      { q: "Do any hosted free plans skip the watermark?", a: "Among the tools checked on " + CHECKED + ", Submagic lists no watermark on any plan but has no free plan; 2short.ai makes a general 'no watermarks' claim without tying it to a plan. Opus Clip, OpenShorts Cloud and hosted Reelsaw watermark their free tiers; Vizard lists watermark removal as a paid feature." },
       { q: "How do I remove a watermark from a clip I already made?", a: "Re-render it from the source without the watermark. Cropping or blurring a watermark lowers quality and usually breaks the tool's terms; running the source through Reelsaw gives you a clean clip from the original video." },
     ],
     sources: [
@@ -137,7 +138,7 @@ export const GUIDES: Guide[] = [
     slug: "youtube-to-shorts-converter",
     metaTitle: "YouTube to Shorts converter you run on your own machine",
     metaDescription:
-      "Paste a YouTube link, get vertical Shorts with word-highlight captions, a hook and a YouTube Data API upload body, all rendered on your own hardware with open-source software. No credits, no watermark.",
+      "Paste a YouTube link, get vertical Shorts with word-highlight captions, a hook and a YouTube Data API upload body, all rendered on your own hardware with open-source software. No credits, no watermark when you self-host.",
     h1: "YouTube to Shorts converter you can run on your own machine",
     intro: [
       "A YouTube link is the most common input to a clipping tool, and the first thing hosted services charge for is the minutes in it. Reelsaw takes the same link and does the whole job on your hardware: fetch, transcribe, pick moments, reframe to 9:16, caption, and hand back clips with upload metadata.",
@@ -168,7 +169,7 @@ export const GUIDES: Guide[] = [
         table: {
           columns: ["", "Reelsaw", "Hosted converters (Opus Clip, Vizard, 2short, quso)"],
           rows: [
-            ["Price", "$0 software; your hardware or your model keys", "Free tiers with watermarks, 720p or expiring exports; paid from about $10 to $29 a month"],
+            ["Price", "$0 software on your hardware (or hosted: Free, then $12 to $59 a month)", "Free tiers with watermarks, 720p or expiring exports; paid from about $10 to $29 a month"],
             ["Source length", "No limit beyond your disk", "Metered per minute or per credit; some cap export length"],
             ["Where the video goes", "Stays on your machine", "Uploaded to the vendor"],
             ["Automation", "MCP server and CLI on every install", "API or MCP on higher plans, where offered"],

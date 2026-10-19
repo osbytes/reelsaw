@@ -4,6 +4,8 @@ export const SITE = {
   title: "Reelsaw: self-hosted, AI-powered video clipper",
   description:
     "Turn long videos into vertical 9:16 clips on your own hardware. Reelsaw transcribes, picks the most clippable moments with an LLM, reframes speakers and burns in word-highlight captions. Open source (AGPL-3.0), fully local with no API keys or any AI provider you choose, one-command Docker install.",
+  /** the hosted service (docs/specs/ee.md) */
+  app: "https://app.reelsaw.com",
   github: "https://github.com/osbytes/reelsaw",
   releases: "https://github.com/osbytes/reelsaw/releases",
   issues: "https://github.com/osbytes/reelsaw/issues",

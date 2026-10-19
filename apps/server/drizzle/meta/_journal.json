@@ -225,6 +225,20 @@
       "when": 1792339893430,
       "tag": "0031_usage_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792427321665,
+      "tag": "0032_billing_watermark",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792430164371,
+      "tag": "0033_abuse_guards",
+      "breakpoints": true
     }
   ]
 }

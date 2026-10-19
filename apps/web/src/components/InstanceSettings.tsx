@@ -21,6 +21,8 @@ export type Field =
 export const ACCESS_FIELDS: Field[] = [
   { key: "SIGNUP_MODE", label: "Sign-ups", kind: "enum", options: [{ value: "open", label: "Open" }, { value: "approval", label: "Approval" }, { value: "closed", label: "Closed" }] },
   { key: "REQUIRE_EMAIL_VERIFICATION", label: "Email verification", kind: "bool", on: "Required", off: "Off" },
+  { key: "MAX_SIGNUPS_PER_IP_PER_DAY", label: "Sign-ups per address per day", kind: "int", unit: "accounts", zero: "unlimited" },
+  { key: "BLOCK_DISPOSABLE_EMAILS", label: "Temporary email domains", kind: "bool", on: "Refused", off: "Allowed" },
   {
     key: "CAPTCHA_PROVIDER",
     label: "Captcha",
@@ -44,7 +46,12 @@ export const LIMIT_FIELDS: Field[] = [
   { key: "MAX_NEW_PROJECTS_PER_HOUR", label: "New projects per hour", kind: "int", unit: "projects", zero: "unlimited" },
   { key: "MAX_LIVE_JOBS_PER_USER", label: "Jobs at once", kind: "int", unit: "jobs", zero: "unlimited" },
   { key: "MAX_RERENDERS_PER_HOUR", label: "Renders asked for per hour", kind: "int", unit: "renders", zero: "unlimited" },
+  { key: "MAX_SOURCE_MINUTES_PER_MONTH", label: "Minutes of video per month", kind: "int", unit: "minutes", zero: "unlimited" },
   { key: "MAX_STORAGE_MB", label: "Storage per account", kind: "int", unit: "MB", zero: "unlimited" },
+  { key: "WATERMARK_NON_ADMINS", label: "Watermark for non-admins", kind: "bool", on: "On", off: "Off" },
+  { key: "WATERMARK_TEXT", label: "Watermark text", kind: "text", placeholder: "reelsaw.com" },
+  { key: "MAX_REQUESTS_PER_MINUTE", label: "Changes per minute", kind: "int", unit: "requests", zero: "unlimited" },
+  { key: "MAX_REQUESTS_PER_HOUR", label: "Changes per hour", kind: "int", unit: "requests", zero: "unlimited" },
   { key: "MAX_UPLOAD_MB", label: "Largest upload", kind: "int", min: 1, unit: "MB" },
   { key: "MAX_SOURCE_FILE_MB", label: "Largest link download", kind: "int", min: 1, unit: "MB" },
   { key: "ALLOW_PRIVATE_SOURCE_URLS", label: "Links to private networks", kind: "bool", on: "Allowed", off: "Blocked" },

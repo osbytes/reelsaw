@@ -368,6 +368,18 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "get_billing",
+    TOOLS.get_billing,
+    () => run(() => api.billing.get()),
+  );
+
+  server.registerTool(
+    "billing_checkout_url",
+    TOOLS.billing_checkout_url,
+    ({ plan, interval }) => run(() => api.billing.checkout({ plan, interval })),
+  );
+
+  server.registerTool(
     "delete_project",
     TOOLS.delete_project,
     ({ id }) => run(() => api.projects.delete({ id })),

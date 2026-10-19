@@ -8,6 +8,7 @@ import type { FixedOption } from "../components/BumperCombobox";
 import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented, Skeleton } from "../components/ui";
 import { useTRPC } from "../lib/trpc";
+import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
 import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchema, styleSchema, type ProjectSettings, type Style } from "@reelsaw/shared";
@@ -149,6 +150,7 @@ export function NewProjectPage() {
         uploadId = await uploadFile(file);
       }
       const p = await create.mutateAsync({ title: title || undefined, sourceUrl: mode === "url" ? url : undefined, uploadId, settings: { ...s, ...bumperSettings } });
+      track("project_create_submitted", { source: mode, projectId: p.id });
       nav(`/p/${p.id}`);
     } catch (err) {
       setError((err as Error).message);

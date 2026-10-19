@@ -13,6 +13,8 @@ import type { Email } from "./email.js";
 import { templates } from "./email.js";
 import type { Logger } from "./log.js";
 import type { InstanceSettings } from "./instance-settings.js";
+import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
+import type { Telemetry } from "./telemetry.js";
 
 /** The MCP endpoint as OAuth clients see it (token audience). */
 export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_URL).toString();
@@ -23,7 +25,7 @@ export const API_KEY_PREFIX = "rs_";
 /** Serialises the "first account becomes admin" decision (arbitrary constant, used only here). */
 const FIRST_ADMIN_LOCK = 7_203_104_001;
 
-export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings) {
+export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
   // read them at request time, never once here. Better Auth checks `emailAndPassword.*` on the options
   // object it was given, so those fields are kept current from the settings' subscription.
@@ -86,6 +88,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
         approvedAt: { type: "date", required: false, input: false },
         banned: { type: "boolean", required: false, defaultValue: false, input: false },
         banReason: { type: "string", required: false, input: false },
+        emailKey: { type: "string", required: false, input: false },
+        signupIp: { type: "string", required: false, input: false },
       },
     },
     databaseHooks: {
@@ -101,13 +105,22 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
           // the first account administers the box; later ones follow SIGNUP_MODE. Count-then-insert
           // races (two concurrent first sign-ups both see zero users), so a "first" candidate is
           // inserted as a plain user and promoted in `after` by one conditional update under a lock.
-          before: async (user) => {
+          before: async (user, ctx) => {
             // checked here, at request time, so closing sign-ups applies to the next request without a restart
             if (mode() === "closed") throw new APIError("FORBIDDEN", { message: "Sign-ups are closed on this Reelsaw." });
+            // abuse guards (abuse.ts): accounts per address per day, temporary domains, one account per mailbox
+            const headers = ctx?.request?.headers ?? ctx?.headers ?? new Headers();
+            let guard: { emailKey: string; signupIp: string | null };
+            try {
+              guard = await signupGuard(db, settings.get(), { email: user.email, ip: clientIp(headers, config.TRUST_PROXY) }, log);
+            } catch (err) {
+              if (err instanceof SignupRefused) throw new APIError("FORBIDDEN", { message: err.message });
+              throw err;
+            }
             const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
             const first = n === 0;
             if (first) firstCandidates.add(user.email);
-            return { data: { ...user, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
+            return { data: { ...user, ...guard, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };
           },
           // Better Auth owns the user insert, so this audit row cannot share its transaction. It is a
           // record of something that did happen; nothing reads it to decide state (the Users page
@@ -127,6 +140,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
             }
             await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() } });
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
+            telemetry?.identify(u.id, { email: u.email, name: u.name, role: u.role ?? "user" });
+            telemetry?.capture("user.signed_up", u.id, { mode: mode(), approved: !!u.approvedAt });
             if (u.approvedAt) return;
             const admins = await db.query.user.findMany({ where: eq(schema.user.role, "admin"), columns: { email: true } });
             for (const a of admins) void email.send({ to: a.email, ...templates.waitingForApproval(config.APP_URL, u.name, u.email) });

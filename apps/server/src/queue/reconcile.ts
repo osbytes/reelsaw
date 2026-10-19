@@ -7,6 +7,7 @@ import { pruneHistory } from "../events-retention.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
+import { flagAccounts, pruneRequestRate } from "../abuse.js";
 import { QUEUES, type QueueName } from "./boss.js";
 import { finalizeProjectIfDone } from "../pipeline/render.js";
 import { REFINE_QUEUE, finishIfComplete } from "../pipeline/refine.js";
@@ -96,6 +97,8 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         await sweepScratch(svc, { budgeted: true });
         await purgeBumperAssets(svc);
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
+        await flagAccounts(svc); // abuse flags for the Users page (abuse.ts)
+        await pruneRequestRate(svc.database.db);
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();

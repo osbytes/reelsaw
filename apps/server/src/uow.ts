@@ -18,7 +18,8 @@ import type { ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
-import type { InstanceLimits } from "./quota.js";
+import type { Telemetry } from "./telemetry.js";
+import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
 
 /**
@@ -38,6 +39,8 @@ export interface UnitOfWork {
   /** persist an event and NOTIFY listeners; both take effect at commit */
   emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
   enqueue(queue: QueueName, data: JobData): Promise<string | null>;
+  /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
+  send(queue: string, data: object, opts?: { singletonKey?: string }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
   /** record what a stage decided and which models ran (see schema.stageArtifacts) */
@@ -89,7 +92,10 @@ export function isRetryableTxError(err: unknown): boolean {
 
 const TX_ATTEMPTS = 3;
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits): RunInTx {
+/** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
+const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
+
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -110,9 +116,12 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
         async enqueue(q, data) {
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
-          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a });
+          // the owner's plan may lift the job (hosted Pro); one indexed read, nothing self-hosted
+          const ent = entitlements();
+          const priorityBoost = ent && a.userId ? ((await ent.grantsFor(db, a.userId))?.queuePriority ?? 0) : 0;
+          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost });
           if (instanceLimits) {
-            const limits = await limitsFor(db, instanceLimits(), a.userId);
+            const limits = await limitsFor(db, instanceLimits(), a.userId, entitlements());
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
               // one admission at a time per user, counted again under the lock, so two requests can't both take the last slot
               await client.query("select pg_advisory_xact_lock(hashtext($1))", [`jobs:${a.userId}`]);
@@ -125,8 +134,9 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               }
             }
           }
-          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a });
+          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost });
         },
+        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {
@@ -146,6 +156,12 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
     for (const e of emitted) {
       const level = EVENT_LEVEL[e.type] ?? "debug";
       log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
+      if (telemetry?.enabled.posthog && PRODUCT_EVENTS.has(e.type)) {
+        void pool
+          .query<{ user_id: string }>("select user_id from projects where id = $1", [e.projectId])
+          .then((r) => r.rows[0] && telemetry.capture(e.type, r.rows[0].user_id, { projectId: e.projectId, ...eventFields(e.payload) }))
+          .catch(() => {});
+      }
     }
     for (const f of after) {
       try {

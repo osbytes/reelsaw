@@ -50,6 +50,9 @@ either; `pnpm docs:check` fails when this file is stale.
 | `SMTP_URL` | unset | SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp. |
 | `RESEND_API_KEY` | unset | Required with EMAIL_DRIVER=resend. |
 | `REQUIRE_EMAIL_VERIFICATION` | `false` | With an email driver: users must click the verification link before they can sign in. Runtime setting: admins can change it under Settings → System without a restart. |
+| `TRUST_PROXY` | `true` | Take the client address from the reverse proxy's headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`): the Docker deployment sits behind Caddy, so the default is on. `false` when the app is exposed directly, or the headers are whatever the client sent. |
+| `MAX_SIGNUPS_PER_IP_PER_DAY` | `0` | Accounts one network address may create per day (sign-up guard). 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `BLOCK_DISPOSABLE_EMAILS` | `false` | Refuse sign-ups from known temporary-address domains. Runtime setting: admins can change it under Settings → System without a restart. |
 | `TERMS_URL` | unset | Terms of service link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
 | `PRIVACY_URL` | unset | Privacy policy link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
 | `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Runtime setting: admins can change it under Settings → System without a restart. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
@@ -145,6 +148,8 @@ either; `pnpm docs:check` fails when this file is stale.
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `MAX_REQUESTS_PER_MINUTE` | `0` | Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_REQUESTS_PER_HOUR` | `0` | Changes an account may make per hour. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
 | `EVENT_REPLAY_LIMIT` | `300` | Events a project page replays when it connects (progress ticks never replay); older ones load on request. |
 | `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
@@ -152,12 +157,26 @@ either; `pnpm docs:check` fails when this file is stale.
 | `MAX_LIVE_JOBS_PER_USER` | `0` | Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_RERENDERS_PER_HOUR` | `0` | Quota: re-renders and hand-made clips per account per hour. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_STORAGE_MB` | `0` | Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MAX_SOURCE_MINUTES_PER_MONTH` | `0` | Quota: minutes of source video per account per period: the billing period when the account has a plan (ee), else the UTC calendar month. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `WATERMARK_NON_ADMINS` | `true` | Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits). Runtime setting: admins can change it under Settings → System without a restart. |
+| `WATERMARK_TEXT` | `reelsaw.com` | The watermark text. Runtime setting: admins can change it under Settings → System without a restart. |
 | `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever. Runtime setting: admins can change it under Settings → System without a restart. |
 | `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+
+### Enterprise edition and billing (hosted)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REELSAW_EE` | `false` | Load the enterprise edition (`apps/server/src/ee`, its own licence): billing through Stripe, plans that set each account's limits. Off, nothing in that folder runs. See docs/specs/ee.md. |
+| `STRIPE_SECRET_KEY` | unset | Stripe secret key (`sk_live_…` / `sk_test_…`). Required with REELSAW_EE. |
+| `STRIPE_WEBHOOK_SECRET` | unset | Signing secret of the webhook endpoint `POST /api/billing/webhook` (`whsec_…`). Required with REELSAW_EE. |
+| `STRIPE_MANAGED_PAYMENTS` | `false` | Enable Stripe Managed Payments (Stripe as merchant of record: it files sales tax and VAT) on every Checkout Session. The Stripe account must be approved for it first. |
+| `STRIPE_API_BASE` | unset | Development only: an origin that stands in for api.stripe.com (stripe-mock, or `test/stripe-mock.ts`). Never set in production. |
+| `BILLING_GRACE_DAYS` | `7` | Days a past-due subscription keeps its plan after the first failed payment; then the account falls back to Free. |
 
 ### Resource governor and workers
 
@@ -177,6 +196,10 @@ either; `pnpm docs:check` fails when this file is stale.
 | `LOG_LEVEL` | `info` | A level (`trace`..`silent`) optionally followed by per-module overrides, e.g. `info,render=debug,http=warn`. Change it without a restart with `reelsaw log-level`. |
 | `LOG_FORMAT` | `auto` | `auto` (pretty on a terminal, JSON otherwise), `json` or `pretty`. Values: `auto | json | pretty`. |
 | `OTEL_ENABLED` | `false` | OpenTelemetry traces and metrics over OTLP/HTTP (see the OTEL_* variables at the end). |
+| `SENTRY_DSN` | unset | Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Unset, nothing is sent. |
+| `SENTRY_ENVIRONMENT` | unset | Sentry environment tag. Default: `production` under NODE_ENV=production, else `development`. |
+| `POSTHOG_KEY` | unset | PostHog project key (public). Set, the server sends sign-ups, project created/done/failed, billing and abuse-flag events, and the web app sends page views and a few product events; people are identified by user id with email and name on the profile. Unset, nothing is sent. |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance). |
 | `LLM_TRACE` | `none` | Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse`; comma-separate for several. |
 | `LLM_TRACE_MAX_CHARS` | `4000` | Truncate captured prompts and responses to this many characters. |
 | `LANGFUSE_PUBLIC_KEY` | unset | Langfuse public key (checked at boot when LLM_TRACE includes langfuse). |

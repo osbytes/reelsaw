@@ -294,7 +294,24 @@ export const TOOLS = {
     inputSchema: settingsPatchSchema.shape,
     annotations: { idempotentHint: true },
   },
+  get_billing: {
+    title: "Billing",
+    description:
+      "Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. Returns { enabled, plan, reason, subscription, period, limits, limitSource, usage, watermark, canManage, plans }. On a self-hosted Reelsaw this answers that billing is not enabled.",
+    annotations: { readOnlyHint: true },
+  },
+  billing_checkout_url: {
+    title: "Checkout URL",
+    description:
+      "Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). Returns { url, kind: \"checkout\" | \"change\" }; a person must open it in a browser, an agent cannot pay. Plans and intervals come from get_billing.",
+    inputSchema: {
+      plan: z.string().min(1).max(40).describe("Plan name from get_billing (e.g. creator, pro)"),
+      interval: z.enum(["month", "year"]).default("month").describe("Billing interval: month (default) or year"),
+    },
+  },
 };
 
 export type ToolName = keyof typeof TOOLS;
+/** Tools that only do something on a hosted instance with billing (ee); elsewhere they answer with a sentence. */
+export const EE_TOOLS: ToolName[] = ["get_billing", "billing_checkout_url"];
 export const TOOL_NAMES = Object.keys(TOOLS) as ToolName[];

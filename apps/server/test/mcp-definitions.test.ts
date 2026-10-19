@@ -15,6 +15,7 @@ import { INSTRUCTIONS, TOOL_NAMES } from "../src/mcp-tools.js";
 
 const EXPECTED = [
   "add_bumper",
+  "billing_checkout_url",
   "bumper_usage",
   "check_for_update",
   "create_clip",
@@ -22,6 +23,7 @@ const EXPECTED = [
   "delete_clip",
   "delete_project",
   "export_project",
+  "get_billing",
   "get_clip",
   "get_instance_settings",
   "get_project",

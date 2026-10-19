@@ -101,9 +101,9 @@ export async function ingest(ctx: StageContext) {
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
-  const over = await sourceMinutesExceeded(ctx.db, svc.settings.get(), project.userId, projectId, probe.durationSec);
+  const over = await sourceMinutesExceeded(ctx.db, svc.settings.get(), project.userId, projectId, probe.durationSec, svc.entitlements);
   if (over) {
-    ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "daily source-minutes limit reached");
+    ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "source-minutes limit reached");
     throw new Error(over);
   }
   ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");

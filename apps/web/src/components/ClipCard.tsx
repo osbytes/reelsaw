@@ -35,6 +35,8 @@ export interface ClipView {
   bumpers?: ClipBumpers | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
+  /** the last render burned the watermark in (hosted free accounts, or an admin's choice) */
+  watermark?: boolean;
 }
 
 const RUBRIC: Array<{ key: keyof ClipScores; label: string }> = [
@@ -126,6 +128,11 @@ export function ClipCard({
           <div className="flex items-start gap-2">
             <span className="pt-px font-mono text-xs text-ink3">#{clip.index + 1}</span>
             <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || "Untitled moment"}</h3>
+            {clip.watermark && done && (
+              <span className="shrink-0 pt-px font-mono text-[11px] text-ink3" title="Rendered with the watermark; a re-render after an upgrade removes it">
+                ◇ wm
+              </span>
+            )}
             {clip.score > 0 && (
               <button
                 onClick={() => setBd(!bdOpen)}

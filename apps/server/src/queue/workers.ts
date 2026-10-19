@@ -48,7 +48,10 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
     } catch (err) {
       if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
       log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
-      if (job.retryCount >= max) await failProject(svc, projectId, stage, err);
+      if (job.retryCount >= max) {
+        svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
+        await failProject(svc, projectId, stage, err);
+      }
       else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1);
       throw err; // let pg-boss apply the retry policy
     }
@@ -76,6 +79,7 @@ export async function startWorkers(svc: Services) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
       if (job.retryCount >= max) {
+        svc.telemetry.captureException(err, { queue, step, projectId, jobId: job.id });
         await refineStepFailed(svc, projectId, step, err);
         return; // handled: don't make pg-boss retry further
       }
@@ -101,7 +105,10 @@ export async function startWorkers(svc: Services) {
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
-      if (job.retryCount >= max) await markClipFailed(svc, projectId, clipId, err);
+      if (job.retryCount >= max) {
+        svc.telemetry.captureException(err, { queue: QUEUES.prepare, projectId, clipId, jobId: job.id });
+        await markClipFailed(svc, projectId, clipId, err);
+      }
       throw err;
     }
   });
@@ -127,7 +134,10 @@ export async function startWorkers(svc: Services) {
     } catch (err) {
       if (err instanceof ProjectGoneError) return;
       log.error({ err, attempt: job.retryCount + 1 }, "job failed");
-      if (job.retryCount >= max) await markClipFailed(svc, projectId, clipId, err, gen);
+      if (job.retryCount >= max) {
+        svc.telemetry.captureException(err, { queue: QUEUES.render, projectId, clipId, jobId: job.id });
+        await markClipFailed(svc, projectId, clipId, err, gen);
+      }
       throw err;
     }
   });

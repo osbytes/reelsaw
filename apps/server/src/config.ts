@@ -58,6 +58,14 @@ export const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   /** With an email driver: users must click the verification link before they can sign in. */
   REQUIRE_EMAIL_VERIFICATION: boolFalse,
+  /** Behind a reverse proxy (Caddy, Cloudflare; the Docker deployment), the client address comes from its headers. false = ignore them (exposed directly). */
+  TRUST_PROXY: boolTrue,
+  /** Sign-up guards (abuse.ts); 0 / false = off. Runtime settings. */
+  MAX_SIGNUPS_PER_IP_PER_DAY: z.coerce.number().int().min(0).default(0),
+  BLOCK_DISPOSABLE_EMAILS: boolFalse,
+  /** Changes (mutations, MCP tool calls) an account may make per minute / hour; 0 = unlimited. Runtime settings. */
+  MAX_REQUESTS_PER_MINUTE: z.coerce.number().int().min(0).default(0),
+  MAX_REQUESTS_PER_HOUR: z.coerce.number().int().min(0).default(0),
   /** Shown on the sign-up form when set (hosted instances). */
   TERMS_URL: z.string().url().optional(),
   PRIVACY_URL: z.string().url().optional(),
@@ -131,6 +139,11 @@ export const envSchema = z.object({
   EVENT_REPLAY_LIMIT: z.coerce.number().int().min(20).max(2000).default(300),
 
   OTEL_ENABLED: boolFalse,
+  // error reporting and product analytics (telemetry.ts); off unless set, the browser gets the public keys via system.status
+  SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z.string().max(60).optional(),
+  POSTHOG_KEY: z.string().max(200).optional(),
+  POSTHOG_HOST: z.string().url().default("https://us.i.posthog.com"),
   // quotas (0 = unlimited); admins can override per user in Users → Limits
   MAX_PROJECTS_PER_USER: z.coerce.number().int().min(0).default(0),
   MAX_SOURCE_MINUTES_PER_DAY: z.coerce.number().int().min(0).default(0),
@@ -138,6 +151,11 @@ export const envSchema = z.object({
   MAX_LIVE_JOBS_PER_USER: z.coerce.number().int().min(0).default(0), // queued + running jobs a user's own requests may add to (hosted: e.g. 12)
   MAX_RERENDERS_PER_HOUR: z.coerce.number().int().min(0).default(0), // re-renders and hand-made clips a user may ask for per hour
   MAX_STORAGE_MB: z.coerce.number().int().min(0).default(0), // sources + uploads + renders + intros/outros per user; checked at upload and project creation
+  /** Minutes of source video per account per period: the billing period when the account has one, else the UTC calendar month. 0 = unlimited. */
+  MAX_SOURCE_MINUTES_PER_MONTH: z.coerce.number().int().min(0).default(0),
+  /** Burn a small watermark into the clips of accounts that are not admins (a paid plan or an admin's per-user choice removes it). */
+  WATERMARK_NON_ADMINS: boolTrue,
+  WATERMARK_TEXT: z.string().trim().min(1).max(60).default("reelsaw.com"),
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
@@ -154,6 +172,17 @@ export const envSchema = z.object({
   MCP_OAUTH: boolFalse,
   /** Include machine resources in GET /api/health for anonymous callers (load balancers on a private network). Admins always get them. */
   HEALTH_DETAILS: boolFalse,
+
+  // enterprise edition (apps/server/src/ee, docs/specs/ee.md): billing through Stripe. Off, the folder is never imported.
+  REELSAW_EE: boolFalse,
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  /** Stripe as merchant of record (Managed Payments) on every Checkout Session; needs the account approved for it. */
+  STRIPE_MANAGED_PAYMENTS: boolFalse,
+  /** Development only: send Stripe API calls to this origin (stripe-mock, test/stripe-mock.ts) instead of api.stripe.com. */
+  STRIPE_API_BASE: z.string().url().optional(),
+  /** Days a past-due subscription keeps its plan after the first failed payment before the account falls back to Free. */
+  BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(90).default(7),
 
   // resource governor (see resources.ts)
   // a running job with no progress event for this long is reported (log + UI) as stalled
@@ -248,6 +277,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (c.REQUIRE_EMAIL_VERIFICATION && c.EMAIL_DRIVER === "none") throw new ConfigError("REQUIRE_EMAIL_VERIFICATION needs an EMAIL_DRIVER");
   if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY)) throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
   if (c.STORAGE_DRIVER === "s3" && !c.S3_BUCKET) throw new ConfigError("STORAGE_DRIVER=s3 requires S3_BUCKET");
+  if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET)) throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
   // the operator CLI (src/cli.ts) runs with both off on purpose
   if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
   if (c.NODE_ENV === "production" && c.BETTER_AUTH_SECRET.length < 32) throw new ConfigError("BETTER_AUTH_SECRET must be at least 32 characters in production");
