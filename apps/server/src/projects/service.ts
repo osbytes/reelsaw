@@ -186,13 +186,16 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
 const SELECTION_KEYS = new Set<string>(["maxClips", "minClipSeconds", "maxClipSeconds", "focus", "instructions"]);
 /** Settings burned into the video: they apply on each clip's next render. */
 const RENDER_KEYS = new Set<string>([...Object.keys(styleSchema.shape), "reframe", "pauses", "sourceText"]);
+/** Refine-stage toggles: they apply the next time refine runs (projects.refine / retry). */
+const REFINE_KEYS = new Set<string>(["refineEntities", "refineDisfluency", "disfluencyLlm", "refineScenes"]);
 /** Set through `projects.setBumpers`, which checks the library. */
 const BUMPER_KEYS = new Set<string>(["introAssetId", "outroAssetId", "introSec", "outroSec"]);
 
 /**
  * Rename a project and/or change its settings without re-running anything: selection settings (focus, instructions,
- * clip length, maxClips) apply on the next re-analyze, style / framing / pauses on each clip's next render. Writes only
- * the keys given (atomic JSON merge), validated against the whole settings object. Per-clip style overrides are kept.
+ * clip length, maxClips) apply on the next re-analyze, style / framing / pauses on each clip's next render, refine
+ * toggles on the next refine. Writes only the keys given (atomic JSON merge), validated against the whole settings
+ * object. Per-clip style overrides are kept.
  */
 export async function updateProject(svc: Services, actor: Actor, projectId: string, input: { title?: string; settings?: ProjectSettingsPatch; clear?: ClearableSetting[] }) {
   return svc.tx(async (u) => {
@@ -217,6 +220,7 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
     if (titleChanged) changed.unshift("title");
     const needsRerender = changed.some((k) => RENDER_KEYS.has(k));
     const needsReanalyze = changed.some((k) => SELECTION_KEYS.has(k));
+    const needsRefine = changed.some((k) => REFINE_KEYS.has(k));
     if (changed.length) {
       let expr = sql`${schema.projects.settings}`;
       for (const k of clear) expr = sql`(${expr}) - ${k}::text`;
@@ -229,8 +233,12 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
         .where(eq(schema.projects.id, p.id));
       await u.emit(p.id, "project.updated", { changed });
     }
-    const followUps = [needsReanalyze && "reanalyze_project picks clips with the new selection settings", needsRerender && "rerender_clips applies the style/framing to finished clips"].filter(Boolean);
-    return { ok: true, changed, needsReanalyze, needsRerender, ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}) };
+    const followUps = [
+      needsReanalyze && "reanalyze_project picks clips with the new selection settings",
+      needsRefine && "refine_project (or Retry) applies the new refine toggles on the existing transcript",
+      needsRerender && "rerender_clips applies the style/framing to finished clips",
+    ].filter(Boolean);
+    return { ok: true, changed, needsReanalyze, needsRefine, needsRerender, ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}) };
   });
 }
 

@@ -45,7 +45,16 @@ export function lifecycleHarness() {
     },
   };
   const tx = createUnitOfWork(pool, queue, log);
-  const runtime = { DELETED_RETENTION_DAYS: 7, STALL_MINUTES: 15, SOURCE_RETENTION_DAYS: 0, CLIP_RETENTION_DAYS: 0 };
+  const runtime = {
+    DELETED_RETENTION_DAYS: 7,
+    STALL_MINUTES: 15,
+    SOURCE_RETENTION_DAYS: 0,
+    CLIP_RETENTION_DAYS: 0,
+    TRANSCRIPT_CORRECTION: true,
+    DISFLUENCY_REMOVAL: true,
+    DISFLUENCY_LLM: true,
+    REFINE_SCENES: true,
+  };
   const svc = {
     tx,
     queue,

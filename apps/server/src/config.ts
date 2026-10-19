@@ -92,11 +92,13 @@ export const envSchema = z.object({
   ANALYZE_JUDGE_MODEL: z.string().optional(),
   /** Feed entities from the video metadata (channel, title, description, tags) to the transcriber as vocabulary hints. */
   TRANSCRIPT_BIAS: boolTrue,
-  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). */
-  TRANSCRIPT_CORRECTION: boolTrue,
-  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). */
-  DISFLUENCY_REMOVAL: boolTrue,
-  DISFLUENCY_LLM: boolTrue,
+  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). Off by default; projects opt in via refineEntities when this ceiling is on. */
+  TRANSCRIPT_CORRECTION: boolFalse,
+  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). Off by default. */
+  DISFLUENCY_REMOVAL: boolFalse,
+  DISFLUENCY_LLM: boolFalse,
+  /** Scene-cut detection and on-screen text scan during refine. Off by default. */
+  REFINE_SCENES: boolFalse,
   /** Corrections at or above this LLM confidence are applied automatically; the rest wait for the user. */
   TRANSCRIPT_AUTO_FIX_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.85),
 

@@ -218,6 +218,16 @@ export const projectSettingsSchema = styleSchema.extend({
   /** Names, brands and jargon the transcriber should spell correctly (comma separated). */
   vocabulary: z.string().max(1000).optional().describe("Names, brands and jargon to spell correctly, comma separated (max 1000 chars)"),
   /**
+   * Refine-stage toggles. Defaults off (faster, cheaper); turn on for polish. An instance gate that
+   * is off (Settings → System → Pipeline, or the matching .env) wins and the step stays skipped
+   * even when these are true. Existing transcript flags stay until refine is re-run.
+   */
+  refineEntities: z.boolean().describe("Fix misheard names after transcription (LLM). Off by default; on runs that refine step.").default(false),
+  refineDisfluency: z.boolean().describe("Find fillers, repetitions and false starts. Off by default; on runs that refine step.").default(false),
+  /** Only used when refineDisfluency is on; rules still run when this is off. */
+  disfluencyLlm: z.boolean().describe("Model pass on top of rule-based disfluency detection. Off by default (rules only when disfluency is on).").default(false),
+  refineScenes: z.boolean().describe("Detect scene cuts and on-screen text. Off by default; on runs that refine step.").default(false),
+  /**
    * Intro / outro video (bumper_assets ids) attached to every clip. Snapshotted from the user's
    * defaults when the project is created. Unset = none; null is reserved for "none, although my
    * default has one" (project override, phase 2).
@@ -249,6 +259,10 @@ export const userProjectDefaultsSchema = z
     highlightColor: hexColor,
     wordsPerLine: z.number().int().min(1).max(8),
     uppercase: z.boolean(),
+    refineEntities: z.boolean(),
+    refineDisfluency: z.boolean(),
+    disfluencyLlm: z.boolean(),
+    refineScenes: z.boolean(),
     /** Intro / outro (bumper_assets ids). Changed only through `bumpers.*`, never by the defaults form. */
     introAssetId: z.string().max(100),
     outroAssetId: z.string().max(100),
