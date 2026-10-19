@@ -60,7 +60,8 @@ services:
 
   # Speech-to-text on your machine (faster-whisper behind an OpenAI-compatible API)
   speaches:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu   # :latest-cuda with an NVIDIA GPU
+    # SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda in .env with an NVIDIA GPU (docker-compose.gpu.yml hands the card over)
+    image: ${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu}
     profiles: ["local-ai"]
     restart: unless-stopped
     environment:

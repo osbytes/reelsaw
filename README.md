@@ -164,6 +164,41 @@ OPENAI_API_KEY=local
 
 Notes: the app requests `response_format: json_schema` from the compat server (`OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS=false` to disable) and falls back to lenient parsing when a model ignores it, but small models still pick weak moments and write bland hooks. gemma3 4b works; qwen2.5 14b (the installer's default on 24 GB or more), llama3.1 8b or gemma3 12b are noticeably better. On first boot the app auto-downloads the whisper model into Speaches and verifies the Ollama model is pulled (it exits with `ollama pull <model>` otherwise). Speaches CPU with `faster-whisper-small` runs roughly real-time; use the `latest-cuda` image and `faster-whisper-large-v3` on a GPU. The `OPENAI_*` variables are reused for Speaches because it speaks the OpenAI audio API, which is why the LLM goes through the `compat` provider instead.
 
+### Using a GPU
+
+Three things can use one, each in its own container, so the GPU is a Compose override rather than
+a different image: `docker-compose.gpu.yml` reserves every NVIDIA device for `speaches`, `ollama`,
+`app` and `worker`. Host side you need the NVIDIA driver (`nvidia-smi` works) and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+(`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`; on Windows,
+Docker Desktop on WSL2 with the Windows driver only). Then in `.env`:
+
+```
+COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda
+WHISPER_MODEL=Systran/faster-whisper-large-v3      # or deepdml/faster-whisper-large-v3-turbo-ct2
+TRANSCRIPTION_MODEL=openai:Systran/faster-whisper-large-v3
+```
+
+and `docker compose --profile local-ai up -d` as before. What changes:
+
+- **Transcription** is the big one: faster-whisper on CUDA runs `large-v3` in a fraction of real time,
+  where `small` on a CPU was about real time (the transcribe factor in the table below).
+- **The language model** uses the card when Ollama runs in the `ollama` container (`--profile ollama`).
+  A native Ollama (macOS, or Linux on the host) already uses the GPU on its own.
+- **Renders** encode with `h264_nvenc` instead of libx264: `FFMPEG_ENCODER=auto` probes it at boot and
+  keeps libx264 when the card is not there. Filters (crops, blur, captions) still run on the CPU, and
+  render was already the short stage, so expect seconds, not minutes. A hardware encode that fails
+  mid-clip (NVENC session limit, driver reset) is redone with libx264 for that clip.
+- **The on-device models** (face, text, alignment) stay on the CPU by default. `ONNX_EXECUTION_PROVIDER=cuda`
+  moves them, but the published image carries no CUDA libraries for onnxruntime, and on Apple silicon
+  CoreML measured slower than the CPU for all three; see `docs/CONFIG.md`.
+
+**Settings → System → Overview** and `docker compose exec app reelsaw machine` show the GPU the app
+process sees, the encoder in use and why, and where each on-device model runs. macOS has no CUDA in
+Docker: run Ollama natively for Metal, and leave Speaches on the CPU (or point `OPENAI_BASE_URL` at a
+whisper.cpp or MLX server running on the host, which speaks the same API).
+
 ### What to expect: processing time
 
 Every stage scales with the length of the video. Expected seconds for a stage ≈ *video seconds × factor*, where the factor depends on the models (local vs vendor) and your machine:
@@ -340,6 +375,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |

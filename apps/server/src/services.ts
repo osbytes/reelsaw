@@ -161,7 +161,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const faces = await step(config.FACE_DETECTION ? "face detector (UltraFace ONNX)" : "face detector (disabled)", async () => {
     if (!config.FACE_DETECTION) return null;
     try {
-      return await loadFaceDetector(config.FACE_MODEL_PATH);
+      return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
     } catch (err) {
       throw new Error(`cannot load ${config.FACE_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set FACE_DETECTION=false.`);
     }
@@ -179,7 +179,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const aligner = await step(config.ALIGNER ? "forced aligner (wav2vec2 CTC)" : "forced aligner (disabled)", async () => {
     if (!config.ALIGNER) return null;
     try {
-      return await loadAligner(config.ALIGN_MODEL_DIR);
+      return await loadAligner(config.ALIGN_MODEL_DIR, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "align" }) });
     } catch (err) {
       throw new Error(`cannot load ${config.ALIGN_MODEL_DIR}: ${(err as Error).message}. Run "pnpm models:download" or set ALIGNER=false.`);
     }
@@ -194,7 +194,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const text = await step(config.TEXT_DETECTION ? "text detector (PP-OCRv4 ONNX)" : "text detector (disabled)", async () => {
     if (!config.TEXT_DETECTION) return null;
     try {
-      return await loadTextDetector(config.TEXT_MODEL_PATH);
+      return await loadTextDetector(config.TEXT_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "text" }) });
     } catch (err) {
       throw new Error(`cannot load ${config.TEXT_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set TEXT_DETECTION=false.`);
     }

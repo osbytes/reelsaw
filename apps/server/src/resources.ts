@@ -1,5 +1,7 @@
 import os from "node:os";
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
 
@@ -28,8 +30,46 @@ export interface ResourceSnapshot {
   ok: { cpu: boolean; memory: boolean; disk: boolean };
 }
 
+/** The GPU this process can see, found once at boot (nvidia-smi, /dev/nvidia*, or the Apple chip). */
+export interface GpuInfo {
+  vendor: "nvidia" | "apple";
+  /** device names, e.g. "NVIDIA GeForce RTX 4060 (8188 MB)" or "Apple M2 Pro" */
+  devices: string[];
+  /** what the app itself can use it for; the LLM and whisper run in their own containers */
+  note: string;
+}
+
+const execFileAsync = promisify(execFile);
+
+/** nvidia-smi inside the container means the NVIDIA runtime handed the GPU over; a bare /dev/nvidia0 means the device without the driver tools. */
+export async function detectGpu(platform: NodeJS.Platform = process.platform, arch = process.arch): Promise<GpuInfo | null> {
+  try {
+    const { stdout } = await execFileAsync("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], { timeout: 5000 });
+    const devices = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const [name, mem] = l.split(",").map((x) => x.trim());
+        return mem ? `${name} (${mem} MB)` : name!;
+      });
+    if (devices.length) return { vendor: "nvidia", devices, note: "NVENC for renders when FFMPEG_ENCODER allows it; CUDA for Speaches/Ollama in their own containers" };
+  } catch {
+    /* no nvidia-smi: not an NVIDIA machine, or the container was started without the GPU */
+  }
+  if (platform === "linux" && (await fs.access("/dev/nvidia0").then(() => true, () => false))) {
+    return { vendor: "nvidia", devices: [], note: "/dev/nvidia0 is present but nvidia-smi is not: the device is mapped without the NVIDIA runtime's tools" };
+  }
+  if (platform === "darwin" && arch === "arm64") {
+    return { vendor: "apple", devices: [os.cpus()[0]?.model ?? "Apple silicon"], note: "Metal is used by a native Ollama; ffmpeg can use VideoToolbox outside Docker (FFMPEG_ENCODER)" };
+  }
+  return null;
+}
+
 export interface ResourceGovernor {
   snapshot(): Promise<ResourceSnapshot>;
+  /** the GPU found at boot, or null; see detectGpu */
+  gpu(): GpuInfo | null;
   /**
    * Resolve once CPU, memory and disk are under their thresholds (plus `needDiskMB` headroom).
    * Calls `onWait` when it has to wait so the job can report progress. Throws after the max wait
@@ -85,6 +125,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
   let prevTimes = cpuTimes();
   let prevTimesAt = Date.now();
   let cpuPercent = 0;
+  let gpu: GpuInfo | null = null;
 
   async function measureCpu() {
     // need a few hundred ms between readings for a meaningful ratio
@@ -139,6 +180,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
 
   return {
     snapshot: sample,
+    gpu: () => gpu,
 
     async acquire({ kind, needDiskMB = 0, signal, onWait }) {
       const started = Date.now();
@@ -214,7 +256,8 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       if (s.diskFreeMB >= 0 && s.diskFreeMB < config.MIN_FREE_DISK_MB) {
         throw new Error(`only ${s.diskFreeMB} MB free in ${dataDir}; MIN_FREE_DISK_MB=${config.MIN_FREE_DISK_MB}`);
       }
-      log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}` }, "resources");
+      gpu = await detectGpu();
+      log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, gpu: gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device without tools"}` : "none", renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}` }, "resources");
     },
   };
 }

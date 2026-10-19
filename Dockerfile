@@ -21,6 +21,7 @@ ENV DATA_DIR=/data \
     TEXT_MODEL_PATH=/app/server/models/ppocrv4-det.onnx \
     VAD_MODEL_PATH=/app/server/models/silero-vad.onnx \
     ALIGN_MODEL_DIR=/app/server/models/wav2vec2-base-960h \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=3000
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl python3 \

@@ -10,6 +10,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { supports } from "../pipeline/language.js";
+import { createOnnxSession, type OnnxOptions, type OnnxProvider } from "../onnx.js";
 
 export const ALIGN_SR = 16000;
 const STRIDE_SEC = 0.02; // wav2vec2 conv stack: 320 samples per frame at 16 kHz
@@ -26,12 +27,14 @@ export interface WordSpan {
 export interface Aligner {
   align(pcm: Float32Array, words: string[]): Promise<WordSpan[]>;
   release(): Promise<void>;
+  /** onnxruntime execution provider the model runs on (ONNX_EXECUTION_PROVIDER, or cpu after a fallback) */
+  readonly provider: OnnxProvider;
 }
 
-export async function loadAligner(dir: string): Promise<Aligner> {
+export async function loadAligner(dir: string, opts: OnnxOptions = {}): Promise<Aligner> {
   const vocab = JSON.parse(await fs.readFile(path.join(dir, "vocab.json"), "utf8")) as Record<string, number>;
   const ort = await import("onnxruntime-node");
-  const session = await ort.InferenceSession.create(path.join(dir, "model.onnx"), { intraOpNumThreads: 2, logSeverityLevel: 3 });
+  const { session, provider } = await createOnnxSession(ort, path.join(dir, "model.onnx"), { intraOpNumThreads: 2, logSeverityLevel: 3 }, opts);
   const blank = vocab["<pad>"] ?? 0;
   const sep = vocab["|"]!;
   const V = Object.keys(vocab).length;
@@ -65,6 +68,7 @@ export async function loadAligner(dir: string): Promise<Aligner> {
       return forceAlign(emit, T, C, words, vocab, blank, sep);
     },
     release: () => session.release(),
+    provider,
   };
 }
 

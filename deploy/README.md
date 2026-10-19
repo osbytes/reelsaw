@@ -56,6 +56,24 @@ open http://localhost:3000    # the first account is the admin; then set SIGNUP_
 The app checks every provider at startup and exits with a message naming what's wrong. See it with
 `docker compose logs app`.
 
+### NVIDIA GPU
+
+Install the NVIDIA driver and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`;
+Windows: Docker Desktop on WSL2 with the Windows driver), then add to `.env`:
+
+```
+COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda
+WHISPER_MODEL=Systran/faster-whisper-large-v3
+TRANSCRIPTION_MODEL=openai:Systran/faster-whisper-large-v3
+```
+
+and start as usual. Speaches then transcribes on the card with the large model, Ollama in a
+container uses it for the language model, and renders encode with NVENC. Check with
+`docker compose exec app reelsaw machine` or Settings → System → Overview (GPU, video encoder).
+macOS has no CUDA in Docker: run Ollama natively (Metal) and leave Speaches on the CPU.
+
 ## Configuration
 
 `.env.example` lists every variable with its default and meaning; the same list as a table is
@@ -114,4 +132,5 @@ included; you can see the contents before saving. Send the zip to the Reelsaw te
 ```bash
 docker compose logs app                      # boot and job logs
 docker compose exec app reelsaw status <id>  # one project's pipeline state (id from the URL)
+docker compose exec app reelsaw machine      # cpus, memory, disk, GPU, ffmpeg encoder in use
 ```

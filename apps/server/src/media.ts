@@ -41,10 +41,49 @@ export class CommandError extends Error {
   }
 }
 
+/** H.264 encoders the renders can use. libx264 is the CPU baseline every ffmpeg build has. */
+export type VideoEncoder = "libx264" | "h264_nvenc" | "h264_videotoolbox";
+export type EncoderSetting = VideoEncoder | "auto";
+export interface EncoderChoice {
+  /** encoder in use */
+  name: VideoEncoder;
+  /** FFMPEG_ENCODER as configured */
+  requested: EncoderSetting;
+  /** sentence for the operator: why this one (probe passed, fell back, pinned) */
+  reason: string;
+}
+
+/**
+ * `-c:v …` and its quality settings per encoder, tuned to look alike: libx264 crf 21 is the
+ * reference; NVENC's constant-quality 23 with VBR and VideoToolbox's q 65 land near it. The caller
+ * adds -pix_fmt yuv420p and the frame rate.
+ */
+export function videoEncodeArgs(encoder: VideoEncoder): string[] {
+  switch (encoder) {
+    case "h264_nvenc":
+      return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-bf", "2"];
+    case "h264_videotoolbox":
+      return ["-c:v", "h264_videotoolbox", "-q:v", "65", "-allow_sw", "1"];
+    default:
+      return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"];
+  }
+}
+
+/** Encoders worth probing for a setting, in order; libx264 is the fallback and is never probed. */
+export function encoderCandidates(requested: EncoderSetting, platform: NodeJS.Platform = process.platform): VideoEncoder[] {
+  if (requested !== "auto") return requested === "libx264" ? [] : [requested];
+  // VideoToolbox exists only on macOS and only outside Docker, where ffmpeg sees the host's hardware
+  return platform === "darwin" ? ["h264_nvenc", "h264_videotoolbox"] : ["h264_nvenc"];
+}
+
 /** Wrapper around the external media binaries (ffmpeg, ffprobe, yt-dlp). */
 export interface MediaTools {
   run(bin: string, args: string[], opts?: RunOptions): Promise<RunResult>;
   ffmpeg(args: string[], opts?: { signal?: AbortSignal; onProgress?: (sec: number) => void }): Promise<RunResult>;
+  /** the H.264 encoder renders use, decided by `check()` from FFMPEG_ENCODER and a probe */
+  encoder(): EncoderChoice;
+  /** `-c:v …` for the encoder in use (or a named one, for a software retry after a hardware failure) */
+  videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
   ytdlp(args: string[], opts?: RunOptions): Promise<RunResult>;
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
@@ -91,6 +130,35 @@ export function loggableArgv(args: string[]): string[] {
 }
 
 export function createMediaTools(config: Config, log: Logger): MediaTools {
+  let encoder: EncoderChoice = { name: "libx264", requested: config.FFMPEG_ENCODER, reason: "not probed yet" };
+
+  /** Encode a few black frames with `enc`; the error text says why a hardware encoder is unusable. */
+  async function probeEncoder(enc: VideoEncoder): Promise<string | null> {
+    try {
+      await execFileAsync(config.FFMPEG_PATH, ["-hide_banner", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:r=30:d=0.2", "-frames:v", "3", "-pix_fmt", "yuv420p", ...videoEncodeArgs(enc), "-f", "null", "-"], { timeout: 20_000 });
+      return null;
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & { stderr?: string; killed?: boolean };
+      const text = e.killed ? "the probe timed out after 20 s" : (e.stderr ?? e.message ?? "").trim().split("\n").filter(Boolean).slice(-2).join(" ");
+      return text || "ffmpeg exited without a message";
+    }
+  }
+
+  /** The first candidate whose probe passes, else libx264. A pinned encoder that fails throws so boot stops. */
+  async function chooseEncoder(): Promise<EncoderChoice> {
+    const requested = config.FFMPEG_ENCODER;
+    const candidates = encoderCandidates(requested);
+    if (!candidates.length) return { name: "libx264", requested, reason: "FFMPEG_ENCODER=libx264" };
+    const failures: string[] = [];
+    for (const enc of candidates) {
+      const failure = await probeEncoder(enc);
+      if (!failure) return { name: enc, requested, reason: `${enc} passed the boot probe${requested === "auto" ? "" : " (FFMPEG_ENCODER)"}` };
+      failures.push(`${enc}: ${failure}`);
+      if (requested !== "auto") throw new Error(`FFMPEG_ENCODER=${enc} cannot encode on this machine (${failure}). Give the container the GPU (docker-compose.gpu.yml) or set FFMPEG_ENCODER=auto.`);
+    }
+    return { name: "libx264", requested, reason: `no hardware encoder available (${failures.join("; ")})` };
+  }
+
   const run: MediaTools["run"] = (bin, args, opts) => {
     const tool = bin.split("/").pop()!;
     // which project/clip/job this belongs to comes from the job's async context (workers set it)
@@ -124,6 +192,8 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
   return {
     run,
     ffmpeg,
+    encoder: () => encoder,
+    videoEncodeArgs: (enc = encoder.name) => videoEncodeArgs(enc),
     ytdlp: (args, opts) => run(config.YTDLP_PATH, [...(config.YTDLP_PROXY ? ["--proxy", config.YTDLP_PROXY] : []), ...(config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : []), ...args], opts),
 
     async ffprobe(file) {
@@ -190,6 +260,9 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
         }
       }
       if (errors.length) throw new Error(errors.join("\n"));
+      // one decision per boot, with its reason; every encode's argv is on the debug "exec" line
+      encoder = await chooseEncoder();
+      log.info({ encoder: encoder.name, requested: encoder.requested, reason: encoder.reason }, "video encoder");
     },
   };
 }

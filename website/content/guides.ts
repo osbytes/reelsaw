@@ -98,7 +98,8 @@ export const GUIDES: Guide[] = [
           rows: [
             ["Fully local, no API keys", "Yes, the installer's default: Ollama, local Whisper, on-device alignment and face detection", "No: Gemini is still needed for layout picking and silent videos"],
             ["Language model", "Any: OpenAI, Anthropic, Google, Groq, Vercel AI Gateway, Ollama, vLLM, LM Studio or any OpenAI-compatible server; switched at runtime", "Gemini by default; any OpenAI-compatible server for moment picking only"],
-            ["Transcription", "Any: Deepgram, AssemblyAI, OpenAI, Groq, or a local Whisper server (Speaches)", "faster-whisper, optional Parakeet backend; GPU override"],
+            ["Transcription", "Any: Deepgram, AssemblyAI, OpenAI, Groq, or a local Whisper server (Speaches, CPU or CUDA)", "faster-whisper, optional Parakeet backend; GPU override"],
+            ["GPU", "Compose override: faster-whisper on CUDA, Ollama in a container, NVENC encoding; detection models on the CPU", "Image build flag: faster-whisper on CUDA, NVENC encoding, detection models on CUDA"],
             ["Licence", "AGPL-3.0, whole repository", "MIT core; cloud/ directory under a commercial licence"],
             ["Stack", "TypeScript: Hono, tRPC, Drizzle, Postgres, pg-boss, React", "Python: FastAPI, faster-whisper, MediaPipe, YOLOv8; React frontend"],
             ["Moment selection", "Map, pool, rank: chunked at pauses, rubric scored as a median of k samples, pairwise top-10 with swapped positions, optional judge model", "Gemini picks 3 to 15 moments per video"],
@@ -117,7 +118,7 @@ export const GUIDES: Guide[] = [
         heading: "Which one to pick",
         bullets: [
           "Pick Reelsaw for the core job and control over it: fully local by default with no API key, any provider for any model, selection you can audit, cuts you can review, per-segment framing, an editor, teams, and a pipeline that resumes after a crash.",
-          "Pick OpenShorts for breadth around the job: dubbing, UGC generation, publishing, a hosted fallback, GPU transcription out of the box and a bigger community.",
+          "Pick OpenShorts for breadth around the job: dubbing, UGC generation, publishing, a hosted fallback and a bigger community.",
           "Pick either over a hosted plan if you clip long videos regularly or need the source to stay on your hardware.",
         ],
       },

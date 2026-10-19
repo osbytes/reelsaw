@@ -184,6 +184,10 @@ export const envSchema = z.object({
   VAD: boolTrue,
   // CTC forced alignment (wav2vec2) for exact word boundaries at disfluency cuts; false = whisper-only search
   ALIGNER: boolTrue,
+  // onnxruntime execution provider for the face, text and alignment models (onnx.ts). cpu is the measured best on
+  // Apple silicon (CoreML was slower for all three); cuda needs the CUDA EP binaries and CUDA 12 + cuDNN 9 libraries.
+  // Unavailable providers fall back to cpu with a warning. The VAD always runs on the CPU (stateful 32 ms frames).
+  ONNX_EXECUTION_PROVIDER: z.enum(["cpu", "cuda", "coreml", "dml"]).default("cpu"),
   ALIGN_MODEL_DIR: z.string().default(path.resolve(process.cwd(), "models/wav2vec2-base-960h")),
   VAD_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/silero-vad.onnx")),
   TEXT_MODEL_PATH: z.string().default(path.resolve(process.cwd(), "models/ppocrv4-det.onnx")),
@@ -191,6 +195,9 @@ export const envSchema = z.object({
   LAYOUT_MIN_FACE_SIZE: z.coerce.number().min(0).max(1).default(0.18), // median face height / frame height
 
   FFMPEG_PATH: z.string().default("ffmpeg"),
+  // H.264 encoder for clips, bumpers and previews. auto probes h264_nvenc (NVIDIA) then h264_videotoolbox (macOS,
+  // outside Docker) at boot and keeps libx264 otherwise; a named encoder must work or boot fails (media.ts)
+  FFMPEG_ENCODER: z.enum(["auto", "libx264", "h264_nvenc", "h264_videotoolbox"]).default("auto"),
   FFPROBE_PATH: z.string().default("ffprobe"),
   YTDLP_PATH: z.string().default("yt-dlp"),
   /** Datacentre IPs get blocked by YouTube: route yt-dlp through a proxy and/or a cookies file (Netscape format) */

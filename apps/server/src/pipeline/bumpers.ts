@@ -10,7 +10,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { DEFAULT_IMAGE_BUMPER_SEC } from "@reelsaw/shared";
 import { keys, type Storage } from "../storage/index.js";
-import type { ProbeInfo } from "../media.js";
+import { videoEncodeArgs, type ProbeInfo } from "../media.js";
+import type { Logger } from "../log.js";
 
 export const BUMPER_MAX_SEC = 10;
 export const BUMPER_MAX_BYTES = 50 * 1024 * 1024;
@@ -92,7 +93,7 @@ export const bumperFrames = (durationSec: number) => Math.max(1, Math.round(dura
  * background, 30 fps constant, yuv420p, AAC stereo 48 kHz (generated silence when it has none),
  * trimmed or padded to a whole number of frames so audio and video end together.
  */
-export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" }, canvas: Canvas): string[] {
+export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" }, canvas: Canvas, encodeArgs: string[] = videoEncodeArgs("libx264")): string[] {
   const image = asset.kind === "image";
   const frames = bumperFrames(asset.durationSec);
   const sec = frames / BUMPER_FPS;
@@ -106,7 +107,7 @@ export function normaliseArgs(input: string, output: string, asset: { durationSe
     "-filter_complex", `${video};${audio}`,
     "-map", "[v]", "-map", "[a]",
     "-frames:v", String(frames), "-t", sec.toFixed(4),
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-r", String(BUMPER_FPS),
+    ...encodeArgs, "-pix_fmt", "yuv420p", "-r", String(BUMPER_FPS),
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
     "-movflags", "+faststart", "-f", "mp4", output,
   ];
@@ -114,6 +115,9 @@ export function normaliseArgs(input: string, output: string, asset: { durationSe
 
 export interface NormaliseDeps {
   ffmpeg: (args: string[], opts?: { signal?: AbortSignal }) => Promise<unknown>;
+  /** `-c:v …` of the encoder in use (media.videoEncodeArgs()); a hardware encoder that fails is retried with libx264 */
+  encodeArgs?: string[];
+  log?: Logger;
   storage: Pick<Storage, "exists" | "ensureLocal" | "putFile">;
   /** local scratch/cache root (`<data>/bumpers`) */
   dir: string;
@@ -151,7 +155,15 @@ export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFi
   const source = await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
   const tmp = `${local}.${randomUUID()}.tmp.mp4`;
   try {
-    await deps.ffmpeg(normaliseArgs(source, tmp, asset, canvas), { signal });
+    const software = videoEncodeArgs("libx264");
+    const hardware = deps.encodeArgs && deps.encodeArgs.join(" ") !== software.join(" ") ? deps.encodeArgs : undefined;
+    try {
+      await deps.ffmpeg(normaliseArgs(source, tmp, asset, canvas, hardware ?? software), { signal });
+    } catch (err) {
+      if (!hardware || signal?.aborted) throw err;
+      deps.log?.warn({ err, encoder: hardware[1] }, "hardware encoder failed normalising an intro/outro; retrying with libx264");
+      await deps.ffmpeg(normaliseArgs(source, tmp, asset, canvas, software), { signal });
+    }
     if (!(await nonEmpty(tmp))) throw new Error("normalising produced an empty file");
     await fs.rename(tmp, local);
   } finally {

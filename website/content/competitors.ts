@@ -398,13 +398,12 @@ export const COMPETITORS: Competitor[] = [
     betterAt: [
       "Breadth beyond clipping: voice dubbing, AI UGC videos with lip-synced actors, a YouTube title and thumbnail studio, and one-click publishing.",
       "A hosted option for people who do not want to self-host, with a GPU behind it.",
-      "GPU acceleration for transcription out of the box.",
+      "An optional Parakeet transcription backend (NVIDIA NeMo), about twice as fast as Whisper on the same card.",
       "A larger community: about 6.8k GitHub stars when checked.",
     ],
     pickThem: [
       "You want dubbing, UGC generation or direct publishing from the same tool.",
       "You might use the hosted version some months and self-host on others.",
-      "You have an NVIDIA GPU and want transcription to use it today.",
       "You prefer a Python stack to extend.",
     ],
     pickReelsaw: [
@@ -422,6 +421,7 @@ export const COMPETITORS: Competitor[] = [
       { q: "Can I use Anthropic, OpenAI or Groq with each tool?", a: "Reelsaw: yes, each of the language, transcription and alignment models is a provider:model string, so you can mix vendors or go fully local, and admins can change them at runtime. OpenShorts: an OpenAI-compatible server can replace Gemini for moment picking; the other Gemini-backed steps stay on Gemini." },
       { q: "Which one picks better clips?", a: "Reelsaw does more work to find out: chunking at pauses with overlap so long videos do not lose their middle, rubric scores as a median of several samples, pairwise comparison of the top ten with swapped positions, an optional separate judge model, and a run-relative gate instead of a fixed count. OpenShorts asks Gemini for 3 to 15 moments in one pass. Neither project publishes a head-to-head benchmark, so try both on your own video." },
       { q: "Which is more open: MIT or AGPL-3.0?", a: "MIT lets anyone, including a company, take the code private and sell it as a service. AGPL-3.0 allows everything MIT allows except that: if you run a modified Reelsaw for other people, you must publish your changes. OpenShorts' core is MIT and its cloud directory is under a separate commercial licence; all of Reelsaw is AGPL-3.0." },
+      { q: "Do both use an NVIDIA GPU?", a: "Yes, and for the same three jobs. OpenShorts builds one image with a GPU flag: faster-whisper on CUDA, NVENC encoding, and its detection models. Reelsaw adds a Compose override (docker-compose.gpu.yml) that hands the card to the Speaches container (faster-whisper on CUDA with large-v3), to Ollama when it runs in a container, and to the app, whose ffmpeg then encodes with NVENC; its face, text and alignment models stay on the CPU by default because they are small enough that the GPU did not measure faster. Neither runs CUDA inside Docker on a Mac; there, Reelsaw's installer runs Ollama natively on Metal." },
       { q: "Do both have MCP servers?", a: "Yes. Both can be driven from Claude Code, Claude Desktop, Cursor or a script. OpenShorts also has a REST API with webhooks and a pip-installable CLI; Reelsaw's CLI is an operator tool inside the container, and its MCP server can use OAuth so claude.ai connectors sign in through the browser." },
     ],
     sources: [

@@ -102,6 +102,16 @@ function useActiveSection(ids: readonly string[]) {
   return active;
 }
 
+/** "text, alignment on cpu; vad on cpu (always)" or, when a GPU provider was asked for, which models got it. */
+function onDeviceSummary(d: { requested: string; faces: string | null; text: string | null; vad: string | null; aligner: string | null }) {
+  const on = (["text", "aligner", "vad"] as const).filter((k) => d[k]);
+  if (!on.length) return "all off";
+  const byProvider = new Map<string, string[]>();
+  for (const k of on) byProvider.set(d[k]!, [...(byProvider.get(d[k]!) ?? []), k === "aligner" ? "alignment" : k]);
+  const parts = [...byProvider].map(([p, ks]) => `${ks.join(", ")} on ${p}`);
+  return d.requested !== "cpu" && !on.some((k) => d[k] === d.requested) ? `${parts.join("; ")} (${d.requested} unavailable)` : parts.join("; ");
+}
+
 function jumpTo(id: string, smooth = true) {
   document.getElementById(id)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
   history.replaceState(null, "", `#${id}`);
@@ -160,7 +170,10 @@ function SystemTab() {
         ["Email", s.email],
         ["OpenAI base URL", s.openaiBaseUrl ?? "api.openai.com"],
         ["Compatible base URL", s.compatBaseUrl ?? "not set"],
-        ["Face detection", s.faceDetection ? "on" : "off"],
+        ["GPU", s.gpu ? `${s.gpu.vendor}: ${s.gpu.devices.join(", ") || "device present, no driver tools"}` : "none visible to this process"],
+        ["Video encoder", `${s.videoEncoder.name} · ${s.videoEncoder.reason}`],
+        ["Face detection", s.faceDetection ? `on · ${s.onDevice.faces}` : "off"],
+        ["On-device models", onDeviceSummary(s.onDevice)],
         ["OpenTelemetry", s.otel ? "on" : "off"],
         ["MCP endpoint", s.mcpUrl],
       ]

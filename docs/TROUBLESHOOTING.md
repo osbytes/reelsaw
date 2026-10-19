@@ -60,6 +60,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
@@ -197,6 +198,16 @@ and list it in `SUPPORTED` in `language.ts`.
   caught. Downloads are capped by `MAX_SOURCE_FILE_MB` (default 8192); uploads by `MAX_UPLOAD_MB`, counted as bytes
   arrive so chunked bodies are capped too.
 - **Docker Desktop disk** fills on rebuilds: `docker builder prune -f --keep-storage 3GB && docker image prune -f`.
+- **"The GPU is not used."** `reelsaw machine` (or Settings → System → Overview) says what the app process sees.
+  `gpu: none` inside Docker means the container was started without the device: `.env` needs
+  `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` and the host the NVIDIA Container Toolkit
+  (`docker compose exec app nvidia-smi -L` must list the card). `video encoder: libx264 … no hardware encoder
+  available (h264_nvenc: …)` quotes ffmpeg's reason; the usual ones are the missing device or
+  `NVIDIA_DRIVER_CAPABILITIES` without `video` (the override sets it). Speaches on the GPU is a separate matter:
+  it needs `SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda`, and `docker compose logs speaches` says which device it loaded the
+  model on. The boot log line `video encoder` and the `resources` line (`gpu`) record the same decision.
+  `ONNX_EXECUTION_PROVIDER=cuda` without the CUDA libraries logs `onnx execution provider unavailable; using
+  the cpu` once per model and carries on.
 - **Disk use: `reelsaw storage`** prints unique bytes under `/data` (hardlinks counted once), scratch-only leftovers,
   duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
   `reelsaw storage sweep [--dry-run]` removes the leftovers: older render generations, files of deleted clips or
