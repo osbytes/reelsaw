@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.10.0
+
+### Minor Changes
+
+- [#41](https://github.com/osbytes/reelsaw/pull/41) [`c48aeb5`](https://github.com/osbytes/reelsaw/commit/c48aeb59469910235ece5b17da377997cf0db14d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Use the GPU where it pays. `docker-compose.gpu.yml` hands an NVIDIA card to Speaches (`SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda`, so `faster-whisper-large-v3` transcribes faster than `small` did on the CPU), to Ollama in a container, and to the app, where ffmpeg now encodes clips, intros and outros with `h264_nvenc` when `FFMPEG_ENCODER=auto` finds it at boot (VideoToolbox on a Mac outside Docker); a hardware encoder that fails mid-render falls back to libx264 for that clip. `ONNX_EXECUTION_PROVIDER` moves the face, text and alignment models to CUDA, CoreML or DirectML with a CPU fallback (CPU stays the default: measured faster on Apple silicon). Settings → System → Overview and the new `reelsaw machine` command show the GPU the process sees, the encoder in use and why, and where each on-device model runs.
+
+- [#41](https://github.com/osbytes/reelsaw/pull/41) [`9324f80`](https://github.com/osbytes/reelsaw/commit/9324f80d74cd125fbc74656e7fe010e4949c2566) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The one-command installers (`install.sh`, `install.ps1`) now look at the machine before doing anything: RAM, an NVIDIA GPU and its VRAM, Docker's memory, free disk, an Ollama already running and the models it has, and the port. They print a plan and ask three questions (local Ollama or a hosted provider, which model, go ahead), install Ollama when it is missing and you chose local, reuse a good model Ollama already has, pick the model by VRAM when a GPU serves it, move a busy port, and put Ollama, Speaches and the app on the GPU when the NVIDIA Container Toolkit is present. Hosted providers (OpenAI, Anthropic, Google, Groq, Vercel AI Gateway) are a choice in the same prompt. `REELSAW_YES=1` takes the proposed answers, `REELSAW_DRY_RUN=1` prints the plan and stops; re-running upgrades an existing install.
+
+### Patch Changes
+
+- [#44](https://github.com/osbytes/reelsaw/pull/44) [`9ba8669`](https://github.com/osbytes/reelsaw/commit/9ba86694b3447e8f34b3f26192bdc7c82fdd9209) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Detect the GPU on Docker Desktop (WSL2) via `/dev/dxg` when `nvidia-smi` and `/dev/nvidia0` are missing, document that Windows `.env` must use `;` in `COMPOSE_FILE` (a colon is the drive-letter separator), and keep `pnpm docs:gen` defaults as POSIX paths on Windows.
+
 ## 0.9.0
 
 ### Minor Changes
