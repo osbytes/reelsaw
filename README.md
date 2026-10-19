@@ -8,6 +8,7 @@
 # Reelsaw
 
 <p align="center">
+  <a href="https://www.osbytes.io" target="_blank" rel="noopener noreferrer" title="osbytes — open source bytes"><img src="https://www.osbytes.io/badge.svg" alt="osbytes — open source bytes" width="24" height="24"></a>
   <a href="https://github.com/osbytes/reelsaw/releases"><img src="https://img.shields.io/github/v/release/osbytes/reelsaw?label=release" alt="Latest release"></a>
   <a href="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml"><img src="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/osbytes/reelsaw/pkgs/container/reelsaw"><img src="https://img.shields.io/badge/ghcr.io-osbytes%2Freelsaw-2496ED?logo=docker&logoColor=white" alt="Docker image on GHCR"></a>
