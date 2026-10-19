@@ -22,21 +22,25 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { parseProfiles, type Profile } from "./profiles.js";
 import { percentile } from "./meter.js";
 import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 
 const argv = process.argv.slice(2);
-const BOOL = new Set(["keep", "verbose", "no-recreate"]);
+const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
 const valueOf = (name: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[i + 1] : undefined;
 };
 const has = (name: string) => argv.includes(`--${name}`);
+/** With --gpu, reserve the NVIDIA device for the bench app (NVENC). Speaches CUDA is separate. */
+const benchGpuFiles = () => (has("gpu") ? ["eval/bench/compose.bench.gpu.yml"] : []);
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath: URL.pathname is `/C:/…` on Windows and is not a valid cwd for spawn (ENOENT).
+const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../..");
 const dotenv = (() => {
   const out: Record<string, string> = {};
@@ -98,6 +102,26 @@ const composeEnv = {
   BENCH_APP_URL: BASE,
 };
 
+/**
+ * Resolve the docker CLI. On Windows, spawn() without a shell often misses WinGet/Docker Desktop
+ * shims that PowerShell finds via PATH — prefer an absolute path from `where.exe`.
+ */
+function resolveDockerBin(): string {
+  if (process.platform !== "win32") return "docker";
+  try {
+    const lines = execFileSync("where.exe", ["docker"], { encoding: "utf8" })
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const exe = lines.find((p) => /\.exe$/i.test(p)) ?? lines[0];
+    if (exe) return exe;
+  } catch {
+    /* fall through */
+  }
+  return "docker.exe";
+}
+const dockerBin = resolveDockerBin();
+
 function sh(cmd: string, args: string[], opts: { cwd?: string; input?: string; quiet?: boolean } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { cwd: opts.cwd ?? repoRoot, env: composeEnv, stdio: [opts.input !== undefined ? "pipe" : "ignore", "pipe", "pipe"] });
@@ -114,7 +138,19 @@ function sh(cmd: string, args: string[], opts: { cwd?: string; input?: string; q
   });
 }
 
-const compose = (extraFiles: string[], ...args: string[]) => sh("docker", ["compose", "-p", COMPOSE_PROJECT, "-f", "docker-compose.yml", "-f", "eval/bench/compose.bench.yml", ...extraFiles.flatMap((f) => ["-f", f]), ...args]);
+const compose = (extraFiles: string[], ...args: string[]) =>
+  sh(dockerBin, [
+    "compose",
+    "-p",
+    COMPOSE_PROJECT,
+    "-f",
+    "docker-compose.yml",
+    "-f",
+    "eval/bench/compose.bench.yml",
+    ...benchGpuFiles().flatMap((f) => ["-f", f]),
+    ...extraFiles.flatMap((f) => ["-f", f]),
+    ...args,
+  ]);
 
 /** Inside the container, the host's services live at host.docker.internal. */
 const containerUrl = (v: string) => v.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/])/g, "//host.docker.internal");
@@ -447,7 +483,7 @@ async function main() {
   const base = profiles.find((p) => p.name === baseName);
   if (steps.length && !base) throw new Error(`--base-profile ${baseName} is not among the selected profiles`);
 
-  console.log(`bench stack ${COMPOSE_PROJECT} at ${BASE}; ${profiles.length} profile(s) × ${repeat} run(s)${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`);
+  console.log(`bench stack ${COMPOSE_PROJECT} at ${BASE}${has("gpu") ? " (--gpu: NVENC for the bench app)" : ""}; ${profiles.length} profile(s) × ${repeat} run(s)${steps.length ? `; steps ${steps.join("+")} on a base project from ${baseName}` : ""}; results → ${path.relative(process.cwd(), outDir)}`);
   const pool = new pg.Pool({ connectionString: DB_URL });
   const results: RunResult[] = [];
   const record = async (r: RunResult) => {

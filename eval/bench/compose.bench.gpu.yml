@@ -1,0 +1,20 @@
+# Optional NVIDIA reservation for the bench app (NVENC renders). Pair with compose.bench.yml:
+#
+#   docker compose -p reelsaw-bench -f docker-compose.yml -f eval/bench/compose.bench.yml \
+#     -f eval/bench/compose.bench.gpu.yml up -d --build app
+#
+# Or pass --gpu to `pnpm bench:e2e`. Speaches CUDA is separate: point OPENAI_BASE_URL at a
+# Speaches container running ghcr.io/speaches-ai/speaches:latest-cuda (the main stack's Speaches
+# when SPEACHES_IMAGE is set that way).
+
+services:
+  app:
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]

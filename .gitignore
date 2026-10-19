@@ -13,3 +13,5 @@ coverage/
 eval/.cache/
 eval/reports/
 apps/server/dist-bundle/
+
+eval/bench/models.local*.json

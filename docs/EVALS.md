@@ -113,6 +113,12 @@ a second, isolated compose stack (`reelsaw-bench`: own image tag, volumes and po
 docker compose -p reelsaw-bench -f docker-compose.yml -f eval/bench/compose.bench.yml build app   # once per code change (ports are not needed to build)
 pnpm --filter @reelsaw/server bench:e2e -- --matrix eval/bench/models.json --profiles cloud-cheap,local-qwen14 \
   --source "https://www.youtube.com/watch?v=9hSfOfgrl1I" --max-clips 3 [--repeat 3] [--out eval/bench/results/<name>]
+# Local CPU vs GPU (NVENC + Speaches CUDA): two runs, switch Speaches image between them
+pnpm --filter @reelsaw/server bench:e2e -- --gpu --matrix eval/bench/models.json --profiles local-qwen14-gpu \
+  --source "https://www.youtube.com/watch?v=9hSfOfgrl1I" --max-clips 3 --out eval/bench/results/<name>
+# then: SPEACHES_IMAGE=…:latest-cpu docker compose --profile local-ai up -d speaches
+pnpm --filter @reelsaw/server bench:e2e -- --matrix eval/bench/models.json --profiles local-qwen14-cpu \
+  --source "https://www.youtube.com/watch?v=9hSfOfgrl1I" --max-clips 3 --fresh-stt --out eval/bench/results/<name>
 ```
 
 Per profile it recreates the bench app container with the profile's env on top of `.env`, waits for

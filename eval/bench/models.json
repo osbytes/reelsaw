@@ -1,5 +1,5 @@
 {
-  "$comment": "Profiles for `pnpm eval <suites> --matrix eval/bench/models.json [--profiles a,b]` and `pnpm bench:e2e --matrix ...`. Each is a set of env overrides on the repo .env; keys (AI_GATEWAY_API_KEY, OPENAI_API_KEY, ...) stay in .env. Cloud models go through the Vercel AI Gateway (one key, per-request cost in the report); local ones through compat (Ollama) and openai+OPENAI_BASE_URL (Speaches). Edit freely; this is a starting grid, not a baseline. Two rules learned the hard way: (1) STT must return word timestamps: whisper-1, deepgram, assemblyai, groq whisper and Speaches do; openai/gpt-4o-transcribe does not (segments only), so it is not in the grid. (2) A profile must set TRANSCRIPT_ALIGN_MODEL to match its STT, or it inherits the .env value (a local Speaches model on a self-hosted box) and render becomes the slowest stage: every cut is re-aligned on the CPU.",
+  "$comment": "Profiles for `pnpm eval <suites> --matrix eval/bench/models.json [--profiles a,b]` and `pnpm bench:e2e --matrix ...`. Each is a set of env overrides on the repo .env; keys (AI_GATEWAY_API_KEY, OPENAI_API_KEY, ...) stay in .env. Cloud models go through the Vercel AI Gateway (one key, per-request cost in the report); local ones through compat (Ollama) and openai+OPENAI_BASE_URL (Speaches). Edit freely; this is a starting grid, not a baseline. Two rules learned the hard way: (1) STT must return word timestamps: whisper-1, deepgram, assemblyai, groq whisper and Speaches do; openai/gpt-4o-transcribe does not (segments only), so it is not in the grid. (2) A profile must set TRANSCRIPT_ALIGN_MODEL to match its STT, or it inherits the .env value (a local Speaches model on a self-hosted box) and render becomes the slowest stage: every cut is re-aligned on the CPU. local-qwen14-cpu vs local-qwen14-gpu: same whisper-small + qwen2.5:14b; differ only FFMPEG_ENCODER (libx264 vs h264_nvenc). For the GPU row also run Speaches as latest-cuda and pass --gpu so the bench app gets NVENC; switch Speaches to latest-cpu for the CPU row (one shared Speaches).",
   "profiles": {
     "cloud-cheap": {
       "AI_MODEL": "gateway:openai/gpt-4o-mini",
@@ -48,6 +48,26 @@
       "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-medium",
       "OPENAI_BASE_URL": "http://localhost:8000/v1",
       "OPENAI_API_KEY": "local"
+    },
+    "local-qwen14-cpu": {
+      "AI_MODEL": "compat:qwen2.5:14b",
+      "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+      "OPENAI_COMPATIBLE_API_KEY": "ollama",
+      "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+      "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+      "OPENAI_BASE_URL": "http://localhost:8000/v1",
+      "OPENAI_API_KEY": "local",
+      "FFMPEG_ENCODER": "libx264"
+    },
+    "local-qwen14-gpu": {
+      "AI_MODEL": "compat:qwen2.5:14b",
+      "OPENAI_COMPATIBLE_BASE_URL": "http://localhost:11434/v1",
+      "OPENAI_COMPATIBLE_API_KEY": "ollama",
+      "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+      "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+      "OPENAI_BASE_URL": "http://localhost:8000/v1",
+      "OPENAI_API_KEY": "local",
+      "FFMPEG_ENCODER": "h264_nvenc"
     }
   }
 }
