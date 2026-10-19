@@ -20,5 +20,6 @@ services:
       LLM_TRACE_MAX_CHARS: "200"
       # (the ASR cache under /data/cache/asr survives container recreation; e2e.ts deletes it per profile so transcription is timed for real)
       # this stack has no speaches/ollama services of its own: reach the host's
-      OPENAI_BASE_URL: http://host.docker.internal:8000/v1
-      OPENAI_COMPATIBLE_BASE_URL: http://host.docker.internal:11434/v1
+      # BENCH_OPENAI_BASE_URL when Speaches is published on a non-default host port (e.g. 18000)
+      OPENAI_BASE_URL: ${BENCH_OPENAI_BASE_URL:-http://host.docker.internal:8000/v1}
+      OPENAI_COMPATIBLE_BASE_URL: ${BENCH_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}

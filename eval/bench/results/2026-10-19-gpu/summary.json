@@ -1,0 +1,231 @@
+{
+  "at": "2026-10-19T05:48:59.208Z",
+  "source": "https://www.youtube.com/watch?v=9hSfOfgrl1I",
+  "maxClips": 3,
+  "profiles": [
+    {
+      "name": "local-qwen14-gpu",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:18000/v1",
+        "OPENAI_API_KEY": "local",
+        "FFMPEG_ENCODER": "h264_nvenc"
+      }
+    },
+    {
+      "name": "local-qwen14-cpu",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:18000/v1",
+        "OPENAI_API_KEY": "local",
+        "FFMPEG_ENCODER": "libx264"
+      }
+    }
+  ],
+  "results": [
+    {
+      "profile": "local-qwen14-gpu",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:18000/v1",
+        "OPENAI_API_KEY": "local",
+        "FFMPEG_ENCODER": "h264_nvenc"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "ff1e6a58-c936-4734-a8dd-d84dea33c696",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-19T03:25:22.228Z",
+      "finishedAt": "2026-10-19T04:47:21.815Z",
+      "stages": {
+        "ingest": 1214,
+        "transcribe": 83.5,
+        "refine": 1800.7,
+        "analyze": 1091.4,
+        "render": 88.5
+      },
+      "totalSec": 4915.6,
+      "models": {
+        "align": "openai:Systran/faster-whisper-small",
+        "alignEndpoint": "host.docker.internal:18000",
+        "transcription": "openai:Systran/faster-whisper-small",
+        "transcriptionEndpoint": "host.docker.internal:18000",
+        "language": "compat:qwen2.5:14b",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Power of Having Nothing to Lose",
+          "hook": "You Have Nothing to Lose",
+          "startSec": 534,
+          "endSec": 554.7,
+          "score": 83,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "Father's Apology",
+          "hook": "Father's Apology",
+          "startSec": 644.3,
+          "endSec": 669.9,
+          "score": 80,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Teacher's Lesson on Revenge",
+          "hook": "Success is the only revenge",
+          "startSec": 0,
+          "endSec": 59.5,
+          "score": 68,
+          "status": "done",
+          "layout": "mixed"
+        }
+      ],
+      "llm": {
+        "calls": 59,
+        "failed": 20,
+        "totalSec": 6480,
+        "p50Ms": 109355,
+        "inputTokens": 37820,
+        "outputTokens": 7653,
+        "byStage": {
+          "refine.disfluency": {
+            "calls": 42,
+            "totalSec": 3283.3
+          },
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 315.4
+          },
+          "analyze": {
+            "calls": 15,
+            "totalSec": 2881.2
+          }
+        }
+      },
+      "machine": {
+        "platform": "win32 10.0.26200",
+        "arch": "x64",
+        "cpus": 24,
+        "memGb": 32,
+        "node": "v22.22.0"
+      }
+    },
+    {
+      "profile": "local-qwen14-cpu",
+      "env": {
+        "AI_MODEL": "compat:qwen2.5:14b",
+        "OPENAI_COMPATIBLE_BASE_URL": "http://host.docker.internal:11434/v1",
+        "OPENAI_COMPATIBLE_API_KEY": "ollama",
+        "TRANSCRIPTION_MODEL": "openai:Systran/faster-whisper-small",
+        "TRANSCRIPT_ALIGN_MODEL": "openai:Systran/faster-whisper-small",
+        "OPENAI_BASE_URL": "http://host.docker.internal:18000/v1",
+        "OPENAI_API_KEY": "local",
+        "FFMPEG_ENCODER": "libx264"
+      },
+      "run": 1,
+      "step": "full",
+      "projectId": "85db13f9-4097-4307-9207-e4e3ccb3a885",
+      "status": "done",
+      "error": null,
+      "durationSec": 1213.986,
+      "startedAt": "2026-10-19T04:48:33.663Z",
+      "finishedAt": "2026-10-19T05:48:24.293Z",
+      "stages": {
+        "ingest": 1214,
+        "transcribe": 494.7,
+        "refine": 1801.5,
+        "analyze": 1185.4,
+        "render": 88.5
+      },
+      "totalSec": 3587.5,
+      "models": {
+        "align": "openai:Systran/faster-whisper-small",
+        "alignEndpoint": "host.docker.internal:18000",
+        "transcription": "openai:Systran/faster-whisper-small",
+        "transcriptionEndpoint": "host.docker.internal:18000",
+        "language": "compat:qwen2.5:14b",
+        "languageEndpoint": "host.docker.internal:11434"
+      },
+      "clips": [
+        {
+          "index": 0,
+          "title": "The Power of Starting With Nothing",
+          "hook": "Nothing to Lose = Dangerous",
+          "startSec": 534,
+          "endSec": 554.7,
+          "score": 82,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 1,
+          "title": "The Fear of Failure",
+          "hook": "Nothing to lose, everything to gain",
+          "startSec": 892.9,
+          "endSec": 940.9,
+          "score": 78,
+          "status": "done",
+          "layout": "face"
+        },
+        {
+          "index": 2,
+          "title": "Turning Adversity into Strength",
+          "hook": "Outcast to Solo Work Champion",
+          "startSec": 809.5,
+          "endSec": 862.4,
+          "score": 68,
+          "status": "done",
+          "layout": "face"
+        }
+      ],
+      "llm": {
+        "calls": 54,
+        "failed": 16,
+        "totalSec": 4784.3,
+        "p50Ms": 104434,
+        "inputTokens": 30453,
+        "outputTokens": 6501,
+        "byStage": {
+          "refine.disfluency": {
+            "calls": 44,
+            "totalSec": 3300.3
+          },
+          "refine.entities": {
+            "calls": 2,
+            "totalSec": 298.9
+          },
+          "analyze": {
+            "calls": 8,
+            "totalSec": 1185.3
+          }
+        }
+      },
+      "machine": {
+        "platform": "win32 10.0.26200",
+        "arch": "x64",
+        "cpus": 24,
+        "memGb": 32,
+        "node": "v22.22.0"
+      }
+    }
+  ]
+}
