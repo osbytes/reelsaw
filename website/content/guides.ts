@@ -48,7 +48,7 @@ export const GUIDES: Guide[] = [
       {
         heading: "What you trade for the self-hosted zero",
         bullets: [
-          "Hardware: Docker, about 10 GB of disk, 8 GB of RAM with a hosted provider or more for a local language model (the installer picks qwen2.5:14b on 24 GB, qwen2.5:7b on 12 GB, gemma3:4b below).",
+          "Hardware: Docker, about 10 GB of disk, 8 GB of RAM with a hosted provider or more for a local language model (the installer checks the machine and picks qwen2.5:14b with 24 GB of RAM or a 12 GB GPU, qwen2.5:7b from 12 GB, gemma3:4b below; it asks before it installs anything).",
           "Time: a fully local run on a CPU is slower than a vendor's GPU. Cloud transcription and selection models bring that back down; you pay those vendors directly, with no markup.",
           "Setup: one command, then an account that becomes the admin. Updates are a Docker pull.",
           "No social publishing: Reelsaw exports a zip with a paste-ready caption, a YouTube Data API body and a TikTok post body per clip, and leaves posting to you or an agent.",

@@ -26,7 +26,7 @@ export const REELSAW_COST = {
   heading: "What Reelsaw costs for the same job",
   paragraphs: [
     "The software is free under the AGPL-3.0 and there is no hosted plan to upsell you to. What you pay for is the machine it runs on and, only if you choose cloud models, the per-call price of those models.",
-    "Fully local: Ollama for the language model and Speaches (Whisper) for transcription. The installer picks a model by RAM (qwen2.5:14b on 24 GB or more, qwen2.5:7b from 12 GB, gemma3:4b below that). Nothing leaves the box and there is no per-minute cost at all.",
+    "Fully local: Ollama for the language model and Speaches (Whisper) for transcription. The installer picks a model by GPU memory or RAM (qwen2.5:14b with 24 GB of RAM or a 12 GB GPU, qwen2.5:7b from 12 GB, gemma3:4b below that), reuses one Ollama already has, and puts both on an NVIDIA GPU when there is one. Nothing leaves the box and there is no per-minute cost at all.",
     "With cloud models: set OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI or any OpenAI-compatible endpoint as a provider:model string and you pay that vendor's metered price for transcription minutes and a few thousand tokens of selection per video. There is no Reelsaw margin on top.",
   ],
 };

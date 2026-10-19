@@ -83,8 +83,10 @@ Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrenc
 
 ## Install (no source needed)
 
-Fully local, with Ollama for the language model and Speaches for speech-to-text. Needs Docker; on
-macOS install [Ollama](https://ollama.com/download) first:
+Needs Docker (Docker Desktop on macOS and Windows). One command: it looks at the machine (RAM, GPU,
+Docker's memory, free disk, an Ollama already running and the models it has, the port), proposes a
+setup, asks three questions in a terminal (local Ollama or a hosted provider, which model, go ahead)
+and installs Ollama for you (Homebrew, ollama.com or winget) if you pick local and it is missing:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash
@@ -99,8 +101,17 @@ irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | 
 WSL2 users can run the bash one-liner as is (with Docker Desktop's WSL integration on).
 
 It writes `~/reelsaw` (compose file + `.env` with generated secrets), pulls the published image and
-the model (chosen by RAM: `qwen2.5:14b`, ~9 GB, on 24 GB or more; `qwen2.5:7b` from 12 GB; `gemma3:4b` below that; the script prints its choice and `REELSAW_LLM=<model>` overrides it), starts everything and waits
-until http://localhost:3000 answers. Hosted providers and manual setup: [deploy/README.md](deploy/README.md).
+the model, starts everything and waits until http://localhost:3000 answers (or the next free port).
+Fully local is the default when the machine can carry a useful model: `qwen2.5:14b` (~9 GB) with
+24 GB of RAM or a 12 GB GPU, `qwen2.5:7b` from 12 GB, `gemma3:4b` below that, and a good model that
+Ollama already has is reused instead of downloaded; with an NVIDIA GPU and the container toolkit,
+Ollama and Speaches run on the GPU (and renders encode with NVENC; see "Using a GPU" below). Hosted
+providers (OpenAI, Anthropic, Google, Groq, Vercel AI Gateway) are a choice in the same prompt: the
+key is asked for and never echoed, and Anthropic and Google pair with local Speaches for
+speech-to-text. Without a terminal, or with `REELSAW_YES=1`, the proposed answers are taken;
+`REELSAW_AI`, `REELSAW_LLM`, `REELSAW_PORT` and friends answer in advance and `REELSAW_DRY_RUN=1`
+prints the plan and stops (every option is listed at the top of the script).
+Manual setup: [deploy/README.md](deploy/README.md).
 The scripts are [deploy/install.sh](deploy/install.sh) and [deploy/install.ps1](deploy/install.ps1);
 they are served from `main` (see [docs/RELEASING.md](docs/RELEASING.md)).
 

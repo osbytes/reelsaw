@@ -202,7 +202,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | `reelsaw` | Database password used by both the db and app containers (compose only). |
 | `REELSAW_IMAGE` | `ghcr.io/osbytes/reelsaw:latest` | Image the compose file runs (compose only). |
-| `WHISPER_MODEL` | `Systran/faster-whisper-small` | Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-large-v3` (or `deepdml/faster-whisper-large-v3-turbo-ct2`). Compose only. |
+| `WHISPER_MODEL` | `Systran/faster-whisper-small` | Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only. |
 | `SPEACHES_IMAGE` | `ghcr.io/speaches-ai/speaches:latest-cpu` | Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`; the installer picks it). Compose only. |
 | `RUN_WORKERS_IN_APP` | `true` | Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs. |
 | `OTEL_SERVICE_NAME` | `reelsaw` | OpenTelemetry service name (read by otel.ts). |
