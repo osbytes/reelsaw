@@ -1,4 +1,5 @@
 import { CopyButton } from "./copy-button";
+import { ScrollArea } from "./scroll-area";
 
 /** A one-line shell command in a panel with a copy button. */
 export function Command({ text, lang = "bash", caption }: { text: string; lang?: string; caption?: string }) {
@@ -8,9 +9,11 @@ export function Command({ text, lang = "bash", caption }: { text: string; lang?:
         <figcaption className="truncate font-mono text-[11px] text-ink3">{caption ?? lang}</figcaption>
         <CopyButton text={text} />
       </div>
-      <pre className="overflow-x-auto px-3.5 py-3 font-mono text-[13px] leading-relaxed text-ink">
-        <code className={`language-${lang}`}>{text}</code>
-      </pre>
+      <ScrollArea>
+        <pre className="px-3.5 py-3 font-mono text-[13px] leading-relaxed text-ink">
+          <code className={`language-${lang}`}>{text}</code>
+        </pre>
+      </ScrollArea>
     </figure>
   );
 }
@@ -18,8 +21,10 @@ export function Command({ text, lang = "bash", caption }: { text: string; lang?:
 /** A multi-line code block (no copy button). */
 export function Code({ children, lang = "bash" }: { children: string; lang?: string }) {
   return (
-    <pre className="card min-w-0 overflow-x-auto px-4 py-3.5 font-mono text-[12.5px] leading-relaxed text-ink2">
-      <code className={`language-${lang}`}>{children}</code>
-    </pre>
+    <ScrollArea className="card min-w-0">
+      <pre className="px-4 py-3.5 font-mono text-[12.5px] leading-relaxed text-ink2">
+        <code className={`language-${lang}`}>{children}</code>
+      </pre>
+    </ScrollArea>
   );
 }

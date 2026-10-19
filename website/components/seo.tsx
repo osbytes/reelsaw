@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { Faq, Link, Table } from "@/content/types";
 import { SITE } from "@/lib/site";
+import { ScrollArea } from "./scroll-area";
 
 export function JsonLd({ data }: { data: unknown }) {
   return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;
@@ -64,7 +65,7 @@ export function FaqSection({ faqs, heading = "Common questions" }: { faqs: Faq[]
 
 export function DataTable({ table, caption }: { table: Table; caption?: string }) {
   return (
-    <div className="card overflow-x-auto">
+    <ScrollArea className="card">
       <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
@@ -94,7 +95,7 @@ export function DataTable({ table, caption }: { table: Table; caption?: string }
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollArea>
   );
 }
 
