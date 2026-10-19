@@ -40,8 +40,8 @@ export const PRICING: PricingPlan[] = [
     projects: 50,
     watermark: false,
     firstVideoFreeMinutes: 0,
-    blurb: "For getting started.",
-    bullets: ["100 minutes of source video a month", "10 GB of storage, 50 projects", "No watermark", "MCP and API access for agents"],
+    blurb: "For getting started, without a watermark.",
+    bullets: ["100 minutes of source video a month", "10 GB of storage, 50 projects", "No watermark", "MCP and API access for agents", "4 jobs at once"],
   },
   {
     name: "creator",
@@ -52,8 +52,8 @@ export const PRICING: PricingPlan[] = [
     projects: 200,
     watermark: false,
     firstVideoFreeMinutes: 0,
-    blurb: "A show a week, clipped without a watermark.",
-    bullets: ["300 minutes of source video a month", "30 GB of storage, 200 projects", "No watermark", "6 jobs at once"],
+    blurb: "A show a week, clipped and posted.",
+    bullets: ["300 minutes of source video a month", "30 GB of storage, 200 projects", "No watermark", "MCP and API access for agents", "6 jobs at once"],
   },
   {
     name: "pro",
@@ -64,7 +64,7 @@ export const PRICING: PricingPlan[] = [
     projects: 0,
     watermark: false,
     firstVideoFreeMinutes: 0,
-    blurb: "Daily publishing, a back catalogue, agents doing the clipping.",
-    bullets: ["750 minutes of source video a month", "100 GB of storage, unlimited projects", "No watermark", "Priority processing queue, 12 jobs at once"],
+    blurb: "Daily publishing and a back catalogue.",
+    bullets: ["750 minutes of source video a month", "100 GB of storage, unlimited projects", "No watermark", "Priority processing queue", "12 jobs at once"],
   },
 ];

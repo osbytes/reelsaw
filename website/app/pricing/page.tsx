@@ -40,15 +40,16 @@ export default function PricingPage() {
           <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {PRICING.map((p) => (
               <li key={p.name} className={`card flex flex-col gap-4 p-6 ${p.name === "creator" ? "border-acc" : ""}`}>
-                <div className="flex flex-col gap-1">
+                {/* fixed-height header and price rows, so the four cards' prices, notes and bullet lists line up */}
+                <div className="flex min-h-[4.75rem] flex-col gap-1">
                   <span className="text-[17px] font-bold tracking-tight">{p.label}</span>
                   <span className="text-sm leading-relaxed text-ink2">{p.blurb}</span>
                 </div>
-                <div className="flex items-baseline gap-1.5">
+                <div className="flex h-11 items-baseline gap-1.5">
                   <span className="text-[34px] font-extrabold tracking-tight tabular-nums">{p.price ? `$${p.price.month}` : "$0"}</span>
                   <span className="text-sm text-ink3">{p.price ? "/ month" : "forever"}</span>
                 </div>
-                <p className="min-h-5 text-xs text-ink3">{p.price ? `or $${p.price.year} a year (two months free)` : "No card needed"}</p>
+                <p className="min-h-9 text-xs leading-relaxed text-ink3">{p.price ? `or $${p.price.year} a year (two months free)` : "No card needed"}</p>
                 <ul className="flex flex-col gap-2 text-sm text-ink2">
                   {p.bullets.map((b) => (
                     <li key={b} className="flex items-start gap-2">
