@@ -5,6 +5,7 @@ import { openReport } from "../lib/report";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Modal, MoreButton, ProgressBar, StatusText } from "./ui";
+import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { ClipBumpersDialog } from "./BumperField";
@@ -241,12 +242,14 @@ export function ClipCard({
 
       <Modal open={postOpen} onOpenChange={setPost} title={`Clip ${clip.index + 1}: caption & hashtags`} width={440}>
         <Dialog.Description className="sr-only">The caption and hashtags to post with this clip.</Dialog.Description>
-        <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-3 text-[13px] leading-snug">
-          <div className="font-semibold">{clip.title}</div>
-          <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
-          {tags && <div className="text-xs text-acc-text">{tags}</div>}
-        </div>
-        <div className="flex justify-end gap-2">
+        <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+          <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-3 text-[13px] leading-snug">
+            <div className="font-semibold">{clip.title}</div>
+            <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>
+            {tags && <div className="text-xs text-acc-text">{tags}</div>}
+          </div>
+        </ScrollArea>
+        <div className="flex shrink-0 justify-end gap-2">
           <button className="btn-ghost" onClick={() => setPost(false)}>
             Close
           </button>

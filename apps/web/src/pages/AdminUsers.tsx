@@ -384,7 +384,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={`Limits for ${row.email}`} width={460}>
       <form
-        className="flex flex-col gap-4"
+        className="flex min-h-0 flex-col gap-3"
         onSubmit={async (e) => {
           e.preventDefault();
           const limits = Object.fromEntries(LIMITS.map(({ key }) => [key, values[key]?.trim() ? Number(values[key]) : null])) as Record<LimitKey, number | null>;
@@ -400,79 +400,83 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           onClose();
         }}
       >
-        {hasPlans && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="limit-plan" className="text-xs font-semibold text-ink2">
-              Plan
-            </label>
-            {q.isPending ? (
-              <Skeleton className="h-[38px] w-full rounded-[10px]" />
-            ) : (
-              <Select
-                value={plan}
-                onValueChange={setPlanDraft}
-                ariaLabel="Plan"
-                options={[
-                  { value: "free", label: "Free (no grant)" },
-                  { value: "starter", label: "Starter, complimentary" },
-                  { value: "creator", label: "Creator, complimentary" },
-                  { value: "pro", label: "Pro, complimentary" },
-                ]}
-              />
+        <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+          <div className="flex flex-col gap-4 pr-3">
+            {hasPlans && (
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="limit-plan" className="text-xs font-semibold text-ink2">
+                  Plan
+                </label>
+                {q.isPending ? (
+                  <Skeleton className="h-[38px] w-full rounded-[10px]" />
+                ) : (
+                  <Select
+                    value={plan}
+                    onValueChange={setPlanDraft}
+                    ariaLabel="Plan"
+                    options={[
+                      { value: "free", label: "Free (no grant)" },
+                      { value: "starter", label: "Starter, complimentary" },
+                      { value: "creator", label: "Creator, complimentary" },
+                      { value: "pro", label: "Pro, complimentary" },
+                    ]}
+                  />
+                )}
+                <span className="min-h-4 text-xs text-ink3">{q.data ? (q.data.plan && q.data.plan !== "free" ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.` : "Free. A complimentary grant gives a plan without Stripe.") : ""}</span>
+              </div>
             )}
-            <span className="min-h-4 text-xs text-ink3">{q.data ? (q.data.plan && q.data.plan !== "free" ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.` : "Free. A complimentary grant gives a plan without Stripe.") : ""}</span>
-          </div>
-        )}
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="limit-watermark" className="text-xs font-semibold text-ink2">
-            Watermark
-          </label>
-          {q.isPending ? <Skeleton className="h-[38px] w-full rounded-[10px]" /> : <Select value={wm} onValueChange={setWmDraft} ariaLabel="Watermark" options={WATERMARK_OPTIONS} />}
-          <span className="min-h-4 text-xs text-ink3">{q.data ? `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).` : ""}</span>
-        </div>
-        {LIMITS.map(({ key, label, window, unit }) => {
-          const used = q.data?.usage?.[key];
-          const typed = values[key]?.trim();
-          const cap = typed ? Number(typed) : (q.data?.effective?.[key] ?? 0);
-          const ratio = used === undefined || !cap ? 0 : used / cap;
-          const state = ratio >= 1 ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" } : ratio >= 0.8 ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" } : null;
-          return (
-            <div key={key} className="flex flex-col gap-1.5">
-              <label htmlFor={`limit-${key}`} className="flex items-baseline justify-between text-xs font-semibold text-ink2">
-                {label}
-                <span className="font-normal text-ink3">{q.data && !typed ? sourceWord(key) : ""}</span>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="limit-watermark" className="text-xs font-semibold text-ink2">
+                Watermark
               </label>
-              {q.isPending ? (
-                <Skeleton className="h-[38px] w-full rounded-[10px]" />
-              ) : (
-              <input
-                id={`limit-${key}`}
-                className="input"
-                type="number"
-                min={0}
-                value={values[key] ?? ""}
-                placeholder={q.data ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}` : ""}
-                onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
-              />
-              )}
-              {q.isPending ? (
-                <Skeleton className="h-1 w-full rounded-full" />
-              ) : (
-              <div className="h-1 w-full overflow-hidden rounded-full bg-sunk" aria-hidden>
-                <div className={`h-full rounded-full ${state?.bar ?? "bg-acc"}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
-              </div>
-              )}
-              <div className="flex min-h-4 items-center justify-between gap-2 text-xs tabular-nums text-ink3">
-                <span>
-                  {used === undefined ? <Skeleton className="inline-block h-3 w-32 align-middle" /> : cap ? `${num.format(used)} of ${num.format(cap)} ${unit}` : `${num.format(used)} ${unit}, no cap`} · {window}
-                </span>
-                <span className={`shrink-0 ${state?.tone ?? ""}`}>{state ? `${state.glyph} ${state.word}` : ""}</span>
-              </div>
+              {q.isPending ? <Skeleton className="h-[38px] w-full rounded-[10px]" /> : <Select value={wm} onValueChange={setWmDraft} ariaLabel="Watermark" options={WATERMARK_OPTIONS} />}
+              <span className="min-h-4 text-xs text-ink3">{q.data ? `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).` : ""}</span>
             </div>
-          );
-        })}
-        <p className="text-xs text-ink3">0 = unlimited. Empty = the plan's value, else the instance setting. An override wins over the plan.</p>
-        <div className="flex justify-end gap-2">
+            {LIMITS.map(({ key, label, window, unit }) => {
+              const used = q.data?.usage?.[key];
+              const typed = values[key]?.trim();
+              const cap = typed ? Number(typed) : (q.data?.effective?.[key] ?? 0);
+              const ratio = used === undefined || !cap ? 0 : used / cap;
+              const state = ratio >= 1 ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" } : ratio >= 0.8 ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" } : null;
+              return (
+                <div key={key} className="flex flex-col gap-1.5">
+                  <label htmlFor={`limit-${key}`} className="flex items-baseline justify-between text-xs font-semibold text-ink2">
+                    {label}
+                    <span className="font-normal text-ink3">{q.data && !typed ? sourceWord(key) : ""}</span>
+                  </label>
+                  {q.isPending ? (
+                    <Skeleton className="h-[38px] w-full rounded-[10px]" />
+                  ) : (
+                  <input
+                    id={`limit-${key}`}
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={values[key] ?? ""}
+                    placeholder={q.data ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}` : ""}
+                    onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
+                  />
+                  )}
+                  {q.isPending ? (
+                    <Skeleton className="h-1 w-full rounded-full" />
+                  ) : (
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-sunk" aria-hidden>
+                    <div className={`h-full rounded-full ${state?.bar ?? "bg-acc"}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
+                  </div>
+                  )}
+                  <div className="flex min-h-4 items-center justify-between gap-2 text-xs tabular-nums text-ink3">
+                    <span>
+                      {used === undefined ? <Skeleton className="inline-block h-3 w-32 align-middle" /> : cap ? `${num.format(used)} of ${num.format(cap)} ${unit}` : `${num.format(used)} ${unit}, no cap`} · {window}
+                    </span>
+                    <span className={`shrink-0 ${state?.tone ?? ""}`}>{state ? `${state.glyph} ${state.word}` : ""}</span>
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-xs text-ink3">0 = unlimited. Empty = the plan's value, else the instance setting. An override wins over the plan.</p>
+          </div>
+        </ScrollArea>
+        <div className="flex shrink-0 justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
