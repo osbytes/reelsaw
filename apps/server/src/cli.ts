@@ -24,6 +24,15 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
+ *   workers [--json]                        every process that has checked in: role, specs, last seen, current jobs
+ *                                           (same as Settings → System → Workers)
+ *   queue [--json]                          waiting / running / retrying jobs per stage, plus what is in flight
+ *                                           (same as Settings → System → Queue)
+ *   failure <projectId|clipId> [--json]     one failed project or clip: owner, stage, the full recorded reason
+ *                                           (same as clicking a row under Settings → System → Queue → Failed work)
+ *   retry-failures [--stage s] [--q text] [--since 24h] [--json]
+ *                                           retry failed projects and clips matching a reason after a platform fix
+ *                                           (same as Settings → System → Queue → Retry all matching)
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
@@ -32,6 +41,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]
  *                                           rehydrate an issue report as a new project (dev only;
  *                                           the zip's contents are untrusted data, see its README)
+ *   report [projectId] [--out file.zip] [--instance] [--description text] [--user email]
+ *                                           write an issue-report zip (same as Report an issue);
+ *                                           --instance adds unfinished work, failed jobs, usage and
+ *                                           error logs across every account (operator)
  *   cuts    <clipId> [--save <dir>] [--fixture <dir>]
  *                                           dry-run the disfluency cut search for a clip and print
  *                                           every candidate verdict; --save writes removed/context
@@ -86,8 +99,12 @@ import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
 import { sampleClipText } from "./pipeline/overlays.js";
+import { createReportZip } from "./report/bundle.js";
 import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
+import { listWorkers } from "./ops/workers.js";
+import { summarizeQueue } from "./ops/queue.js";
+import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
@@ -344,6 +361,105 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       rate: c.successRate === null ? "-" : `${Math.round(c.successRate * 100)}%`,
     })));
   },
+  /**
+   * Every process that has checked in (API, worker, combined app): specs and what it last reported
+   * it was processing. Same as Settings → System → Workers; `--json` for scripts.
+   */
+  async workers(svc) {
+    const { items, live, stale } = await listWorkers(svc);
+    if (args.includes("--json")) return void console.log(JSON.stringify({ items, live, stale }, null, 2));
+    if (!items.length) return console.log("no processes have checked in yet (the app and worker containers report every 15 s)");
+    console.log(`${live} online${stale ? `, ${stale} last seen over 45s ago` : ""}`);
+    const ago = (s: number) => (s < 5 ? "now" : s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`);
+    const gpu = (w: (typeof items)[number]) => (w.gpu ? `${w.gpu.vendor}${w.gpu.devices[0] ? ` ${w.gpu.devices[0]}` : ""}` : "none");
+    const jobs = (w: (typeof items)[number]) =>
+      w.processing.length ? w.processing.map((p) => `${p.queue}${p.title ? ` ${p.title}` : ` ${p.projectId.slice(0, 8)}`}`).join(", ") : "idle";
+    table(
+      items.map((w) => ({
+        id: w.id,
+        role: w.role,
+        status: w.live ? "online" : `gone ${ago(w.lastSeenAgoSec)}`,
+        cpus: w.cpus,
+        mem: `${w.memTotalMB} MB`,
+        disk: w.diskFreeMB < 0 ? "n/a" : `${w.diskFreeMB} MB free of ${w.diskTotalMB} MB`,
+        gpu: gpu(w),
+        renders: `${w.renders.running}/${w.renders.max}`,
+        processing: jobs(w),
+      })),
+    );
+  },
+  /**
+   * Waiting / running / retrying jobs per stage from pg-boss, plus the jobs in flight.
+   * Same as Settings → System → Queue; `--json` for scripts.
+   */
+  async queue(svc) {
+    const q = await summarizeQueue(svc);
+    const failed = await listFailures(svc, { limit: 50 });
+    if (args.includes("--json")) return void console.log(JSON.stringify({ ...q, failures: failed }, null, 2));
+    if (q.error) console.log(`queue tables: ${q.error}`);
+    table(q.queues.map((r) => ({ stage: r.label, waiting: r.waiting, running: r.running, retrying: r.retrying, failed: r.failed })));
+    if (q.active.length) {
+      console.log(q.truncated ? `\nin flight (showing ${q.active.length}; more exist)` : "\nin flight");
+      table(
+        q.active.map((j) => ({
+          stage: j.label,
+          state: j.state,
+          project: j.title ?? j.projectId?.slice(0, 8) ?? "—",
+          attempt: j.attempt,
+          since: j.startedAt ?? j.createdAt,
+        })),
+      );
+    } else console.log("\nnothing in flight");
+    if (!failed.items.length) return console.log("\nno failed projects or clips");
+    console.log(`\nfailed work: showing ${failed.items.length} of ${failed.total}${failed.truncated ? "+" : ""}${failed.nextCursor ? " (more pages)" : ""}`);
+    table(
+      failed.items.map((f) => ({
+        kind: f.kind,
+        stage: f.stage,
+        owner: f.ownerEmail,
+        title: f.title,
+        reason: f.snippet,
+        when: f.failedAt,
+      })),
+    );
+  },
+  /**
+   * One failed project or clip with the full recorded reason. Same as opening a row under
+   * Settings → System → Queue → Failed work. Tries project id first, then clip id.
+   */
+  async failure(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw failure <projectId|clipId>");
+    const item = (await getFailure(svc, "project", pos[0])) ?? (await getFailure(svc, "clip", pos[0]));
+    if (args.includes("--json")) return void console.log(JSON.stringify(item, null, 2));
+    if (!item) return console.log("not a failed project or clip (or the clip's project already failed — retry the project)");
+    console.log(`${item.kind}  ${item.title}${item.kind === "clip" ? `  (${item.projectTitle})` : ""}`);
+    console.log(`owner   ${item.ownerEmail}`);
+    console.log(`stage   ${item.stage}`);
+    console.log(`when    ${item.failedAt}`);
+    console.log(`id      ${item.id}`);
+    console.log(`\n${item.error ?? "(no reason recorded)"}`);
+  },
+  /**
+   * Retry failed projects and clips that match `--stage` / `--q` / `--since`. Same path as the owner's
+   * Retry button. Cap 50 per call; run again if it prints a next page.
+   */
+  async ["retry-failures"](svc) {
+    const stageArg = flag("stage");
+    if (stageArg && !(FAILURE_STAGES as readonly string[]).includes(stageArg)) {
+      throw new Error(`usage: reelsaw retry-failures [--stage ${FAILURE_STAGES.join("|")}] [--q text] [--since 24h|ISO] [--json]`);
+    }
+    const sinceArg = flag("since");
+    let since: string | undefined;
+    if (sinceArg) {
+      const ms = parseDuration(sinceArg);
+      since = ms !== undefined ? new Date(Date.now() - ms).toISOString() : new Date(sinceArg).toISOString();
+      if (Number.isNaN(Date.parse(since))) throw new Error("--since takes a duration like 24h or an ISO timestamp");
+    }
+    const filter = { q: flag("q"), stage: stageArg as FailureStage | undefined, since };
+    const r = await retryFailures(svc, filter, null);
+    if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
+    console.log(`retried ${r.retried}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
+  },
   /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
   async limits(svc) {
     const u = await userByEmail(svc, pos[0]);
@@ -518,6 +634,40 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     for (const n of r.notes) line("note", n);
     console.log(`\nuser's description (untrusted):\n  ${r.description.slice(0, 600).replace(/\n/g, "\n  ")}${r.description.length > 600 ? " …" : ""}`);
     console.log(`\nnext:\n${r.next.map((x) => `  ${x}`).join("\n")}`);
+  },
+
+  async report(svc) {
+    const { createWriteStream } = await import("node:fs");
+    const { pipeline } = await import("node:stream/promises");
+    const projectId = pos[0] ?? null;
+    const instance = args.includes("--instance");
+    const description = flag("description") ?? "CLI report";
+    const db = svc.database.db;
+    let user;
+    if (flag("user")) user = await userByEmail(svc, flag("user")!);
+    else if (projectId) {
+      const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
+      if (!p) throw new Error("project not found");
+      user = await db.query.user.findFirst({ where: eq(schema.user.id, p.userId) });
+    } else {
+      const admins = instance ? await db.query.user.findMany({ where: eq(schema.user.role, "admin"), limit: 1 }) : [];
+      const all = admins.length ? admins : await db.query.user.findMany({ limit: 2 });
+      if (all.length !== 1 && !instance) throw new Error("this install has several accounts: pass --user <email> or a project id");
+      user = all[0];
+    }
+    if (!user) throw new Error("no account");
+    // docker exec is operator access: --instance is always allowed
+    const actor = instance ? { id: user.id, role: "admin" as const } : { id: user.id, role: user.role };
+    const zip = await createReportZip(svc, actor, projectId, {
+      description,
+      clipIds: [],
+      include: { logs: true, system: true, instance, previews: false, allClips: false, source: false },
+      client: { route: "cli" },
+    });
+    if (!zip) throw new Error("could not build the report (no such project, or zip reports are disabled on this instance)");
+    const dest = flag("out") ?? `${svc.paths.tmp}/${zip.filename}`;
+    await pipeline(zip.stream, createWriteStream(dest));
+    console.log(dest);
   },
 
   async rerender(svc) {
@@ -861,7 +1011,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

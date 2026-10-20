@@ -35,6 +35,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `WEB_DIST` | unset | Directory of the built web app to serve. Unset: the bundled location. |
 | `RUN_WORKERS` | `true` | Process pipeline jobs in this process. false for a web-only container. At least one of RUN_HTTP / RUN_WORKERS must be on. |
 | `RUN_HTTP` | `true` | Serve HTTP in this process. false for a worker-only container. |
+| `WORKER_ID` | unset | Stable name for this process on Settings → System → Workers. Unset: `hostname:pid`. Set it to the pod or container name when scaling workers so each replica stays recognisable. |
 | `MAX_UPLOAD_MB` | `4096` | Largest accepted file upload in MB. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_SOURCE_FILE_MB` | `8192` | Largest file yt-dlp may download for a link source, in MB (`--max-filesize`). Runtime setting: admins can change it under Settings → System without a restart. |
 | `ALLOW_PRIVATE_SOURCE_URLS` | `false` | `true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). Runtime setting: admins can change it under Settings → System without a restart. |

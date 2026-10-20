@@ -158,7 +158,9 @@ docker compose exec -T db pg_dump -U reelsaw reelsaw > reelsaw.sql
 
 Use **Report an issue** in the app (project ⋯ menu, a failed clip, or your account menu). It
 saves a zip with the project's data, logs and your description. API keys and passwords are never
-included; you can see the contents before saving. Send the zip to the Reelsaw team.
+included; you can see the contents before saving. Admins can include unfinished work and error
+logs from the whole instance. Send the zip to the Reelsaw team. Or from the box:
+`docker compose exec app reelsaw report --instance`.
 
 ## Troubleshooting
 

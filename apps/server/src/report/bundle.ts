@@ -19,8 +19,8 @@ import { REPORT_FORMAT, type ReportRequest } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { applyReportInclude, reportCapabilities, type ReportCapabilities } from "./capabilities.js";
-import { configForReport, makeRedactor } from "./redact.js";
-import { queueInfo, recentErrors, systemInfo, usageInfo } from "./system.js";
+import { configForReport, hashOwner, makeRedactor } from "./redact.js";
+import { instanceProjectSummaries, queueInfo, recentErrors, stuckInfo, systemInfo, usageInfo } from "./system.js";
 import type { UserRole } from "../db/schema.js";
 
 export type { ReportCapabilities };
@@ -117,14 +117,16 @@ ${m.kind === "project" ? `- project.json     the project (owner id hashed), sett
 - artifacts.json   what each stage decided and why (candidate moments, fix candidates) and the
                    models that ran
 - events.jsonl     the project's full event history
-` : `- projects.json    the account's projects (status, stage, errors)
+` : `- projects.json    projects (status, stage, errors); own account, or the whole instance when
+                   an admin opted into instance-wide diagnostics
 - events.jsonl     recent failure events across those projects
 `}- logs.jsonl       log lines for this project (redacted), when included
 - system.json      versions (app, node, ffmpeg, yt-dlp), CPU/memory/disk, on-device models
 - queue.json       job counts per queue/state and recent failed jobs with their output
 - usage.json       project/clip counts by status and render times
-- errors.jsonl     the instance's error log lines from the last week (redacted; never about
-                   another user's projects)
+- errors.jsonl     error log lines from the last week (redacted; other accounts' lines only
+                   when an admin opted into instance-wide diagnostics)
+- stuck.json       unfinished projects and live jobs across the instance (admin, instance)
 - client.json      browser errors, route, viewport, user agent
 - media/           thumbnails, rendered clips and the source video, as opted in
 `;
@@ -234,7 +236,7 @@ export async function createReportZip(
         const picked = new Set(reqSafe.clipIds);
         manifest.clipIds = clips.filter((c) => picked.has(c.id)).map((c) => c.id); // only this project's clips
         const { userId: owner, sourceMeta, error, ...rest } = project;
-        addJson("project.json", { ...rest, error: error ? redact(error) : null, ownerHash: sha256(owner).slice(0, 12), sourceMeta: sourceMeta ? JSON.parse(redact(JSON.stringify(sourceMeta))) : null });
+        addJson("project.json", { ...rest, error: error ? redact(error) : null, ownerHash: hashOwner(owner), sourceMeta: sourceMeta ? JSON.parse(redact(JSON.stringify(sourceMeta))) : null });
         addJson("transcript.json", transcript ? { ...transcript, chunks } : null);
         // error text comes from providers and tools (can quote URLs, keys); user content stays verbatim
         addJson("clips.json", clips.map((c) => ({ ...c, error: c.error ? redact(c.error) : null })));
@@ -256,6 +258,16 @@ export async function createReportZip(
         if (include.source && project.sourceKey) await addStored(`media/source${path.extname(project.sourceKey) || ".mp4"}`, project.sourceKey).catch(() => manifest.notes.push("source video missing from storage"));
         if (!include.source && project.sourceType === "upload") manifest.notes.push("Uploaded source not included: media-dependent problems can't be reproduced without it.");
         addText("report.md", reportMd(reqSafe, manifest, project.title));
+      } else if (include.instance) {
+        const summaries = await instanceProjectSummaries(svc);
+        addJson("projects.json", JSON.parse(redact(JSON.stringify(summaries))));
+        if (summaries.truncated) manifest.notes.push(`projects.json lists ${summaries.projects.length} of the instance's projects (in progress, recent failures, recently updated).`);
+        const ids = summaries.projects.map((p) => p.id);
+        const failures = ids.length
+          ? await db.query.projectEvents.findMany({ where: and(inArray(schema.projectEvents.projectId, ids), inArray(schema.projectEvents.type, ["project.failed", "clip.failed", "stage.failed", "job.stalled"] as never[])), orderBy: desc(schema.projectEvents.id), limit: 200 })
+          : [];
+        addJsonl("events.jsonl", failures.map((e) => redact(JSON.stringify(e))));
+        addText("report.md", reportMd(reqSafe, manifest, null));
       } else {
         const projects = await db.query.projects.findMany({ where: eq(schema.projects.userId, user.id), orderBy: desc(schema.projects.updatedAt), limit: 50, columns: { id: true, title: true, status: true, stage: true, error: true, sourceType: true, sourceUrl: true, durationSec: true, createdAt: true, updatedAt: true } });
         addJson("projects.json", projects);
@@ -269,10 +281,20 @@ export async function createReportZip(
       if (include.system) {
         const own = (await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.userId, user.id))).map((p) => p.id);
         const ownClips = own.length ? (await db.select({ id: schema.clips.id }).from(schema.clips).where(inArray(schema.clips.projectId, own))).map((c) => c.id) : [];
-        addJson("system.json", { ...(await systemInfo(svc)), logLevel: svc.logLevel.state() });
-        addJson("queue.json", JSON.parse(redact(JSON.stringify(await queueInfo(svc, project ? [project.id] : own)))));
-        addJson("usage.json", await usageInfo(svc, user.id));
-        addJsonl("errors.jsonl", await recentErrors(svc, { projectIds: own, clipIds: ownClips }, redact));
+        addJson("system.json", { ...(await systemInfo(svc, include.instance)), logLevel: svc.logLevel.state() });
+        addJson("queue.json", JSON.parse(redact(JSON.stringify(await queueInfo(svc, include.instance ? { instance: true } : { projectIds: project ? [project.id] : own })))));
+        addJson("usage.json", await usageInfo(svc, include.instance ? { instance: true } : { userId: user.id }));
+        addJsonl("errors.jsonl", await recentErrors(svc, { projectIds: own, clipIds: ownClips, instance: include.instance }, redact));
+      }
+      if (include.instance) {
+        const stuck = await stuckInfo(svc);
+        addJson("stuck.json", JSON.parse(redact(JSON.stringify(stuck))));
+        if (project) {
+          const summaries = await instanceProjectSummaries(svc);
+          addJson("projects.json", JSON.parse(redact(JSON.stringify(summaries))));
+        }
+        manifest.notes.push("Instance-wide diagnostics are included (admin): unfinished work, failed jobs, usage and error logs across every account. Other accounts' project titles and ids are in projects.json and stuck.json.");
+        if (stuck.truncated) manifest.notes.push(`stuck.json lists the ${stuck.limit} most recently updated unfinished projects.`);
       }
       // last: the manifest covers every other file
       archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });

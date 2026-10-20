@@ -246,6 +246,20 @@
       "when": 1792435831341,
       "tag": "0034_billing_stripe_created",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792515000000,
+      "tag": "0035_worker_instances",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792517647514,
+      "tag": "0036_worker_disk",
+      "breakpoints": true
     }
   ]
 }

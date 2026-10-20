@@ -61,6 +61,11 @@ About 2 days. Cut scope, not quality.
 - **Self-host**, and **admins on hosted**: zip download as below. Instance system info, queue
   counts and recent errors are opt-in (`include.system`) and only allowed for these callers —
   never for a hosted non-admin (instance-wide data must not leak across accounts).
+- **Admins only (`include.instance`, off by default):** unfinished work, failed jobs, usage and
+  error logs across every account, plus bounded `projects.json` / `stuck.json` (titles and hashed
+  owners, no emails or source URLs). For queue, disk or machine problems that are not just the
+  reporter's projects. Forced off for everyone else, including a non-admin who ticks it. Same
+  capability on `me.get.report`, MCP `report_issue` (`instance: true`) and `reelsaw report --instance`.
 - **Hosted non-admin with Sentry/PostHog configured**: no zip. The dialog sends the description
   through Sentry User Feedback and a PostHog `issue_reported` event (ids/counts only; the free
   text stays in Sentry). Capabilities come from `me.get.report` (`report/capabilities.ts`).
@@ -71,7 +76,9 @@ About 2 days. Cut scope, not quality.
 2. Dialog: a text box "What went wrong?" (required, prefilled hint), optional clip picker (prefilled
    when opened from a clip). On zip mode, a contents list with checkboxes:
    - Project data and pipeline outputs (always)
-   - System info and recent errors (on when allowed; hidden for hosted non-admins)
+   - Instance-wide diagnostics (admin only, off; implies system info)
+   - System info and recent errors (on when allowed; hidden for hosted non-admins; included
+     automatically when instance-wide is on)
    - Logs for this project (on)
    - Thumbnails and the selected clip's rendered video (on)
    - All rendered clips (off)
@@ -93,6 +100,12 @@ clips.json           every clip incl. scores, reasoning, layoutSections/Segments
 artifacts.json       stage outputs: candidate moments with scores and drop reasons, per stage
 events.jsonl         full project event history
 logs.jsonl           LOG_FILE lines for this project/clips/jobs (redacted)
+system.json          versions, machine, encoder; with instance: disk, account counts, workers
+queue.json           job counts; recent failures for this project, or every account (instance)
+usage.json           this account's project/clip counts, or the whole instance
+errors.jsonl         error/fatal lines that belong to the reporter, or every line (instance)
+projects.json        own projects, or a bounded instance list (in progress, recent failures)
+stuck.json           unfinished projects and live jobs across the instance (admin, instance)
 client.json          recent client errors/console warnings, route, viewport, user agent
 media/               thumbnails, selected clip mp4, optional all clips, optional source
 ```
@@ -175,14 +188,20 @@ videos, titles, model outputs and logs can carry text aimed at whoever (or whate
 - WHEN the zip has a newer major manifest version THE SYSTEM SHALL refuse with the version found.
 - WHEN the source video is unticked for an uploaded-file project THE SYSTEM SHALL say in the
   dialog that the report can't reproduce media-dependent problems without it.
+- WHEN a non-admin requests `include.instance` THE SYSTEM SHALL omit `stuck.json` and other
+  accounts' projects, and record `include.instance: false` in the manifest.
+- WHEN an admin opts into instance-wide diagnostics THE SYSTEM SHALL include `stuck.json`, a
+  bounded `projects.json` of in-progress and recent projects (titles and hashed owners), instance
+  queue/usage/errors, and no other account's email.
 
 ## Auth matrix
-| Action | Anonymous | Owner (self-host / admin / hosted without telemetry) | Hosted non-admin with telemetry | Other user |
-|---|---|---|---|---|
-| Download report for a project | 401 | 200 | 403 | 404 |
-| Global report (no project) | 401 | 200 (own account context only) | 403 | - |
-| System info in zip | - | allowed when opted in | never | - |
-| `import-report` (CLI) | operator only | - | - | - |
+| Action | Anonymous | Owner (self-host / hosted without telemetry) | Admin | Hosted non-admin with telemetry | Other user |
+|---|---|---|---|---|---|
+| Download report for a project | 401 | 200 | 200 | 403 | 404 |
+| Global report (no project) | 401 | 200 (own account) | 200 (own, or instance when opted in) | 403 | - |
+| System info in zip | - | allowed when opted in | allowed when opted in | never | - |
+| Instance-wide diagnostics | - | never (even if requested) | allowed when opted in | never | - |
+| `import-report` (CLI) | operator only | - | - | - | - |
 
 ## Metrics
 - Time from receiving a zip to a local reproduction: under 5 minutes (measure on the first 3 reports).

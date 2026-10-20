@@ -210,7 +210,7 @@ export function createLogLevelSettings(log: Logger, opts: { pollMs?: number; lis
 }
 
 /** Module names used in code (the `module` binding), so the picker offers them before they have logged anything. */
-export const KNOWN_LOG_MODULES = ["accounts", "ai", "analyze", "asr", "auth", "boot", "bumpers", "cli", "cut-preview", "cuts", "db", "email", "events", "export", "http", "ingest", "llm", "log", "mcp", "media", "models", "otel", "providers", "prune", "queue", "reconcile", "refine", "render", "resources", "retention", "storage", "sweep", "transcribe", "uow", "uploads", "watchdog", "web", "worker"] as const;
+export const KNOWN_LOG_MODULES = ["accounts", "ai", "analyze", "asr", "auth", "boot", "bumpers", "cli", "cut-preview", "cuts", "db", "email", "events", "export", "http", "ingest", "llm", "log", "mcp", "media", "models", "ops", "otel", "providers", "prune", "queue", "reconcile", "refine", "render", "resources", "retention", "storage", "sweep", "transcribe", "uow", "uploads", "watchdog", "web", "worker"] as const;
 
 /** The levels a person may pick, most severe first (not `silent`: it hides errors too). */
 export const PICKABLE_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;

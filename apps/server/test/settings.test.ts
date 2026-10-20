@@ -32,9 +32,28 @@ describe("settings", () => {
 
   it("keeps system settings to admins and public status to a few words", async () => {
     assert.equal((await trpc(user.cookie, "admin.system", undefined, "GET")).error?.data.code, "FORBIDDEN");
+    assert.equal((await trpc(user.cookie, "admin.workers.list", undefined, "GET")).error?.data.code, "FORBIDDEN");
+    assert.equal((await trpc(user.cookie, "admin.queue.summary", undefined, "GET")).error?.data.code, "FORBIDDEN");
+    assert.equal((await trpc(user.cookie, "admin.failures.list", undefined, "GET")).error?.data.code, "FORBIDDEN");
+    assert.equal((await trpc(user.cookie, "admin.failures.get", { kind: "project", id: "x" }, "GET")).error?.data.code, "FORBIDDEN");
+    assert.equal((await trpc(user.cookie, "admin.failures.retry", {})).error?.data.code, "FORBIDDEN");
     const sys = await trpc(admin.cookie, "admin.system", undefined, "GET");
     assert.equal(sys.status, 200);
     assert.ok((sys.data as { resources: { cpus: number } }).resources.cpus > 0);
+    const workers = await trpc(admin.cookie, "admin.workers.list", undefined, "GET");
+    assert.equal(workers.status, 200);
+    const listed = workers.data as { live: number; items: Array<{ live: boolean; role: string; diskFreeMB: number; diskTotalMB: number }> };
+    assert.ok(listed.live >= 1, "the running app should have heartbeated");
+    assert.ok(listed.items.some((w) => w.live));
+    assert.ok(listed.items.some((w) => typeof w.diskFreeMB === "number" && typeof w.diskTotalMB === "number"));
+    const queue = await trpc(admin.cookie, "admin.queue.summary", undefined, "GET");
+    assert.equal(queue.status, 200);
+    assert.ok(Array.isArray((queue.data as { queues: unknown[] }).queues));
+    const fails = await trpc(admin.cookie, "admin.failures.list", undefined, "GET");
+    assert.equal(fails.status, 200);
+    const one = await trpc(admin.cookie, "admin.failures.get", { kind: "project", id: "missing" }, "GET");
+    assert.equal(one.status, 200);
+    assert.equal(one.data, null);
     const pub = (await trpc("", "system.status", undefined, "GET")).data as Record<string, unknown>;
     assert.deepEqual(Object.keys(pub).sort(), ["captcha", "emailEnabled", "maxUploadMb", "paused", "privacyUrl", "signupMode", "telemetry", "termsUrl", "version"]);
   });

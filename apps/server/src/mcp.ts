@@ -19,6 +19,7 @@ import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./bumpers/service.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { restorableFor } from "./projects/service.js";
+import { reportCapabilities } from "./report/capabilities.js";
 
 function mmss(s: number) {
   const m = Math.floor(s / 60);
@@ -275,6 +276,28 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "report_issue",
+    TOOLS.report_issue,
+    ({ description, projectId, clipIds, instance, logs, system, previews, allClips, source }) =>
+      run(async () => {
+        const caps = reportCapabilities(svc, user);
+        if (!caps.zip) throw new TRPCError({ code: "FORBIDDEN", message: "Send feedback from the app instead of downloading a report on this instance." });
+        if (instance && !caps.instance) throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
+        if (projectId) await api.projects.get({ id: projectId });
+        const q = new URLSearchParams({ description });
+        if (instance) q.set("instance", "1");
+        if (logs === false) q.set("logs", "0");
+        if (system === false) q.set("system", "0");
+        if (previews === false) q.set("previews", "0");
+        if (allClips) q.set("allClips", "1");
+        if (source) q.set("source", "1");
+        if (clipIds?.length) q.set("clipIds", clipIds.join(","));
+        const path = projectId ? `/api/projects/${projectId}/report` : `/api/report`;
+        return { url: abs(`${path}?${q}`), filename: "reelsaw-report.zip" };
+      }),
+  );
+
+  server.registerTool(
     "retry_project",
     TOOLS.retry_project,
     ({ id }) => run(() => api.projects.retry({ id })),
@@ -359,6 +382,36 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "get_instance_settings",
     TOOLS.get_instance_settings,
     () => run(() => api.admin.settings.get()),
+  );
+
+  server.registerTool(
+    "list_workers",
+    TOOLS.list_workers,
+    () => run(() => api.admin.workers.list()),
+  );
+
+  server.registerTool(
+    "get_failure",
+    TOOLS.get_failure,
+    (input) => run(() => api.admin.failures.get(input)),
+  );
+
+  server.registerTool(
+    "get_queue",
+    TOOLS.get_queue,
+    () => run(() => api.admin.queue.summary()),
+  );
+
+  server.registerTool(
+    "list_failures",
+    TOOLS.list_failures,
+    (input) => run(() => api.admin.failures.list(input ?? {})),
+  );
+
+  server.registerTool(
+    "retry_failures",
+    TOOLS.retry_failures,
+    (input) => run(() => api.admin.failures.retry(input ?? {})),
   );
 
   server.registerTool(

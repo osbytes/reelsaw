@@ -215,7 +215,9 @@ and `docker compose --profile local-ai up -d` as before. What changes:
   CoreML measured slower than the CPU for all three; see `docs/CONFIG.md`.
 
 **Settings → System → Overview** and `docker compose exec app reelsaw machine` show the GPU the app
-process sees, the encoder in use and why, and where each on-device model runs. macOS has no CUDA in
+process sees, the encoder in use and why, and where each on-device model runs. **Workers** (and
+`reelsaw workers`) lists every API and worker replica with its specs and what it is processing —
+needed when the HTTP process is not the one doing the work. macOS has no CUDA in
 Docker: run Ollama natively for Metal, and leave Speaches on the CPU (or point `OPENAI_BASE_URL` at a
 whisper.cpp or MLX server running on the host, which speaks the same API).
 
@@ -392,6 +394,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
 | `rerender_clips` | Queue several clips of one project for rendering again in one step (after edits or failures). |
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. |
+| `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
 | `list_bumpers` | Your intro/outro library. |
@@ -408,6 +411,11 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
+| `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, disk (free/total MB; -1 free means unmeasurable), GPU, render slots, the queues it listens on, and the jobs it last reported. |
+| `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
+| `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage, plus the jobs currently in flight (project title, attempt, started). |
+| `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
+| `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 | `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
@@ -442,12 +450,17 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
+| `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
+| `reelsaw queue [--json]` | waiting / running / retrying jobs per stage, plus what is in flight (same as Settings → System → Queue) |
+| `reelsaw failure <projectId\|clipId> [--json]` | one failed project or clip: owner, stage, the full recorded reason (same as clicking a row under Settings → System → Queue → Failed work) |
+| `reelsaw retry-failures [--stage s] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (same as Settings → System → Queue → Retry all matching) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
 | `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
 | `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
 | `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
+| `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
 | `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
@@ -573,7 +586,9 @@ dependencies, which `scripts/check-image.sh <image>` verifies.
 
 **Report an issue** (project ⋯ menu, a failed clip, the account menu) downloads a zip with the
 project's data, pipeline decisions (`stage_artifacts`), logs, system info and recent errors, and the
-user's description. Secrets never go in. To reproduce one locally:
+user's description. Secrets never go in. Admins can tick **Instance-wide diagnostics** to include
+unfinished work, failed jobs, usage and error logs across every account — for queue, disk or
+machine problems, not only their own projects. To reproduce one locally:
 
 ```bash
 docker compose cp ~/Downloads/reelsaw-report-….zip app:/data/tmp/report.zip

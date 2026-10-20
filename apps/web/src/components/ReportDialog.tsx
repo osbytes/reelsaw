@@ -34,14 +34,14 @@ export function ReportDialog() {
   const projectId = target?.projectId;
   const trpc = useTRPC();
   const me = useMe();
-  const caps = me.data?.report ?? { zip: true, system: true, feedback: false };
+  const caps = me.data?.report ?? { zip: true, system: true, instance: false, feedback: false };
   const feedbackOnly = !caps.zip && caps.feedback;
   const project = useQuery({ ...trpc.projects.get.queryOptions({ id: projectId ?? "" }), enabled: !!projectId && open });
   const clips = (project.data?.clips ?? []).slice().sort((a, b) => a.index - b.index);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [text, setText] = useState("");
   const [clipIds, setClipIds] = useState<string[]>([]);
-  const [inc, setInc] = useState<ReportInclude>({ logs: true, system: caps.system, previews: true, allClips: false, source: false });
+  const [inc, setInc] = useState<ReportInclude>({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +62,7 @@ export function ReportDialog() {
     setText("");
     setError(null);
     setClipIds(target?.clipId ? [target.clipId] : []);
-    setInc({ logs: true, system: caps.system, previews: true, allClips: false, source: false });
+    setInc({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
     setPreview(null);
     if (!projectId || feedbackOnly) return;
     let live = true;
@@ -112,7 +112,7 @@ export function ReportDialog() {
     setBusy(true);
     setError(null);
     try {
-      const include = caps.system ? inc : { ...inc, system: false };
+      const include = { ...inc, system: caps.system && inc.system, instance: !!caps.instance && inc.instance };
       const res = await fetch(projectId ? `/api/projects/${projectId}/report` : "/api/report", {
         method: "POST",
         credentials: "include",
@@ -151,7 +151,19 @@ export function ReportDialog() {
 
   const row = (key: keyof ReportInclude, label: string, hint: ReactNode, disabled = false) => (
     <label className={`flex items-start gap-2.5 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
-      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--acc)]" checked={inc[key]} disabled={disabled} onChange={(e) => setInc((x) => ({ ...x, [key]: e.target.checked }))} />
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 accent-[var(--acc)]"
+        checked={key === "system" ? inc.system || inc.instance : inc[key]}
+        disabled={disabled}
+        onChange={(e) =>
+          setInc((x) => {
+            const on = e.target.checked;
+            if (key === "instance") return { ...x, instance: on, system: on || x.system };
+            return { ...x, [key]: on };
+          })
+        }
+      />
       <span className="min-w-0">
         <span className="block text-sm">{label}</span>
         <span className="block min-h-4 text-xs text-ink3">{hint}</span>
@@ -212,9 +224,26 @@ export function ReportDialog() {
             <fieldset className="flex flex-col gap-2 rounded-[12px] border border-line p-3">
               <legend className="px-1 text-xs font-semibold text-ink2">Included</legend>
               <span className="text-xs text-ink2">
-                {projectId ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history" : "Your projects' status and recent failures"}, the app's settings (secrets shown only as set/unset), and your description.
+                {projectId
+                  ? "Project settings, transcript, fixes, clips, pipeline decisions and the event history"
+                  : inc.instance
+                    ? "This instance's unfinished work, job queue, usage and recent failures"
+                    : "Your projects' status and recent failures"}
+                , the app's settings (secrets shown only as set/unset), and your description.
               </span>
-              {caps.system && row("system", "System info and recent errors", "Versions, CPU/memory/disk, job queue, usage, and this instance's error log from the last week")}
+              {caps.instance &&
+                row(
+                  "instance",
+                  "Instance-wide diagnostics",
+                  "Unfinished work, failed jobs, usage and error logs across every account — for queue, disk or machine problems, not only your projects. Other accounts' project titles and ids are included.",
+                )}
+              {caps.system &&
+                row(
+                  "system",
+                  "System info and recent errors",
+                  inc.instance ? "Included with instance-wide diagnostics" : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren't tied to another account",
+                  inc.instance,
+                )}
               {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn't keep a log file" : "Pipeline log lines, including model calls when they're recorded", !!preview && !preview.logs)}
               {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
               {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}

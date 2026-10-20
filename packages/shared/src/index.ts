@@ -669,6 +669,11 @@ export const reportIncludeSchema = z.object({
   logs: z.boolean().default(true),
   /** versions, machine resources, queue state, usage and the instance's recent errors */
   system: z.boolean().default(true),
+  /**
+   * Admin-only: unfinished work, failed jobs, usage and error logs across every account.
+   * For problems that are not just the reporter's projects. Off unless the caller is an admin.
+   */
+  instance: z.boolean().default(false),
   /** thumbnails and the selected clip's rendered video */
   previews: z.boolean().default(true),
   /** every rendered clip */
@@ -692,7 +697,7 @@ export const reportRequestSchema = z.object({
   description: z.string().trim().min(3, "Describe what went wrong").max(10000),
   /** clips the report is about (their renders are included with previews) */
   clipIds: z.array(z.string().max(100)).max(50).default([]),
-  include: reportIncludeSchema.default({ logs: true, system: true, previews: true, allClips: false, source: false }),
+  include: reportIncludeSchema.default({ logs: true, system: true, instance: false, previews: true, allClips: false, source: false }),
   client: reportClientSchema.default({}),
 });
 export type ReportRequest = z.infer<typeof reportRequestSchema>;

@@ -161,6 +161,7 @@ export const ADMIN_EVENT_TYPES = [
   "models.changed",
   "provider.changed",
   "settings.changed",
+  "failures.retried",
   // billing (ee/): written by the subscription sync, never by a webhook handler directly
   "billing.subscribed",
   "billing.changed",
@@ -599,3 +600,41 @@ export const billingEvents = pgTable(
   (t) => [index("billing_events_subscription_idx").on(t.subscriptionId, t.created), index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`)],
 );
 export type BillingEventRow = typeof billingEvents.$inferSelect;
+
+/** What this process can use a GPU for; stored on each heartbeat so the admin page can show it without asking the box. */
+export type WorkerGpu = { vendor: string; devices: string[]; note: string };
+export type WorkerRenders = { running: number; limit: number; max: number; mode: "auto" | "fixed" };
+export type WorkerJob = { jobId: string; queue: string; projectId: string; clipId?: string; startedAt: string };
+export const WORKER_ROLES = ["app", "api", "worker"] as const;
+export type WorkerRole = (typeof WORKER_ROLES)[number];
+
+/**
+ * One row per live process (API, worker, or combined app). Heartbeat in ops/workers.ts upserts
+ * every 15 s; rows last-seen more than 45 s ago are stale, and ones older than an hour are pruned.
+ * Identity is WORKER_ID, or `hostname:pid` when unset.
+ */
+export const workerInstances = pgTable(
+  "worker_instances",
+  {
+    id: text("id").primaryKey(),
+    role: text("role").$type<WorkerRole>().notNull(),
+    hostname: text("hostname").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    version: text("version").notNull(),
+    commit: text("commit").notNull(),
+    pid: integer("pid").notNull(),
+    cpus: integer("cpus").notNull(),
+    memTotalMB: integer("mem_total_mb").notNull(),
+    /** -1 when this filesystem cannot report free space (same as ResourceSnapshot) */
+    diskFreeMB: integer("disk_free_mb").notNull().default(-1),
+    diskTotalMB: integer("disk_total_mb").notNull().default(0),
+    gpu: jsonb("gpu").$type<WorkerGpu | null>(),
+    renders: jsonb("renders").$type<WorkerRenders>().notNull(),
+    queues: text("queues").array().notNull().default(sql`'{}'::text[]`),
+    processing: jsonb("processing").$type<WorkerJob[]>().notNull().default(sql`'[]'::jsonb`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("worker_instances_last_seen_idx").on(t.lastSeenAt)],
+);
+export type WorkerInstanceRow = typeof workerInstances.$inferSelect;
