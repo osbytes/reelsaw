@@ -23,6 +23,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
+ *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
  *   clip    <clipId>                        everything about one clip incl. render diagnostics
@@ -307,7 +308,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const enc = svc.media.encoder();
     const onDevice = { requested: svc.config.ONNX_EXECUTION_PROVIDER, faces: svc.faces?.provider ?? null, text: svc.text?.provider ?? null, vad: svc.vad ? "cpu" : null, aligner: svc.aligner?.provider ?? null };
     const renders = { ...svc.resources.renders(), max: svc.resources.maxRenders() };
-    if (args.includes("--json")) return void console.log(JSON.stringify({ resources: r, gpu, videoEncoder: enc, onDevice, renders, models: svc.models.get() }, null, 2));
+    if (args.includes("--json")) return void console.log(JSON.stringify({ resources: r, gpu, videoEncoder: enc, onDevice, renders, models: svc.models.get(), ytdlpProxies: svc.media.ytdlpProxies() }, null, 2));
     const line = (k: string, v: string) => console.log(`${k.padEnd(16)} ${v}`);
     line("platform", `${r.platform} ${process.arch}, node ${process.version}`);
     line("cpu", `${r.cpus} cores, ${r.cpuPercent}% busy${r.load1 !== null ? `, load ${r.load1}` : ""}`);
@@ -318,7 +319,30 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     line("renders", renders.mode === "auto" ? `${renders.running} running, up to ${renders.max} (RENDER_CONCURRENCY=auto)` : `${renders.running} running, fixed ${renders.max}`);
     line("on-device", `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`);
     line("models", `${svc.models.get().language}, ${svc.models.get().transcription}${svc.models.get().align ? `, align ${svc.models.get().align}` : ""}`);
+    const proxies = svc.media.ytdlpProxies();
+    line("ytdlp proxies", proxies.candidates.length ? `${proxies.candidates.map((c) => `${c.id} p${c.priority}`).join(", ")}${proxies.next ? ` (next ${proxies.next})` : ""}` : "this server's IP (set YTDLP_PROXY)");
     console.log("\nSpeech-to-text and the language model run in their own containers: Speaches uses the GPU with SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda, Ollama when its container has the device (docker-compose.gpu.yml).");
+  },
+  /**
+   * Operator-ranked yt-dlp egress candidates and the circuit breaker on each. Priority is what you
+   * set; the circuit is runtime reliability and never changes the ranking among healthy candidates.
+   * URLs (and passwords) are not printed. `--json` for scripts.
+   */
+  async "ytdlp-proxies"(svc) {
+    const snap = svc.media.ytdlpProxies();
+    if (args.includes("--json")) return void console.log(JSON.stringify(snap, null, 2));
+    if (!snap.candidates.length) return void console.log("none: yt-dlp uses this server's IP. Set YTDLP_PROXY.");
+    console.log(`next  ${snap.next ?? "-"}`);
+    table(snap.candidates.map((c) => ({
+      id: c.id,
+      host: c.host,
+      priority: c.priority,
+      circuit: c.circuit,
+      inflight: c.concurrency ? `${c.inFlight}/${c.concurrency}` : c.inFlight,
+      ok: c.successes,
+      faults: c.faults,
+      rate: c.successRate === null ? "-" : `${Math.round(c.successRate * 100)}%`,
+    })));
   },
   /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
   async limits(svc) {
@@ -837,7 +861,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|status|storage|events|clip|faces|import-report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

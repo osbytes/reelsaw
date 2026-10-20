@@ -5,6 +5,7 @@ import type { Config } from "./config.js";
 import { withSpan } from "./otel.js";
 import type { Logger } from "./log.js";
 import { parseSceneScores, pickSceneCuts } from "./pipeline/scenes.js";
+import { createYtdlpProxyPool, parseYtdlpProxies, type ProxySnapshot } from "./ytdlp-proxy.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +90,8 @@ export interface MediaTools {
   videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
   ytdlp(args: string[], opts?: RunOptions): Promise<RunResult>;
+  /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
+  ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
   /** Shot cuts (seconds). `floor` = minimum scene score; cuts must also stand out from local motion. */
@@ -146,6 +149,7 @@ export function loggableArgv(args: string[]): string[] {
 
 export function createMediaTools(config: Config, log: Logger): MediaTools {
   let encoder: EncoderChoice = { name: "libx264", requested: config.FFMPEG_ENCODER, reason: "not probed yet" };
+  const ytdlpPool = createYtdlpProxyPool(config.YTDLP_PROXY ? parseYtdlpProxies(config.YTDLP_PROXY) : [], { log });
 
   /** Encode a few black frames with `enc`; the error text says why a hardware encoder is unusable. */
   async function probeEncoder(enc: VideoEncoder): Promise<string | null> {
@@ -209,7 +213,15 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
     ffmpeg,
     encoder: () => encoder,
     videoEncodeArgs: (enc = encoder.name) => videoEncodeArgs(enc),
-    ytdlp: (args, opts) => run(config.YTDLP_PATH, [...(config.YTDLP_PROXY ? ["--proxy", config.YTDLP_PROXY] : []), ...(config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : []), ...args], opts),
+    ytdlpProxies: () => ytdlpPool.snapshot(),
+    async ytdlp(args, opts) {
+      const cookies = config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : [];
+      if (args.includes("--proxy") || ytdlpPool.size === 0) {
+        return run(config.YTDLP_PATH, [...cookies, ...args], opts);
+      }
+      const { value } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...cookies, ...args], { ...opts, signal }), opts?.signal);
+      return value;
+    },
 
     async ffprobe(file) {
       const { stdout } = await run(config.FFPROBE_PATH, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file]);

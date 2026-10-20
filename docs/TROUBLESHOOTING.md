@@ -63,6 +63,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
+| `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
@@ -195,6 +196,39 @@ and list it in `SUPPORTED` in `language.ts`.
 - **Deploys interrupt jobs.** Rebuilding the app container kills in-flight renders; pg-boss retries them, and each
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.
+- **YouTube bot-check from a datacentre / `YTDLP_PROXY`.** yt-dlp takes one `--proxy`; Reelsaw walks an
+  operator-ranked pool in the same variable (one URL still works). **Priority** is yours and never
+  changes at runtime (put the cheap home Pi first). **Reliability** is a circuit breaker per candidate
+  (cockatiel): consecutive faults skip that one, then the ranking applies again among whoever is healthy.
+  A paid proxy that is 99% successful cannot overtake a Pi that is 80% successful. `reelsaw ytdlp-proxies`
+  shows id, priority and circuit — never the URL.
+
+  Plug in a Pi or a cheap VPS as an exit, not as a Tailscale exit node (that would route the whole
+  app through it, including model API calls). YouTube must see the **exit machine's public IP** (the
+  Pi's home ISP). Tailscale is only the path from the Reelsaw host to that machine:
+
+  1. Install Tailscale on the Reelsaw host, the Pi, and the Racknerd box. `tailscale ip -4` on each.
+  2. Run a SOCKS5 proxy **on the exit**, bound to its Tailscale IP so it is not on the public
+     internet. [`microsocks`](https://github.com/rofl0r/microsocks) is enough:
+     `microsocks -i 100.x.x.x -p 1080`. Use `socks5h://` so DNS happens on the Pi, not in the
+     datacentre. A Tailscale **exit node** is the wrong tool.
+  3. Set something like
+     `YTDLP_PROXY=pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,racknerd=socks5h://100.64.1.20:1080;priority=10,paid=http://user:pass@gate.example:7000;priority=1`.
+     `concurrency=1` keeps the Pi's upload from stacking. Racknerd is still a datacentre IP, so
+     YouTube may bot-check it; it is overflow when the Pi is down or busy. `direct` (this server's
+     IP) is only useful if Reelsaw itself is on a residential connection.
+  4. From inside Docker the container must be able to reach `100.64.0.0/10`. Docker Desktop often
+     can; on Linux the host's Tailscale route is not always forwarded. Easiest: SSH SOCKS on the
+     host that lands on the Pi (`ssh -N -D 1080 pi@100.64.1.10`) and point the pool at
+     `socks5h://host.docker.internal:1080` (the installer already adds `extra_hosts:
+     host.docker.internal:host-gateway`). MagicDNS names (`pi.tailnet.ts.net`) usually do **not**
+     resolve inside the app container; use the `100.x` address. Test with
+     `docker compose exec app wget -qO- http://100.x.x.x:1080` (connection refused from microsocks
+     is fine; timeout means the route is missing).
+  5. `reelsaw ytdlp-proxies` after a failed ingest: `circuit=open` on `pi` means it was skipped
+     and the next priority was used; it comes back after the cooldown without you changing
+     `priority`. Circuits are in-process (each worker has its own); they reset on restart.
+
 - **"That address points inside this server's network."** Link sources must be public http(s) URLs: ingest resolves
   the host and refuses loopback, private (RFC1918), CGNAT, link-local, unique-local and multicast addresses, plus
   `localhost`, `host.docker.internal` and `*.internal`. To ingest from a LAN NAS, set `ALLOW_PRIVATE_SOURCE_URLS=true`.

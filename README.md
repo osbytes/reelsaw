@@ -310,8 +310,11 @@ them), so a single-user box stays as it is:
   overrides like the other quotas. An hourly pass flags accounts that
   share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
   suspended automatically. Every refusal is a sentence.
-- **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` and
-  `YTDLP_COOKIES_FILE` help; a blocked download fails with "upload the file instead".
+- **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` is one URL
+  or an operator-ranked pool (a home Pi, a cheap VPS, a paid proxy). Reliability is a
+  circuit breaker on each candidate and never changes the ranking among healthy ones.
+  `YTDLP_COOKIES_FILE` helps too; a blocked download fails with "upload the file instead".
+  `reelsaw ytdlp-proxies` shows the pool.
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` appear on the sign-up form.
 - **MCP over OAuth** (`MCP_OAUTH=true`): Reelsaw becomes an OAuth 2.1 authorization server for
   MCP connectors (claude.ai, Claude Desktop): dynamic client registration, sign-in and a consent
@@ -438,6 +441,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
+| `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
 | `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
