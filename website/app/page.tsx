@@ -188,13 +188,23 @@ export default function HomePage() {
                 .
               </p>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-primary h-10 px-4 text-sm">
-                <GitHubMark /> Star on GitHub
-              </a>
-              <a href={SITE.releases} target="_blank" rel="noreferrer" className="btn-ghost h-10 px-4 text-sm">
-                Latest release <ArrowRight className="h-4 w-4" aria-hidden />
-              </a>
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-primary h-10 px-4 text-sm">
+                  <GitHubMark /> Star on GitHub
+                </a>
+                <a href={SITE.releases} target="_blank" rel="noreferrer" className="btn-ghost h-10 px-4 text-sm">
+                  Latest release <ArrowRight className="h-4 w-4" aria-hidden />
+                </a>
+              </div>
+              {SITE.hosted && (
+                <p className="text-sm text-ink3">
+                  Prefer not to run a machine?{" "}
+                  <a href={SITE.app} className="prose-link">
+                    Try the hosted Free plan
+                  </a>
+                </p>
+              )}
             </div>
           </div>
           <div className="container-page pb-20">
