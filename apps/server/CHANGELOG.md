@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.11.6
+
+### Patch Changes
+
+- [#74](https://github.com/osbytes/reelsaw/pull/74) [`eb5ee1f`](https://github.com/osbytes/reelsaw/commit/eb5ee1ff2579123cf98f966b713a599d71362458) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Admins can turn the watermark off (or on) for one account from Users → Limits. Follow / Always / Never saves and applies on the next render; `reelsaw limits <email> --watermark always|never|follow` does the same.
+
 ## 0.11.5
 
 ### Patch Changes
