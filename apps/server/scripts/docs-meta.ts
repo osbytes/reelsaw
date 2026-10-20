@@ -153,8 +153,8 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   MAX_CPU_PERCENT: ["resources", "Heavy steps wait while total CPU time is busier than this (measured, any OS)."],
   MIN_FREE_MEM_MB: ["resources", "Heavy steps wait while free memory is below this."],
-  MIN_FREE_DISK_MB: ["resources", "Below this, jobs fail fast with a \"low disk\" error instead of corrupting output."],
-  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for the governor."],
+  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. Jobs that also need scratch fail immediately if free space is below this plus that scratch."],
+  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU or memory. Disk shortfalls fail immediately."],
   STALL_MINUTES: ["resources", "A running job with no progress event for this long is reported (log and UI) as stalled."],
   SHUTDOWN_GRACE_SECONDS: ["resources", "On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders."],
 

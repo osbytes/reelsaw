@@ -1,7 +1,7 @@
 /** Render concurrency follows CPUs and free memory (pure; no stack needed). */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { nvidiaDeviceNode, renderLimit, RENDER_MEM_MB } from "../src/resources.js";
+import { diskShortReason, nvidiaDeviceNode, renderLimit, RENDER_MEM_MB, requiredDiskMB } from "../src/resources.js";
 
 const base = { memAvailableMB: 64000, running: 0, minFreeMemMB: 512 };
 describe("renderLimit", () => {
@@ -20,6 +20,18 @@ describe("renderLimit", () => {
   });
   it("honours a fixed RENDER_CONCURRENCY", () => {
     assert.equal(renderLimit({ cpus: 64, memAvailableMB: 100, running: 0, minFreeMemMB: 512, fixed: 3 }), 3);
+  });
+});
+
+describe("diskShortReason", () => {
+  it("requires MIN_FREE plus the job's scratch", () => {
+    assert.equal(requiredDiskMB(2048, 2048), 4096);
+    assert.equal(diskShortReason(4615, 2048, 2048), null);
+    assert.equal(diskShortReason(4095, 2048, 2048), "4095 MB disk free, need 4096");
+    assert.equal(diskShortReason(2500, 2048, 512), "2500 MB disk free, need 2560");
+  });
+  it("treats unmeasured disk as unlimited", () => {
+    assert.equal(diskShortReason(-1, 2048, 2048), null);
   });
 });
 

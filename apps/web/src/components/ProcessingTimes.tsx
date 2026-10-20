@@ -7,7 +7,7 @@ import { formatTime } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { Skeleton, SkeletonRegion } from "./ui";
 
-const STAGE: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
+const STAGE: Record<string, string> = { ingest: "Source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 const TEN_MIN = 600;
 
 export function ProcessingTimes() {

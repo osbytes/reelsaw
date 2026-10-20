@@ -1,7 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseDownloadTick } from "../src/pipeline/ingest.js";
+import { ingestScratchMB, parseDownloadTick } from "../src/pipeline/ingest.js";
 import { lineSplitter } from "../src/media.js";
+
+describe("ingestScratchMB", () => {
+  it("sizes an upload from its bytes instead of reserving 2 GB", () => {
+    assert.equal(ingestScratchMB(80 * 1048576), 208);
+    assert.equal(ingestScratchMB(2048 * 1048576), 2176);
+    assert.equal(ingestScratchMB(1), 129);
+  });
+  it("reserves 2 GB when the size is unknown (a link)", () => {
+    assert.equal(ingestScratchMB(), 2048);
+    assert.equal(ingestScratchMB(null), 2048);
+    assert.equal(ingestScratchMB(0), 2048);
+  });
+});
 
 describe("parseDownloadTick", () => {
   it("reads a yt-dlp --newline progress line", () => {
