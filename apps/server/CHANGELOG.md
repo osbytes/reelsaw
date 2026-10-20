@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.13.0
+
+### Minor Changes
+
+- [#80](https://github.com/osbytes/reelsaw/pull/80) [`8ba227c`](https://github.com/osbytes/reelsaw/commit/8ba227caa5c4008ef5a3a5e103b9c68b293f3801) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Show each API and worker process under Settings → System → Workers, and a Queue section for live job depth, failed work, and bulk retry after a platform fix. A failed-work row opens the recorded reason (Retry, Copy, Open project); `#queue&fail=kind:id` deep-links it. Admins get the same from `list_workers` / `get_queue` / `list_failures` / `get_failure` / `retry_failures` and `reelsaw workers` / `reelsaw queue` / `reelsaw failure` / `reelsaw retry-failures`.
+
+### Patch Changes
+
+- [#80](https://github.com/osbytes/reelsaw/pull/80) [`8ba227c`](https://github.com/osbytes/reelsaw/commit/8ba227caa5c4008ef5a3a5e103b9c68b293f3801) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Admins can tick **Instance-wide diagnostics** on Report an issue to include unfinished work, failed jobs, usage and error logs across every account — not only their own projects. `reelsaw report --instance` and the `report_issue` MCP tool do the same.
+
 ## 0.12.0
 
 ### Minor Changes
