@@ -11,6 +11,7 @@ import { useTheme } from "./lib/theme";
 import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
+import { initOtel } from "./lib/otel";
 import { BILLING_PATH } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
@@ -263,16 +264,20 @@ function AppToaster() {
   );
 }
 
-/** Sentry / PostHog in the browser, only when the server hands out keys (lib/telemetry.ts): init once, identify, page views. */
+/** Sentry / PostHog / OTEL in the browser when the server hands out keys (lib/telemetry.ts, lib/otel.ts). */
 function TelemetryBridge() {
   const status = useSystemStatus();
   const { data: session } = useSession();
   const me = useMe(!!session);
   const loc = useLocation();
   const t = status.data?.telemetry;
+  const otel = status.data?.otel;
   useEffect(() => {
     if (t) void initTelemetry(t);
   }, [t]);
+  useEffect(() => {
+    if (otel) void initOtel(otel);
+  }, [otel]);
   useEffect(() => {
     if (!session) identify(null);
     else if (me.data) identify({ id: me.data.id, email: me.data.email, name: me.data.name, role: me.data.role });
