@@ -337,6 +337,8 @@ export const appRouter = router({
         paused,
         /** public keys for the browser's Sentry / PostHog (telemetry.ts); null = off */
         telemetry: ctx.svc.telemetry.public,
+        /** browser OTLP (otel-config.ts); null when OTEL is off or headers are not public */
+        otel: ctx.svc.otel.public,
       };
     }),
   }),
