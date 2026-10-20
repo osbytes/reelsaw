@@ -176,7 +176,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   FFMPEG_ENCODER: ["tools", "H.264 encoder for clips, intros/outros and previews. `auto` probes `h264_nvenc` (NVIDIA, container started with docker-compose.gpu.yml) then `h264_videotoolbox` (macOS, outside Docker) at boot and keeps `libx264` otherwise; naming one makes boot fail if it cannot encode. A hardware encoder that fails mid-render is retried on libx264. Settings → System and `reelsaw machine` show the one in use and why. Values: `auto | libx264 | h264_nvenc | h264_videotoolbox`."],
   FFPROBE_PATH: ["tools", "ffprobe binary."],
   YTDLP_PATH: ["tools", "yt-dlp binary."],
-  YTDLP_PROXY: ["tools", "Route yt-dlp through a proxy. YouTube blocks many datacentre IPs."],
+  YTDLP_PROXY: ["tools", "yt-dlp egress: one URL (`http`, `https`, `socks5`, `socks5h`), or a comma-separated pool `[id=]<url-or-direct>[;priority=N][;concurrency=N]`. `priority` is the operator ranking (higher is tried first) and never changes at runtime; a circuit breaker skips a candidate after consecutive faults, then the ranking applies again. `direct` uses this server's IP. YouTube blocks many datacentre IPs. `reelsaw ytdlp-proxies` shows the pool (never URLs). Example: `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,paid=http://user:pass@gate.example:7000;priority=1`."],
   YTDLP_COOKIES_FILE: ["tools", "Cookies file in Netscape format for yt-dlp."],
   CAPTION_FONT: ["tools", "Font family for burned-in captions; it must be installed where ffmpeg runs."],
 

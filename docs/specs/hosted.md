@@ -106,8 +106,9 @@ Decisions, in order of how hard they are to reverse:
   signup_burst, disposable_email) with an admin event and a Users-page filter.
   Flags inform; the plan caps contain. Cloudflare in front of app.reelsaw.com adds edge rate
   limits and bot scoring (infra runbook `abuse.md`).
-- **yt-dlp from a datacentre IP** gets blocked by YouTube: `YTDLP_PROXY` and `YTDLP_COOKIES_FILE`
-  settings, and "upload the file" as the first-class fallback with a clear error.
+- **yt-dlp from a datacentre IP** gets blocked by YouTube: `YTDLP_PROXY` (one URL or an
+  operator-ranked pool) and `YTDLP_COOKIES_FILE`, and "upload the file" as the first-class
+  fallback with a clear error.
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` shown on sign-up when set.
 - **MCP over OAuth 2.1** (`@better-auth/mcp` + `@better-auth/oauth-provider`, dynamic client
   registration) so claude.ai and Claude Desktop connectors sign in with the browser; API keys

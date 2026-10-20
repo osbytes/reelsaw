@@ -1,6 +1,7 @@
 import { z } from "zod";
 import path from "node:path";
 import { parseLogLevels } from "./log.js";
+import { parseYtdlpProxies } from "./ytdlp-proxy.js";
 
 const boolTrue = z
   .string()
@@ -231,7 +232,7 @@ export const envSchema = z.object({
   FFMPEG_ENCODER: z.enum(["auto", "libx264", "h264_nvenc", "h264_videotoolbox"]).default("auto"),
   FFPROBE_PATH: z.string().default("ffprobe"),
   YTDLP_PATH: z.string().default("yt-dlp"),
-  /** Datacentre IPs get blocked by YouTube: route yt-dlp through a proxy and/or a cookies file (Netscape format) */
+  /** Datacentre IPs get blocked by YouTube: one proxy URL, or a ranked pool (ytdlp-proxy.ts) */
   YTDLP_PROXY: z.string().optional(),
   YTDLP_COOKIES_FILE: z.string().optional(),
   CAPTION_FONT: z.string().default("DejaVu Sans"),
@@ -283,5 +284,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // the operator CLI (src/cli.ts) runs with both off on purpose
   if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
   if (c.NODE_ENV === "production" && c.BETTER_AUTH_SECRET.length < 32) throw new ConfigError("BETTER_AUTH_SECRET must be at least 32 characters in production");
+  try {
+    if (c.YTDLP_PROXY) parseYtdlpProxies(c.YTDLP_PROXY);
+  } catch (err) {
+    throw new ConfigError(err instanceof Error ? err.message : String(err));
+  }
   return c;
 }
