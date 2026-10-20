@@ -1,13 +1,20 @@
 /**
  * Clip selection as map → pool → rank (see docs/RESEARCH.md, B4/B5):
  *
- *  1. chunk   – split the transcript into ~9k-char chunks at the longest pause near the boundary,
- *               with ~20% overlap, so no moment sits in the "lost in the middle" zone of a long prompt
- *  2. map     – ask for every standalone moment per chunk (no target count), in parallel
- *  3. pool    – snap/dedupe in the caller
- *  4. score   – rubric (hook / flow / value / shareability [/ relevance]) 0-10 per criterion, k samples,
+ *  1. chunk   – split the transcript into ~3-minute windows (also capped by characters) at the
+ *               longest pause near the boundary, with ~35% overlap so a max-length clip at the
+ *               cut appears whole in at least one window. Long single-prompt maps under-select
+ *               the middle (Lost in the Middle, TACL 2024) and stop after the first few JSON
+ *               items; smaller windows are the structural fix, not a "spread clips" prompt.
+ *  2. map     – ask for every standalone moment per chunk (no target count), in parallel. Drop
+ *               proposals that do not overlap the chunk after timestamp repair.
+ *  3. glean   – one extra map pass when a long window's first picks leave a long uncovered tail
+ *               (exhaustive-extraction / GraphRAG gleaning). Empty is allowed; dull stretches
+ *               stay empty.
+ *  4. pool    – snap/dedupe in the caller
+ *  5. score   – rubric (hook / flow / value / shareability [/ relevance]) 0-10 per criterion, k samples,
  *               median per criterion; also returns emphasis words for the captions
- *  5. rank    – K sliding pairwise passes over the top clips (K places the top K), each comparison
+ *  6. rank    – K sliding pairwise passes over the top clips (K places the top K), each comparison
  *               asked twice with the positions swapped; disagreements count as ties (judge position bias)
  */
 import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from "ai";
@@ -140,8 +147,17 @@ export interface Chunk {
   end: number;
 }
 
-/** Split at the longest pause in the last quarter of each chunk; overlap ~20% so boundary moments appear whole once. */
-export function chunkTranscript(segments: TranscriptSegment[], targetChars = 9000, overlap = 0.2): Chunk[] {
+/**
+ * Map-window size. ~3 minutes is long enough for several 15–60 s clips and short enough that
+ * the model actually reads past the opening (GraphRAG measured ~2× entity recall at 600 tokens
+ * vs 2400 in one pass). Character cap is a safety bound on dense speech, not the primary split.
+ */
+export const MAP_CHUNK_SECONDS = 180;
+export const MAP_CHUNK_CHARS = 4000;
+
+/** Split at the longest pause in the last quarter of each window; overlap ~35% so a 60 s clip at the cut appears whole once. */
+export function chunkTranscript(segments: TranscriptSegment[], targetChars = MAP_CHUNK_CHARS, overlap = 0.2, targetSec = MAP_CHUNK_SECONDS): Chunk[] {
+  if (!segments.length) return [];
   const lines = segments.map((s) => `[${fmtTs(s.start)} - ${fmtTs(s.end)}] ${s.text}`);
   const n = lines.length;
   const chunks: Chunk[] = [];
@@ -149,7 +165,9 @@ export function chunkTranscript(segments: TranscriptSegment[], targetChars = 900
   while (i0 < n) {
     let chars = 0;
     let j = i0;
-    while (j < n && chars < targetChars) chars += lines[j++]!.length + 1;
+    while (j < n && chars < targetChars && (j === i0 || segments[j - 1]!.end - segments[i0]!.start < targetSec)) {
+      chars += lines[j++]!.length + 1;
+    }
     if (j >= n) {
       chunks.push({ lines: lines.slice(i0), start: segments[i0]!.start, end: segments[n - 1]!.end });
       break;
@@ -163,20 +181,45 @@ export function chunkTranscript(segments: TranscriptSegment[], targetChars = 900
         cut = k + 1;
       }
     }
-    // a short remainder joins this chunk instead of becoming its own tiny chunk
-    let rest = 0;
-    for (let k = cut; k < n; k++) rest += lines[k]!.length + 1;
-    if (rest < targetChars * 0.3) {
+    // a short remainder joins this chunk instead of becoming its own tiny chunk (time, not chars:
+    // a long sparse remainder must stay its own window or we recreate a 10-minute prompt)
+    const restSec = segments[n - 1]!.end - segments[cut]!.start;
+    if (restSec < targetSec * 0.3) {
       chunks.push({ lines: lines.slice(i0), start: segments[i0]!.start, end: segments[n - 1]!.end });
       break;
     }
     chunks.push({ lines: lines.slice(i0, cut), start: segments[i0]!.start, end: segments[cut - 1]!.end });
-    let back = 0;
+    const chunkDur = segments[cut - 1]!.end - segments[i0]!.start;
+    const wantOverlap = Math.min(chunkDur * 0.35, Math.max(targetSec * overlap, Math.min(60, chunkDur)));
     let k = cut;
-    while (k > i0 + 1 && back < overlap * targetChars) back += lines[--k]!.length + 1;
+    while (k > i0 + 1 && segments[cut - 1]!.end - segments[k - 1]!.start < wantOverlap) k--;
     i0 = Math.max(i0 + 1, k);
   }
   return chunks;
+}
+
+/** True when the candidate overlaps this map window (same ±5 s slop as timestamp repair). */
+export function inChunk(c: { startSec: number; endSec: number }, chunk: Pick<Chunk, "start" | "end">, slop = 5): boolean {
+  return c.endSec > c.startSec && c.endSec > chunk.start - slop && c.startSec < chunk.end + slop;
+}
+
+/**
+ * One extra map pass is worth it when the window is long enough to hold more than one clip and
+ * the first pass left a long uncovered side (usually the tail: primacy bias). A dull stretch that
+ * returned nothing still gets one gleaning pass; the prompt already allows {"clips":[]}.
+ */
+export function needsSecondLook(chunk: Pick<Chunk, "start" | "end">, found: Array<{ startSec: number; endSec: number }>, minSec = 20): boolean {
+  const dur = chunk.end - chunk.start;
+  if (dur < MAP_CHUNK_SECONDS - 1e-6) return false;
+  if (found.length <= 1) return true;
+  const slack = minSec + 15;
+  const lo = Math.min(...found.map((c) => c.startSec));
+  const hi = Math.max(...found.map((c) => c.endSec));
+  return lo - chunk.start >= slack || chunk.end - hi >= slack;
+}
+
+export function excludeRanges(cs: Array<{ startSec: number; endSec: number; title: string }>): string {
+  return cs.length ? cs.map((c) => `${fmtTs(c.startSec)}-${fmtTs(c.endSec)} "${c.title}"`).join("; ") : "none";
 }
 
 // ---------- 2. map ----------
@@ -228,12 +271,15 @@ export async function mapChunk(o: LlmOpts, chunk: Chunk, c: SelectContext, exclu
     return clips.length ? { clips } : null;
   });
   if (!res) throw new Error("The model did not return usable JSON for clip candidates");
-  return res.clips.map((x) => repairTimestamps(normalizeCandidate(x), chunk));
+  const repaired = res.clips.map((x) => repairTimestamps(normalizeCandidate(x), chunk));
+  const kept = repaired.filter((clip) => inChunk(clip, chunk));
+  if (kept.length !== repaired.length) o.log?.debug({ chunkStart: chunk.start, chunkEnd: chunk.end, dropped: repaired.length - kept.length }, "map dropped candidates outside the chunk");
+  return kept;
 }
 
 /**
- * Small models sometimes turn "05:28.0" into 528 (colon dropped). If a candidate falls outside the
- * chunk but reading its numbers as mmss puts it inside, use that.
+ * Small models sometimes turn "05:28.0" into 528 (colon dropped) or "5:28" into 5.28 (minutes.seconds
+ * as a decimal). If a candidate falls outside the chunk but a reading of its numbers lands inside, use that.
  */
 export function repairTimestamps(c: ClipCandidate, chunk: Pick<Chunk, "start" | "end">): ClipCandidate {
   const inside = (a: number, b: number) => a >= chunk.start - 5 && b <= chunk.end + 5 && b > a;
@@ -243,9 +289,19 @@ export function repairTimestamps(c: ClipCandidate, chunk: Pick<Chunk, "start" | 
     const ss = whole % 100;
     return ss < 60 ? Math.floor(whole / 100) * 60 + ss + (v - whole) : NaN;
   };
-  const a = mmss(c.startSec);
-  const b = mmss(c.endSec);
-  return Number.isFinite(a) && Number.isFinite(b) && inside(a, b) ? { ...c, startSec: a, endSec: b } : c;
+  // 5.28 → 5 min 28 s (not 5.28 seconds, and not 5.28 × 60)
+  const mmDotSs = (v: number) => {
+    if (!Number.isFinite(v) || v < 0) return NaN;
+    const m = Math.floor(v);
+    const ss = Math.round((v - m) * 100 + 1e-9);
+    return ss < 60 ? m * 60 + ss : NaN;
+  };
+  for (const conv of [mmss, mmDotSs]) {
+    const a = conv(c.startSec);
+    const b = conv(c.endSec);
+    if (Number.isFinite(a) && Number.isFinite(b) && inside(a, b)) return { ...c, startSec: a, endSec: b };
+  }
+  return c;
 }
 
 // ---------- 4. score ----------

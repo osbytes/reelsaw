@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { defaultProjectSettings, type ClipCandidate, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { sentenceEndAfter } from "../../pipeline/thought.js";
-import { chunkTranscript, repairTimestamps, mapChunk, pairwiseRank, pairwiseCalls, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "../../pipeline/select.js";
+import { chunkTranscript, excludeRanges, MAP_CHUNK_CHARS, MAP_CHUNK_SECONDS, mapChunk, needsSecondLook, repairTimestamps, pairwiseRank, pairwiseCalls, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "../../pipeline/select.js";
 import { clipCap, scoreGate, snapCandidate, type ScoreGateOpts } from "../../pipeline/analyze.js";
 import { isUnavailable, type CaseResult, type Suite, type SummaryMetric, type EvalContext } from "../framework.js";
 import { evalAi } from "../asr.js";
@@ -287,8 +287,8 @@ async function runPicker(ctx: EvalContext, t: TranscriptFixture & { windows: Arr
   for (const ch of chunks) {
     // same key as `selection-model`, so the two share recorded calls
     const found = await cached(["map", cfg.AI_MODEL, ch.lines, sc], async () => mapChunk((await models()).o, ch, sc));
-    if (found.length <= 1 && ch.end - ch.start >= 180) {
-      const exclude = found.length ? found.map((c) => `${c.startSec}-${c.endSec} "${c.title}"`).join("; ") : "none";
+    if (needsSecondLook(ch, found, sc.minSec)) {
+      const exclude = excludeRanges(found);
       found.push(...(await cached(["map-more", cfg.AI_MODEL, ch.lines, sc, exclude], async () => mapChunk((await models()).o, ch, sc, exclude).catch(() => []))));
     }
     perChunk.push(found);
@@ -398,6 +398,7 @@ export const selectionSuite: Suite = {
       [457, 528, 297, 328],
       [540, 607, 340, 367],
       [310, 350, 310, 350],
+      [5.07, 5.28, 307, 328],
     ];
     const bad = repairCases.filter(([a, b, ea, eb]) => {
       const r = repairTimestamps(cand(a, b), { start: 300, end: 420 });
@@ -421,7 +422,11 @@ export const selectionSuite: Suite = {
         if (ov > 0.4) fails.push(`chunk ${i} overlaps ${(ov * 100).toFixed(0)}%`);
       }
       const maxChars = Math.max(...chunks.map((c) => c.lines.join("\n").length));
-      if (maxChars > 9000 * 1.6) fails.push(`chunk of ${maxChars} chars`);
+      if (maxChars > MAP_CHUNK_CHARS * 1.6) fails.push(`chunk of ${maxChars} chars`);
+      if (chunks.length > 1) {
+        const long = chunks.filter((c, i) => i < chunks.length - 1 && c.end - c.start > MAP_CHUNK_SECONDS * 1.4);
+        if (long.length) fails.push(`non-last chunk of ${(long[0]!.end - long[0]!.start).toFixed(0)} s`);
+      }
       out.push({ id: `${name}/chunking`, pass: !fails.length, metrics: { chunks: chunks.length, maxChars, segments: segs.length }, notes: fails.join("; ") });
 
       // snapping: candidates at odd times snap to segment boundaries within the length range
