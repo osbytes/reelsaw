@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.12.0
+
+### Minor Changes
+
+- [#77](https://github.com/osbytes/reelsaw/pull/77) [`16f9d5b`](https://github.com/osbytes/reelsaw/commit/16f9d5b3e22f323157d2d2960f62b1fd0b5e0335) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `YTDLP_PROXY` accepts one URL or an operator-ranked pool. Priority is what you set; a circuit breaker skips a candidate after consecutive faults and never lets a more reliable expensive proxy overtake a healthy cheaper one. `reelsaw ytdlp-proxies` shows the pool without URLs.
+
+### Patch Changes
+
+- [#76](https://github.com/osbytes/reelsaw/pull/76) [`c3b33b4`](https://github.com/osbytes/reelsaw/commit/c3b33b437bb3f6914806472a653a3a9ed8877c82) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Ingest fails immediately when the worker disk cannot hold `MIN_FREE_DISK_MB` plus the source (instead of waiting 900 s and retrying). Uploads reserve their actual size, and the UI says Preparing rather than Downloading.
+
 ## 0.11.6
 
 ### Patch Changes
