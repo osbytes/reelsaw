@@ -6,8 +6,11 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
-import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, updateProject, type Actor } from "../projects/service.js";
+import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
+import { listWorkers } from "../ops/workers.js";
+import { summarizeQueue } from "../ops/queue.js";
+import { FAILURE_STAGES, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
 import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
@@ -867,6 +870,43 @@ export const appRouter = router({
       const models = currentModels(ctx.svc);
       return processingTimes(models, await loadHistory(ctx.svc.database.db), defaultFactors(models, localConfig(ctx.svc)));
     }),
+    /** Live processes (API / worker / combined) with specs and what they reported last. Same as Settings → System → Workers. */
+    workers: router({
+      list: adminProcedure.query(({ ctx }) => listWorkers(ctx.svc)),
+    }),
+    /** Waiting / running / retrying counts from pg-boss, plus the jobs in flight. Same as Settings → System → Queue. */
+    queue: router({
+      summary: adminProcedure.query(({ ctx }) => summarizeQueue(ctx.svc)),
+    }),
+    /** Failed projects and clips across the instance (durable app state). Retry goes through the same lifecycle as the owner Retry button. */
+    failures: router({
+      list: adminProcedure
+        .input(
+          z
+            .object({
+              q: z.string().max(200).optional(),
+              stage: z.enum(FAILURE_STAGES).optional(),
+              since: z.string().max(40).optional(),
+              cursor: z.string().max(300).optional(),
+              limit: z.number().int().min(1).max(50).optional(),
+            })
+            .optional(),
+        )
+        .query(({ ctx, input }) => listFailures(ctx.svc, input ?? {})),
+      retry: adminProcedure
+        .input(
+          z.object({
+            q: z.string().max(200).optional(),
+            stage: z.enum(FAILURE_STAGES).optional(),
+            since: z.string().max(40).optional(),
+            ids: z.array(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) })).max(50).optional(),
+            limit: z.number().int().min(1).max(50).optional(),
+          }).optional(),
+        )
+        .mutation(({ ctx, input }) =>
+          retryFailures(ctx.svc, { q: input?.q, stage: input?.stage, since: input?.since }, { id: ctx.user.id, email: ctx.user.email }, { ids: input?.ids, limit: input?.limit }),
+        ),
+    }),
   }),
 
   /** ⌘K palette before anything is typed: the 20 projects changed most recently, with their clip counts. */
@@ -966,42 +1006,10 @@ export const appRouter = router({
     retry: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
       return svc.tx(async (u) => {
-        const db = u.db;
-        const p = await ownedProject(db, ctx.user.id, input.id);
-        // lock order transcript → clip → project: the refine branch rewrites the transcript, the render branch the clips,
-        // and every branch then updates the project row (startRun)
-        const [transcript] = await db.select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
-        await lockProjectClips(u, p.id);
-        const clips = await listClips(db, p.id); // read after the lock, so the statuses below are current
-        const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-        let queue: QueueName = QUEUES.ingest;
-        if (clips.length) queue = QUEUES.render;
-        else if (transcript && refineDone) queue = QUEUES.analyze;
-        else if (transcript) queue = QUEUES.refineEntities; // marker: resume the refine fan-out
-        else if (p.sourceKey) queue = QUEUES.transcribe;
-
-        if (queue === QUEUES.render) {
-          await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
-          for (const c of clips) {
-            if (c.status === "done") continue;
-            // a user-made clip whose AI preparation never finished goes back through clip.prepare
-            if (needsPrepare(c)) {
-              await requestPrepare(svc, u, p.id, c.id);
-              continue;
-            }
-            await requestRender(svc, u, p.id, c.id, {}, "retry");
-          }
-        } else if (queue === QUEUES.refineEntities) {
-          await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
-          for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-          await enqueueRefine(svc, p.id, undefined, u);
-        } else {
-          for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-          await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
-          await u.enqueue(queue, { projectId: p.id });
-        }
-        await u.emit(p.id, "stage.started", { stage: queue, retried: true });
-        return { ok: true, queue };
+        const p = await ownedProject(u.db, ctx.user.id, input.id);
+        const r = await retryProject(svc, u, p.id);
+        if (!r) throw new TRPCError({ code: "NOT_FOUND" });
+        return r;
       });
     }),
 

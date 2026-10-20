@@ -12,12 +12,12 @@ import { settingsPatchSchema } from "./instance-settings.js";
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
-- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why)
+- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins)
 - change: update_clip (one clip's text, bounds, framing, style), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
-You only see and change your own projects and library. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
+You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, refine steps off). Set refineEntities / refineDisfluency / disfluencyLlm / refineScenes true to opt into polish (instance Pipeline gates must be on).");
 
@@ -191,6 +191,23 @@ export const TOOLS = {
     },
     annotations: { readOnlyHint: true },
   },
+  report_issue: {
+    title: "Report an issue",
+    description:
+      "A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). Returns { url, filename }; GET the url with the same Authorization header as this server. Admins may set instance true to include unfinished work, failed jobs, usage and error logs across every account, for queue, disk or machine problems that are not just one project. On hosted instances with telemetry, non-admins cannot download a zip.",
+    inputSchema: {
+      description: z.string().trim().min(3).max(2000).describe("What went wrong (a sentence is enough)"),
+      projectId: z.string().optional().describe("Project the report is about (from list_projects); omit for an account- or instance-level report"),
+      clipIds: z.array(z.string()).max(50).optional().describe("Clips the problem shows up in (from get_project)"),
+      instance: z.boolean().default(false).describe("Admins only: include unfinished work, failed jobs, usage and error logs across every account"),
+      logs: z.boolean().default(true).describe("Include this project's log lines (default true)"),
+      system: z.boolean().default(true).describe("Include versions, machine resources, queue counts and recent errors (default true; ignored when not allowed)"),
+      previews: z.boolean().default(true).describe("Include thumbnails and the selected clips' videos (default true)"),
+      allClips: z.boolean().default(false).describe("Include every rendered clip (default false)"),
+      source: z.boolean().default(false).describe("Include the source video file (default false)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
   retry_project: {
     title: "Retry project",
     description: "Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. Finished clips, the transcript and the source are kept. Returns { queue } (the stage restarted); then wait_for_project. To pick different clips use reanalyze_project instead.",
@@ -286,6 +303,52 @@ export const TOOLS = {
     description:
       "Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. Returns { values, env, override, source: { KEY: \"env\" | \"db\" }, ignored: { KEY: reason }, groups, help, updatedAt, updatedBy }; secrets are masked.",
     annotations: { readOnlyHint: true },
+  },
+  list_workers: {
+    title: "List workers",
+    description:
+      "Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, GPU, render slots, the queues it listens on, and the jobs it last reported. Returns { items, live, stale }; a process is stale when it has not checked in for 45 seconds. Hosted non-admins are refused.",
+    annotations: { readOnlyHint: true },
+  },
+  get_queue: {
+    title: "Queue summary",
+    description:
+      "Admins only: waiting, running and retrying job counts per pipeline stage, plus the jobs currently in flight (project title, attempt, started). Returns { queues, active, truncated, error? }. Failed work is list_failures, not this. Hosted non-admins are refused.",
+    annotations: { readOnlyHint: true },
+  },
+  list_failures: {
+    title: "List failed work",
+    description:
+      "Admins only: failed projects and clips across the instance (owner email, stage, reason, when). A failed project's clips are not listed separately — retry the project. Returns { items, nextCursor, total, limit, truncated }. Filter with q (substring of the error), stage, since (ISO time). Hosted non-admins are refused.",
+    inputSchema: {
+      q: z.string().max(200).optional().describe("Case-insensitive substring of the recorded error (e.g. disk, encoder, model)"),
+      stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Pipeline stage that failed"),
+      since: z.string().max(40).optional().describe("ISO timestamp; only failures updated at or after this time"),
+      cursor: z.string().max(300).optional().describe("nextCursor from the previous page"),
+      limit: z.number().int().min(1).max(50).optional().describe("Page size, default 50"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  retry_failures: {
+    title: "Retry failed work",
+    description:
+      "Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). Each item is its own transaction so live-job caps still apply. Cap 50 per call. Returns { retried, skipped, nextCursor }. Writes an admin event failures.retried. Hosted non-admins are refused.",
+    inputSchema: {
+      q: z.string().max(200).optional().describe("Same error substring as list_failures"),
+      stage: z.enum(["ingest", "transcribe", "refine", "analyze", "render", "prepare"]).optional().describe("Same stage filter as list_failures"),
+      since: z.string().max(40).optional().describe("Same since filter as list_failures"),
+      ids: z
+        .array(
+          z.object({
+            kind: z.enum(["project", "clip"]).describe("project = resume the whole project; clip = re-render or re-prepare one clip"),
+            id: z.string().min(1).max(80).describe("Project id or clip id"),
+          }),
+        )
+        .max(50)
+        .optional()
+        .describe("Retry these rows instead of the current filter; omitted = every match of q/stage/since"),
+      limit: z.number().int().min(1).max(50).optional().describe("Max items to retry this call, default 50"),
+    },
   },
   set_instance_settings: {
     title: "Change instance settings",

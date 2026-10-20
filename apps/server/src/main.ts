@@ -5,6 +5,7 @@ import { createLogger } from "./log.js";
 import { createApp } from "./http.js";
 import { startWorkers } from "./queue/workers.js";
 import { startReconciler } from "./queue/reconcile.js";
+import { beat, startHeartbeat } from "./ops/workers.js";
 
 async function main() {
   const svc = await createServices();
@@ -39,6 +40,7 @@ async function main() {
 
   let server: ReturnType<typeof serve> | undefined;
   let stopReconciler: (() => void) | undefined;
+  let stopHeartbeat: (() => void) | undefined;
 
   if (config.RUN_HTTP) {
     const app = createApp(svc);
@@ -54,6 +56,10 @@ async function main() {
     if (svc.ee) await svc.ee.startWorkers();
     stopReconciler = startReconciler(svc);
   }
+  if (config.RUN_HTTP || config.RUN_WORKERS) {
+    await beat(svc).catch((err) => log.warn({ err, module: "ops" }, "worker heartbeat failed"));
+    stopHeartbeat = startHeartbeat(svc);
+  }
 
   let shuttingDown = false;
   const shutdown = async (sig: string) => {
@@ -63,6 +69,7 @@ async function main() {
     log.info({ graceSeconds: config.SHUTDOWN_GRACE_SECONDS }, "waiting for running jobs to finish");
     setTimeout(() => process.exit(1), (config.SHUTDOWN_GRACE_SECONDS + 15) * 1000).unref();
     stopReconciler?.();
+    stopHeartbeat?.();
     server?.close();
     await shutdownServices(svc);
     process.exit(0);

@@ -46,6 +46,16 @@ export const envSchema = z.object({
   RUN_WORKERS: boolTrue,
   RUN_HTTP: boolTrue,
   /**
+   * Stable id for this process in Settings → System → Workers. Unset: `hostname:pid`. Set it to the
+   * pod or container name when replicas would otherwise collide or when you want a name you recognise.
+   */
+  WORKER_ID: z
+    .string()
+    .min(1)
+    .max(120)
+    .regex(/^[A-Za-z0-9._:/-]+$/, "WORKER_ID may contain letters, digits, . _ : / -")
+    .optional(),
+  /**
    * open: anyone may sign up (single-user box, default). approval: sign-ups wait for an admin.
    * closed: no sign-ups. The first account is always the admin. ALLOW_SIGNUP=false is an alias for closed.
    */

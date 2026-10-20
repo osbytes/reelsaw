@@ -20,18 +20,34 @@ describe("issue reports", () => {
   const secrets = Object.entries(env).filter(([k, v]) => SECRET_KEY.test(k) && v.length >= 8).map(([, v]) => v);
   let owner: Awaited<ReturnType<typeof signUp>>;
   let other: Awaited<ReturnType<typeof signUp>>;
+  let admin: Awaited<ReturnType<typeof signUp>>;
   const projectId = randomUUID();
   const clipId = randomUUID();
+  const otherProjectId = randomUUID();
+  const stuckProjectId = randomUUID();
 
   before(async () => {
     owner = await signUp();
     other = await signUp();
+    admin = await signUp();
+    await pool.query(`update "user" set role = 'user' where id = any($1)`, [[owner.userId, other.userId]]);
+    await pool.query(`update "user" set role = 'admin' where id = $1`, [admin.userId]);
     // a small project with secrets planted where logs/events/metadata could carry them
     const planted = { apiKey: secrets[0] ?? "none", header: "Authorization: Bearer abcdefghijklmnop123456", cookie: "cookie: session=s3cr3tsession", email: "someone@example.com" };
     await pool.query(
       `insert into projects (id, user_id, title, source_type, source_url, source_meta, duration_sec, status, settings)
        values ($1, $2, 'Report test', 'url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', $3, 60, 'done', '{}')`,
       [projectId, owner.userId, JSON.stringify({ uploader: "Someone", planted })],
+    );
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings)
+       values ($1, $2, 'OTHER_ACCOUNT_TITLE', 'url', 'https://www.youtube.com/watch?v=aaaaaaaaaaa', 90, 'failed', '{}')`,
+      [otherProjectId, other.userId],
+    );
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, stage, settings)
+       values ($1, $2, 'STUCK_OTHER_TITLE', 'url', 'https://www.youtube.com/watch?v=bbbbbbbbbbb', 30, 'rendering', 'render', '{}')`,
+      [stuckProjectId, other.userId],
     );
     await pool.query(
       `insert into transcripts (project_id, language, text, words, raw_words, segments, flags) values ($1, 'en', 'hello world', $2, $2, $3, '[]')`,
@@ -43,7 +59,7 @@ describe("issue reports", () => {
   });
 
   after(async () => {
-    await pool.query(`delete from "user" where id = any($1)`, [[owner?.userId, other?.userId].filter(Boolean)]);
+    await pool.query(`delete from "user" where id = any($1)`, [[owner?.userId, other?.userId, admin?.userId].filter(Boolean)]);
     await pool.end();
   });
 
@@ -129,12 +145,83 @@ describe("issue reports", () => {
   it("omits system.json / queue / errors when include.system is false", async () => {
     const res = await post(`/api/projects/${projectId}/report`, owner.cookie, {
       ...req,
-      include: { logs: false, system: false, previews: false, allClips: false, source: false },
+      include: { logs: false, system: false, instance: false, previews: false, allClips: false, source: false },
     });
     assert.equal(res.status, 200);
     const files = await readZip(Buffer.from(await res.arrayBuffer()));
-    for (const name of ["system.json", "queue.json", "usage.json", "errors.jsonl"]) assert.ok(!files.has(name), `${name} must not be present`);
-    const manifest = JSON.parse(files.get("manifest.json")!.toString()) as { include: { system: boolean } };
+    for (const name of ["system.json", "queue.json", "usage.json", "errors.jsonl", "stuck.json"]) assert.ok(!files.has(name), `${name} must not be present`);
+    const manifest = JSON.parse(files.get("manifest.json")!.toString()) as { include: { system: boolean; instance: boolean } };
     assert.equal(manifest.include.system, false);
+    assert.equal(manifest.include.instance, false);
+  });
+
+  it("ignores include.instance from a non-admin", async () => {
+    const res = await post(`/api/report`, owner.cookie, {
+      description: "The queue looks stuck",
+      include: { logs: true, system: true, instance: true, previews: false, allClips: false, source: false },
+    });
+    assert.equal(res.status, 200);
+    const files = await readZip(Buffer.from(await res.arrayBuffer()));
+    assert.ok(!files.has("stuck.json"), "non-admins must not get instance stuck.json");
+    const manifest = JSON.parse(files.get("manifest.json")!.toString()) as { include: { instance: boolean } };
+    assert.equal(manifest.include.instance, false);
+    const projects = JSON.parse(files.get("projects.json")!.toString()) as Array<{ id: string; title?: string }>;
+    assert.ok(Array.isArray(projects), "own-account projects.json is a list of the reporter's projects");
+    assert.ok(!projects.some((p) => p.id === otherProjectId || p.title === "OTHER_ACCOUNT_TITLE"));
+    const text = [...files].map(([, b]) => b.toString()).join("\n");
+    assert.ok(!text.includes("OTHER_ACCOUNT_TITLE"));
+    assert.ok(!text.includes("STUCK_OTHER_TITLE"));
+    assert.ok(!text.includes(other.email));
+  });
+
+  it("admin instance report includes other accounts' unfinished work, not their emails", async () => {
+    const t = new Date().toISOString();
+    const gone = randomUUID();
+    const lines = [
+      { level: 50, time: t, msg: "other account crashed", projectId: otherProjectId, title: "OTHER_ACCOUNT_TITLE" },
+      { level: 50, time: t, msg: "job crashed", jobId: gone, detail: "INSTANCE_JOB_DETAIL" },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n");
+    const file = `/data/logs/reelsaw.zz-instance-${gone}.log`;
+    const local = path.join(os.tmpdir(), `reelsaw-instance-${gone}.log`);
+    fs.writeFileSync(local, lines + "\n");
+    inContainer(`mv ${toContainer(local, path.basename(local))} ${file}`);
+    fs.rmSync(local);
+    try {
+      const res = await post(`/api/report`, admin.cookie, {
+        description: "The queue is backed up",
+        include: { logs: true, system: true, instance: true, previews: false, allClips: false, source: false },
+      });
+      assert.equal(res.status, 200);
+      const files = await readZip(Buffer.from(await res.arrayBuffer()));
+      for (const name of ["stuck.json", "projects.json", "system.json", "queue.json", "usage.json", "errors.jsonl"]) {
+        assert.ok(files.has(name), `missing ${name}`);
+      }
+      const stuck = JSON.parse(files.get("stuck.json")!.toString()) as { projects: Array<{ id: string; title: string; ownerHash: string }> };
+      assert.ok(stuck.projects.some((p) => p.id === stuckProjectId && p.title === "STUCK_OTHER_TITLE"));
+      const summaries = JSON.parse(files.get("projects.json")!.toString()) as { projects: Array<{ id: string; title: string; ownerHash: string }> };
+      assert.ok(summaries.projects.some((p) => p.id === otherProjectId && p.title === "OTHER_ACCOUNT_TITLE"));
+      assert.ok(summaries.projects.some((p) => p.id === stuckProjectId));
+      const system = JSON.parse(files.get("system.json")!.toString()) as { accounts?: unknown; workers?: unknown; disk?: unknown };
+      assert.ok(system.accounts, "instance system.json includes account counts");
+      assert.ok(system.workers, "instance system.json includes workers");
+      const usage = JSON.parse(files.get("usage.json")!.toString()) as { scope: string };
+      assert.equal(usage.scope, "instance");
+      const queue = JSON.parse(files.get("queue.json")!.toString()) as { scope: string };
+      assert.equal(queue.scope, "instance");
+      const errors = files.get("errors.jsonl")!.toString();
+      assert.match(errors, /OTHER_ACCOUNT_TITLE/);
+      assert.match(errors, /INSTANCE_JOB_DETAIL/);
+      const text = [...files].filter(([n]) => !n.startsWith("media/")).map(([, b]) => b.toString()).join("\n");
+      assert.ok(!text.includes(other.email), "other account email leaked");
+      assert.ok(!text.includes(other.userId), "other account id leaked (should be hashed)");
+      assert.ok(!text.includes(admin.email), "admin email leaked");
+      const manifest = JSON.parse(files.get("manifest.json")!.toString()) as { include: { instance: boolean; system: boolean } };
+      assert.equal(manifest.include.instance, true);
+      assert.equal(manifest.include.system, true);
+    } finally {
+      inContainer(`rm -f ${file}`);
+    }
   });
 });

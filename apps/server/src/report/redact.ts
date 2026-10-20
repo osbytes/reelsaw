@@ -15,6 +15,11 @@ export function isSecretKey(key: string): boolean {
   return SECRET_KEY.test(key);
 }
 
+/** Same 12-char pseudonym `project.json` uses for the owner, so ids in queue/stuck/projects match. */
+export function hashOwner(id: string): string {
+  return createHash("sha256").update(id).digest("hex").slice(0, 12);
+}
+
 /** "https://user:pass@host:1/path?sig=…" → "https://host:1/path" (non-URLs pass through). */
 export function stripUrl(value: string): string {
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;

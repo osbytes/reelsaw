@@ -8,16 +8,18 @@
 import fs from "node:fs/promises";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { projectSettingsSchema, styleSchema, type ClearableSetting, type ProjectSettings, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { REFINE_STEPS, projectSettingsSchema, styleSchema, type ClearableSetting, type ProjectSettings, type ProjectSettingsPatch } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { QUEUES } from "../queue/boss.js";
+import { QUEUES, type QueueName } from "../queue/boss.js";
 import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { finalizeProjectIfDone, lockProjectClips, startRun } from "../pipeline/lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, startRun } from "../pipeline/lifecycle.js";
+import { needsPrepare } from "../pipeline/manual.js";
+import { enqueueRefine } from "../pipeline/refine.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 
@@ -31,6 +33,54 @@ export type Actor = { id: string; admin: boolean } | null;
 const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 /** "for 7 days" / "until you purge it", for messages and tool results. */
 export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc)} day${days(svc) === 1 ? "" : "s"}` : "until it is purged");
+
+/**
+ * Resume a project from the furthest completed stage (each stage skips work that already exists).
+ * Same path as the owner's Retry button; admin bulk retry and MCP retry_project call this too.
+ * Lock order is transcript → clip → project. Returns null when the project is gone or deleted.
+ */
+export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
+  const [p] = await u.db
+    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!p) return null;
+  const [transcript] = await u.db
+    .select({ projectId: schema.transcripts.projectId, refine: schema.transcripts.refine })
+    .from(schema.transcripts)
+    .where(eq(schema.transcripts.projectId, p.id))
+    .for("update");
+  await lockProjectClips(u, p.id);
+  const clips = await listClips(u.db, p.id);
+  const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
+  let queue: QueueName = QUEUES.ingest;
+  if (clips.length) queue = QUEUES.render;
+  else if (transcript && refineDone) queue = QUEUES.analyze;
+  else if (transcript) queue = QUEUES.refineEntities;
+  else if (p.sourceKey) queue = QUEUES.transcribe;
+
+  if (queue === QUEUES.render) {
+    await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
+    for (const c of clips) {
+      if (c.status === "done") continue;
+      if (needsPrepare(c)) {
+        await requestPrepare(svc, u, p.id, c.id);
+        continue;
+      }
+      await requestRender(svc, u, p.id, c.id, {}, "retry");
+    }
+  } else if (queue === QUEUES.refineEntities) {
+    await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
+    for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await enqueueRefine(svc, p.id, undefined, u);
+  } else {
+    for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
+    await u.enqueue(queue, { projectId: p.id });
+  }
+  await u.emit(p.id, "stage.started", { stage: queue, retried: true });
+  return { ok: true, queue };
+}
 
 /**
  * Soft-delete a project in the caller's unit of work: mark it, cancel its jobs, stop work in progress (a working

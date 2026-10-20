@@ -25,7 +25,7 @@ import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import type { Services } from "../services.js";
 
-const NAME = /^(README\.md|report\.md|manifest\.json|config\.json|client\.json|project\.json|transcript\.json|clips\.json|artifacts\.json|events\.jsonl|logs\.jsonl|system\.json|queue\.json|usage\.json|errors\.jsonl|projects\.json|media\/thumbnails\/[\w.-]{1,120}\.jpg|media\/clips\/[\w.-]{1,120}\.mp4|media\/source\.[a-z0-9]{1,5})$/; // source: any upload extension, only ever handed to storage + ffmpeg
+const NAME = /^(README\.md|report\.md|manifest\.json|config\.json|client\.json|project\.json|transcript\.json|clips\.json|artifacts\.json|events\.jsonl|logs\.jsonl|system\.json|queue\.json|usage\.json|errors\.jsonl|stuck\.json|projects\.json|media\/thumbnails\/[\w.-]{1,120}\.jpg|media\/clips\/[\w.-]{1,120}\.mp4|media\/source\.[a-z0-9]{1,5})$/; // source: any upload extension, only ever handed to storage + ffmpeg
 const MAX_DATA_FILE = 512 * 1024 * 1024; // uncompressed, per non-media file
 const MAX_TOTAL = 64 * 1024 * 1024 * 1024;
 const MAX_RATIO = 400; // uncompressed / compressed, for non-media files over 16 MB (zip-bomb guard)

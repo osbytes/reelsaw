@@ -169,9 +169,10 @@ are not the metrics.
   on the response, and carried by the access line, the tRPC error line, the MCP tool line and
   the lines of that handler; the job it enqueues is found by the `projectId` on both sides.
 - **Logs are the first thing a report carries.** The issue-report zip bundles the project's lines
-  from the last seven days and the level in force; `docs/TROUBLESHOOTING.md` ("Reading the logs")
-  says how to read them. A change that adds a decision point adds its `debug` line in the same
-  change.
+  from the last seven days and the level in force; admins can opt into instance-wide unfinished
+  work and error logs for problems that are not just their projects. `docs/TROUBLESHOOTING.md`
+  ("Reading the logs") says how to read them. A change that adds a decision point adds its `debug`
+  line in the same change.
 
 ### Scale
 

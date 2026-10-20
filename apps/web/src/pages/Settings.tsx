@@ -8,6 +8,8 @@ import { AccountSection } from "../components/AccountSection";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
+import { WorkersOnlineLine, WorkersSection } from "../components/WorkersSection";
+import { QueueSection } from "../components/QueueSection";
 import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
@@ -25,6 +27,8 @@ function gb(mb: number) {
 /** The System tab's sections, in page order; the side nav links to them and the URL hash deep-links one. */
 const SYSTEM_SECTIONS = [
   ["overview", "Overview"],
+  ["workers", "Workers"],
+  ["queue", "Queue"],
   ["models", "Models"],
   ["access", "Access"],
   ["limits", "Limits"],
@@ -276,6 +280,7 @@ function SystemTab() {
                   </div>
                 ))}
               </div>
+              <WorkersOnlineLine />
               <ProcessingTimes />
               <div>
                 <div className="flex items-baseline gap-2">
@@ -296,6 +301,9 @@ function SystemTab() {
             </>
           )}
         </section>
+
+        <WorkersSection />
+        <QueueSection />
 
         <div id="models" className="scroll-mt-4">
           <ModelsSection />

@@ -298,12 +298,32 @@ export function createApp(svc: Services) {
     const info = await reportPreview(svc, session.user.id, c.req.param("projectId"));
     return info ? c.json(info) : c.json({ error: "not found" }, 404);
   });
+  const boolQuery = (v: string | undefined, fallback: boolean) => (v === undefined ? fallback : v === "1" || v === "true");
+  const reportFromQuery = (c: Context) => {
+    const clipIds = (c.req.query("clipIds") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return reportRequestSchema.safeParse({
+      description: c.req.query("description") ?? "",
+      clipIds,
+      include: {
+        logs: boolQuery(c.req.query("logs"), true),
+        system: boolQuery(c.req.query("system"), true),
+        instance: boolQuery(c.req.query("instance"), false),
+        previews: boolQuery(c.req.query("previews"), true),
+        allClips: boolQuery(c.req.query("allClips"), false),
+        source: boolQuery(c.req.query("source"), false),
+      },
+      client: { route: c.req.query("route") ?? "mcp" },
+    });
+  };
   const sendReport = async (c: Context, projectId: string | null) => {
     const session = await actor(c);
     if (!session) return c.json({ error: "unauthorized" }, 401);
     const caps = reportCapabilities(svc, session.user);
     if (!caps.zip) return c.json({ error: "Send feedback from the app instead of downloading a report on this instance." }, 403);
-    const parsed = reportRequestSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = c.req.method === "GET" ? reportFromQuery(c) : reportRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "invalid report" }, 400);
     const zip = await createReportZip(svc, session.user, projectId, parsed.data);
     if (!zip) return c.json({ error: "not found" }, 404);
@@ -312,8 +332,8 @@ export function createApp(svc: Services) {
     c.header("Cache-Control", "no-store");
     return c.body(Readable.toWeb(zip.stream) as ReadableStream);
   };
-  app.post("/api/projects/:projectId/report", (c) => sendReport(c, c.req.param("projectId")));
-  app.post("/api/report", (c) => sendReport(c, null));
+  app.on(["GET", "POST"], "/api/projects/:projectId/report", (c) => sendReport(c, c.req.param("projectId")));
+  app.on(["GET", "POST"], "/api/report", (c) => sendReport(c, null));
 
   // The browser reports an error it caught (ErrorBoundary, window handlers); logged as a warn with the user and route.
   const clientLogHits = new Map<string, number[]>();
