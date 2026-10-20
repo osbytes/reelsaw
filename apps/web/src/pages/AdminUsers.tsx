@@ -5,7 +5,7 @@ import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
-import { ConfirmDialog, Modal, MoreButton, Skeleton, Select } from "../components/ui";
+import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 
 type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
 type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage; /** the plan in force (hosted); null when this instance has no plans */ plan: string | null; /** abuse flags from the hourly pass (abuse.ts) */ flags: string[]; signupIp: string | null };
@@ -348,10 +348,10 @@ const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string
 ];
 
 const WATERMARK_OPTIONS = [
-  { value: "default", label: "Follow the plan and instance setting" },
-  { value: "on", label: "Always" },
-  { value: "off", label: "Never" },
-];
+  { value: "default", label: "Follow", title: "Follow the plan and the instance setting" },
+  { value: "on", label: "Always", title: "Always burn the watermark into this account's renders" },
+  { value: "off", label: "Never", title: "Never burn the watermark into this account's renders" },
+] as const;
 
 /**
  * Per-user quota overrides, each next to what the account has used and where the value in force comes from
@@ -381,6 +381,16 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
   const busy = save.isPending || saveWm.isPending || savePlan.isPending;
   const sourceWord = (k: LimitKey) => (q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance");
+  const wmHint =
+    wm === "on"
+      ? "Next render: watermark on (always)."
+      : wm === "off"
+        ? "Next render: no watermark (never)."
+        : !q.data
+          ? ""
+          : wmDraft === "default" && q.data.watermark.override != null
+            ? "Next render: follow the plan and instance setting (after save)."
+            : `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).`;
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={`Limits for ${row.email}`} width={460}>
       <form
@@ -426,11 +436,13 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               </div>
             )}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="limit-watermark" className="text-xs font-semibold text-ink2">
-                Watermark
-              </label>
-              {q.isPending ? <Skeleton className="h-[38px] w-full rounded-[10px]" /> : <Select value={wm} onValueChange={setWmDraft} ariaLabel="Watermark" options={WATERMARK_OPTIONS} />}
-              <span className="min-h-4 text-xs text-ink3">{q.data ? `Next render: ${q.data.watermark.effective ? "watermark on" : "no watermark"} (${q.data.watermark.source === "admin" ? "admins never get one" : q.data.watermark.source === "plan" ? "from the plan" : q.data.watermark.source === "override" ? "your choice" : "instance setting"}).` : ""}</span>
+              <span className="text-xs font-semibold text-ink2">Watermark</span>
+              {q.isPending ? (
+                <Skeleton className="h-[38px] w-full rounded-[10px]" />
+              ) : (
+                <Segmented ariaLabel="Watermark" value={wm} onChange={setWmDraft} className="w-full" options={WATERMARK_OPTIONS.map((o) => ({ value: o.value, label: o.label, title: o.title }))} />
+              )}
+              <span className="min-h-4 text-xs text-ink3">{wmHint}</span>
             </div>
             {LIMITS.map(({ key, label, window, unit }) => {
               const used = q.data?.usage?.[key];

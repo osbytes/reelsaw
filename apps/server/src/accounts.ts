@@ -101,7 +101,7 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
  * The admin's per-user watermark decision: true (always), false (never) or null (follow the plan and the
  * instance setting). Applies to the next render; existing clips keep what they were rendered with.
  */
-export async function setUserWatermark(svc: Services, actorId: string, userId: string, watermark: boolean | null) {
+export async function setUserWatermark(svc: Services, actorId: string | null, userId: string, watermark: boolean | null) {
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     await u.db
