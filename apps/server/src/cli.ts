@@ -61,7 +61,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --store saves them (renders then hide them)
  *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
- *   limits  <email>                         an account's quotas: instance value, plan, override, in force, in use now
+ *   limits  <email> [--watermark always|never|follow]
+ *                                           an account's quotas: instance value, plan, override, in force, in use now;
+ *                                           --watermark sets the per-user override (same as Users → Limits)
  *   abuse   [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
@@ -88,8 +90,8 @@ import { reconcile } from "./queue/reconcile.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
-import { approveUser, setUserRole } from "./accounts.js";
-import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser } from "./quota.js";
+import { approveUser, setUserRole, setUserWatermark } from "./accounts.js";
+import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
 import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
@@ -318,12 +320,21 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     line("models", `${svc.models.get().language}, ${svc.models.get().transcription}${svc.models.get().align ? `, align ${svc.models.get().align}` : ""}`);
     console.log("\nSpeech-to-text and the language model run in their own containers: Speaches uses the GPU with SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda, Ollama when its container has the device (docker-compose.gpu.yml).");
   },
-  /** One account's quotas (0 = unlimited). Change them in Users → Limits. */
+  /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
   async limits(svc) {
     const u = await userByEmail(svc, pos[0]);
-    const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true } });
-    const [effective, used] = await Promise.all([limitsFor(svc.database.db, svc.settings.get(), u.id), limitUsage(svc.database.db, u.id)]);
+    const wmArg = flag("watermark");
+    if (wmArg !== undefined) {
+      const parsed = wmArg === "always" || wmArg === "on" ? true : wmArg === "never" || wmArg === "off" ? false : wmArg === "follow" || wmArg === "default" ? null : undefined;
+      if (parsed === undefined) throw new Error("usage: reelsaw limits <email> [--watermark always|never|follow]");
+      await setUserWatermark(svc, null, u.id, parsed);
+      console.log(`watermark ${parsed === true ? "always" : parsed === false ? "never" : "follow"} for ${u.email}; next render uses it`);
+    }
+    const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true, watermark: true } });
+    const [effective, used, wm] = await Promise.all([limitsFor(svc.database.db, svc.settings.get(), u.id, svc.entitlements), limitUsage(svc.database.db, u.id), watermarkFor(svc.database.db, svc.settings.get(), u, svc.entitlements)]);
     table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.settings.get()[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
+    const override = row?.watermark === true ? "always" : row?.watermark === false ? "never" : "follow";
+    console.log(`watermark next render: ${wm.on ? "on" : "off"} (${override === "follow" ? wm.source : `override ${override}`})`);
   },
   /**
    * Instance settings in force and where each comes from. `settings SIGNUP_MODE=approval MAX_UPLOAD_MB=2048`
@@ -815,7 +826,7 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
 }
 
 async function userByEmail(svc: Services, email: string | undefined) {
-  if (!email) throw new Error("usage: reelsaw <approve|make-admin> <email>");
+  if (!email) throw new Error(`usage: reelsaw ${cmd ?? "<command>"} <email>`);
   const u = await svc.database.db.query.user.findFirst({ where: eq(schema.user.email, email.toLowerCase()) });
   if (!u) throw new Error(`no account with email ${email}`);
   return u;

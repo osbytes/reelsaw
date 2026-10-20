@@ -245,7 +245,9 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   ships for it (add the Radix package, wrap it once in `ui.tsx`, style it with our tokens), then
   at a maintained library. Browser-native widgets with their own OS chrome (`<select>`,
   `<input type="date">`) are not used where a themed primitive exists. See "Don't rebuild what
-  exists".
+  exists". Overlay stacking (a Select inside a Dialog that paints but ignores clicks) is a known
+  Radix/shadcn trap: three choices is `Segmented`, portaled menus over a dialog use `z-[80]`, and
+  the scale plus upstream issues live in [UI.md](UI.md). Do not invent a new z-index on one screen.
 - **No layout shift.**
   - Nothing appears *above* what the user is interacting with and pushes it down.
   - Follow-up actions go into space reserved for them (a label row, a status line that's always
@@ -322,4 +324,5 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - Commit and push only when asked. Commit messages describe the change and why; no
   tool-attribution trailers.
 - Keep docs current: `EVALS.md` for suites, `TROUBLESHOOTING.md` for operator recipes,
-  `RESEARCH.md` for findings, and this file for principles.
+  `RESEARCH.md` for findings, `UI.md` for overlay/portal/stacking gotchas, and this file for
+  principles.

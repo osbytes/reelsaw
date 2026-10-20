@@ -56,6 +56,34 @@ describe("hosted", () => {
     assert.equal((await trpc(user.cookie, "admin.users.setLimits", { id: user.userId, limits: {} })).error?.data.code, "FORBIDDEN");
   });
 
+  it("lets an admin turn the watermark off for one account", async () => {
+    const off = await trpc(admin.cookie, "admin.users.setWatermark", { id: user.userId, watermark: false });
+    assert.deepEqual(off.data, { ok: true, watermark: false });
+    const lim = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; effective: boolean; source: string } };
+    assert.equal(lim.watermark.override, false);
+    assert.equal(lim.watermark.effective, false);
+    assert.equal(lim.watermark.source, "override");
+    const me = (await trpc(user.cookie, "me.get", undefined, "GET")).data as { watermark: { on: boolean; source: string } };
+    assert.equal(me.watermark.on, false);
+    assert.equal(me.watermark.source, "override");
+    const on = await trpc(admin.cookie, "admin.users.setWatermark", { id: user.userId, watermark: true });
+    assert.deepEqual(on.data, { ok: true, watermark: true });
+    const follow = await trpc(admin.cookie, "admin.users.setWatermark", { id: user.userId, watermark: null });
+    assert.deepEqual(follow.data, { ok: true, watermark: null });
+    const cleared = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; source: string } };
+    assert.equal(cleared.watermark.override, null);
+    assert.notEqual(cleared.watermark.source, "override");
+    const ev = await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = 'user.watermark_changed'`, [user.userId]);
+    assert.equal(ev.rows[0].n, 3);
+    assert.equal((await trpc(user.cookie, "admin.users.setWatermark", { id: user.userId, watermark: false })).error?.data.code, "FORBIDDEN");
+    const r = cli(["limits", user.email, "--watermark", "never"]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /override never/);
+    const fromCli = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; effective: boolean } };
+    assert.equal(fromCli.watermark.override, false);
+    assert.equal(fromCli.watermark.effective, false);
+  });
+
   it("reports usage per user", async () => {
     const r = (await trpc(admin.cookie, "admin.usage", { days: 365 }, "GET")).data as { users: Array<{ id: string; projects: number; sourceMinutes: number; llmCalls: number; llmInputTokens: number; storedBytes: number }> };
     const me = r.users.find((u) => u.id === user.userId)!;

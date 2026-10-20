@@ -85,9 +85,9 @@ export function ProgressBar({ value, className = "" }: { value: number; classNam
 }
 
 /** Pill segmented control on a sunk track. */
-export function Segmented<T extends string | number>({ value, options, onChange, className = "", size = "md" }: { value: T; options: Array<{ value: T; label: ReactNode; title?: string }>; onChange: (v: T) => void; className?: string; size?: "sm" | "md" }) {
+export function Segmented<T extends string | number>({ value, options, onChange, className = "", size = "md", ariaLabel }: { value: T; options: Array<{ value: T; label: ReactNode; title?: string }>; onChange: (v: T) => void; className?: string; size?: "sm" | "md"; ariaLabel?: string }) {
   return (
-    <div className={`seg ${className}`} role="radiogroup">
+    <div className={`seg ${className}`} role="radiogroup" aria-label={ariaLabel}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -111,11 +111,20 @@ export function Kbd({ children }: { children: ReactNode }) {
 
 /** Centered confirm / info dialog in the design's style. */
 export function Modal({ open, onOpenChange, title, children, width = 420 }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode; width?: number }) {
+  // portaled menus (Select, Combobox) live outside this node; a click on one is not a dismiss
+  const keepIfMenu = (e: { target: EventTarget | null; preventDefault: () => void }) => {
+    if (e.target instanceof Element && e.target.closest(".menu")) e.preventDefault();
+  };
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[71] flex max-h-[90vh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none" style={{ maxWidth: width }}>
+        <Dialog.Content
+          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[90vh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none"
+          style={{ maxWidth: width }}
+          onPointerDownOutside={keepIfMenu}
+          onFocusOutside={keepIfMenu}
+        >
           <Dialog.Title className="shrink-0 text-lg font-bold">{title}</Dialog.Title>
           {children}
         </Dialog.Content>
@@ -161,6 +170,7 @@ export type SelectOption = { value: string; label: ReactNode; hint?: string; dis
 export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
+    // z-[80]: a Select inside Modal (overlay z-70) must paint above it. Combobox uses the same z-index.
     <RadixSelect.Root disabled={disabled} value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
       <RadixSelect.Trigger
         aria-label={ariaLabel}
@@ -175,7 +185,7 @@ export function Select({ value, onValueChange, options, placeholder, size = "md"
         </RadixSelect.Icon>
       </RadixSelect.Trigger>
       <RadixSelect.Portal>
-        <RadixSelect.Content position="popper" sideOffset={6} collisionPadding={12} className="menu max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0">
+        <RadixSelect.Content position="popper" sideOffset={6} collisionPadding={12} className="menu pointer-events-auto z-[80] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0">
           <RadixSelect.ScrollUpButton className="flex h-6 items-center justify-center text-ink3">
             <ChevronUp className="h-4 w-4" />
           </RadixSelect.ScrollUpButton>
@@ -225,7 +235,7 @@ export function Combobox({ value, onValueChange, options, placeholder = "Chooseâ
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="menu z-[80] w-[max(var(--radix-popover-trigger-width),12rem)] overflow-hidden p-0">
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="menu pointer-events-auto z-[80] w-[max(var(--radix-popover-trigger-width),12rem)] overflow-hidden p-0">
           <Command loop>
             <Command.Input placeholder="Type to filterâ€¦" className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
             <ScrollArea className="max-h-[min(260px,calc(var(--radix-popover-content-available-height)-60px))]">
