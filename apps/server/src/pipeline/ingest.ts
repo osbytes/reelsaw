@@ -9,18 +9,33 @@ import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { StageContext, exists } from "./common.js";
 
+/** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
+export function ingestScratchMB(knownBytes?: number | null) {
+  if (knownBytes && knownBytes > 0) return Math.max(128, Math.ceil(knownBytes / 1048576) + 128);
+  return 2048;
+}
+
 export async function ingest(ctx: StageContext) {
   const { svc, projectId } = ctx;
   const project = await ctx.project();
   const dir = await ctx.dir();
   await ctx.start("ingesting");
-  await svc.resources.acquire({ kind: "ingest", needDiskMB: 2048, signal: ctx.signal, onWait: (r) => void ctx.progress(0, `Waiting for resources: ${r}`).catch(() => {}) });
+
+  const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
+  const upload = !stored && project.sourceType === "upload" ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) }) : undefined;
+  if (!stored && project.sourceType === "upload" && !upload) throw new Error("Uploaded source file is missing");
+  await svc.resources.acquire({
+    kind: "ingest",
+    needDiskMB: ingestScratchMB(stored ? project.sourceBytes : upload?.sizeBytes),
+    signal: ctx.signal,
+    onWait: (r) => void ctx.progress(0, `Waiting for resources: ${r}`).catch(() => {}),
+  });
 
   let meta: Record<string, unknown> = project.sourceMeta ?? {};
   let sourcePath: string | undefined;
   let sourceKey = project.sourceKey ?? undefined;
 
-  if (sourceKey && (await svc.storage.exists(sourceKey))) {
+  if (stored && sourceKey) {
     sourcePath = await svc.storage.ensureLocal(sourceKey, path.join(dir, path.posix.basename(sourceKey)));
   } else {
     if (project.sourceType === "url") {
@@ -84,11 +99,10 @@ export async function ingest(ctx: StageContext) {
       if (!chosen) throw new Error("yt-dlp finished but no source file was produced");
       sourcePath = path.join(dir, chosen);
     } else {
-      const upload = await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) });
       if (!upload) throw new Error("Uploaded source file is missing");
       const ext = path.extname(upload.storageKey) || ".mp4";
       sourcePath = path.join(dir, `source${ext}`);
-      await ctx.progress(0.3, "Fetching upload");
+      await ctx.progress(0.3, "Copying your upload");
       await svc.storage.ensureLocal(upload.storageKey, sourcePath);
     }
     sourceKey = keys.source(projectId, path.extname(sourcePath) || ".mp4");

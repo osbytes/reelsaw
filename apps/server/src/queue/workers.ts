@@ -8,6 +8,7 @@ import { analyze } from "../pipeline/analyze.js";
 import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from "../pipeline/refine.js";
 import { renderClip, markClipFailed } from "../pipeline/render.js";
 import { StageContext, failProject, stageFailedAttempt, ProjectGoneError } from "../pipeline/common.js";
+import { ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
 
@@ -48,11 +49,13 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
     } catch (err) {
       if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
       log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
-      if (job.retryCount >= max) {
+      const last = job.retryCount >= max || err instanceof ResourceExhaustedError;
+      if (last) {
         svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
         await failProject(svc, projectId, stage, err);
-      }
-      else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1);
+      } else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1);
+      // disk will not free itself on the next attempt; returning marks the job done so it does not loop
+      if (err instanceof ResourceExhaustedError) return;
       throw err; // let pg-boss apply the retry policy
     }
   };

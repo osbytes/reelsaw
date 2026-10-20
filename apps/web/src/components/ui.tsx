@@ -14,7 +14,7 @@ const TONE_FG: Record<Tone, string> = { ok: "text-ok", acc: "text-acc-text", war
 const STATUS: Record<ProjectStatus | ClipStatus, [glyph: string, word: string, tone: Tone]> = {
   queued: ["◷", "Queued", "warn"],
   pending: ["○", "Waiting", "idle"],
-  ingesting: ["◔", "Downloading", "acc"],
+  ingesting: ["◔", "Preparing", "acc"],
   transcribing: ["◔", "Transcribing", "acc"],
   refining: ["◔", "Refining", "acc"],
   analyzing: ["◔", "Finding moments", "acc"],

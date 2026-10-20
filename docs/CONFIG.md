@@ -187,8 +187,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. |
 | `MAX_CPU_PERCENT` | `90` | Heavy steps wait while total CPU time is busier than this (measured, any OS). |
 | `MIN_FREE_MEM_MB` | `512` | Heavy steps wait while free memory is below this. |
-| `MIN_FREE_DISK_MB` | `2048` | Below this, jobs fail fast with a "low disk" error instead of corrupting output. |
-| `RESOURCE_WAIT_MAX_SECONDS` | `900` | Longest a step waits for the governor. |
+| `MIN_FREE_DISK_MB` | `2048` | Floor that must stay free. Jobs that also need scratch fail immediately if free space is below this plus that scratch. |
+| `RESOURCE_WAIT_MAX_SECONDS` | `900` | Longest a step waits for CPU or memory. Disk shortfalls fail immediately. |
 
 ### Logging, tracing and telemetry
 

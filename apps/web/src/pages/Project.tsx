@@ -25,7 +25,7 @@ import { openReport } from "../lib/report";
 import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
-const STAGE_LABEL: Record<string, string> = { ingest: "Download", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
+const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 const STAGE_INDEX: Record<string, number> = { queued: -1, ingesting: 0, transcribing: 1, refining: 2, analyzing: 3, rendering: 4, done: 5, failed: 99 };
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 const TONE_GLYPH: Record<Tone, string> = { ok: "●", run: "◔", warn: "◷", err: "▲" };
@@ -602,7 +602,7 @@ export function ProjectPage() {
         ) : (
           <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-film-text">
             {active ? (
-              "downloading…"
+              progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
             ) : p.sourceExpiredAt ? (
               <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
                 Source removed · fetch again
@@ -661,15 +661,20 @@ export function ProjectPage() {
     </SkeletonRegion>
   );
   const transcriptStage = stageIdx >= 2 || p.status === "done" || !!p.transcript;
+  const transcribePct = Math.round((progress?.stage === "transcribe" ? progress.value : (p.stageProgress ?? 0)) * 100);
+  const waitingHeading =
+    stageIdx <= 0
+      ? (progress?.message ?? (p.sourceType === "upload" ? "Preparing your upload…" : "Downloading…"))
+      : `Transcribing… ${transcribePct}%`;
   const waiting = (
     <div className="flex min-h-0 flex-1 items-start justify-center border-t border-line px-5 py-10">
       <div className="flex w-full max-w-[560px] flex-col gap-3">
-        <b className="text-base">{stageIdx <= 0 ? "Downloading…" : `Transcribing… ${Math.round((progress?.stage === "transcribe" ? progress.value : (p.stageProgress ?? 0)) * 100)}%`}</b>
+        <b className="text-base">{waitingHeading}</b>
         <span className="text-[13px] leading-relaxed text-ink2">The transcript appears here when transcription finishes. Fixes, then clips, follow. You can leave; this keeps running on the server.</span>
         <ProgressBar value={progress?.value ?? p.stageProgress ?? 0} />
         <div className="flex h-5 justify-between font-mono text-xs tabular-nums leading-5 text-ink3">
           <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
-          <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the download"}</span>
+          <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the source is ready"}</span>
         </div>
         {[92, 78, 85, 60, 88, 70].map((w, i) => (
           <div key={i} className="flex gap-2.5">
