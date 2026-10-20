@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.11.5
+
+### Patch Changes
+
+- [#73](https://github.com/osbytes/reelsaw/pull/73) [`31561b7`](https://github.com/osbytes/reelsaw/commit/31561b7706d48d73dbd4f84c17d16d0a98dfb178) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Clips are picked throughout the video instead of clustering in the first couple of minutes. Each map pass now looks at a short overlapping window, and a second pass only runs when the first picks leave a long uncovered stretch. Existing projects pick this up on re-analyze.
+
 ## 0.11.4
 
 ### Patch Changes
