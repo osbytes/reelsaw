@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.11.4
+
+### Patch Changes
+
+- [#69](https://github.com/osbytes/reelsaw/pull/69) [`f841d61`](https://github.com/osbytes/reelsaw/commit/f841d610280bd080f80c166574c81476f964464c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - OpenTelemetry is clearer to wire and works in the browser too: the server exports traces with explicit OTLP URLs/headers (Sentry destinations skip metrics), and when OTEL is on the web app gets the same public endpoint from `system.status` and sends browser traces. `SENTRY_DSN` stays separate from OTEL — set `OTEL_EXPORTER_OTLP_*` yourself.
+
 ## 0.11.3
 
 ### Patch Changes
