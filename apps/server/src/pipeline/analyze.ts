@@ -4,8 +4,7 @@ import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "../db/index.js";
 import { StageContext, modelsUsed } from "./common.js";
-import { fmtTs } from "./transcript.js";
-import { chunkTranscript, mapChunk, mapLimit, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import { chunkTranscript, excludeRanges, mapChunk, mapLimit, needsSecondLook, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
 import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { finishThought } from "./thought.js";
@@ -184,10 +183,6 @@ export function snapCandidate(
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }
 
-function fmtRanges(cs: ClipCandidate[]) {
-  return cs.map((c) => `${fmtTs(c.startSec)}-${fmtTs(c.endSec)} "${c.title}"`).join("; ");
-}
-
 /** Local models are slow and sequential; cloud models take parallel calls and extra samples. */
 function isSelfHostedModel(cfg: { AI_MODEL: string; OPENAI_BASE_URL?: string }) {
   const provider = cfg.AI_MODEL.split(":")[0];
@@ -288,13 +283,18 @@ export async function analyze(ctx: StageContext) {
     await ctx.progress(0.05 + 0.35 * (++mapped / chunks.length), `Found candidates in part ${mapped}/${chunks.length}`);
     return found;
   });
-  // weak models often stop after the obvious pick; give sparse long chunks one more look
-  for (let i = 0; i < chunks.length; i++) {
+  // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1)
+  let gleaned = 0;
+  const gleanIdx = chunks.map((ch, i) => (needsSecondLook(ch, perChunk[i]!, settings.minClipSeconds) ? i : -1)).filter((i) => i >= 0);
+  await mapLimit(gleanIdx, concurrency, async (i) => {
+    if (ctx.signal.aborted) return;
     const ch = chunks[i]!;
-    if (perChunk[i]!.length > 1 || ch.end - ch.start < 180 || ctx.signal.aborted) continue;
-    const more = await mapChunk(o, ch, sc, perChunk[i]!.length ? fmtRanges(perChunk[i]!) : "none").catch(() => []);
+    const more = await mapChunk(o, ch, sc, excludeRanges(perChunk[i]!)).catch(() => []);
     perChunk[i]!.push(...more);
-  }
+    gleaned++;
+    await ctx.progress(0.4 + 0.05 * (gleaned / Math.max(1, gleanIdx.length)), `Looking again in part ${i + 1}/${chunks.length}`);
+  });
+  if (gleanIdx.length) log.debug({ gleaned: gleanIdx.length, perChunk: perChunk.map((l) => l.length) }, "second map pass on uncovered windows");
   const candidates = perChunk.flat();
   log.debug({ chunks: chunks.length, perChunk: perChunk.map((l) => l.length), candidates: candidates.length }, "moments proposed by the model");
   // what happened to every candidate the model proposed (stage artifact for diagnosis / reports)

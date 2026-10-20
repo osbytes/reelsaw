@@ -5,7 +5,10 @@ How a clip's start and end are chosen, and where to add a fixture when one is wr
 ## Pipeline
 
 1. The model proposes moments in **seconds** (`startSec`, `endSec`, `analyze.ts` map step). It may
-   propose fewer seconds than the minimum; it never sees word timings.
+   propose fewer seconds than the minimum; it never sees word timings. Each map call sees a ~3
+   minute overlapping window (also capped at 4000 characters), not the whole transcript — a
+   structural guard against primacy bias in long prompts, not a request to spread clips evenly.
+   A second map pass runs only when that window's first picks leave a long uncovered tail.
 2. `snapCandidate` (`pipeline/analyze.ts`) turns a proposal into a clip: snap to transcript
    segment boundaries, scene cuts, 0.25 s / 0.35 s of breathing room, trim to the maximum, grow to
    the minimum. Every candidate passes through it: the AI picks (`analyze`) and "Re-pick moments"

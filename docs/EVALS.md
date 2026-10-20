@@ -302,7 +302,7 @@ by loosening the IoU. `passRate` covers only the invariant cases.
 - `creator-picks/<name>`: model-free, on `candidates.json`, the real picker's ranked pool recorded
   from one run (model, judge, samples and date are in the file). Rank and gate are recomputed with the
   current code, so a gate change shows up offline.
-- `creator-picks/<name>/live`: the real picker (chunk each window, map, second look at sparse chunks,
+- `creator-picks/<name>/live`: the real picker (chunk each window, map, second look when a window's picks leave a long uncovered tail,
   snap, pool, rubric scores, pairwise if the config enables it), mirroring `analyze()` without the
   database. Every model call goes through `ctx.cached` (the map key is shared with `selection-model`),
   so `--offline` replays a recorded run. It calls the model only with `--creator-picks live`, or
