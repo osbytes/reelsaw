@@ -25,6 +25,7 @@ const EXPECTED = [
   "export_project",
   "get_billing",
   "get_clip",
+  "get_failure",
   "get_instance_settings",
   "get_project",
   "get_project_events",

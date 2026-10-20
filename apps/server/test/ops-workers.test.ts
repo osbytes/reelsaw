@@ -20,6 +20,8 @@ function row(p: { id: string; role: WorkerRole; hostname: string; seenAgoMs: num
     pid: 1,
     cpus: 4,
     memTotalMB: 8192,
+    diskFreeMB: 4096,
+    diskTotalMB: 102400,
     gpu: null,
     renders,
     queues: ["project.ingest"],
@@ -50,6 +52,8 @@ describe("classifyWorkers", () => {
     assert.equal(items[0]?.id, "a");
     assert.equal(items[0]?.live, true);
     assert.equal(items[0]?.thisProcess, true);
+    assert.equal(items[0]?.diskFreeMB, 4096);
+    assert.equal(items[0]?.diskTotalMB, 102400);
     assert.equal(items[1]?.id, "b");
     assert.equal(items[1]?.live, false);
     assert.equal(items[1]?.thisProcess, false);

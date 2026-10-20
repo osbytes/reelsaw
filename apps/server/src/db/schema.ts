@@ -626,6 +626,9 @@ export const workerInstances = pgTable(
     pid: integer("pid").notNull(),
     cpus: integer("cpus").notNull(),
     memTotalMB: integer("mem_total_mb").notNull(),
+    /** -1 when this filesystem cannot report free space (same as ResourceSnapshot) */
+    diskFreeMB: integer("disk_free_mb").notNull().default(-1),
+    diskTotalMB: integer("disk_total_mb").notNull().default(0),
     gpu: jsonb("gpu").$type<WorkerGpu | null>(),
     renders: jsonb("renders").$type<WorkerRenders>().notNull(),
     queues: text("queues").array().notNull().default(sql`'{}'::text[]`),

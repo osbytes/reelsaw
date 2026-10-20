@@ -90,7 +90,7 @@ truth. Competitors in this shape (n8n, Bull Board–style UIs, Temporal Web) sep
 
 1. **Heartbeat registry in Postgres, written by every process that can run work (and optionally
    the API for visibility).** Table roughly `worker_instances (id, role, hostname, started_at,
-   last_seen_at, version, commit, pid, cpus, mem_total_mb, gpu jsonb, render jsonb, queues
+   last_seen_at, version, commit, pid, cpus, mem_total_mb, disk_free_mb, disk_total_mb, gpu jsonb, render jsonb, queues
    text[], processing jsonb)`. Each process upserts every ~10–15 s (aligned with job heartbeat)
    with a stable `id` = `hostname:pid` or `WORKER_ID` env when set (compose/k8s can pin it).
    Stale = `last_seen_at` older than ~45 s. No Redis; the database is already the coordination
@@ -119,9 +119,9 @@ truth. Competitors in this shape (n8n, Bull Board–style UIs, Temporal Web) sep
    `#workers` when the registry has more than one row (or any worker role).
 
 5. **Surfaces ship together.** Service module (e.g. `ops/workers.ts`, `ops/failures.ts`) →
-   `admin.workers.list`, `admin.queue.summary`, `admin.failures.list`, `admin.failures.retry` →
-   MCP `list_workers`, `get_queue`, `list_failures`, `retry_failures` → CLI `reelsaw workers`,
-   `reelsaw queue`, extend `reelsaw recover` / add `reelsaw retry-failures`.
+   `admin.workers.list`, `admin.queue.summary`, `admin.failures.list`, `admin.failures.get`,
+   `admin.failures.retry` → MCP `list_workers`, `get_queue`, `list_failures`, `get_failure`,
+   `retry_failures` → CLI `reelsaw workers`, `reelsaw queue`, `reelsaw failure`, `reelsaw retry-failures`.
 
 ---
 
@@ -129,15 +129,18 @@ truth. Competitors in this shape (n8n, Bull Board–style UIs, Temporal Web) sep
 
 **Workers**
 - One row per live instance: hostname (or `WORKER_ID`), role (app / api / worker), version,
-  CPUs, memory, GPU note, render slots `running/max`, last seen.
+  CPUs, memory, disk (free of total), GPU note, render slots `running/max`, last seen.
 - Expand: queues this process listens on, current job ids / project titles (from `processing`).
 - Gone instances drop after stale timeout; no manual "remove".
 
 **Queue**
 - Counts: waiting / active / retrying per stage (from pg-boss).
 - Active: project, stage, attempt, worker id, started.
-- Failed work: project or clip, owner (email), stage, short reason, when. Actions: open project,
-  Retry, and (with a filter applied) "Retry all matching (N)".
+- Failed work: project or clip, owner (email), stage, short reason, when. The item and reason
+  open a dialog with the full recorded error, Retry, Copy reason, and Open project (secondary).
+  Row Retry stays on the list. With a filter applied: "Retry matching (N)". Hash
+  `#queue&fail=kind:id` deep-links the dialog. MCP `get_failure` / CLI `reelsaw failure` return
+  the same item.
 
 ---
 

@@ -5,7 +5,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
-import { clipFailureStage, errorSnippet, listFailures, retryFailures } from "../src/ops/failures.js";
+import { clipFailureStage, errorSnippet, getFailure, listFailures, retryFailures } from "../src/ops/failures.js";
 import { QUEUES } from "../src/queue/boss.js";
 
 describe("errorSnippet / clipFailureStage", () => {
@@ -57,7 +57,14 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
 
     const renderHits = await listFailures(h.svc, { stage: "render" });
     assert.ok(renderHits.items.some((i) => i.id === disk));
-    assert.ok(renderHits.items.some((i) => i.id === clipId && i.kind === "clip"));
+    const clipRow = renderHits.items.find((i) => i.id === clipId && i.kind === "clip");
+    assert.equal(clipRow?.title, "t");
+    assert.equal(clipRow?.projectTitle, "lifecycle test");
+
+    const one = await getFailure(h.svc, "clip", clipId);
+    assert.equal(one?.id, clipId);
+    assert.equal(one?.error, "encoder missing nvenc");
+    assert.equal(await getFailure(h.svc, "clip", orphaned.clipId), null);
 
     const ingestHits = await listFailures(h.svc, { stage: "ingest" });
     assert.ok(ingestHits.items.every((i) => i.stage === "ingest"));

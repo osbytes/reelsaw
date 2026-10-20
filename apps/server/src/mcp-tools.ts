@@ -12,7 +12,7 @@ import { settingsPatchSchema } from "./instance-settings.js";
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
-- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins)
+- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
@@ -307,7 +307,17 @@ export const TOOLS = {
   list_workers: {
     title: "List workers",
     description:
-      "Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, GPU, render slots, the queues it listens on, and the jobs it last reported. Returns { items, live, stale }; a process is stale when it has not checked in for 45 seconds. Hosted non-admins are refused.",
+      "Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, disk (free/total MB; -1 free means unmeasurable), GPU, render slots, the queues it listens on, and the jobs it last reported. Returns { items, live, stale }; a process is stale when it has not checked in for 45 seconds. Hosted non-admins are refused.",
+    annotations: { readOnlyHint: true },
+  },
+  get_failure: {
+    title: "Get a failed project or clip",
+    description:
+      "Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). A clip whose project also failed is not returned — retry the project. Returns the item or null if it is gone (retried, deleted). Hosted non-admins are refused.",
+    inputSchema: {
+      kind: z.enum(["project", "clip"]).describe("project = the whole pipeline stopped; clip = one clip failed to prepare or render"),
+      id: z.string().min(1).max(80).describe("Project id or clip id"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_queue: {

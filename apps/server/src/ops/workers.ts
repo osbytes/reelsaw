@@ -42,6 +42,8 @@ export interface WorkerView {
   pid: number;
   cpus: number;
   memTotalMB: number;
+  diskFreeMB: number;
+  diskTotalMB: number;
   gpu: WorkerGpu | null;
   renders: WorkerRenders;
   queues: string[];
@@ -63,6 +65,8 @@ export function classifyWorkers(
     pid: number;
     cpus: number;
     memTotalMB: number;
+    diskFreeMB: number;
+    diskTotalMB: number;
     gpu: WorkerGpu | null;
     renders: WorkerRenders;
     queues: string[] | null;
@@ -85,6 +89,8 @@ export function classifyWorkers(
       pid: r.pid,
       cpus: r.cpus,
       memTotalMB: r.memTotalMB,
+      diskFreeMB: r.diskFreeMB,
+      diskTotalMB: r.diskTotalMB,
       gpu: r.gpu,
       renders: r.renders,
       queues: r.queues ?? [],
@@ -142,6 +148,8 @@ export async function beat(svc: Services): Promise<void> {
       pid: process.pid,
       cpus: snap.cpus,
       memTotalMB: snap.memTotalMB,
+      diskFreeMB: snap.diskFreeMB,
+      diskTotalMB: snap.diskTotalMB,
       gpu: gpuJson,
       renders,
       queues,
@@ -160,6 +168,8 @@ export async function beat(svc: Services): Promise<void> {
         pid: process.pid,
         cpus: snap.cpus,
         memTotalMB: snap.memTotalMB,
+        diskFreeMB: snap.diskFreeMB,
+        diskTotalMB: snap.diskTotalMB,
         gpu: gpuJson,
         renders,
         queues,

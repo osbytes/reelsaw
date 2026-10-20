@@ -110,9 +110,15 @@ export function SettingsPage() {
   );
 }
 
+/** Section id from `#queue` or `#queue&fail=clip:…` (Failed work keeps extra hash params). */
+function sectionFromHash(hash = window.location.hash): string {
+  const head = (hash.replace(/^#/, "").split("&")[0] ?? "").replace(/=$/, "");
+  return head && !head.includes("=") ? head : "";
+}
+
 /** Which section is on screen, for the side nav; the hash follows without adding history entries. */
 function useActiveSection(ids: readonly string[]) {
-  const [active, setActive] = useState<string>(() => window.location.hash.slice(1) || ids[0]!);
+  const [active, setActive] = useState<string>(() => sectionFromHash() || ids[0]!);
   useEffect(() => {
     const els = ids.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => !!e);
     if (!els.length) return;
@@ -142,6 +148,7 @@ function onDeviceSummary(d: { requested: string; faces: string | null; text: str
 function jumpTo(id: string, smooth = true) {
   document.getElementById(id)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
   history.replaceState(null, "", `#${id}`);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
 function SystemTab() {
@@ -150,10 +157,12 @@ function SystemTab() {
   const s = q.data;
   const ids = SYSTEM_SECTIONS.map(([id]) => id);
   const active = useActiveSection(ids);
-  // a deep link (#access) lands on its section once the content exists
+  // a deep link (#access, or #queue&fail=…) lands on its section once the content exists; keep extra hash params
   useEffect(() => {
-    const id = window.location.hash.slice(1);
-    if (id && ids.includes(id as never)) jumpTo(id, false);
+    const section = sectionFromHash();
+    if (section && ids.includes(section as never)) {
+      document.getElementById(section)?.scrollIntoView({ behavior: "auto", block: "start" });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!s]);
 

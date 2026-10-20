@@ -391,6 +391,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "get_failure",
+    TOOLS.get_failure,
+    (input) => run(() => api.admin.failures.get(input)),
+  );
+
+  server.registerTool(
     "get_queue",
     TOOLS.get_queue,
     () => run(() => api.admin.queue.summary()),

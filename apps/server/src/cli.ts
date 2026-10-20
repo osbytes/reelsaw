@@ -28,6 +28,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           (same as Settings → System → Workers)
  *   queue [--json]                          waiting / running / retrying jobs per stage, plus what is in flight
  *                                           (same as Settings → System → Queue)
+ *   failure <projectId|clipId> [--json]     one failed project or clip: owner, stage, the full recorded reason
+ *                                           (same as clicking a row under Settings → System → Queue → Failed work)
  *   retry-failures [--stage s] [--q text] [--since 24h] [--json]
  *                                           retry failed projects and clips matching a reason after a platform fix
  *                                           (same as Settings → System → Queue → Retry all matching)
@@ -102,7 +104,7 @@ import { importReport } from "./report/import.js";
 import { reconcile } from "./queue/reconcile.js";
 import { listWorkers } from "./ops/workers.js";
 import { summarizeQueue } from "./ops/queue.js";
-import { FAILURE_STAGES, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
+import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { createServices, shutdownServices, type Services } from "./services.js";
@@ -379,6 +381,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         status: w.live ? "online" : `gone ${ago(w.lastSeenAgoSec)}`,
         cpus: w.cpus,
         mem: `${w.memTotalMB} MB`,
+        disk: w.diskFreeMB < 0 ? "n/a" : `${w.diskFreeMB} MB free of ${w.diskTotalMB} MB`,
         gpu: gpu(w),
         renders: `${w.renders.running}/${w.renders.max}`,
         processing: jobs(w),
@@ -419,6 +422,22 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         when: f.failedAt,
       })),
     );
+  },
+  /**
+   * One failed project or clip with the full recorded reason. Same as opening a row under
+   * Settings → System → Queue → Failed work. Tries project id first, then clip id.
+   */
+  async failure(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw failure <projectId|clipId>");
+    const item = (await getFailure(svc, "project", pos[0])) ?? (await getFailure(svc, "clip", pos[0]));
+    if (args.includes("--json")) return void console.log(JSON.stringify(item, null, 2));
+    if (!item) return console.log("not a failed project or clip (or the clip's project already failed — retry the project)");
+    console.log(`${item.kind}  ${item.title}${item.kind === "clip" ? `  (${item.projectTitle})` : ""}`);
+    console.log(`owner   ${item.ownerEmail}`);
+    console.log(`stage   ${item.stage}`);
+    console.log(`when    ${item.failedAt}`);
+    console.log(`id      ${item.id}`);
+    console.log(`\n${item.error ?? "(no reason recorded)"}`);
   },
   /**
    * Retry failed projects and clips that match `--stage` / `--q` / `--since`. Same path as the owner's
@@ -992,7 +1011,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

@@ -31,7 +31,9 @@ export interface FailureItem {
   id: string;
   projectId: string;
   clipId: string | null;
+  /** Clip title when kind is clip, otherwise the project title. */
   title: string;
+  projectTitle: string;
   ownerEmail: string;
   stage: FailureStage | string;
   error: string | null;
@@ -79,6 +81,7 @@ type Raw = {
   projectId: string;
   clipId: string | null;
   title: string;
+  projectTitle: string;
   ownerEmail: string;
   stage: string | null;
   error: string | null;
@@ -93,6 +96,7 @@ function view(r: Raw): FailureItem {
     projectId: r.projectId,
     clipId: r.clipId,
     title: r.title,
+    projectTitle: r.projectTitle,
     ownerEmail: r.ownerEmail,
     stage,
     error: r.error,
@@ -155,7 +159,8 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
           .select({
             id: schema.clips.id,
             projectId: schema.clips.projectId,
-            title: schema.projects.title,
+            title: schema.clips.title,
+            projectTitle: schema.projects.title,
             error: schema.clips.error,
             failedAt: schema.clips.updatedAt,
             ownerEmail: schema.user.email,
@@ -183,6 +188,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
       projectId: p.id,
       clipId: null,
       title: p.title,
+      projectTitle: p.title,
       ownerEmail: p.ownerEmail,
       stage: p.stage,
       error: p.error,
@@ -194,6 +200,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
       projectId: c.projectId,
       clipId: c.id,
       title: c.title,
+      projectTitle: c.projectTitle,
       ownerEmail: c.ownerEmail,
       stage: clipFailureStage(c),
       error: c.error,
@@ -219,6 +226,20 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
     limit,
     truncated,
   };
+}
+
+/** One failed project or clip, same visibility as the list (a clip whose project also failed is not returned). */
+export async function getFailure(svc: Services, kind: FailureKind, id: string): Promise<FailureItem | null> {
+  const [item] = await loadByIds(svc, [{ kind, id }]);
+  if (!item) return null;
+  if (kind === "clip") {
+    const [p] = await svc.database.db
+      .select({ status: schema.projects.status })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, item.projectId));
+    if (p?.status === "failed") return null;
+  }
+  return item;
 }
 
 export interface RetryResult {
@@ -325,7 +346,8 @@ async function loadByIds(svc: Services, ids: Array<{ kind: FailureKind; id: stri
           .select({
             id: schema.clips.id,
             projectId: schema.clips.projectId,
-            title: schema.projects.title,
+            title: schema.clips.title,
+            projectTitle: schema.projects.title,
             error: schema.clips.error,
             failedAt: schema.clips.updatedAt,
             ownerEmail: schema.user.email,
@@ -350,6 +372,7 @@ async function loadByIds(svc: Services, ids: Array<{ kind: FailureKind; id: stri
         projectId: p.id,
         clipId: null,
         title: p.title,
+        projectTitle: p.title,
         ownerEmail: p.ownerEmail,
         stage: p.stage,
         error: p.error,
@@ -363,6 +386,7 @@ async function loadByIds(svc: Services, ids: Array<{ kind: FailureKind; id: stri
         projectId: c.projectId,
         clipId: c.id,
         title: c.title,
+        projectTitle: c.projectTitle,
         ownerEmail: c.ownerEmail,
         stage: clipFailureStage(c),
         error: c.error,

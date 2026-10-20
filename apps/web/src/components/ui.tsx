@@ -171,19 +171,23 @@ export function Select({ value, onValueChange, options, placeholder, size = "md"
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
     // z-[80]: a Select inside Modal (overlay z-70) must paint above it. Combobox uses the same z-index.
+    // Width/placement live on a wrapper: the trigger is `w-full`, and a later `w-*` in className
+    // does not reliably override that, so a flex sibling (Failed work filters) would get crushed.
     <RadixSelect.Root disabled={disabled} value={value === "" ? NONE : value} onValueChange={(v) => onValueChange(v === NONE ? "" : v)}>
-      <RadixSelect.Trigger
-        aria-label={ariaLabel}
-        onClick={onClick}
-        className={`flex w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[placeholder]:text-ink3 data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls} ${className}`}
-      >
-        <span className="min-w-0 truncate">
-          <RadixSelect.Value placeholder={placeholder} />
-        </span>
-        <RadixSelect.Icon asChild>
-          <ChevronDown className="h-4 w-4 shrink-0 text-ink3" />
-        </RadixSelect.Icon>
-      </RadixSelect.Trigger>
+      <div className={className || "w-full"}>
+        <RadixSelect.Trigger
+          aria-label={ariaLabel}
+          onClick={onClick}
+          className={`flex h-full w-full items-center justify-between gap-2 border border-line bg-panel text-left text-ink outline-none transition focus:border-acc data-[placeholder]:text-ink3 data-[state=open]:border-acc disabled:cursor-not-allowed disabled:opacity-50 ${cls}`}
+        >
+          <span className="min-w-0 truncate">
+            <RadixSelect.Value placeholder={placeholder} />
+          </span>
+          <RadixSelect.Icon asChild>
+            <ChevronDown className="h-4 w-4 shrink-0 text-ink3" />
+          </RadixSelect.Icon>
+        </RadixSelect.Trigger>
+      </div>
       <RadixSelect.Portal>
         <RadixSelect.Content position="popper" sideOffset={6} collisionPadding={12} className="menu pointer-events-auto z-[80] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[max(var(--radix-select-trigger-width),12rem)] overflow-hidden p-0">
           <RadixSelect.ScrollUpButton className="flex h-6 items-center justify-center text-ink3">

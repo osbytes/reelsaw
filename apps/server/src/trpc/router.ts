@@ -10,7 +10,7 @@ import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restore
 import { USER_ROLES } from "../db/schema.js";
 import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
-import { FAILURE_STAGES, listFailures, retryFailures } from "../ops/failures.js";
+import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
 import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
@@ -893,6 +893,9 @@ export const appRouter = router({
             .optional(),
         )
         .query(({ ctx, input }) => listFailures(ctx.svc, input ?? {})),
+      get: adminProcedure
+        .input(z.object({ kind: z.enum(["project", "clip"]), id: z.string().min(1).max(80) }))
+        .query(({ ctx, input }) => getFailure(ctx.svc, input.kind, input.id)),
       retry: adminProcedure
         .input(
           z.object({
