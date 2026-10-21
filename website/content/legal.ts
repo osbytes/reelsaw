@@ -3,9 +3,9 @@
  * topic. Bracketed values ([…]) are the facts only the operator can fill in; `LEGAL_UPDATED` is shown on both
  * pages. Have counsel read these once before the first paying customer (docs/specs/ee.md).
  */
-export const LEGAL_UPDATED = "2026-10-19";
+export const LEGAL_UPDATED = "2026-10-21";
 export const LEGAL_ENTITY = "osbytes";
-export const LEGAL_CONTACT = "legal@reelsaw.com";
+export const LEGAL_CONTACT = "hi+reelsaw@osbytes.io";
 export const LEGAL_LAW = "[the jurisdiction of the operator]";
 
 export type LegalSection = { heading: string; paragraphs: string[]; bullets?: string[] };
