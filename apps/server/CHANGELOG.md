@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.14.0
+
+### Minor Changes
+
+- [#83](https://github.com/osbytes/reelsaw/pull/83) [`65c0b7e`](https://github.com/osbytes/reelsaw/commit/65c0b7eb8a562f5ac1a842f4274324b3942e3a87) Thanks [@dillonstreator](https://github.com/dillonstreator)! - When OpenTelemetry points at Sentry, traces and logs go to Sentry's OTLP endpoint, and metrics go through the Sentry SDK. Sentry does not accept OTLP metrics. Logs are the same pino lines as the local log, with prompts, transcripts and secret values left out. The browser records traces on the same rate (`OTEL_TRACES_SAMPLE_RATE`, default all of them) and its API calls, including live subscriptions, stay on the server's trace.
+  
+  **Upgrade:** With `OTEL_ENABLED=true`, a Sentry OTLP endpoint and `SENTRY_DSN` set, the server starts sending logs and, unless `OTEL_METRICS_ENABLED=false`, runtime gauges and span durations. The browser starts sending traces too. Set `OTEL_METRICS_ENABLED=false` to keep traces and logs only, or `OTEL_TRACES_SAMPLE_RATE` below 1 to keep fewer traces.
+
+### Patch Changes
+
+- [#85](https://github.com/osbytes/reelsaw/pull/85) [`dd23f2b`](https://github.com/osbytes/reelsaw/commit/dd23f2b7f9c8c96a8a904e3ff11bfcd77771e77e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Signing in to an account that is waiting for approval shows that waiting message instead of "Email not verified". The sign-in form asks for the current password, so a password manager does not generate a new one that was never stored. A repeat sign-up for an existing email is refused instead of looking successful.
+
 ## 0.13.0
 
 ### Minor Changes
