@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { textFontFamily } from "../lib/fonts";
 import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
@@ -48,6 +49,8 @@ export type PreviewAssetOverlay =
       color: string;
       box: boolean;
       opacity: number;
+      /** font family (TEXT_FONTS); absent = the caption font */
+      font?: string;
     };
 
 /** Where a layout's crop panes sit in the 9:16 frame, as [top, bottom] fractions; a stack's top part is content, not a crop. */
@@ -313,7 +316,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
               style={{
                 left: `${o.x * 100}%`,
                 top: `${o.y * 100}%`,
-                fontFamily: FONT,
+                fontFamily: textFontFamily(o.font),
                 fontSize: px,
                 maxWidth: width * 0.88,
                 color: o.color,

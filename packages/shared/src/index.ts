@@ -172,6 +172,7 @@ export const clipOverlaySchema = z
       .optional()
       .describe("text: colour as #RRGGBB, default white"),
     box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
+    font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
     opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
   })
   .refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
@@ -183,17 +184,46 @@ export const MAX_CLIP_OVERLAYS = 20;
  * someone talks, faded in and out. Times are absolute source seconds like sections and overlays.
  */
 export const clipAudioSchema = z.object({
-  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_bumpers, kind audio)"),
+  id: z.string().min(1).max(40).describe("Stable id for this track (any short string; keep it when editing)"),
+  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_bumpers, kind audio); the same asset can be used more than once"),
   start: z.number().min(0).describe("Music starts at this second of the source video"),
   end: z.number().min(0).describe("Music stops after this second of the source video"),
   offset: z.number().min(0).optional().describe("Seconds into the track to start from (default 0)"),
-  volume: z.number().min(0).max(1).optional().describe("Music level 0-1 (default 0.25), before ducking"),
+  volume: z.number().min(0).max(1).optional().describe("Music level 0-1 (default 0.6) on a track normalised to -20 LUFS, before ducking"),
   duck: z.boolean().optional().describe("Lower the music while someone speaks (default true)"),
   fade: z.number().min(0).max(5).optional().describe("Fade in and out, seconds (default 0.5)"),
   loop: z.boolean().optional().describe("Repeat the track when it is shorter than the window (default true)"),
 });
 export type ClipAudio = z.infer<typeof clipAudioSchema>;
-export const CLIP_AUDIO_DEFAULTS = { volume: 0.25, duck: true, fade: 0.5, loop: true } as const;
+export const CLIP_AUDIO_DEFAULTS = { volume: 0.6, duck: true, fade: 0.5, loop: true } as const;
+export const MAX_CLIP_AUDIO = 10;
+/** Rows written before tracks had ids and could repeat hold one object; read them as a one-track list. */
+export function clipAudioList(v: unknown): ClipAudio[] {
+  if (Array.isArray(v)) return v.flatMap((x) => (clipAudioSchema.safeParse(x).success ? [clipAudioSchema.parse(x)] : []));
+  if (v && typeof v === "object") {
+    const one = clipAudioSchema.safeParse({ id: "music", ...(v as Record<string, unknown>) });
+    return one.success ? [one.data] : [];
+  }
+  return [];
+}
+
+/**
+ * Fonts a text overlay can use: installed in the server image (Dockerfile) and served to the editor
+ * preview from there (`/api/fonts/:family`), so what you see is what libass draws.
+ */
+export const TEXT_FONTS = [
+  { family: "DejaVu Sans", label: "DejaVu Sans (default)" },
+  { family: "Liberation Sans", label: "Liberation Sans (Arial-like)" },
+  { family: "Roboto", label: "Roboto" },
+  { family: "Open Sans", label: "Open Sans" },
+  { family: "Lato", label: "Lato" },
+  { family: "Inter", label: "Inter" },
+  { family: "Bebas Neue", label: "Bebas Neue (condensed caps)" },
+  { family: "Liberation Serif", label: "Liberation Serif" },
+  { family: "DejaVu Sans Mono", label: "DejaVu Sans Mono" },
+] as const;
+export type TextFont = (typeof TEXT_FONTS)[number]["family"];
+export const textFontSchema = z.enum(TEXT_FONTS.map((f) => f.family) as [TextFont, ...TextFont[]]);
 
 /** A caption line as the last render burned it in, in the rendered video's own seconds (after the intro). */
 export interface RenderedCaptionLine {

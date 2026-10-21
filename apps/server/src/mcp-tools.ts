@@ -5,7 +5,7 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, MAX_CLIP_OVERLAYS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO } from "@reelsaw/shared";
 import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
@@ -181,7 +181,7 @@ export const TOOLS = {
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
       overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional().describe(`Things laid over the clip for a time range (max ${MAX_CLIP_OVERLAYS}): kind asset = a library image/video (list_bumpers; logos, stickers, b-roll), kind text = a line of text (size, color, box). Replaces the list; null or [] = none`),
-      audio: clipAudioSchema.nullable().optional().describe("Background music under part of the clip: a library audio asset (list_bumpers, kind audio), its window in source seconds, volume, ducking under speech, fades. Replaces the value; null = none"),
+      audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional().describe(`Background music tracks under parts of the clip (max ${MAX_CLIP_AUDIO}; the same asset may repeat): library audio assets (list_bumpers, kind audio), each with a window in source seconds, volume, ducking under speech, fades. Replaces the list; null or [] = none`),
       rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
     },
   },

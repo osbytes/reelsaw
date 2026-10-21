@@ -32,6 +32,8 @@ export interface TextOverlayEvent {
   /** dark plate behind the text instead of an outline */
   box: boolean;
   opacity: number;
+  /** font family (TEXT_FONTS); absent = the caption font */
+  font?: string;
 }
 
 /**
@@ -151,7 +153,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const alpha = Math.round((1 - Math.max(0.1, Math.min(1, t.opacity))) * 255);
     const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
     const fs = Math.max(8, Math.round(t.size * height));
-    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
+    const fn = t.font && t.font !== font ? `\\fn${esc(t.font).replace(/[\\,]/g, "")}` : "";
+    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
   }
 
   // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed

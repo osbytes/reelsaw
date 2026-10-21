@@ -459,8 +459,8 @@ export const clips = pgTable(
     bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     /** library images/videos laid over the clip for a time range (logos, stickers, b-roll); null = none */
     overlays: jsonb("overlays").$type<ClipOverlay[]>(),
-    /** background music under part of the clip (library audio asset, ducked under speech); null = none */
-    audio: jsonb("audio").$type<ClipAudio>(),
+    /** background music under parts of the clip (library audio tracks, ducked under speech); null = none. Read through `clipAudioList` (older rows hold one object). */
+    audio: jsonb("audio").$type<ClipAudio[]>(),
     /** the caption lines the last render burned in, in the rendered video's seconds, for SRT / VTT export */
     captions: jsonb("captions").$type<RenderedCaptions>(),
     /** last time the user edited the clip (clips.update); an edited clip survives a re-analyze */

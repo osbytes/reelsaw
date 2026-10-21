@@ -24,7 +24,10 @@ import { requester, activeRequester, bearerToken, blockedReason, mcpResource, AP
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
-import { reportRequestSchema } from "@reelsaw/shared";
+import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
@@ -222,6 +225,24 @@ export function createApp(svc: Services) {
   });
 
   // A user's own intro/outro, for the Settings preview. Owner only; soft-deleted assets stay readable by their owner.
+  // The font files text overlays can use, from the image's own fontconfig, so the editor preview draws
+  // exactly what libass will. Public: a font file is not user data. Long cache: the files never change.
+  app.get("/api/fonts/:family", async (c) => {
+    const family = TEXT_FONTS.find((f) => f.family === c.req.param("family"))?.family;
+    if (!family) return c.text("unknown font", 404);
+    try {
+      const { stdout } = await execFileAsync("fc-match", ["-f", "%{file}|%{family}", family]);
+      const [file, matched] = stdout.trim().split("|");
+      // fc-match falls back to any font when the family is missing: refuse that instead of serving the wrong face
+      if (!file || !matched || !matched.split(",").some((m) => m.trim().toLowerCase() === family.toLowerCase())) return c.text("font not installed", 404);
+      c.header("Cache-Control", "public, max-age=604800, immutable");
+      return sendFile(c.req.raw, file);
+    } catch (err) {
+      c.get("log").warn({ err, family }, "font lookup failed");
+      return c.text("font not available", 404);
+    }
+  });
+
   app.get("/media/bumpers/:id", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
