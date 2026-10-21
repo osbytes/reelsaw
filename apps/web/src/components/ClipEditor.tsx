@@ -310,6 +310,13 @@ export function ClipEditor(props: Props) {
   const [selectedMusic, setSelectedMusicRaw] = useState<string | null>(null);
   // the text-overlay fonts, from the server image, so the preview shows the real faces
   useEffect(() => loadTextFonts(), []);
+  // selecting a block on the timeline brings its card into view in the Overlays pane (after a tab switch renders it)
+  useEffect(() => {
+    const sel = selectedOverlay ? `[data-ov-card="${selectedOverlay}"]` : selectedMusic ? `[data-music-card="${selectedMusic}"]` : null;
+    if (!sel) return;
+    const id = requestAnimationFrame(() => document.querySelector(sel)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+    return () => cancelAnimationFrame(id);
+  }, [selectedOverlay, selectedMusic]);
   const [addOverlayOpen, setAddOverlayOpen] = useState(false);
   const [addMusicOpen, setAddMusicOpen] = useState(false);
   const library = useBumperLibrary();
@@ -845,6 +852,7 @@ export function ClipEditor(props: Props) {
           overlayKind(o) === "text" ? Number((o.size ?? TEXT_OVERLAY_DEFAULTS.size).toFixed(3)) : Number((o.w ?? ASSET_OVERLAY_DEFAULT_W).toFixed(3)),
           overlayKind(o) === "text" ? (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase() : "",
           overlayKind(o) === "text" ? !!o.box : false,
+          overlayKind(o) === "text" ? (o.font ?? TEXT_FONTS[0].family) : "",
           o.opacity !== undefined && o.opacity < 1 ? Number(o.opacity.toFixed(3)) : 1,
         ]),
     );
@@ -1292,6 +1300,7 @@ export function ClipEditor(props: Props) {
       return (
         <div
           key={m.id}
+          data-music-card={m.id}
           onClick={() => {
             setSelectedMusic(m.id);
             if (current < m.start || current > m.end) seek(m.start);
@@ -1374,6 +1383,7 @@ export function ClipEditor(props: Props) {
           return (
             <div
               key={o.id}
+              data-ov-card={o.id}
               onClick={() => {
                 setSelectedOverlay(o.id);
                 if (current < o.start || current > o.end) seek(o.start);
@@ -1828,7 +1838,11 @@ export function ClipEditor(props: Props) {
       selectedOverlay={selectedOverlay}
       onOverlaySelect={(id) => {
         setSelectedOverlay(id);
-        if (id && tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        if (!id) return;
+        if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        // show it: park the playhead inside its window so the preview has it on screen
+        const o = assetOverlays.find((x) => x.id === id);
+        if (o && (current < o.start || current > o.end)) seek(o.start);
       }}
       onOverlayChange={(id, r, key) => patchOverlay(id, { start: r[0], end: r[1] }, key)}
       onOverlayAdd={(t, kind) => {
@@ -1842,7 +1856,10 @@ export function ClipEditor(props: Props) {
       selectedMusic={selectedMusic}
       onMusicSelect={(id) => {
         setSelectedMusic(id);
-        if (id && tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        if (!id) return;
+        if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        const m = music.find((x) => x.id === id);
+        if (m && (current < m.start || current > m.end)) seek(m.start);
       }}
       onMusicChange={(id, r, key) => patchMusic(id, { start: r[0], end: r[1] }, key)}
       onMusicAdd={() => setAddMusicOpen(true)}
