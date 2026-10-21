@@ -297,7 +297,10 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - **Live data comes from events.** Mutations invalidate queries, and the project event stream
   drives refreshes and progress. Don't poll when an event exists.
 - **Keyboard first in editors.** Shortcuts are consistent across views and listed in the UI
-  (`?`). Typing in an input never triggers a shortcut.
+  (`?`). Typing in an input never triggers a shortcut. A binding is one `useShortcut("mod+s", …)`
+  call (`lib/shortcuts.ts`, react-hotkeys-hook underneath) next to a `useShortcuts()` entry that
+  documents it; never a hand-rolled `keydown` listener on `window`, so the typing rule, the platform
+  modifier and the sheet cannot drift apart.
 
 ## Surfaces: UI, MCP, CLI
 

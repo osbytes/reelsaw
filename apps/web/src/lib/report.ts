@@ -28,10 +28,5 @@ export function openReportHere() {
   openReport({ projectId, clipId });
 }
 
-/** Keyboard shortcut: "!" anywhere except while typing. */
+/** Keyboard shortcut: "!" anywhere except while typing (bound in ReportDialog). */
 export const REPORT_SHORTCUT = "!";
-export function isReportShortcut(e: KeyboardEvent) {
-  if (e.key !== REPORT_SHORTCUT || e.metaKey || e.ctrlKey || e.altKey) return false;
-  const el = e.target as HTMLElement | null;
-  return !el?.closest?.("input, textarea, select, [contenteditable]");
-}

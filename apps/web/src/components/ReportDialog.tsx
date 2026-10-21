@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useShortcut } from "../lib/shortcuts";
 import { useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
@@ -10,7 +11,7 @@ import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { clientContext } from "../lib/diagnostics";
-import { closeReport, isReportShortcut, openReportHere, useReportTarget } from "../lib/report";
+import { closeReport, openReportHere, REPORT_SHORTCUT, useReportTarget } from "../lib/report";
 import { sendIssueFeedback } from "../lib/telemetry";
 
 interface Preview {
@@ -46,15 +47,7 @@ export function ReportDialog() {
   const [error, setError] = useState<string | null>(null);
 
   // "!" opens the report from anywhere (ignored while typing)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!isReportShortcut(e)) return;
-      e.preventDefault();
-      openReportHere();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useShortcut(REPORT_SHORTCUT, () => openReportHere(), { useKey: true });
 
   // reset per opening; fetch media sizes for the checkboxes (zip mode only)
   useEffect(() => {

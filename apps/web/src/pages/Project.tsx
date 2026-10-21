@@ -15,7 +15,7 @@ import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ShortcutSheet } from "../components/ShortcutSheet";
-import { useShortcuts, useSheetKey } from "../lib/shortcuts";
+import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { ProjectBumpersModal } from "../components/BumperField";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
@@ -251,11 +251,11 @@ export function ProjectPage() {
       .catch(() => toast.error("Couldn’t copy the link"));
   
   // Space plays / pauses the source video anywhere on the page except while typing
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey) return;
+  useShortcut(
+    "space",
+    (e) => {
       const el = e.target as HTMLElement;
-      if (el.closest("input, textarea, select, [contenteditable]")) return;
+      if (el.closest("input, select")) return; // a focused checkbox keeps Space for itself
       // the clip preview dialog owns Space: it controls the preview video, never the source
       const pv = previewRef.current;
       if (pv) {
@@ -269,10 +269,9 @@ export function ProjectPage() {
       if (!sourceRef.current) return;
       e.preventDefault(); // also stops Space from re-clicking the focused button
       togglePlay(); // pauses / resumes play-in-context too, keeping it armed
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay]);
+    },
+    { preventDefault: false },
+  );
 
   useShortcuts("Project page", [["Play / pause the source video", "Space"]]);
   const [keysOpen, setKeysOpen] = useState(false);
