@@ -3,6 +3,7 @@
   "document": "CLA.md",
   "how": "Add your GitHub login below in your first pull request. That signed-off commit is your signature of CLA.md.",
   "signatures": [
-    { "login": "dillonstreator", "signedAt": "2026-10-19" }
+    { "login": "dillonstreator", "signedAt": "2026-10-19" },
+    { "login": "cursoragent", "signedAt": "2026-10-21" }
   ]
 }
