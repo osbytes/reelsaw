@@ -1,12 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Analytics } from "@/components/analytics";
 import { THEME_BOOT_SCRIPT } from "@/components/theme";
 import { SITE } from "@/lib/site";
 import "./globals.css";
 
-const hanken = Hanken_Grotesk({ subsets: ["latin"], variable: "--font-hanken", display: "swap" });
-const jetbrains = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains", display: "swap", weight: ["400", "500", "600"] });
+// Self-hosted so `next build` does not download Google Fonts. Next.js 16.4.2 crashes
+// when Google returns an extensionless /l/font?kit= URL ("next/font/google queries have
+// exactly one entry", vercel/next.js#99114). Latin subsets match the previous loader.
+const hanken = localFont({
+  src: [{ path: "../fonts/hanken-grotesk-latin-wght-normal.woff2", weight: "100 900", style: "normal" }],
+  variable: "--font-hanken",
+  display: "swap",
+});
+const jetbrains = localFont({
+  src: [
+    { path: "../fonts/jetbrains-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/jetbrains-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/jetbrains-mono-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
