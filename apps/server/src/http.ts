@@ -12,6 +12,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Services } from "./services.js";
+import { injectOtelBoot } from "./otel-config.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
@@ -86,12 +87,15 @@ export function createApp(svc: Services) {
     cors({
       origin: [config.APP_URL, "http://localhost:5173"],
       credentials: true,
-      allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version"],
+      allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version", "traceparent", "tracestate", "baggage", "last-event-id"],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     }),
   );
 
   const version = { version: svc.config.REELSAW_VERSION, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT };
+  // Public OTLP config for the browser. The production HTML embeds the same object so the SDK
+  // starts before the first API call; Vite dev has no embed and fetches this instead.
+  app.get("/api/otel", (c) => c.json(svc.otel.public));
   // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
   app.get("/api/health", async (c) => {
     const open = svc.settings.get().HEALTH_DETAILS;
@@ -389,7 +393,7 @@ export function createApp(svc: Services) {
 
   // Static SPA (production build of apps/web) with history fallback
   if (config.WEB_DIST && fs.existsSync(config.WEB_DIST)) {
-    const index = fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8");
+    const index = injectOtelBoot(fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8"), svc.otel.public);
     app.use("/*", serveStatic({ root: path.relative(process.cwd(), config.WEB_DIST) || "." }));
     app.get("*", (c) => (c.req.path.startsWith("/api/") || c.req.path.startsWith("/media/") ? c.notFound() : c.html(index)));
   }

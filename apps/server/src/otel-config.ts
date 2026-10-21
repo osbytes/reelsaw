@@ -9,6 +9,8 @@ export type OtelPublic = {
   headers: Record<string, string>;
   metrics: boolean;
   serviceName: string;
+  /** 0–1. The browser sampler uses this; the server uses the same rate unless OTEL_TRACES_SAMPLER is set. */
+  sampleRate: number;
 } | null;
 
 export function isSentryOtlpUrl(url: string): boolean {
@@ -64,7 +66,44 @@ export type ResolvedOtlp = {
   sentryMetrics: boolean;
   sentry: boolean;
   serviceName: string;
+  /** 0–1 from OTEL_TRACES_SAMPLE_RATE. 1 records every trace. */
+  sampleRate: number;
 };
+
+/**
+ * Fraction of root traces to record. Blank or unreadable means 1 (record all).
+ * Out of range clamps into 0–1.
+ */
+export function traceSampleRate(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OTEL_TRACES_SAMPLE_RATE;
+  if (raw === undefined || raw.trim() === "") return 1;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * Apply the sample rate as a parent-based ratio, so a trace the browser did not record
+ * is not recorded here either. Skipped when OTEL_TRACES_SAMPLER is already set: that
+ * standard variable wins on the server.
+ */
+export function applyServerSampler(env: NodeJS.ProcessEnv, sampleRate: number): void {
+  if (env.OTEL_TRACES_SAMPLER?.trim()) return;
+  env.OTEL_TRACES_SAMPLER = "parentbased_traceidratio";
+  env.OTEL_TRACES_SAMPLER_ARG = String(sampleRate);
+}
+
+/** JSON island the SPA reads before its first request. `<` is escaped so the payload cannot close the script. */
+export function otelBootHtml(cfg: OtelPublic): string {
+  const json = JSON.stringify(cfg).replace(/</g, "\\u003c");
+  return `<script type="application/json" id="reelsaw-otel">${json}</script>`;
+}
+
+export function injectOtelBoot(html: string, cfg: OtelPublic): string {
+  const tag = otelBootHtml(cfg);
+  if (html.includes('id="reelsaw-otel"')) return html.replace(/<script type="application\/json" id="reelsaw-otel">[\s\S]*?<\/script>/, tag);
+  return html.includes("</head>") ? html.replace("</head>", `${tag}</head>`) : html + tag;
+}
 
 /** Resolve OTLP endpoint/headers from OTEL_* env only. */
 export function resolveOtlp(env: NodeJS.ProcessEnv = process.env): ResolvedOtlp {
@@ -85,6 +124,7 @@ export function resolveOtlp(env: NodeJS.ProcessEnv = process.env): ResolvedOtlp 
     sentryMetrics: toSentry && metricsWanted,
     sentry: toSentry,
     serviceName,
+    sampleRate: traceSampleRate(env),
   };
 }
 
@@ -178,5 +218,6 @@ export function publicFromResolved(r: ResolvedOtlp): OtelPublic {
     headers: r.headers,
     metrics: r.metrics,
     serviceName: `${r.serviceName}-web`,
+    sampleRate: r.sampleRate,
   };
 }

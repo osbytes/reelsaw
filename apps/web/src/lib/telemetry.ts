@@ -18,6 +18,8 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
   started = (async () => {
     if (t.sentry) {
       sb = await import("@sentry/browser");
+      // tracesSampleRate stays 0. Browser traces are OpenTelemetry (lib/otel.ts, OTEL_TRACES_SAMPLE_RATE).
+      // A non-zero rate here would send a second copy through the Sentry SDK.
       sb.init({ dsn: t.sentry.dsn, environment: t.sentry.environment, release: t.sentry.release, tracesSampleRate: 0 });
     }
     if (t.posthog) {

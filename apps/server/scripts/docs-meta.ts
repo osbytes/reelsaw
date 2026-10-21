@@ -190,6 +190,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   OTEL_EXPORTER_OTLP_ENDPOINT: ["compose", "OTLP/HTTP collector base URL (the SDK appends `/v1/traces`). For Sentry, paste the OTLP base from Project Settings → Client Keys → OpenTelemetry (`…/integration/otlp`), not `…/v1/traces`."],
   OTEL_EXPORTER_OTLP_HEADERS: ["compose", "Extra OTLP headers as `key=url-encoded-value` pairs. For Sentry: `x-sentry-auth=sentry%20sentry_key%3D<public-key>` (the public key from the DSN). Private collector example: `authorization=Bearer%20xxx`."],
   OTEL_METRICS_ENABLED: ["compose", "Export metrics as well as traces. A collector receives OTLP `/v1/metrics`. Sentry does not: with a Sentry OTLP endpoint and `SENTRY_DSN` set, the server sends Node runtime gauges and span durations as Sentry Application Metrics instead. Set to false for traces only."],
+  OTEL_TRACES_SAMPLE_RATE: ["compose", "Fraction of traces to record, from 0 to 1. Default 1 (record all). The browser uses the same rate and starts before the first API call, so a page load and the server work it starts share a trace. A trace the browser does not record is not recorded on the server either. Leave `OTEL_TRACES_SAMPLER` unset; that standard variable overrides this on the server only."],
   OTEL_METRIC_EXPORT_INTERVAL: ["compose", "Metric export interval in milliseconds."],
   OTEL_LOG_LEVEL: ["compose", "Diagnostic log level of the OpenTelemetry SDK itself."],
 };
@@ -205,6 +206,7 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
   OTEL_EXPORTER_OTLP_HEADERS: "",
   OTEL_METRICS_ENABLED: "true",
+  OTEL_TRACES_SAMPLE_RATE: "1",
   OTEL_METRIC_EXPORT_INTERVAL: "30000",
   OTEL_LOG_LEVEL: "",
 };
