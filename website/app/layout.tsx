@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Analytics } from "@/components/analytics";
-import { THEME_BOOT_SCRIPT } from "@/components/theme";
+import { ThemeSync } from "@/components/theme";
 import { SITE } from "@/lib/site";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme-script";
 import "./globals.css";
 
 // Self-hosted so `next build` does not download Google Fonts. Next.js 16.4.2 crashes
@@ -71,12 +72,14 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // suppressHydrationWarning: data-theme is set by the boot script before React runs
+    // suppressHydrationWarning: the boot script sets data-theme before React hydrates.
+    // ThemeSync puts it back when a later commit rebuilds <html> without that attribute.
     <html lang="en" className={`${hanken.variable} ${jetbrains.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       <body className="min-h-dvh">
+        <ThemeSync />
         {children}
         <Analytics />
       </body>
