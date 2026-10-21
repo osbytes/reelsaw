@@ -78,20 +78,31 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/\b(sk-ant|sk-proj|gsk|xai|AIza)[A-Za-z0-9_-]{12,}/g, "[redacted key]"],
 ];
 
+/** Longest first, plus the JSON-escaped form, so a value inside a log line is replaced before a shorter prefix of it. */
+function secretForms(secrets: readonly string[]): string[] {
+  return [...new Set(secrets.filter((v) => v.length >= MIN_SECRET_LENGTH).flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Scrub a string that is about to leave the machine: configured secret values, then bearer tokens,
+ * cookies, emails, signed-URL queries and well-known API-key shapes. Field names are irrelevant.
+ * Does not pseudonymise user ids; issue reports do that in makeRedactor.
+ */
+export function scrubOutboundText(text: string, secrets: readonly string[] = []): string {
+  let s = text;
+  for (const v of secretForms(secrets)) if (s.includes(v)) s = s.split(v).join("[redacted]");
+  for (const [re, rep] of PATTERNS) s = s.replace(re, rep);
+  return s;
+}
+
 /**
  * `extra` carries secrets that live outside the environment, such as provider API keys an admin
  * entered in the UI (stored encrypted, decrypted in memory only).
  */
 export function makeRedactor(config: Config, extra: Iterable<string> = []): (text: string) => string {
-  const secrets = [...new Set([...secretValues(config), ...[...extra].filter((v) => v.length >= MIN_SECRET_LENGTH)])].sort((a, b) => b.length - a.length);
-  // also match each secret as it appears inside JSON text (quotes/backslashes escaped)
-  const forms = [...new Set(secrets.flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))].sort((a, b) => b.length - a.length);
+  const secrets = [...new Set([...secretValues(config), ...[...extra].filter((v) => v.length >= MIN_SECRET_LENGTH)])];
   return (text) => {
-    let s = text;
-    for (const v of forms) if (s.includes(v)) s = s.split(v).join("[redacted]");
-    for (const [re, rep] of PATTERNS) s = s.replace(re, rep);
     // user ids in JSON lines (request logs, job data, events) become the same 12-char pseudonym as project.json's ownerHash
-    s = s.replace(/"(userId|user_id|actorId)":"([A-Za-z0-9_-]{8,})"/g, (_m, k: string, id: string) => `"${k}":"${createHash("sha256").update(id).digest("hex").slice(0, 12)}"`);
-    return s;
+    return scrubOutboundText(text, secrets).replace(/"(userId|user_id|actorId)":"([A-Za-z0-9_-]{8,})"/g, (_m, k: string, id: string) => `"${k}":"${createHash("sha256").update(id).digest("hex").slice(0, 12)}"`);
   };
 }

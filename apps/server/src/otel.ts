@@ -7,12 +7,15 @@
  * Enable with OTEL_ENABLED=true. OTEL_* env vars configure the exporters independently of
  * SENTRY_DSN (error reporting). Point OTEL_EXPORTER_OTLP_ENDPOINT at a collector or at Sentry's
  * OTLP base (`…/integration/otlp`) and set OTEL_EXPORTER_OTLP_HEADERS (for Sentry:
- * `x-sentry-auth=sentry%20sentry_key%3D<public>`). Sentry destinations export traces only.
+ * `x-sentry-auth=sentry%20sentry_key%3D<public>`). Sentry accepts OTLP traces and logs
+ * (`/v1/logs`); when metrics are left on, telemetry.ts sends those through the Sentry SDK
+ * instead of `/v1/metrics`. Application logs are pino lines forwarded by log.ts.
  * Resolution helpers live in otel-config.ts.
  */
 import { createRequire } from "node:module";
 import { trace, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
 import { publicFromResolved, resolveOtlp, type OtelPublic } from "./otel-config.js";
+import { setOtelLogsEnabled } from "./otel-log.js";
 
 export type { OtelPublic } from "./otel-config.js";
 export { resolveOtlp } from "./otel-config.js";
@@ -23,16 +26,29 @@ export interface Otel {
   enabled: boolean;
   /** browser-safe OTLP config for system.status; null when off or headers are not public */
   public: OtelPublic;
+  /** Sentry SDK metrics (runtime gauges + span durations). OTLP metrics stay off for that endpoint. */
+  sentryMetrics: boolean;
   shutdown(): Promise<void>;
 }
 
+export type SpanMetric = (info: { name: string; durationMs: number; ok: boolean; attributes: Attributes }) => void;
+
+let spanMetric: SpanMetric | null = null;
+
+/** Registered by telemetry.ts once Sentry is initialised. No-op until then, and never throws into the span. */
+export function setSpanMetric(fn: SpanMetric | null): void {
+  spanMetric = fn;
+}
+
 function start(): Otel {
-  if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, shutdown: async () => {} };
+  if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
   const cfg = resolveOtlp(process.env);
   const require = createRequire(import.meta.url);
   const { NodeSDK, metrics } = require("@opentelemetry/sdk-node");
   const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
   const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
+  const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
+  const { BatchLogRecordProcessor } = require("@opentelemetry/sdk-logs");
   const { OTLPMetricExporter } = require("@opentelemetry/exporter-metrics-otlp-http");
   const { resourceFromAttributes } = require("@opentelemetry/resources");
   const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = require("@opentelemetry/semantic-conventions");
@@ -47,6 +63,9 @@ function start(): Otel {
       "reelsaw.role": runHttp && runWorkers ? "app" : runHttp ? "api" : "worker",
     }),
     traceExporter: new OTLPTraceExporter({ url: cfg.tracesUrl, headers: cfg.headers }),
+    // Explicit processor so the SDK does not also build one from OTEL_LOGS_EXPORTER (that path
+    // defaults to protobuf and would send a second copy). Same URL and headers as traces.
+    logRecordProcessors: [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter({ url: cfg.logsUrl, headers: cfg.headers }) })],
     metricReader: cfg.metrics
       ? new metrics.PeriodicExportingMetricReader({
           exporter: new OTLPMetricExporter({ url: cfg.metricsUrl, headers: cfg.headers }),
@@ -66,6 +85,7 @@ function start(): Otel {
     ],
   });
   sdk.start();
+  setOtelLogsEnabled(true);
   // runs before the logger exists (it must patch modules first); one JSON line in pino's shape
   let host = cfg.endpoint;
   try {
@@ -80,12 +100,14 @@ function start(): Otel {
       module: "otel",
       host,
       traces: true,
+      logs: true,
       metrics: cfg.metrics,
+      sentryMetrics: cfg.sentryMetrics,
       sentry: cfg.sentry,
       msg: "opentelemetry enabled",
     }) + "\n",
   );
-  return { enabled: true, public: publicFromResolved(cfg), shutdown: () => sdk.shutdown() };
+  return { enabled: true, public: publicFromResolved(cfg), sentryMetrics: cfg.sentryMetrics, shutdown: () => sdk.shutdown() };
 }
 
 export const otel: Otel = start();
@@ -94,15 +116,24 @@ export const tracer = trace.getTracer("reelsaw");
 /** Run `fn` inside a span. When OTel is disabled the API's noop tracer makes this free. */
 export async function withSpan<T>(name: string, attributes: Attributes, fn: (span: Span) => Promise<T>): Promise<T> {
   return tracer.startActiveSpan(name, { attributes }, async (span) => {
+    const t0 = performance.now();
+    let ok = true;
     try {
       const out = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return out;
     } catch (err) {
+      ok = false;
       span.recordException(err as Error);
       span.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
       throw err;
     } finally {
+      // Record while the span is still current so Sentry can attach its trace id. Never fail the work.
+      try {
+        spanMetric?.({ name, durationMs: performance.now() - t0, ok, attributes });
+      } catch {
+        /* metric export must not change the span's result */
+      }
       span.end();
     }
   });
