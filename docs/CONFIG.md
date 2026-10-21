@@ -197,8 +197,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `LOG_LEVEL` | `info` | A level (`trace`..`silent`) optionally followed by per-module overrides, e.g. `info,render=debug,http=warn`. Change it without a restart with `reelsaw log-level`. |
 | `LOG_FORMAT` | `auto` | `auto` (pretty on a terminal, JSON otherwise), `json` or `pretty`. Values: `auto | json | pretty`. |
-| `OTEL_ENABLED` | `false` | OpenTelemetry traces (and metrics, when the collector supports them) over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. See the OTEL_* variables at the end. |
-| `SENTRY_DSN` | unset | Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Does not configure OTEL. Unset, nothing is sent. |
+| `OTEL_ENABLED` | `false` | OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end. |
+| `SENTRY_DSN` | unset | Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and span durations are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent. |
 | `SENTRY_ENVIRONMENT` | unset | Sentry environment tag. Default: `production` under NODE_ENV=production, else `development`. |
 | `POSTHOG_KEY` | unset | PostHog project key (public). Set, the server sends sign-ups, project created/done/failed, billing and abuse-flag events, and the web app sends page views and a few product events; people are identified by user id with email and name on the profile. Unset, nothing is sent. |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance). |
@@ -233,7 +233,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `OTEL_SERVICE_NAME` | `reelsaw` | OpenTelemetry service name (read by otel.ts). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP collector base URL (the SDK appends `/v1/traces`). For Sentry, paste the OTLP base from Project Settings → Client Keys → OpenTelemetry (`…/integration/otlp`), not `…/v1/traces`. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Extra OTLP headers as `key=url-encoded-value` pairs. For Sentry: `x-sentry-auth=sentry%20sentry_key%3D<public-key>` (the public key from the DSN). Private collector example: `authorization=Bearer%20xxx`. |
-| `OTEL_METRICS_ENABLED` | `true` | Export metrics as well as traces. Forced off when the endpoint looks like Sentry OTLP (no metrics ingest). |
+| `OTEL_METRICS_ENABLED` | `true` | Export metrics as well as traces. A collector receives OTLP `/v1/metrics`. Sentry does not: with a Sentry OTLP endpoint and `SENTRY_DSN` set, the server sends Node runtime gauges and span durations as Sentry Application Metrics instead. Set to false for traces only. |
 | `OTEL_METRIC_EXPORT_INTERVAL` | `30000` | Metric export interval in milliseconds. |
 | `OTEL_LOG_LEVEL` | unset | Diagnostic log level of the OpenTelemetry SDK itself. |
 <!-- /generated -->

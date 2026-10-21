@@ -102,7 +102,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
   output length and render time.
 - **Structured logs** (pino, `src/log.ts`): JSON lines; children carry `module`, `projectId`, `clipId`, `jobId`,
   `runSeq`, `userId`, `requestId`; errors under `err` with stack. See "Reading the logs" below. With
-  `OTEL_ENABLED=true` each line gets `trace_id`/`span_id`, so a log line jumps straight to its trace.
+  `OTEL_ENABLED=true` each line gets `trace_id`/`span_id` and is exported to the collector's `/v1/logs` (Sentry shows them under Logs, on the same trace). Prompt, transcript and address fields are not exported.
 - **Evals** (no DB, no render):
   - `eval:transcription`: model × bias × correction comparison matrix (`eval/fixtures/transcription/cases.json`).
   - `eval:cuts`: real problem cuts as fixtures (`reelsaw cuts <clipId> --fixture /data/fixtures`), graded clean /

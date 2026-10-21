@@ -31,6 +31,8 @@ import { createInstanceSettings, type InstanceSettings } from "./instance-settin
 import type { Entitlements } from "./quota.js";
 import type { EE } from "./ee/index.js";
 import { createTelemetry, type Telemetry } from "./telemetry.js";
+import { setOtelLogScrubber } from "./otel-log.js";
+import { secretValues } from "./report/redact.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
@@ -123,6 +125,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
   const paths = makePaths(config.DATA_DIR);
+  setOtelLogScrubber(secretValues(config));
   const telemetry = createTelemetry(config, log.child({ module: "telemetry" }));
 
   await step("data dir", async () => {

@@ -1,7 +1,10 @@
 /**
  * Structured logging (pino). JSON lines on stdout by default, which is what log shippers, Docker
  * and 12-factor expect; human-readable when stdout is a terminal or LOG_FORMAT=pretty.
- * When OpenTelemetry is on, the pino auto-instrumentation stamps trace_id/span_id on every line.
+ * When OpenTelemetry is on, the pino auto-instrumentation stamps trace_id/span_id on every line,
+ * and each line that passes its level is also exported to the OTLP logs endpoint, after pino's
+ * own redaction. Prompt and transcript fields are removed from the export; secret values are
+ * scrubbed by the same pass issue reports use.
  *
  * Conventions (the rule lives in docs/PRINCIPLES.md, "Logging"):
  *  - one root logger built in the composition root and injected (svc.log, ctx.log); modules derive
@@ -15,6 +18,7 @@
  * `module` binding). The spec can be changed while running (`reelsaw log-level`), see LogControl.
  */
 import { pino, type DestinationStream, type Logger, type LoggerOptions } from "pino";
+import { forwardPinoLine } from "./otel-log.js";
 
 export type { Logger };
 
@@ -106,6 +110,18 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
       censor: "[redacted]",
     },
     serializers: { err: pino.stdSerializers.err },
+    hooks: {
+      // `s` is the line after redaction and err serialisation, and only if the level allowed it.
+      // Return it unchanged so the local line still has prompts.
+      streamWrite(s) {
+        try {
+          forwardPinoLine(s);
+        } catch {
+          /* exporting a log must not change the local line */
+        }
+        return s;
+      },
+    },
   };
   const console = pretty ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } : { target: "pino/file", options: { destination: 1 } };
   const root = dest

@@ -621,6 +621,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318   # OTLP/HTTP; traces + m
 OTEL_SERVICE_NAME=reelsaw
 ```
 
+Sentry's OTLP endpoint takes traces and logs (`…/integration/otlp`, plus `OTEL_EXPORTER_OTLP_HEADERS`). Each pino line that passes its level is exported to `/v1/logs`, with the active trace id attached; prompt, transcript and address fields stay in the local log. Sentry does not ingest OTLP metrics. With `SENTRY_DSN` set and `OTEL_METRICS_ENABLED` left on, the server sends Node runtime gauges (memory, CPU, event loop) and a `reelsaw.span.duration` distribution for each pipeline and ffmpeg span through the DSN instead. Set `OTEL_METRICS_ENABLED=false` to keep traces and logs and drop those metrics.
+
 Spans: inbound HTTP (`/api/health` excluded), Postgres queries, outbound fetch to AI vendors, `pipeline.<stage>` per job with `reelsaw.project_id` / `reelsaw.clip_id` / `reelsaw.attempt`, `exec ffmpeg|ffprobe|yt-dlp`, and the AI SDK's own `ai.generateText` / `ai.transcribe` spans (inputs/outputs not recorded). pg-boss propagates trace context from `send()` into the worker span, so one trace follows a project from the create mutation through every stage.
 
 ## Entity-aware transcription
