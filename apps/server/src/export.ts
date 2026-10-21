@@ -15,7 +15,7 @@ import type { Readable } from "node:stream";
 import type { Storage } from "./storage/index.js";
 import type { Paths } from "./config.js";
 import type { Clip, Project } from "./db/schema.js";
-import { formatTime } from "@reelsaw/shared";
+import { formatTime, toSrt, toVtt } from "@reelsaw/shared";
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
@@ -302,6 +302,9 @@ LAYOUT
   clips/NN-title.txt           paste-ready title, description, tags and caption
   clips/NN-title.youtube.json  YouTube Data API v3 "videos.insert" request body (snippet + status)
   clips/NN-title.tiktok.json   TikTok Content Posting API "post_info" (Direct Post / Upload)
+  clips/NN-title.srt, .vtt     the captions as rendered (same text and timing as the video), for
+                               YouTube / Facebook / LinkedIn caption uploads; clips rendered before
+                               caption files existed have none until they are re-rendered
   manifest.json                everything above in one machine-readable file
   clips.csv                    one row per clip, for spreadsheets / bulk tools
 
@@ -372,6 +375,11 @@ export async function createExportZip(deps: { storage: Storage; paths: Paths; lo
         archive.append(c.text, { name: `clips/${c.base}.txt` });
         archive.append(JSON.stringify(c.youtube, null, 2), { name: `clips/${c.base}.youtube.json` });
         archive.append(JSON.stringify(c.tiktok, null, 2), { name: `clips/${c.base}.tiktok.json` });
+        // the captions as rendered (times include the intro), for platforms that take a caption file; clips rendered before this existed have none
+        if (clip.captions) {
+          archive.append(toSrt(clip.captions.lines), { name: `clips/${c.base}.srt` });
+          archive.append(toVtt(clip.captions.lines), { name: `clips/${c.base}.vtt` });
+        }
       }
       await archive.finalize();
     } catch (err) {

@@ -20,8 +20,12 @@ export const BUMPER_IMAGE_EXTS = [".png", ".jpg", ".jpeg"] as const;
 export const BUMPER_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const BUMPER_IMAGE_MAX_PX = 8192;
 export const BUMPER_IMAGE_SEC = { min: 1, max: 10, default: DEFAULT_IMAGE_BUMPER_SEC } as const;
-export const bumperKind = (ext: string): "video" | "image" | null =>
-  (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : null;
+/** music for the audio lane: never an intro/outro */
+export const BUMPER_AUDIO_EXTS = [".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac"] as const;
+export const BUMPER_AUDIO_MAX_BYTES = 30 * 1024 * 1024;
+export const BUMPER_AUDIO_MAX_SEC = 15 * 60;
+export const bumperKind = (ext: string): "video" | "image" | "audio" | null =>
+  (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext) ? "audio" : null;
 export const BUMPER_FPS = 30;
 /** Seconds of the body's audio faded out when an outro follows. */
 export const OUTRO_FADE_SEC = 0.2;
@@ -34,10 +38,18 @@ export const NORM_VERSION = "v1";
 export const normVariant = (w: number, h: number) => `${NORM_VERSION}.${w}x${h}`;
 
 /** A sentence for the user, or null when the probed file is an acceptable bumper. */
-export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height">): string | null {
+export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height"> & { hasAudio?: boolean }): string | null {
   const label = slot === "intro" ? "Intros" : slot === "outro" ? "Outros" : "Intros and outros";
   const kind = bumperKind(file.ext);
-  if (!kind) return "Use an MP4, MOV or WebM video, or a PNG or JPG image.";
+  if (!kind) return "Use an MP4, MOV or WebM video, a PNG or JPG image, or an MP3, M4A, WAV, OGG or FLAC audio file.";
+  if (kind === "audio") {
+    if (slot) return "An audio file can be music under a clip, not an intro or outro. Add it without a slot.";
+    if (file.sizeBytes > BUMPER_AUDIO_MAX_BYTES) return `This audio file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Music can be at most ${BUMPER_AUDIO_MAX_BYTES / 1024 / 1024} MB.`;
+    if (probe.hasAudio === false) return "This file has no audio stream that could be read.";
+    if (!(probe.durationSec >= 0.5)) return "This audio is too short to use (under 0.5 s).";
+    if (probe.durationSec > BUMPER_AUDIO_MAX_SEC + 0.05) return `This audio is ${Math.round(probe.durationSec / 60)} min long. Music can be at most ${BUMPER_AUDIO_MAX_SEC / 60} min.`;
+    return null;
+  }
   if (kind === "image") {
     if (file.sizeBytes > BUMPER_IMAGE_MAX_BYTES) return `This image is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Images can be at most ${BUMPER_IMAGE_MAX_BYTES / 1024 / 1024} MB.`;
     if (!probe.width || !probe.height) return "This file could not be read as an image.";
@@ -93,7 +105,7 @@ export const bumperFrames = (durationSec: number) => Math.max(1, Math.round(dura
  * background, 30 fps constant, yuv420p, AAC stereo 48 kHz (generated silence when it has none),
  * trimmed or padded to a whole number of frames so audio and video end together.
  */
-export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" }, canvas: Canvas, encodeArgs: string[] = videoEncodeArgs("libx264")): string[] {
+export function normaliseArgs(input: string, output: string, asset: { durationSec: number; hasAudio: boolean; kind?: "video" | "image" | "audio" }, canvas: Canvas, encodeArgs: string[] = videoEncodeArgs("libx264")): string[] {
   const image = asset.kind === "image";
   const frames = bumperFrames(asset.durationSec);
   const sec = frames / BUMPER_FPS;
@@ -127,7 +139,7 @@ export interface BumperAssetFile {
   sourceKey: string;
   durationSec: number;
   hasAudio: boolean;
-  kind?: "video" | "image";
+  kind?: "video" | "image" | "audio";
 }
 
 async function nonEmpty(file: string) {
@@ -201,10 +213,11 @@ export const BUMPER_THUMB = { width: 270, height: 480 } as const;
  * resized to cover. Idempotent: written to a temp name, renamed, then stored; concurrent callers share one run.
  */
 const thumbRuns = new Map<string, Promise<string>>();
-export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string }, asset: { id: string; kind: "video" | "image"; durationSec: number; sourceKey: string }, localSource?: string): Promise<string> {
+export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; storage: Storage; dir: string }, asset: { id: string; kind: "video" | "image" | "audio"; durationSec: number; sourceKey: string }, localSource?: string): Promise<string> {
   const running = thumbRuns.get(asset.id);
   if (running) return running;
   const run = (async () => {
+    if (asset.kind === "audio") throw new Error("audio has no thumbnail");
     const key = keys.bumperThumb(asset.id);
     if (await deps.storage.exists(key)) return key;
     const dir = path.join(deps.dir, `bumper-thumb-${asset.id}`);

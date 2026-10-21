@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, styleSchema, type ClipOverlay, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, styleSchema, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -43,6 +43,7 @@ import { knownModules, PICKABLE_LEVELS, specFromStructured } from "../log-level.
 import { providerOf } from "../ai/registry.js";
 import { generateText } from "ai";
 import { takeTxLock, txLock } from "../locks.js";
+import { clipCaptionsFile, importTranscript, projectTranscriptFile, MAX_SUBTITLE_BYTES } from "../transcript-files.js";
 
 /** The models a new stage would run with, for expected-time lookups. */
 const currentModels = (svc: Services): Models => ({ language: svc.models.get().language, transcription: svc.models.get().transcription });
@@ -70,6 +71,7 @@ function publicClip(c: schema.Clip) {
     style: c.style ?? null,
     bumpers: c.bumpers ?? null,
     overlays: c.overlays ?? [],
+    audio: c.audio ?? null,
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -80,6 +82,8 @@ function publicClip(c: schema.Clip) {
     layoutInfo: c.layoutInfo,
     /** the last render burned the watermark in; a re-render after an upgrade drops it */
     watermark: c.watermark,
+    /** the last render stored its captions, so SRT / VTT can be downloaded */
+    hasCaptions: !!c.captions,
     videoUrl: c.outputKey ? `/media/clips/${c.projectId}/${c.id}.mp4` : null,
     thumbnailUrl: c.thumbnailKey ? `/media/clips/${c.projectId}/${c.id}.jpg` : null,
     createdAt: c.createdAt.toISOString(),
@@ -277,6 +281,25 @@ function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: { startSec:
   return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
 }
 
+/** Music as stored: clamped to the clip, defaults left out, numbers rounded; null when it no longer overlaps the clip. */
+function cleanAudio(a: ClipAudio | null | undefined, clip: { startSec: number; endSec: number }): ClipAudio | null {
+  if (!a) return null;
+  const start = Math.max(clip.startSec, a.start);
+  const end = Math.min(clip.endSec, a.end);
+  if (end - start < 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: "The music window lies outside the clip or lasts under 0.5 s" });
+  const r2 = (n: number) => Number(n.toFixed(2));
+  return {
+    assetId: a.assetId,
+    start: r2(start),
+    end: r2(end),
+    ...(a.offset ? { offset: r2(a.offset) } : {}),
+    ...(a.volume !== undefined && Math.abs(a.volume - CLIP_AUDIO_DEFAULTS.volume) > 1e-3 ? { volume: r2(a.volume) } : {}),
+    ...(a.duck === false ? { duck: false } : {}),
+    ...(a.fade !== undefined && Math.abs(a.fade - CLIP_AUDIO_DEFAULTS.fade) > 1e-3 ? { fade: r2(a.fade) } : {}),
+    ...(a.loop === false ? { loop: false } : {}),
+  };
+}
+
 /**
  * The user's project, or NOT_FOUND. A mutation calls it with `u.db` inside the unit of work that writes, so ownership
  * is checked in the same transaction as the write (a check made before the transaction can be stale at commit).
@@ -433,7 +456,8 @@ export const appRouter = router({
       const db = ctx.svc.database.db;
       const rows = await db.select().from(schema.bumperAssets).where(eq(schema.bumperAssets.userId, ctx.user.id)).orderBy(desc(schema.bumperAssets.createdAt));
       const usage = await bumperUsageCounts(db, ctx.user.id);
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
+      // audio has no thumbnail: the pickers draw a music glyph instead
+      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
       // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
@@ -516,7 +540,7 @@ export const appRouter = router({
           await fs.mkdir(svc.paths.tmp, { recursive: true });
           await svc.storage.ensureLocal(up.storageKey, local);
           const probe = await svc.media.ffprobe(local).catch(() => null);
-          if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : "a video"}.` });
+          if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.` });
           const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
           if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
           const sourceKey = keys.bumper(id, ext);
@@ -542,9 +566,10 @@ export const appRouter = router({
                 kind,
                 name: up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
                 durationSec: kind === "image" ? (input.imageSeconds ?? BUMPER_IMAGE_SEC.default) : probe.durationSec,
-                width: probe.width!,
-                height: probe.height!,
-                hasAudio: kind === "video" && probe.hasAudio,
+                // audio has no picture: bumperProblem already refused images/videos without dimensions
+                width: probe.width ?? 0,
+                height: probe.height ?? 0,
+                hasAudio: kind === "audio" || (kind === "video" && probe.hasAudio),
                 sourceKey,
                 sizeBytes: up.sizeBytes,
                 contentHash,
@@ -555,8 +580,8 @@ export const appRouter = router({
             u.afterCommit(async () => {
               try {
                 await svc.storage.putFile(sourceKey, local);
-                // the picker thumbnail; if this fails the media route makes it on first request
-                const thumbKey = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
+                // the picker thumbnail (none for audio); if this fails the media route makes it on first request
+                const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
                 if (thumbKey) await svc.database.db.update(schema.bumperAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.bumperAssets.id, id)).catch(() => {});
               } finally {
                 await fs.rm(local, { force: true }).catch(() => {});
@@ -1026,6 +1051,16 @@ export const appRouter = router({
       return publicProject(p);
     }),
 
+    /** The project transcript as an SRT / VTT file (one cue per segment; VTT can carry word times). */
+    transcriptFile: protectedProcedure
+      .input(z.object({ id: z.string(), format: z.enum(["srt", "vtt"]).default("srt"), words: z.boolean().optional() }))
+      .query(({ ctx, input }) => projectTranscriptFile(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
+
+    /** Use an SRT / VTT file as the transcript instead of transcribing; the project must be idle or just created. */
+    importTranscript: protectedProcedure
+      .input(z.object({ id: z.string(), uploadId: z.string().optional(), text: z.string().max(MAX_SUBTITLE_BYTES).optional(), format: z.enum(["auto", "srt", "vtt"]).default("auto"), language: z.string().trim().min(2).max(12).optional() }))
+      .mutation(({ ctx, input }) => importTranscript(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
+
     /** Resume from the furthest completed stage; each stage skips work that already exists. */
     retry: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
       const { svc } = ctx;
@@ -1303,6 +1338,11 @@ export const appRouter = router({
   }),
 
   clips: router({
+    /** The captions of the clip's last render as an SRT / VTT file (what was burned in; VTT can carry word times). */
+    captions: protectedProcedure
+      .input(z.object({ id: z.string(), format: z.enum(["srt", "vtt"]).default("srt"), words: z.boolean().optional() }))
+      .query(({ ctx, input }) => clipCaptionsFile(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
+
     /** Edit title/hook/bounds. Changing bounds invalidates the render; pass rerender=true to queue it. */
     update: protectedProcedure
       .input(
@@ -1323,6 +1363,8 @@ export const appRouter = router({
           bumpers: clipBumpersSchema.nullable().optional(),
           /** Library images/videos laid over the clip, replacing the whole list; null or [] = none. */
           overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional(),
+          /** Background music under the clip (a library audio asset); null = none. */
+          audio: clipAudioSchema.nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
           rerender: z.boolean().optional(),
@@ -1349,11 +1391,14 @@ export const appRouter = router({
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
         const cleanedOverlays = input.overlays !== undefined ? cleanOverlays(input.overlays, { startSec, endSec }) : undefined;
         const overlaysChanged = cleanedOverlays !== undefined && JSON.stringify(cleanedOverlays) !== JSON.stringify(c.overlays?.length ? c.overlays : null);
-        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || overlaysChanged; // these are burned into the video
+        const cleanedAudio = input.audio !== undefined ? cleanAudio(input.audio, { startSec, endSec }) : undefined;
+        const audioChanged = cleanedAudio !== undefined && JSON.stringify(cleanedAudio) !== JSON.stringify(c.audio ?? null);
+        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || overlaysChanged || audioChanged; // these are burned into the video
         const cur = c;
         // ownership of the chosen assets is checked in the unit of work that writes
         if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
         if (overlaysChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedOverlays ?? []).map((o) => o.assetId), (cur.overlays ?? []).map((o) => o.assetId), "overlay");
+        if (audioChanged && cleanedAudio) await assertOwnedBumpers(u.db, ctx.user.id, [cleanedAudio.assetId], [cur.audio?.assetId], "music");
         const [row] = await u.db
           .update(schema.clips)
           .set({
@@ -1367,6 +1412,7 @@ export const appRouter = router({
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
             ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
             ...(cleanedOverlays !== undefined ? { overlays: cleanedOverlays } : {}),
+            ...(cleanedAudio !== undefined ? { audio: cleanedAudio } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
             editedAt: new Date(), // a clip the user touched survives a re-analyze

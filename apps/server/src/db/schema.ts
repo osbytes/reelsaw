@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -300,7 +300,7 @@ export const bumperAssets = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    kind: text("kind").$type<"video" | "image">().notNull().default("video"),
+    kind: text("kind").$type<"video" | "image" | "audio">().notNull().default("video"),
     name: text("name").notNull(),
     durationSec: real("duration_sec").notNull(),
     width: integer("width").notNull(),
@@ -459,6 +459,10 @@ export const clips = pgTable(
     bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     /** library images/videos laid over the clip for a time range (logos, stickers, b-roll); null = none */
     overlays: jsonb("overlays").$type<ClipOverlay[]>(),
+    /** background music under part of the clip (library audio asset, ducked under speech); null = none */
+    audio: jsonb("audio").$type<ClipAudio>(),
+    /** the caption lines the last render burned in, in the rendered video's seconds, for SRT / VTT export */
+    captions: jsonb("captions").$type<RenderedCaptions>(),
     /** last time the user edited the clip (clips.update); an edited clip survives a re-analyze */
     editedAt: timestamp("edited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

@@ -36,6 +36,8 @@ export interface ClipView {
   bumpers?: ClipBumpers | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
+  /** the last render stored its captions: SRT / VTT can be downloaded */
+  hasCaptions?: boolean;
   /** the last render burned the watermark in (hosted free accounts, or an admin's choice) */
   watermark?: boolean;
 }
@@ -221,6 +223,14 @@ export function ClipCard({
                   Copy link
                 </DropdownMenu.Item>
               )}
+              {clip.hasCaptions &&
+                (["srt", "vtt"] as const).map((f) => (
+                  <DropdownMenu.Item key={f} className="menu-item" asChild>
+                    <a href={`/api/clips/${clip.id}/captions.${f}`} download>
+                      Download captions ({f.toUpperCase()})
+                    </a>
+                  </DropdownMenu.Item>
+                ))}
               <DropdownMenu.Item className="menu-item" disabled={working || busy || clip.status === "preparing"} onSelect={onRerender}>
                 Re-render
               </DropdownMenu.Item>

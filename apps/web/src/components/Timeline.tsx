@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type } from "lucide-react";
+import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music } from "lucide-react";
 import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -24,7 +24,7 @@ export interface OverlayBlock {
 export interface BumperBlock {
   name: string;
   sec: number;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   thumbnailUrl?: string;
   /** where the choice comes from */
   source: "clip" | "project";
@@ -123,6 +123,13 @@ interface Props {
   onOverlayRemove?: (id: string) => void;
   /** the in/out editor (fields and nudges), shown in a popover from the clip block's length label */
   renderClipEditor?: () => ReactNode;
+  /** background music on its own lane: one block (drag to move, edges to trim), + to pick a track */
+  music?: { start: number; end: number; name: string } | null;
+  selectedMusic?: boolean;
+  onMusicSelect?: (on: boolean) => void;
+  onMusicChange?: (range: [number, number], key?: string) => void;
+  onMusicAdd?: () => void;
+  onMusicRemove?: () => void;
   /** the intro and outro the clip renders with, drawn as blocks around the clip range */
   bumpers?: { intro: BumperBlock | null; outro: BumperBlock | null };
   selectedBumper?: BumperSlot | null;
@@ -141,6 +148,8 @@ type DragState =
   | { kind: "pan"; grabX: number; orig: [number, number] }
   | { kind: "ov-move"; id: string; grabT: number; orig: [number, number] }
   | { kind: "ov-start" | "ov-end"; id: string }
+  | { kind: "mu-move"; grabT: number; orig: [number, number] }
+  | { kind: "mu-start" | "mu-end" }
   | { kind: "bumper"; slot: BumperSlot };
 
 /**
@@ -148,7 +157,7 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, overlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, onOverlayAdd, onOverlayRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, overlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, onOverlayAdd, onOverlayRemove, renderClipEditor, music = null, selectedMusic = false, onMusicSelect, onMusicChange, onMusicAdd, onMusicRemove, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const ovRows = useMemo(() => packOverlayRows(overlays), [overlays]);
@@ -311,6 +320,15 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
       if (!o) return;
       if (drag.kind === "ov-start") onOverlayChange?.(drag.id, [Math.max(range[0], Math.min(o.end - MIN_OVERLAY, snapT(t, "start", alt))), o.end], gesture.current);
       else onOverlayChange?.(drag.id, [o.start, Math.min(range[1], Math.max(o.start + MIN_OVERLAY, snapT(t, "end", alt)))], gesture.current);
+    } else if (drag.kind === "mu-move") {
+      const len = drag.orig[1] - drag.orig[0];
+      let s = drag.orig[0] + (t - drag.grabT);
+      s = Math.max(range[0], Math.min(range[1] - len, s));
+      const snapped = Math.max(range[0], Math.min(range[1] - len, snapT(s, "start", alt)));
+      onMusicChange?.([snapped, Number((snapped + len).toFixed(2))], gesture.current);
+    } else if ((drag.kind === "mu-start" || drag.kind === "mu-end") && music) {
+      if (drag.kind === "mu-start") onMusicChange?.([Math.max(range[0], Math.min(music.end - 0.5, snapT(t, "start", alt))), music.end], gesture.current);
+      else onMusicChange?.([music.start, Math.min(range[1], Math.max(music.start + 0.5, snapT(t, "end", alt)))], gesture.current);
     } else if (drag.kind === "bumper") {
       // the outer edge of an image intro/outro sets how long it shows
       const raw = drag.slot === "intro" ? range[0] - t : t - range[1];
@@ -479,6 +497,16 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
           </div>
           <div className={`${label} mt-1.5 h-[34px]`}>Clip</div>
           <div className={`${label} mt-1.5 h-[38px]`}>Framing</div>
+          {onMusicAdd && (
+            <div className={`${label} mt-1.5 h-[26px] justify-between pr-2`}>
+              Music
+              {!music && (
+                <button type="button" className="grid h-5 w-5 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" onClick={onMusicAdd} aria-label="Add music under the clip" title="Add music under the clip">
+                  <Plus className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <ContextMenu.Root modal={false}>
@@ -662,6 +690,50 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             ))}
           </div>
 
+          {/* music: one block under the clip */}
+          {onMusicAdd && (
+            <div
+              data-lane="music"
+              className={`${lane} mt-1.5 h-[26px] rounded-[8px] bg-sunk/60`}
+              onPointerDown={(e) => {
+                if (e.button !== 0 || (e.target as HTMLElement).closest("[data-music]")) return;
+                onMusicSelect?.(false);
+                begin(e, { kind: "pan", grabX: e.clientX, orig: view });
+              }}
+              onDoubleClick={(e) => {
+                if (!music && !(e.target as HTMLElement).closest("[data-music]")) onMusicAdd();
+              }}
+              title={music ? undefined : "Double-click to add music under the clip"}
+            >
+              {music && (
+                <div
+                  data-music=""
+                  className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${selectedMusic ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
+                  style={{ left: x(music.start), width: Math.max(6, x(music.end) - x(music.start)), top: 2 }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    onMusicSelect?.(true);
+                    begin(e, { kind: "mu-move", grabT: tAt(e.clientX), orig: [music.start, music.end] });
+                  }}
+                  title={`${music.name} ${formatTime(music.start)}–${formatTime(music.end)} · drag to move, edges to trim`}
+                >
+                  <Music className="h-3 w-3 shrink-0 text-ink3" />
+                  {x(music.end) - x(music.start) > 50 && <span className="truncate text-[10px] font-semibold leading-none">{music.name}</span>}
+                  {(["mu-start", "mu-end"] as const).map((k) => (
+                    <div
+                      key={k}
+                      className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "mu-start" ? "left-0" : "right-0"} ${selectedMusic ? "bg-acc/60" : "hover:bg-line"}`}
+                      onPointerDown={(e) => {
+                        onMusicSelect?.(true);
+                        begin(e, { kind: k });
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* scene changes */}
           {sceneCuts
             .filter((c) => c > view[0] && c < view[1])
@@ -701,6 +773,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             overlay={menuAt?.overlay ? (overlays.find((o) => o.id === menuAt.overlay) ?? null) : null}
             onOverlayAdd={onOverlayAdd && ((t, kind) => inClip(t) && onOverlayAdd(t, kind))}
             onOverlayRemove={onOverlayRemove}
+            hasMusic={!!music}
+            onMusicAdd={onMusicAdd}
+            onMusicRemove={onMusicRemove}
           />
         </ContextMenu.Portal>
         </ContextMenu.Root>
@@ -733,6 +808,9 @@ function TimelineMenu(p: {
   overlay: OverlayBlock | null;
   onOverlayAdd?: (t: number, kind: "asset" | "text") => void;
   onOverlayRemove?: (id: string) => void;
+  hasMusic?: boolean;
+  onMusicAdd?: () => void;
+  onMusicRemove?: () => void;
   sections: EditorSection[];
   detected: DetectedSegment[];
   range: [number, number];
@@ -761,7 +839,15 @@ function TimelineMenu(p: {
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
         <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ml-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
-      {p.overlay && p.onOverlayRemove ? (
+      {at.lane === "music" && p.onMusicRemove && p.hasMusic ? (
+        <ContextMenu.Item className={item} onSelect={() => p.onMusicRemove!()}>
+          <Trash2 className="h-3.5 w-3.5" /> Remove music <span className="kbd ml-auto">⌫</span>
+        </ContextMenu.Item>
+      ) : at.lane === "music" && p.onMusicAdd ? (
+        <ContextMenu.Item className={item} onSelect={() => p.onMusicAdd!()}>
+          <Music className="h-3.5 w-3.5" /> Add music…
+        </ContextMenu.Item>
+      ) : p.overlay && p.onOverlayRemove ? (
         <ContextMenu.Item className={item} onSelect={() => p.onOverlayRemove!(p.overlay!.id)}>
           <Trash2 className="h-3.5 w-3.5" /> Remove overlay “{p.overlay.name}” <span className="kbd ml-auto">⌫</span>
         </ContextMenu.Item>

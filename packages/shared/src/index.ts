@@ -177,6 +177,38 @@ export const clipOverlaySchema = z
   .refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
 export type ClipOverlay = z.infer<typeof clipOverlaySchema>;
 export const MAX_CLIP_OVERLAYS = 20;
+
+/**
+ * Background music under part of a clip: a library audio asset mixed under the speech, ducked while
+ * someone talks, faded in and out. Times are absolute source seconds like sections and overlays.
+ */
+export const clipAudioSchema = z.object({
+  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_bumpers, kind audio)"),
+  start: z.number().min(0).describe("Music starts at this second of the source video"),
+  end: z.number().min(0).describe("Music stops after this second of the source video"),
+  offset: z.number().min(0).optional().describe("Seconds into the track to start from (default 0)"),
+  volume: z.number().min(0).max(1).optional().describe("Music level 0-1 (default 0.25), before ducking"),
+  duck: z.boolean().optional().describe("Lower the music while someone speaks (default true)"),
+  fade: z.number().min(0).max(5).optional().describe("Fade in and out, seconds (default 0.5)"),
+  loop: z.boolean().optional().describe("Repeat the track when it is shorter than the window (default true)"),
+});
+export type ClipAudio = z.infer<typeof clipAudioSchema>;
+export const CLIP_AUDIO_DEFAULTS = { volume: 0.25, duck: true, fade: 0.5, loop: true } as const;
+
+/** A caption line as the last render burned it in, in the rendered video's own seconds (after the intro). */
+export interface RenderedCaptionLine {
+  start: number;
+  end: number;
+  words: Array<{ text: string; start: number; end: number }>;
+}
+/** The captions of the last render, kept for SRT / VTT export so the files match the video exactly. */
+export interface RenderedCaptions {
+  /** seconds of intro before the body (already added to the line times) */
+  introSec: number;
+  /** the caption look that was rendered ("none" = no captions were burned in, lines still exported) */
+  captions: "karaoke" | "box" | "plain" | "none";
+  lines: RenderedCaptionLine[];
+}
 /** The kind of an overlay, "asset" for rows stored before text overlays existed. */
 export const overlayKind = (o: Pick<ClipOverlay, "kind">): "asset" | "text" => o.kind ?? "asset";
 export const TEXT_OVERLAY_DEFAULTS = { size: 0.045, color: "#FFFFFF" } as const;
@@ -467,6 +499,8 @@ export const PROJECT_EVENT_TYPES = [
   "clip.deleted",
   /** title or settings changed without re-running anything (projects.update / update_project); payload { changed } */
   "project.updated",
+  /** a transcript was imported from an SRT / VTT file instead of transcribed (importTranscript); payload { format, cues, words } */
+  "transcript.imported",
   "project.done",
   "project.failed",
 ] as const;
@@ -801,3 +835,4 @@ export const CONNECTOR_WORDS: ReadonlySet<string> = new Set([
 export * from "./tokens.js";
 export * from "./billing.js";
 export * from "./accounts.js";
+export * from "./captions-format.js";

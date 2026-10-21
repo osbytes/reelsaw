@@ -1,4 +1,4 @@
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style, type RenderedCaptions } from "@reelsaw/shared";
 
 export interface CaptionOptions {
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
@@ -55,6 +55,20 @@ export const WATERMARK_LOGO = {
 } as const;
 /** Centre y of the text line under the logo (logo height = w × 9/16 ÷ aspect of the frame height). */
 export const watermarkTextY = () => WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
+
+/**
+ * The caption lines a render burns in, grouped exactly as `buildAss` groups them, shifted by the
+ * intro so the times match the rendered video. Stored on the clip for SRT / VTT export.
+ */
+export function renderedCaptions(words: Word[], style: Style, introSec: number, maxLineSeconds?: number): RenderedCaptions {
+  const r3 = (n: number) => Number((n + introSec).toFixed(3));
+  const lines = style.captions === "none" ? [] : groupLines(monotonicWords(words), style.wordsPerLine, maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
+  return {
+    introSec: Number(introSec.toFixed(3)),
+    captions: style.captions,
+    lines: lines.map((line, i) => ({ start: r3(line[0]!.start), end: r3(lineDisplayEnd(lines, i)), words: line.map((w) => ({ text: w.text, start: r3(w.start), end: r3(w.end) })) })),
+  };
+}
 
 /** "#RRGGBB" → ASS "&HBBGGRR&" */
 export function assColor(hex: string): string {

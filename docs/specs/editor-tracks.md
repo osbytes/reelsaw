@@ -117,6 +117,29 @@ The ruler stays in source seconds: the blocks sit outside the clip range on purp
 intro thumbnail at the head of OpusClip's video track. Nothing about the stored model changed
 (`clips.bumpers`, project settings); only where it is edited.
 
+## 2b. Music lane
+
+One background track per clip (`clips.audio`, `clipAudioSchema`): a library audio asset (the
+library now takes MP3 / M4A / AAC / WAV / OGG / FLAC up to 15 min and 30 MB; an audio item can never
+be an intro or outro), a window in source seconds, `offset` into the track, `volume` (default 0.25),
+`duck` (default on), `fade` (default 0.5 s) and `loop` (default on). The editor shows it as the
+"Music" lane under the framing lane (one block: drag, trim, `+` or double-click to pick a track,
+Delete to remove) with a card in the Overlays tab for level, fades, ducking, looping and the track
+offset; the preview plays the track along with the video inside its window (no ducking in the
+preview).
+
+Render (`musicMix`, `render.ts`): the track is an extra ffmpeg input after the overlays and the
+logo (`-stream_loop -1` when looping), trimmed to the window, faded in and out, set to its level,
+delayed to its start and padded to the body; with ducking the body's speech keys a
+`sidechaincompress` on the music (roughly 10-15 dB down while someone talks, back within half a second), and
+`amix … normalize=0` keeps the speech at its own level. The mix replaces the body audio before the
+intro/outro are joined, so bumpers keep their own sound. An unusable track is skipped with a
+`clip.overlay_skipped` event, and the "render with overlays failed" retry drops the music together
+with the overlays.
+
+Surfaces: `clips.update { audio }`, MCP `update_clip { audio }` / `get_clip`, CLI
+`reelsaw clip-audio <projectId> <clipId> --track <assetId> [--from] [--to] [--volume] [--offset] [--fade] [--no-duck] [--no-loop] | --clear [--rerender]`.
+
 **Watermark.** The instance watermark reuses the overlay compositor: when a render carries it, the
 logo (`WATERMARK_LOGO_PATH`, `apps/server/assets/watermark.png`) is appended as the last overlay
 input for the whole body (top-left under the platform top band, 18% of the width, 95% opacity; `WATERMARK_LOGO` in

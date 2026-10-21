@@ -70,6 +70,8 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
       return { text: `${clip} deleted${p.title ? `: “${p.title}”` : ""} (restorable for ${p.days} days)`, tone: "warn" };
     case "project.updated":
       return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
+    case "transcript.imported":
+      return { text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`, tone: "ok" };
     case "job.stalled":
       return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:

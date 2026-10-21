@@ -267,6 +267,13 @@
       "when": 1792588308080,
       "tag": "0037_clip_overlays",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792594549136,
+      "tag": "0038_clip_audio_captions",
+      "breakpoints": true
     }
   ]
 }

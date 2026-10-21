@@ -1,14 +1,14 @@
 export interface SlotAsset {
   assetId: string;
   name: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   thumbnailUrl: string;
   withCount: number;
 }
 export interface SlotSummary {
   assetId: string;
   name: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   thumbnailUrl: string;
   withCount: number;
   total: number;
