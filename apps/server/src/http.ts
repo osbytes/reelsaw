@@ -24,10 +24,15 @@ import { requester, activeRequester, bearerToken, blockedReason, mcpResource, AP
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
-import { reportRequestSchema } from "@reelsaw/shared";
+import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
+import { TRPCError } from "@trpc/server";
+import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
 
 /** What the browser may report: trimmed so a loop of errors cannot fill the log. */
 const clientLogSchema = z.object({
@@ -220,6 +225,24 @@ export function createApp(svc: Services) {
   });
 
   // A user's own intro/outro, for the Settings preview. Owner only; soft-deleted assets stay readable by their owner.
+  // The font files text overlays can use, from the image's own fontconfig, so the editor preview draws
+  // exactly what libass will. Public: a font file is not user data. Long cache: the files never change.
+  app.get("/api/fonts/:family", async (c) => {
+    const family = TEXT_FONTS.find((f) => f.family === c.req.param("family"))?.family;
+    if (!family) return c.text("unknown font", 404);
+    try {
+      const { stdout } = await execFileAsync("fc-match", ["-f", "%{file}|%{family}", family]);
+      const [file, matched] = stdout.trim().split("|");
+      // fc-match falls back to any font when the family is missing: refuse that instead of serving the wrong face
+      if (!file || !matched || !matched.split(",").some((m) => m.trim().toLowerCase() === family.toLowerCase())) return c.text("font not installed", 404);
+      c.header("Cache-Control", "public, max-age=604800, immutable");
+      return sendFile(c.req.raw, file);
+    } catch (err) {
+      c.get("log").warn({ err, family }, "font lookup failed");
+      return c.text("font not available", 404);
+    }
+  });
+
   app.get("/media/bumpers/:id", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
@@ -291,6 +314,29 @@ export function createApp(svc: Services) {
     c.header("Cache-Control", "no-store");
     return c.body(Readable.toWeb(stream) as ReadableStream);
   });
+
+  // SRT / VTT downloads: a clip's burned-in captions and a project's transcript. Owner only; `?words=1` adds word times to VTT.
+  const sendCaptionFile = async (c: Context<AppEnv>, make: (who: { id: string; admin: false }, format: CaptionFormat, words: boolean) => Promise<CaptionFile>, ext: string) => {
+    const session = await actor(c);
+    if (!session) return c.text("unauthorized", 401);
+    const format = ext === "vtt" ? "vtt" : "srt";
+    try {
+      const file = await make({ id: session.user.id, admin: false }, format, boolQuery(c.req.query("words"), false));
+      c.header("Content-Type", format === "vtt" ? "text/vtt; charset=utf-8" : "application/x-subrip; charset=utf-8");
+      c.header("Content-Disposition", `attachment; filename="${file.filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+      c.header("Cache-Control", "no-store");
+      return c.body(file.text);
+    } catch (err) {
+      if (err instanceof TRPCError && err.code === "NOT_FOUND") return c.text(err.message || "not found", 404);
+      throw err;
+    }
+  };
+  app.get("/api/clips/:id/:file{captions\\.(srt|vtt)}", (c) =>
+    sendCaptionFile(c, (who, format, words) => clipCaptionsFile(svc, who, c.req.param("id"), { format, words }), c.req.param("file").slice(-3)),
+  );
+  app.get("/api/projects/:projectId/:file{transcript\\.(srt|vtt)}", (c) =>
+    sendCaptionFile(c, (who, format, words) => projectTranscriptFile(svc, who, c.req.param("projectId"), { format, words }), c.req.param("file").slice(-3)),
+  );
 
   // "Report an issue": zip of the project's (or account's) data for local reproduction; owner only.
   // Hosted non-admins with telemetry use Sentry/PostHog feedback instead (reportCapabilities).

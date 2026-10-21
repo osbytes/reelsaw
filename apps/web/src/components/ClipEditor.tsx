@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon, Music as MusicIcon } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
@@ -11,7 +11,9 @@ import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type OverlayBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
-import { BumperCombobox, Thumb } from "./BumperCombobox";
+import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
+import { loadTextFonts } from "../lib/fonts";
+import { z } from "zod";
 import { ThemeToggle } from "../App";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
@@ -30,6 +32,13 @@ import {
   MAX_CLIP_OVERLAYS,
   TEXT_OVERLAY_DEFAULTS,
   ASSET_OVERLAY_DEFAULT_W,
+  CLIP_AUDIO_DEFAULTS,
+  MAX_CLIP_AUDIO,
+  clipAudioList,
+  clipAudioSchema,
+  clipOverlaySchema,
+  TEXT_FONTS,
+  type ClipAudio,
   type ClipDiagnostics,
   type ClipBumpers,
   type ClipOverlay,
@@ -63,6 +72,8 @@ export interface EditorClip {
   emphasis: string[];
   bumpers?: ClipBumpers | null;
   overlays?: ClipOverlay[];
+  /** music tracks (older rows: one object; read through clipAudioList) */
+  audio?: unknown;
   status: string;
   diagnostics: ClipDiagnostics | null;
 }
@@ -100,6 +111,9 @@ const newOverlayId = () => `ov-${Math.random().toString(36).slice(2, 6)}`;
 type Layout = "classic" | "transcript";
 const LAYOUT_KEY = "rs-editor-layout";
 const SNAP_KEY = "rs-editor-snap";
+/** the editor's own clipboard (⌘C / ⌘V on an overlay or a music track), shared by every editor tab of this browser */
+const CLIP_KEY = "rs-editor-clipboard";
+const clipboardItemSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("overlay"), value: clipOverlaySchema }), z.object({ kind: z.literal("music"), value: clipAudioSchema })]);
 
 interface EditorDoc {
   range: [number, number];
@@ -114,6 +128,8 @@ interface EditorDoc {
   bumpers: ClipBumpers;
   /** library images/videos laid over the clip, absolute source seconds */
   overlays: ClipOverlay[];
+  /** background music tracks under the clip, absolute source seconds */
+  audio: ClipAudio[];
 }
 
 const MODE_EXPLAIN: Record<string, string> = {
@@ -285,24 +301,37 @@ export function ClipEditor(props: Props) {
     emphasis: clip.emphasis,
     bumpers: clip.bumpers ?? {},
     overlays: clip.overlays ?? [],
+    audio: clipAudioList(clip.audio),
   }));
-  const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers, overlays: assetOverlays } = history.state;
+  const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers, overlays: assetOverlays, audio: music } = history.state;
   const [bumpersDialog, setBumpersDialog] = useState(false);
   const [selectedOverlay, setSelectedOverlayRaw] = useState<string | null>(null);
   const [selectedBumper, setSelectedBumperRaw] = useState<BumperSlot | null>(null);
+  const [selectedMusic, setSelectedMusicRaw] = useState<string | null>(null);
+  // the text-overlay fonts, from the server image, so the preview shows the real faces
+  useEffect(() => loadTextFonts(), []);
+  // selecting a block on the timeline brings its card into view in the Overlays pane (after a tab switch renders it)
+  useEffect(() => {
+    const sel = selectedOverlay ? `[data-ov-card="${selectedOverlay}"]` : selectedMusic ? `[data-music-card="${selectedMusic}"]` : null;
+    if (!sel) return;
+    const id = requestAnimationFrame(() => document.querySelector(sel)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+    return () => cancelAnimationFrame(id);
+  }, [selectedOverlay, selectedMusic]);
   const [addOverlayOpen, setAddOverlayOpen] = useState(false);
+  const [addMusicOpen, setAddMusicOpen] = useState(false);
   const library = useBumperLibrary();
   const libraryAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
   const assetById = (id: string | null | undefined): LibraryAsset | undefined => (id ? libraryAssets.find((a) => a.id === id) : undefined);
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) => history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
   const [selected, setSelectedRaw] = useState<number | null>(null);
-  // one selection at a time: a section, an overlay or an intro/outro block
+  // one selection at a time: a section, an overlay, the music block or an intro/outro block
   const setSelected = (i: number | null) => {
     setSelectedRaw(i);
     if (i !== null) {
       setSelectedOverlayRaw(null);
       setSelectedBumperRaw(null);
+      setSelectedMusicRaw(null);
     }
   };
   const setSelectedOverlay = (id: string | null) => {
@@ -310,6 +339,7 @@ export function ClipEditor(props: Props) {
     if (id !== null) {
       setSelectedRaw(null);
       setSelectedBumperRaw(null);
+      setSelectedMusicRaw(null);
     }
   };
   const setSelectedBumper = (slot: BumperSlot | null) => {
@@ -317,6 +347,15 @@ export function ClipEditor(props: Props) {
     if (slot !== null) {
       setSelectedRaw(null);
       setSelectedOverlayRaw(null);
+      setSelectedMusicRaw(null);
+    }
+  };
+  const setSelectedMusic = (id: string | null) => {
+    setSelectedMusicRaw(id);
+    if (id !== null) {
+      setSelectedRaw(null);
+      setSelectedOverlayRaw(null);
+      setSelectedBumperRaw(null);
     }
   };
   useEffect(() => {
@@ -397,8 +436,10 @@ export function ClipEditor(props: Props) {
     const a = Math.max(0, Number(r[0].toFixed(2)));
     const b = Math.min(durationSec || Infinity, Number(r[1].toFixed(2)));
     if (b - a < 3) return;
-    edit((d) => ({ range: [a, b], sections: normalizeSections(d.sections, [a, b]), overlays: clampOverlays(d.overlays, [a, b]) }), key);
+    edit((d) => ({ range: [a, b], sections: normalizeSections(d.sections, [a, b]), overlays: clampOverlays(d.overlays, [a, b]), audio: clampMusic(d.audio, [a, b]) }), key);
   };
+  /** Music clamped to the clip; dropped when under half a second of it remains. */
+  const clampMusic = (list: ClipAudio[], r: [number, number]): ClipAudio[] => list.map((m) => ({ ...m, start: Math.max(r[0], m.start), end: Math.min(r[1], m.end) })).filter((m) => m.end - m.start >= 0.5);
   const setSections = (s: EditorSection[], key?: string) => edit((d) => ({ sections: normalizeSections(s, d.range) }), key);
 
   // media listeners once; read the live range through a ref
@@ -630,7 +671,8 @@ export function ClipEditor(props: Props) {
       assetOverlays.map((o) => {
         if (overlayKind(o) === "text") return { id: o.id, start: o.start, end: o.end, name: o.text ?? "", kind: "text" as const };
         const a = assetById(o.assetId);
-        return { id: o.id, start: o.start, end: o.end, name: a?.name ?? (library.isPending ? "…" : "removed"), kind: a?.kind ?? "image", thumbnailUrl: a?.thumbnailUrl };
+        // an audio asset cannot be an overlay; the picker never offers one, so draw it as an image block
+        return { id: o.id, start: o.start, end: o.end, name: a?.name ?? (library.isPending ? "…" : "removed"), kind: a?.kind === "video" ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [assetOverlays, libraryAssets, library.isPending],
@@ -639,11 +681,110 @@ export function ClipEditor(props: Props) {
     assetOverlays
       .filter((o) => t >= o.start - 0.001 && t <= o.end + 0.001)
       .flatMap((o): PreviewAssetOverlay[] => {
-        if (overlayKind(o) === "text") return [{ kind: "text", id: o.id, text: o.text ?? "", x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1 }];
+        if (overlayKind(o) === "text") return [{ kind: "text", id: o.id, text: o.text ?? "", x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1, ...(o.font ? { font: o.font } : {}) }];
         const a = assetById(o.assetId);
         if (!a) return [];
         return [{ kind: "asset", id: o.id, url: a.kind === "image" ? `/media/bumpers/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: o.x, y: o.y, w: o.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: o.opacity ?? 1 }];
       });
+
+  // ----- music under the clip (several tracks, the same file may repeat) -----
+  const setMusic = (list: ClipAudio[], key?: string) => edit((d) => ({ audio: clampMusic(list, d.range) }), key);
+  const patchMusic = (id: string, patch: Partial<ClipAudio>, key?: string) => setMusic(music.map((m) => (m.id === id ? { ...m, ...patch } : m)), key);
+  const pushMusic = (m: ClipAudio, note: string) => {
+    if (music.length >= MAX_CLIP_AUDIO) return toast(`A clip can have at most ${MAX_CLIP_AUDIO} music tracks`);
+    setMusic([...music, m]);
+    setSelectedMusic(m.id);
+    if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+    toast(note);
+  };
+  const addMusic = (asset: LibraryAsset) => {
+    // a new track starts at the playhead and runs to the end of the clip (or the track's own length)
+    const start = Number(Math.max(range[0], Math.min(range[1] - 0.5, current)).toFixed(2));
+    pushMusic({ id: `mu-${Math.random().toString(36).slice(2, 6)}`, assetId: asset.id, start, end: range[1] }, `${asset.name} plays from ${fmtPrecise(start - range[0])} · drag the block to move or shorten it`);
+  };
+  const removeMusic = (id: string) => {
+    setMusic(music.filter((m) => m.id !== id));
+    if (selectedMusic === id) setSelectedMusicRaw(null);
+  };
+  const musicBlocks = useMemo(
+    () => music.map((m) => ({ id: m.id, start: m.start, end: m.end, name: assetById(m.assetId)?.name ?? (library.isPending ? "…" : "removed") })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [music, libraryAssets, library.isPending],
+  );
+  // the tracks play along in the preview: one <audio> element per track following the clock inside its window (no ducking)
+  const musicEls = useRef(new Map<string, HTMLAudioElement>());
+  useEffect(() => {
+    for (const m of music) {
+      const el = musicEls.current.get(m.id);
+      if (el) el.volume = Math.max(0, Math.min(1, m.volume ?? CLIP_AUDIO_DEFAULTS.volume));
+    }
+  }, [music]);
+  useEffect(() => {
+    const els = musicEls.current;
+    const pauseAll = () => els.forEach((el) => el.pause());
+    if (!music.length || !playing) {
+      pauseAll();
+      return;
+    }
+    let raf = 0;
+    const follow = () => {
+      const t = clock.get();
+      for (const m of music) {
+        const el = els.get(m.id);
+        if (!el) continue;
+        if (t >= m.start && t < m.end) {
+          const want = (m.offset ?? 0) + (t - m.start);
+          const len = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : Infinity;
+          const at = m.loop === false ? want : want % len;
+          if (Math.abs(el.currentTime - at) > 0.35) el.currentTime = at;
+          if (el.paused && (m.loop !== false || want < len)) el.play().catch(() => {});
+        } else if (!el.paused) el.pause();
+      }
+      raf = requestAnimationFrame(follow);
+    };
+    raf = requestAnimationFrame(follow);
+    return () => {
+      cancelAnimationFrame(raf);
+      pauseAll();
+    };
+  }, [music, playing, clock]);
+
+  // ----- copy / paste of the selected overlay or music track (⌘C / ⌘V), also across clips of this browser -----
+  const copySelection = () => {
+    const o = selectedOverlay ? assetOverlays.find((x) => x.id === selectedOverlay) : undefined;
+    const m = selectedMusic ? music.find((x) => x.id === selectedMusic) : undefined;
+    const item = o ? { kind: "overlay" as const, value: o } : m ? { kind: "music" as const, value: m } : null;
+    if (!item) return false;
+    try {
+      localStorage.setItem(CLIP_KEY, JSON.stringify(item));
+    } catch {
+      /* private mode */
+    }
+    toast(`Copied ${o ? (overlayKind(o) === "text" ? `“${o.text}”` : "the overlay") : "the music track"} · ⌘V pastes it at the playhead`);
+    return true;
+  };
+  const pasteSelection = () => {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(CLIP_KEY);
+    } catch {
+      /* private mode */
+    }
+    if (!raw) return false;
+    const item = clipboardItemSchema.safeParse(JSON.parse(raw));
+    if (!item.success) return false;
+    const t = Math.max(range[0], Math.min(range[1] - 0.5, current));
+    if (item.data.kind === "overlay") {
+      const o = item.data.value;
+      const len = o.end - o.start;
+      pushOverlay({ ...o, id: newOverlayId(), start: Number(t.toFixed(2)), end: Number(Math.min(range[1], t + len).toFixed(2)) }, "Pasted at the playhead");
+    } else {
+      const m = item.data.value;
+      const len = m.end - m.start;
+      pushMusic({ ...m, id: `mu-${Math.random().toString(36).slice(2, 6)}`, start: Number(t.toFixed(2)), end: Number(Math.min(range[1], t + len).toFixed(2)) }, "Pasted at the playhead");
+    }
+    return true;
+  };
 
   // ----- intro / outro as blocks on the timeline -----
   const bumperBlock = (slot: BumperSlot): BumperBlock | null => {
@@ -711,13 +852,22 @@ export function ClipEditor(props: Props) {
           overlayKind(o) === "text" ? Number((o.size ?? TEXT_OVERLAY_DEFAULTS.size).toFixed(3)) : Number((o.w ?? ASSET_OVERLAY_DEFAULT_W).toFixed(3)),
           overlayKind(o) === "text" ? (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase() : "",
           overlayKind(o) === "text" ? !!o.box : false,
+          overlayKind(o) === "text" ? (o.font ?? TEXT_FONTS[0].family) : "",
           o.opacity !== undefined && o.opacity < 1 ? Number(o.opacity.toFixed(3)) : 1,
         ]),
     );
   const overlaysChanged = overlayKey(assetOverlays) !== overlayKey(clip.overlays ?? []);
-  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged, overlaysChanged].filter(Boolean).length;
+  // fixed key order and defaults folded in, so a jsonb round trip compares equal
+  const musicKey = (list: ClipAudio[]) =>
+    JSON.stringify(
+      [...list]
+        .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+        .map((m) => [m.id, m.assetId, Number(m.start.toFixed(2)), Number(m.end.toFixed(2)), Number((m.offset ?? 0).toFixed(2)), Number((m.volume ?? CLIP_AUDIO_DEFAULTS.volume).toFixed(2)), m.duck ?? CLIP_AUDIO_DEFAULTS.duck, Number((m.fade ?? CLIP_AUDIO_DEFAULTS.fade).toFixed(2)), m.loop ?? CLIP_AUDIO_DEFAULTS.loop]),
+    );
+  const musicChanged = musicKey(music) !== musicKey(clipAudioList(clip.audio));
+  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged, overlaysChanged, musicChanged].filter(Boolean).length;
   const changed = dirtyCount > 0;
-  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged || overlaysChanged;
+  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged || overlaysChanged || musicChanged;
 
   async function save(rerender: boolean): Promise<boolean> {
     try {
@@ -733,6 +883,7 @@ export function ClipEditor(props: Props) {
         ...(emphasisChanged ? { emphasis } : {}),
         ...(bumpersChanged ? { bumpers } : {}),
         ...(overlaysChanged ? { overlays: assetOverlays } : {}),
+        ...(musicChanged ? { audio: music } : {}),
         ...(sectionsChanged ? { layoutSections: forcedSections, layoutOverride: null } : {}),
         ...(styleChanged && styleScope === "clip" ? { style: Object.keys(styleOverride).length ? styleOverride : null } : {}),
         rerender,
@@ -780,6 +931,15 @@ export function ClipEditor(props: Props) {
         return;
       }
       if (el.closest("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]")) return;
+      // copy / paste the selected overlay or music track; typing in a field keeps the browser's own clipboard
+      if (mod && k === "c" && !window.getSelection()?.toString() && copySelection()) {
+        e.preventDefault();
+        return;
+      }
+      if (mod && k === "v" && pasteSelection()) {
+        e.preventDefault();
+        return;
+      }
       if (mod) return;
       if (e.key === "Escape") {
         if (keysOpen) setKeysOpen(false);
@@ -797,6 +957,7 @@ export function ClipEditor(props: Props) {
         videoRef.current?.pause();
         seek(clock.get() + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedOverlay) removeOverlay(selectedOverlay);
+      else if ((e.key === "Delete" || e.key === "Backspace") && selectedMusic) removeMusic(selectedMusic);
       else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null && selected > 0) mergeSection(selected, "left");
     };
     window.addEventListener("keydown", onKey);
@@ -1131,6 +1292,69 @@ export function ClipEditor(props: Props) {
     </div>
   );
 
+  const musicCards = [...music]
+    .sort((a, b) => a.start - b.start)
+    .map((m) => {
+      const asset = assetById(m.assetId);
+      const sel = m.id === selectedMusic;
+      return (
+        <div
+          key={m.id}
+          data-music-card={m.id}
+          onClick={() => {
+            setSelectedMusic(m.id);
+            if (current < m.start || current > m.end) seek(m.start);
+          }}
+          className={`flex cursor-pointer flex-col gap-2 rounded-[12px] p-2.5 ${sel ? "border-2 border-acc" : "border border-line"}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="grid h-9 w-5 shrink-0 place-items-center rounded-[4px] bg-sunk text-ink2">
+              <MusicIcon className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-semibold">{asset?.name ?? (library.isPending ? "…" : "Removed from the library")}</span>
+              <span className="block font-mono text-[11px] text-ink3">
+                {fmtPrecise(m.start - range[0])}–{fmtPrecise(m.end - range[0])} · music{asset ? ` · ${clockText(asset.durationSec)}` : ""}
+              </span>
+            </span>
+            <button
+              className="grid h-7 w-7 place-items-center rounded-[8px] text-ink3 hover:bg-sunk hover:text-ink"
+              aria-label="Remove this track"
+              title="Remove this track (Delete)"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeMusic(m.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Volume" hint={<span className="font-mono">{Math.round((m.volume ?? CLIP_AUDIO_DEFAULTS.volume) * 100)}%</span>}>
+                <input type="range" min={0} max={100} step={5} value={Math.round((m.volume ?? CLIP_AUDIO_DEFAULTS.volume) * 100)} onChange={(e) => patchMusic(m.id, { volume: Number(e.target.value) / 100 }, `music-vol-${m.id}`)} className="accent-[var(--acc)]" aria-label="Music volume" />
+              </Field>
+              <Field label="Fade in / out" hint={<span className="font-mono">{(m.fade ?? CLIP_AUDIO_DEFAULTS.fade).toFixed(1)}s</span>}>
+                <input type="range" min={0} max={5} step={0.5} value={m.fade ?? CLIP_AUDIO_DEFAULTS.fade} onChange={(e) => patchMusic(m.id, { fade: Number(e.target.value) }, `music-fade-${m.id}`)} className="accent-[var(--acc)]" aria-label="Music fade" />
+              </Field>
+            </div>
+            <Switch checked={m.duck ?? CLIP_AUDIO_DEFAULTS.duck} onChange={(v) => patchMusic(m.id, { duck: v })} label="Lower the music while someone speaks" />
+            <Switch checked={m.loop ?? CLIP_AUDIO_DEFAULTS.loop} onChange={(v) => patchMusic(m.id, { loop: v })} label="Repeat the track if it is shorter" />
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-ink3">From</span>
+              <TimeField label="Music start" value={m.start - range[0]} onCommit={(t) => patchMusic(m.id, { start: Math.min(m.end - 0.5, range[0] + Math.max(0, t)) })} />
+              <span className="text-ink3">to</span>
+              <TimeField label="Music end" value={m.end - range[0]} onCommit={(t) => patchMusic(m.id, { end: Math.max(m.start + 0.5, range[0] + t) })} />
+              <span className="text-ink3">· track from</span>
+              <TimeField label="Seconds into the track" value={m.offset ?? 0} onCommit={(t) => patchMusic(m.id, { offset: Math.max(0, t) })} />
+              <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => patchMusic(m.id, { start: range[0], end: range[1] })} title="Play under the whole clip">
+                Whole clip
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    });
   const overlaysTab = (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -1140,10 +1364,14 @@ export function ClipEditor(props: Props) {
         <button className="btn-ghost text-xs" disabled={assetOverlays.length >= MAX_CLIP_OVERLAYS} onClick={() => addTextOverlay(current)}>
           <Type className="h-3.5 w-3.5" /> Text
         </button>
-        <span className="ml-auto text-[11px] text-ink3">
-          {assetOverlays.length}/{MAX_CLIP_OVERLAYS}
+        <button className="btn-ghost text-xs" disabled={music.length >= MAX_CLIP_AUDIO} onClick={() => setAddMusicOpen(true)} title="Music under the clip from the playhead, ducked while someone speaks">
+          <MusicIcon className="h-3.5 w-3.5" /> Music
+        </button>
+        <span className="ml-auto text-[11px] text-ink3" title="Overlays · music tracks">
+          {assetOverlays.length}/{MAX_CLIP_OVERLAYS} · {music.length}/{MAX_CLIP_AUDIO}
         </span>
       </div>
+      {musicCards}
       {assetOverlays.length === 0 && <p className="text-xs leading-snug text-ink2">A logo, a sticker, a piece of b-roll from your library, or a line of text, shown over part of the clip from the playhead. Captions stay on top of images and video.</p>}
       {[...assetOverlays]
         .sort((a, b) => a.start - b.start)
@@ -1155,6 +1383,7 @@ export function ClipEditor(props: Props) {
           return (
             <div
               key={o.id}
+              data-ov-card={o.id}
               onClick={() => {
                 setSelectedOverlay(o.id);
                 if (current < o.start || current > o.end) seek(o.start);
@@ -1211,6 +1440,9 @@ export function ClipEditor(props: Props) {
                       <input type="range" min={10} max={100} step={5} value={Math.round((o.opacity ?? 1) * 100)} onChange={(e) => patchOverlay(o.id, { opacity: Number(e.target.value) === 100 ? undefined : Number(e.target.value) / 100 }, `ov-o-${o.id}`)} className="accent-[var(--acc)]" aria-label="Text opacity" />
                     </Field>
                   </div>
+                  <Field label="Font">
+                    <Select size="sm" ariaLabel="Text font" value={o.font ?? TEXT_FONTS[0].family} onValueChange={(v) => patchOverlay(o.id, { font: v === TEXT_FONTS[0].family ? undefined : v })} options={TEXT_FONTS.map((f) => ({ value: f.family, label: f.label }))} />
+                  </Field>
                   <Field label="Colour">
                     <Swatches label="Text colour" colors={TEXT_COLORS} value={o.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => patchOverlay(o.id, { color: c })} />
                   </Field>
@@ -1606,7 +1838,11 @@ export function ClipEditor(props: Props) {
       selectedOverlay={selectedOverlay}
       onOverlaySelect={(id) => {
         setSelectedOverlay(id);
-        if (id && tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        if (!id) return;
+        if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        // show it: park the playhead inside its window so the preview has it on screen
+        const o = assetOverlays.find((x) => x.id === id);
+        if (o && (current < o.start || current > o.end)) seek(o.start);
       }}
       onOverlayChange={(id, r, key) => patchOverlay(id, { start: r[0], end: r[1] }, key)}
       onOverlayAdd={(t, kind) => {
@@ -1616,6 +1852,18 @@ export function ClipEditor(props: Props) {
       }}
       onOverlayRemove={removeOverlay}
       renderClipEditor={clipRangeEditor}
+      music={musicBlocks}
+      selectedMusic={selectedMusic}
+      onMusicSelect={(id) => {
+        setSelectedMusic(id);
+        if (!id) return;
+        if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+        const m = music.find((x) => x.id === id);
+        if (m && (current < m.start || current > m.end)) seek(m.start);
+      }}
+      onMusicChange={(id, r, key) => patchMusic(id, { start: r[0], end: r[1] }, key)}
+      onMusicAdd={() => setAddMusicOpen(true)}
+      onMusicRemove={removeMusic}
       bumpers={bumperBlocks}
       selectedBumper={selectedBumper}
       onBumperSelect={setSelectedBumper}
@@ -1701,7 +1949,8 @@ export function ClipEditor(props: Props) {
     ["Back / forward 1s", "⇧← ⇧→"],
     ["Set in / out at playhead", "I  O"],
     ["Split framing at playhead", `${MOD}B`],
-    ["Remove selected overlay / transition", "Delete"],
+    ["Remove selected overlay / track / transition", "Delete"],
+    ["Copy / paste the selected overlay or track at the playhead", `${MOD}C  ${MOD}V`],
     ["Undo / redo", `${MOD}Z  ⇧${MOD}Z`],
     ["Save", `${MOD}S`],
     ["Snapping on / off", "S"],
@@ -1755,7 +2004,7 @@ export function ClipEditor(props: Props) {
           label="Overlay asset"
           value=""
           fixed={[]}
-          assets={library.data?.assets ?? []}
+          assets={(library.data?.assets ?? []).filter((a) => a.kind !== "audio")}
           loading={library.isPending}
           onChange={(id) => {
             const a = assetById(id);
@@ -1765,6 +2014,38 @@ export function ClipEditor(props: Props) {
         />
         {!library.isPending && !(library.data?.assets ?? []).length && <p className="text-xs text-ink3">Your library is empty.</p>}
       </Modal>
+
+      <Modal open={addMusicOpen} onOpenChange={setAddMusicOpen} title="Music under the clip">
+        <p className="text-sm leading-relaxed text-ink2">
+          A track from your library, played from <span className="font-mono">{fmtPrecise(Math.max(0, current - range[0]))}</span> to the end of the clip to start with, lowered while someone speaks. The same track can be added more than once. Add MP3, M4A, WAV, OGG or FLAC files on the Library page.
+        </p>
+        <BumperCombobox
+          slot="music"
+          label="Music track"
+          value=""
+          fixed={[]}
+          assets={(library.data?.assets ?? []).filter((a) => a.kind === "audio")}
+          loading={library.isPending}
+          onChange={(id) => {
+            const a = assetById(id);
+            setAddMusicOpen(false);
+            if (a) addMusic(a);
+          }}
+        />
+        {!library.isPending && !(library.data?.assets ?? []).some((a) => a.kind === "audio") && <p className="text-xs text-ink3">No audio files in your library yet.</p>}
+      </Modal>
+      {music.map((m) => (
+        <audio
+          key={m.id}
+          ref={(el) => {
+            if (el) musicEls.current.set(m.id, el);
+            else musicEls.current.delete(m.id);
+          }}
+          src={`/media/bumpers/${m.assetId}`}
+          preload="auto"
+          className="hidden"
+        />
+      ))}
 
       <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">

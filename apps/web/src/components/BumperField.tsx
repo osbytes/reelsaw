@@ -1,27 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { Ban, Equal, Loader2, Pencil, Star, Trash2, Upload, X } from "lucide-react";
+import { Ban, Equal, Loader2, Music, Pencil, Star, Trash2, Upload, X } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { Modal, Skeleton, SkeletonRegion } from "./ui";
 import { ScrollArea } from "./scroll-area";
-import { BumperCombobox, type FixedOption } from "./BumperCombobox";
+import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/webm,image/png,image/jpeg";
+const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
+const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
 const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
 export interface LibraryAsset {
   id: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   name: string;
   durationSec: number;
   width: number;
@@ -44,16 +46,22 @@ function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "kind" | "name
   const [failed, setFailed] = useState(false);
   return (
     <button type="button" className="relative block aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk" aria-label={`View ${asset.name}`} title="View larger" onClick={onOpen}>
-      {!failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
+      {asset.kind === "audio" ? (
+        <span className="absolute inset-0 grid place-items-center text-ink3">
+          <Music className="h-8 w-8" aria-hidden />
+        </span>
+      ) : (
+        !failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />
+      )}
       {asset.kind === "video" && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
     </button>
   );
 }
 
-export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
+export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);
 const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-/** "video · 4 s · 1080×1920" (images are drawn separately: their length is a control). */
-const metaText = (a: LibraryAsset) => `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
+/** "video · 4 s · 1080×1920", "audio · 2:31" (images are drawn separately: their length is a control). */
+const metaText = (a: LibraryAsset) => (a.kind === "audio" ? `audio · ${lengthText(a)}` : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`);
 
 export interface UploadJob {
   key: string;
@@ -131,7 +139,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     for (const file of files) {
       const key = `${file.name}:${file.size}:${Date.now()}:${Math.random()}`;
       const image = isImageFile(file);
-      const max = image ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+      const max = image ? MAX_IMAGE_BYTES : isAudioFile(file) ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
       if (file.size > max) {
         fresh.push({ key, name: file.name, pct: 0, state: "failed", error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.` });
         continue;
@@ -191,12 +199,14 @@ export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HT
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sunk text-ink2">{uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}</span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">
-            Drop videos or images here, or{" "}
+            Drop videos, images or music here, or{" "}
             <button type="button" className="font-semibold text-acc-text underline-offset-2 hover:underline" onClick={() => inputRef.current?.click()}>
               choose files
             </button>
           </p>
-          <p className="mt-0.5 text-xs text-ink3">MP4, MOV or WebM up to 10 s and 50 MB, or PNG or JPG up to 20 MB. Images are shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card.</p>
+          <p className="mt-0.5 text-xs text-ink3">
+            MP4, MOV or WebM up to 10 s and 50 MB, PNG or JPG up to 20 MB (shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card), or MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB for music under a clip.
+          </p>
         </div>
       </div>
       <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
@@ -331,7 +341,7 @@ export function SlotRow({
 /** Intro / outro / remove, in the same order on the card and in the viewer. */
 function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
-    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
+    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy || a.kind === "audio"} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
       {on ? "● " : ""}
       {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
     </button>
@@ -618,7 +628,8 @@ export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string 
 export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean }) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
-  const assets = library.data?.assets ?? [];
+  // music is for the audio lane, never a slot
+  const assets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = [...assets, ...(library.data?.deleted ?? [])];
   const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
   const fixed = (projectId: string | null | undefined): FixedOption[] => [

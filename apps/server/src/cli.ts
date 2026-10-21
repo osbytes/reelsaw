@@ -17,6 +17,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   restore <projectId>                     undo a project delete (same as projects.restore and the restore_project tool)
  *   restore-clip <clipId>                   bring back a deleted clip or one a re-analyze replaced
  *   delete-clip <clipId>                    delete one clip, restorable like a project (same as clips.delete and delete_clip)
+ *   captions <clipId> [--format srt|vtt] [--words]   print a clip's rendered captions as an SRT or VTT file (same as clips.captions and get_clip_captions)
+ *   transcript-file <projectId> [--format srt|vtt] [--words]   print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file)
+ *   import-transcript <projectId> <file.srt|file.vtt> [--language xx]   use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript)
  *   update-project <projectId> [--title t] [--set key=value]… [--clear key]…
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
@@ -71,7 +74,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           a clip's own choice (inherit the project's, none or an item);
  *                                           both act as the project's owner;
  *                                           --rerender re-renders only the affected clips
- *   clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]
+ *   clip-audio <projectId> <clipId> [--add <assetId> [--from <sec>] [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--no-duck] [--no-loop] | --track <trackId> [same options, --duck] | --remove <trackId> | --clear] [--rerender]
+ *                                           background music tracks under parts of a clip from library audio items (source seconds;
+ *                                           the same item may repeat); ducked under speech unless --no-duck; with no flag it lists them
+ *   clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]
  *                                           library images/videos or lines of text laid over part of a clip (source seconds,
  *                                           x/y/w/size as fractions of the 9:16 frame); with no change flag it lists them
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
@@ -110,6 +116,8 @@ import { summarizeQueue } from "./ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, setUserRole, setUserWatermark } from "./accounts.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
@@ -123,7 +131,7 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime, clipOverlaySchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W } from "@reelsaw/shared";
+import { formatTime, clipOverlaySchema, clipAudioSchema, clipAudioList, CLIP_AUDIO_DEFAULTS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipAudio } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
@@ -148,6 +156,13 @@ function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number
 /** "followed" / "fixed" for the top pane, with a "·" prefixed second pane when the segment has one. */
 function subjectLabel(s: { subject?: string; subject2?: string }) {
   return [s.subject, s.subject2 ? `·${s.subject2}` : ""].filter(Boolean).join(" ");
+}
+
+/** `--format srt|vtt` (default srt). */
+function captionFormat(): CaptionFormat {
+  const f = flag("format") ?? "srt";
+  if (f !== "srt" && f !== "vtt") throw new Error("--format must be srt or vtt");
+  return f;
 }
 
 function table(rows: Array<Record<string, unknown>>) {
@@ -231,6 +246,23 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!pos[0]) throw new Error("usage: reelsaw delete-clip <clipId>");
     const r = await deleteClip(svc, null, pos[0]);
     console.log(r.changed ? `deleted clip ${pos[0]}; reelsaw restore-clip brings it back ${r.restorable}` : `${pos[0]} was already deleted`);
+  },
+  /** A clip's rendered captions as a file on stdout: `reelsaw captions <clipId> [--format srt|vtt] [--words] > clip.srt`. */
+  async captions(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw captions <clipId> [--format srt|vtt] [--words]");
+    process.stdout.write((await clipCaptionsFile(svc, null, pos[0], { format: captionFormat(), words: args.includes("--words") })).text);
+  },
+  /** The project transcript as a file on stdout: `reelsaw transcript-file <projectId> [--format srt|vtt] [--words]`. */
+  async "transcript-file"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw transcript-file <projectId> [--format srt|vtt] [--words]");
+    process.stdout.write((await projectTranscriptFile(svc, null, pos[0], { format: captionFormat(), words: args.includes("--words") })).text);
+  },
+  /** Use a subtitle file as the transcript: `reelsaw import-transcript <projectId> <file.srt|file.vtt> [--language xx]`. Same function as projects.importTranscript. */
+  async "import-transcript"(svc) {
+    if (pos.length < 2) throw new Error("usage: reelsaw import-transcript <projectId> <file.srt|file.vtt> [--language xx]");
+    const r = await importTranscript(svc, null, pos[0]!, { text: await readFile(pos[1]!, "utf8"), format: pos[1]!.toLowerCase().endsWith(".vtt") ? "vtt" : "auto", language: flag("language") });
+    console.log(`${r.message}\n  ${r.format.toUpperCase()}: ${r.cues} cues, ${r.words} words${r.language ? `, language ${r.language}` : ""}`);
+    for (const w of r.warnings) console.log(`  warning: ${w}`);
   },
   /** Title and settings without re-running anything. Same function as projects.update and the update_project tool. */
   async "update-project"(svc) {
@@ -936,10 +968,50 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await api.clips.setBumpersMany(clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
     console.log(`updated ${r.updated} clip(s); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
   },
-  async "clip-overlays"(svc) {
-    const { pos: p, rerender, set, add, addText, remove, clear, from, to, x, y, w, size, color, box, opacity } = bumperArgs();
+  async "clip-audio"(svc) {
+    const { pos: p, rerender, add, track, remove, clear, from, to, volume, offset, fade, duck, noDuck, noLoop } = bumperArgs();
     const usage =
-      "usage: reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]";
+      "usage: reelsaw clip-audio <projectId> <clipId> [--add <assetId> [--from <sec>] [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--no-duck] [--no-loop] | --track <trackId> [same options, --duck] | --remove <trackId> | --clear] [--rerender]";
+    if (p.length < 2) throw new Error(usage);
+    const { api } = await bumperApi(svc, p[0]);
+    const clip = await svc.database.db.query.clips.findFirst({ where: and(eq(schema.clips.id, p[1]!), eq(schema.clips.projectId, p[0]!)), columns: { id: true, startSec: true, endSec: true, audio: true } });
+    if (!clip) throw new Error("clip not found in this project");
+    const current = clipAudioList(clip.audio);
+    const modes = [add !== undefined, track !== undefined, remove !== undefined, clear].filter(Boolean).length;
+    if (modes > 1) throw new Error(`pick one of --add, --track, --remove, --clear\n${usage}`);
+    const opts = (base: Partial<ClipAudio>) => ({
+      ...(offset !== undefined ? { offset } : base.offset !== undefined ? { offset: base.offset } : {}),
+      ...(volume !== undefined ? { volume } : base.volume !== undefined ? { volume: base.volume } : {}),
+      ...(fade !== undefined ? { fade } : base.fade !== undefined ? { fade: base.fade } : {}),
+      ...(noDuck ? { duck: false } : duck ? { duck: true } : base.duck !== undefined ? { duck: base.duck } : {}),
+      ...(noLoop ? { loop: false } : base.loop !== undefined ? { loop: base.loop } : {}),
+    });
+    const parse = (v: unknown) => {
+      const r = clipAudioSchema.safeParse(v);
+      if (!r.success) throw new Error(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      return r.data;
+    };
+    let next: ClipAudio[] = current;
+    if (clear) next = [];
+    else if (add !== undefined) next = [...current, parse({ id: `mu-${Math.random().toString(36).slice(2, 6).padEnd(4, "0")}`, assetId: add, start: from ?? clip.startSec, end: to ?? clip.endSec, ...opts({}) })];
+    else if (track !== undefined) {
+      const t = current.find((x) => x.id === track);
+      if (!t) throw new Error(`no music track ${track} on this clip`);
+      next = current.map((x) => (x.id === track ? parse({ ...x, start: from ?? x.start, end: to ?? x.end, ...opts(x) }) : x));
+    } else if (remove !== undefined) {
+      next = current.filter((x) => x.id !== remove);
+      if (next.length === current.length) throw new Error(`no music track ${remove} on this clip`);
+    }
+    if (modes) await api.clips.update({ id: clip.id, audio: next, rerender });
+    if (!next.length) console.log("no music on this clip");
+    else table(next.map((t) => ({ id: t.id, asset: t.assetId, source: `${t.start}-${t.end}`, offset: t.offset ?? 0, volume: t.volume ?? CLIP_AUDIO_DEFAULTS.volume, duck: t.duck ?? CLIP_AUDIO_DEFAULTS.duck, fade: t.fade ?? CLIP_AUDIO_DEFAULTS.fade, loop: t.loop ?? CLIP_AUDIO_DEFAULTS.loop })));
+    if (!modes) return;
+    console.log(rerender ? "re-render requested" : "saved; no re-render requested (pass --rerender to apply now)");
+  },
+  async "clip-overlays"(svc) {
+    const { pos: p, rerender, set, add, addText, remove, clear, from, to, x, y, w, size, color, box, font, opacity } = bumperArgs();
+    const usage =
+      "usage: reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]";
     if (p.length < 2) throw new Error(usage);
     const { api } = await bumperApi(svc, p[0]);
     const clip = await svc.database.db.query.clips.findFirst({ where: and(eq(schema.clips.id, p[1]!), eq(schema.clips.projectId, p[0]!)), columns: { id: true, overlays: true } });
@@ -957,7 +1029,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (from === undefined || to === undefined) throw new Error(`--add / --add-text need --from and --to\n${usage}`);
       const common = { id: newId(), start: from, end: to, x: x ?? 0.5, y: y ?? 0.5, ...(opacity !== undefined ? { opacity } : {}) };
       const parsed = clipOverlaySchema.safeParse(
-        addText !== undefined ? { ...common, kind: "text", text: addText, ...(size !== undefined ? { size } : {}), ...(color ? { color } : {}), ...(box ? { box: true } : {}) } : { ...common, kind: "asset", assetId: add, w: w ?? ASSET_OVERLAY_DEFAULT_W },
+        addText !== undefined ? { ...common, kind: "text", text: addText, ...(size !== undefined ? { size } : {}), ...(color ? { color } : {}), ...(box ? { box: true } : {}), ...(font ? { font } : {}) } : { ...common, kind: "asset", assetId: add, w: w ?? ASSET_OVERLAY_DEFAULT_W },
       );
       if (!parsed.success) throw new Error(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
       next = [...current, parsed.data];
@@ -1027,7 +1099,16 @@ function bumperArgs() {
     size: undefined as number | undefined,
     color: undefined as string | undefined,
     box: false,
+    font: undefined as string | undefined,
     opacity: undefined as number | undefined,
+    // clip-audio
+    track: undefined as string | undefined,
+    volume: undefined as number | undefined,
+    offset: undefined as number | undefined,
+    fade: undefined as number | undefined,
+    duck: false,
+    noDuck: false,
+    noLoop: false,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -1044,6 +1125,14 @@ function bumperArgs() {
     else if (a === "--size") out.size = Number(val());
     else if (a === "--color") out.color = val();
     else if (a === "--box") out.box = true;
+    else if (a === "--font") out.font = val();
+    else if (a === "--track") out.track = val();
+    else if (a === "--volume") out.volume = Number(val());
+    else if (a === "--offset") out.offset = Number(val());
+    else if (a === "--fade") out.fade = Number(val());
+    else if (a === "--duck") out.duck = true;
+    else if (a === "--no-duck") out.noDuck = true;
+    else if (a === "--no-loop") out.noLoop = true;
     else if (a === "--remove") out.remove = val();
     else if (a === "--from") out.from = Number(val());
     else if (a === "--to") out.to = Number(val());
@@ -1098,7 +1187,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|clip-overlays|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|clip-audio|clip-overlays|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

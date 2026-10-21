@@ -1,4 +1,4 @@
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style, type RenderedCaptions } from "@reelsaw/shared";
 
 export interface CaptionOptions {
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
@@ -32,6 +32,8 @@ export interface TextOverlayEvent {
   /** dark plate behind the text instead of an outline */
   box: boolean;
   opacity: number;
+  /** font family (TEXT_FONTS); absent = the caption font */
+  font?: string;
 }
 
 /**
@@ -55,6 +57,20 @@ export const WATERMARK_LOGO = {
 } as const;
 /** Centre y of the text line under the logo (logo height = w × 9/16 ÷ aspect of the frame height). */
 export const watermarkTextY = () => WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
+
+/**
+ * The caption lines a render burns in, grouped exactly as `buildAss` groups them, shifted by the
+ * intro so the times match the rendered video. Stored on the clip for SRT / VTT export.
+ */
+export function renderedCaptions(words: Word[], style: Style, introSec: number, maxLineSeconds?: number): RenderedCaptions {
+  const r3 = (n: number) => Number((n + introSec).toFixed(3));
+  const lines = style.captions === "none" ? [] : groupLines(monotonicWords(words), style.wordsPerLine, maxLineSeconds ?? lineSecondsFor(style.wordsPerLine), captionMaxChars(style.captionSize));
+  return {
+    introSec: Number(introSec.toFixed(3)),
+    captions: style.captions,
+    lines: lines.map((line, i) => ({ start: r3(line[0]!.start), end: r3(lineDisplayEnd(lines, i)), words: line.map((w) => ({ text: w.text, start: r3(w.start), end: r3(w.end) })) })),
+  };
+}
 
 /** "#RRGGBB" → ASS "&HBBGGRR&" */
 export function assColor(hex: string): string {
@@ -137,7 +153,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const alpha = Math.round((1 - Math.max(0.1, Math.min(1, t.opacity))) * 255);
     const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
     const fs = Math.max(8, Math.round(t.size * height));
-    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
+    const fn = t.font && t.font !== font ? `\\fn${esc(t.font).replace(/[\\,]/g, "")}` : "";
+    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{${fn}\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
   }
 
   // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed

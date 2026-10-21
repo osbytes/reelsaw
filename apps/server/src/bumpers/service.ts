@@ -189,7 +189,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
 export interface AssetRef {
   id: string;
   name: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   durationSec: number;
 }
 type Slot = "intro" | "outro";
@@ -248,7 +248,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
 export interface SlotSummary {
   assetId: string;
   name: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   thumbnailUrl: string;
   withCount: number;
   total: number;
@@ -257,7 +257,7 @@ export interface SlotSummary {
   /** clips with nothing in this slot */
   noneCount: number;
   /** every distinct asset used in this slot (soft-deleted ones included), most used first */
-  assets: { assetId: string; name: string; kind: "video" | "image"; thumbnailUrl: string; withCount: number }[];
+  assets: { assetId: string; name: string; kind: "video" | "image" | "audio"; thumbnailUrl: string; withCount: number }[];
 }
 export interface ProjectBumperSummary {
   intro: SlotSummary | null;

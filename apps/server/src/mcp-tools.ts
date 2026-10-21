@@ -5,7 +5,7 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO } from "@reelsaw/shared";
 import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
@@ -109,6 +109,38 @@ export const TOOLS = {
     },
     annotations: { readOnlyHint: true },
   },
+  get_clip_captions: {
+    title: "Get clip captions",
+    description: "The captions of a clip's last render as an SRT or WebVTT file: the same lines and times as the video (intro included), even when the style has captions off. Returns the file text; VTT with words: true adds karaoke word timestamps. A clip rendered before caption files existed answers that it needs a re-render (rerender_clip).",
+    inputSchema: {
+      id: clipId(),
+      format: z.enum(["srt", "vtt"]).default("srt").describe("srt (default) or vtt"),
+      words: z.boolean().default(false).describe("VTT only: add a <timestamp> before every word after the first in each cue"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  get_project_transcript_file: {
+    title: "Get transcript file",
+    description: "The project transcript as an SRT or WebVTT subtitle file, one cue per transcript segment, in source-video seconds. Returns the file text; VTT with words: true adds word timestamps. Use get_transcript to read it as plain timed lines instead.",
+    inputSchema: {
+      id: projectId(),
+      format: z.enum(["srt", "vtt"]).default("srt").describe("srt (default) or vtt"),
+      words: z.boolean().default(false).describe("VTT only: add a <timestamp> before every word after the first in each cue"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  import_transcript: {
+    title: "Import transcript",
+    description: "Use an SRT or WebVTT file as the project's transcript instead of transcribing: right after create_project (only the video is fetched) or on a done or failed project (it then re-cleans the transcript and picks clips again). Give exactly one of text, uploadId or url. Returns { format, cues, words, warnings, message }; follow with wait_for_project.",
+    inputSchema: {
+      id: projectId(),
+      text: z.string().max(10 * 1024 * 1024).optional().describe("The contents of the .srt or .vtt file"),
+      uploadId: z.string().optional().describe("Upload id of an .srt/.vtt file sent to POST /api/upload"),
+      url: z.url().optional().describe("http(s) link to a public .srt/.vtt file"),
+      format: z.enum(["auto", "srt", "vtt"]).default("auto").describe("auto (default) decides from the WEBVTT header"),
+      language: z.string().min(2).max(12).optional().describe("Language code of the text, e.g. en, es, ja (default: the existing transcript's, else unknown)"),
+    },
+  },
   search_clips: {
     title: "Search clips",
     description: "Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). Returns { projects (max 8), clips (max limit) with ids, bounds and links, truncated? }. Use list_projects to browse instead.",
@@ -149,6 +181,7 @@ export const TOOLS = {
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
       overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional().describe(`Things laid over the clip for a time range (max ${MAX_CLIP_OVERLAYS}): kind asset = a library image/video (list_bumpers; logos, stickers, b-roll), kind text = a line of text (size, color, box). Replaces the list; null or [] = none`),
+      audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional().describe(`Background music tracks under parts of the clip (max ${MAX_CLIP_AUDIO}; the same asset may repeat): library audio assets (list_bumpers, kind audio), each with a window in source seconds, volume, ducking under speech, fades. Replaces the list; null or [] = none`),
       rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
     },
   },

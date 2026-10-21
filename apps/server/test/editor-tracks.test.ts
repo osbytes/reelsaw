@@ -5,7 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { coverTimeline, adjustDecision, subjectTrack, type FaceSample, type LayoutDecision } from "../src/pipeline/layout.js";
-import { overlayChain, textOverlayEvents, type LoadedOverlay } from "../src/pipeline/render.js";
+import { overlayChain, textOverlayEvents, musicMix, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
+import { bumperProblem } from "../src/pipeline/bumpers.js";
 import { buildAss, WATERMARK_LOGO, watermarkTextY } from "../src/pipeline/captions.js";
 import { resolveStyle } from "@reelsaw/shared";
 
@@ -117,6 +118,42 @@ describe("overlayChain", () => {
     assert.ok(chain.includes("[oc0][ov1]overlay"), chain);
     assert.ok(chain.includes("[2:v]"), chain);
     assert.equal(out, "[oc1]");
+  });
+});
+
+describe("music under the clip", () => {
+  const m = (over: Partial<LoadedMusic> = {}): LoadedMusic => ({ id: "t1", assetId: "a", path: "/m.mp3", start: 2, end: 12, offset: 0, volume: 0.25, duck: true, fade: 0.5, loop: true, ...over });
+
+  it("trims, fades, levels, delays and ducks the track under the speech, then mixes without a level drop", () => {
+    const g = musicMix([m()], 3, "[ca]", 30);
+    assert.ok(g.includes("[3:a]atrim=start=0.000:end=10.000,asetpts=PTS-STARTPTS"), g);
+    assert.ok(g.includes("loudnorm=I=-20:TP=-2:LRA=11,afade=t=in:st=0:d=0.500,afade=t=out:st=9.500:d=0.500"), g);
+    assert.ok(g.includes("volume=0.250,adelay=2000|2000,apad=whole_dur=30.000,atrim=end=30.000[mu0]"), g);
+    assert.ok(g.includes("[ca]aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp,asplit=2[speech][key]"), g);
+    assert.ok(g.includes("[mu0]anull[musicd];[musicd][key]sidechaincompress="), g);
+    assert.ok(g.endsWith("[speech][ducked]amix=inputs=2:duration=first:normalize=0[mixed]"), g);
+  });
+
+  it("skips the compressor when ducking is off and keeps the fade inside a short window", () => {
+    const g = musicMix([m({ duck: false, start: 0, end: 0.6, offset: 4 })], 1, "[ca]", 5);
+    assert.ok(!g.includes("sidechaincompress"), g);
+    assert.ok(g.includes("atrim=start=4.000:end=4.600"), g);
+    assert.ok(g.includes("afade=t=in:st=0:d=0.300,afade=t=out:st=0.300:d=0.300"), g);
+    assert.ok(g.endsWith("[speech][musicp]amix=inputs=2:duration=first:normalize=0[mixed]"), g);
+  });
+
+  it("sums several tracks per group, ducked and plain, and mixes both with the speech", () => {
+    const g = musicMix([m(), m({ id: "t2", start: 5, end: 9 }), m({ id: "t3", duck: false })], 2, "[ca]", 30);
+    assert.ok(g.includes("[2:a]") && g.includes("[3:a]") && g.includes("[4:a]"), g);
+    assert.ok(g.includes("[mu0][mu1]amix=inputs=2:duration=longest:normalize=0[musicd]"), g);
+    assert.ok(g.includes("[mu2]anull[musicp]"), g);
+    assert.ok(g.endsWith("[speech][ducked][musicp]amix=inputs=3:duration=first:normalize=0[mixed]"), g);
+  });
+
+  it("refuses an audio file as an intro and accepts it as music", () => {
+    assert.match(bumperProblem("intro", { ext: ".mp3", sizeBytes: 1000 }, { durationSec: 30, hasAudio: true }) ?? "", /music under a clip/);
+    assert.equal(bumperProblem(undefined, { ext: ".mp3", sizeBytes: 1000 }, { durationSec: 30, hasAudio: true }), null);
+    assert.match(bumperProblem(undefined, { ext: ".wav", sizeBytes: 1000 }, { durationSec: 20 * 60, hasAudio: true }) ?? "", /at most 15 min/);
   });
 });
 

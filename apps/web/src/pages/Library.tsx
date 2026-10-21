@@ -69,7 +69,7 @@ export function LibraryPage() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-bold tracking-tight">Library</h1>
-            <p className="mt-1 min-h-5 text-sm text-ink2">Intros and outros you can attach to clips</p>
+            <p className="mt-1 min-h-5 text-sm text-ink2">Intros, outros, overlays and music you can attach to clips</p>
           </div>
           <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isPending ? <Skeleton className="ml-auto h-3.5 w-12" /> : `${assets.length} item${assets.length === 1 ? "" : "s"}`}</span>
         </div>
@@ -84,7 +84,7 @@ export function LibraryPage() {
         <div className="grid grid-cols-2 content-start gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {assets.length === 0 && (
             <div className="col-span-full grid h-[26rem] place-items-center rounded-[16px] border border-line bg-panel px-6 text-center text-sm text-ink3 sm:h-[30rem]">
-              Nothing here yet. Drop a video or an image above to add your first intro or outro.
+              Nothing here yet. Drop a video, an image or a music file above to add your first item.
             </div>
           )}
           {assets.map((a) => (

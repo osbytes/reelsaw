@@ -117,6 +117,41 @@ The ruler stays in source seconds: the blocks sit outside the clip range on purp
 intro thumbnail at the head of OpusClip's video track. Nothing about the stored model changed
 (`clips.bumpers`, project settings); only where it is edited.
 
+## 2b. Music lane
+
+Background tracks per clip (`clips.audio`, a list of `clipAudioSchema`, max 10; rows written
+before the list existed hold one object and are read through `clipAudioList`): each a library audio
+asset (the library takes MP3 / M4A / AAC / WAV / OGG / FLAC up to 15 min and 30 MB; an audio item
+can never be an intro or outro; the same asset may repeat), with its own `id`, a window in source
+seconds, `offset` into the track, `volume` (default 0.6, on a track normalised to −20 LUFS), `duck` (default on), `fade` (default
+0.5 s) and `loop` (default on). The editor shows them on the "Music" lane under the framing lane
+(packed rows; drag, trim, `+` or double-click to add a track at the playhead, Delete to remove) with
+a card per track in the Overlays tab for level, fades, ducking, looping and the track offset; the
+preview plays the tracks along with the video inside their windows (no ducking in the preview).
+
+**Text fonts.** A text overlay has a `font` from `TEXT_FONTS` (DejaVu Sans, Liberation Sans/Serif,
+Roboto, Open Sans, Lato, Inter, Bebas Neue, DejaVu Sans Mono): fonts installed in the image
+(Dockerfile), written as `\fn` in the caption file, and served to the editor from the same
+fontconfig lookup (`GET /api/fonts/:family`, `lib/fonts.ts` registers them as `FontFace`s), so the
+preview draws the face libass will. A family the image lacks is refused by the route and the preview
+falls back to the caption font, like the render.
+
+**Copy / paste.** `⌘C` on a selected overlay or track stores it in the editor's own clipboard
+(`localStorage`, so it works across clips and tabs); `⌘V` pastes a copy at the playhead with a new
+id and the original length, clamped to the clip. Typing in a field keeps the browser clipboard.
+
+Render (`musicMix`, `render.ts`): the track is an extra ffmpeg input after the overlays and the
+logo (`-stream_loop -1` when looping), trimmed to the window, faded in and out, set to its level,
+delayed to its start and padded to the body; with ducking the body's speech keys a
+`sidechaincompress` on the music (about 6 dB down while someone talks, back within half a second), and
+`amix … normalize=0` keeps the speech at its own level. The mix replaces the body audio before the
+intro/outro are joined, so bumpers keep their own sound. An unusable track is skipped with a
+`clip.overlay_skipped` event, and the "render with overlays failed" retry drops the music together
+with the overlays.
+
+Surfaces: `clips.update { audio }`, MCP `update_clip { audio }` / `get_clip`, CLI
+`reelsaw clip-audio <projectId> <clipId> --track <assetId> [--from] [--to] [--volume] [--offset] [--fade] [--no-duck] [--no-loop] | --clear [--rerender]`.
+
 **Watermark.** The instance watermark reuses the overlay compositor: when a render carries it, the
 logo (`WATERMARK_LOGO_PATH`, `apps/server/assets/watermark.png`) is appended as the last overlay
 input for the whole body (top-left under the platform top band, 18% of the width, 95% opacity; `WATERMARK_LOGO` in

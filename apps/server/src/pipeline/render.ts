@@ -10,7 +10,7 @@ import type { Services } from "../services.js";
 import { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
-import { buildAss } from "./captions.js";
+import { buildAss, renderedCaptions } from "./captions.js";
 import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import type { VideoEncoder } from "../media.js";
@@ -472,7 +472,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, { intro: chosen.introSec, outro: chosen.outroSec }, clip.id, log);
   // overlays (logos, stickers, b-roll) from the library, in post-cut body time; an unusable one is skipped
   const overlayItems = await loadOverlays(ctx, project.userId, clip.overlays ?? [], clip.startSec, duration, plan.mapTime, clip.id, log);
-  const srcHasAudio = bumpers.intro || bumpers.outro ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
+  // background music from the library, mixed under the speech (ducked); an unusable track is skipped like an overlay
+  const music = await loadMusic(ctx, project.userId, clipAudioList(clip.audio), clip.startSec, duration, plan.mapTime, clip.id, log);
+  const srcHasAudio = bumpers.intro || bumpers.outro || music.length ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean, withOverlays: boolean): { graph: string; audioMap: string[] } => {
   const vOut = withBumpers ? "[bodyraw]" : "[v]";
@@ -480,8 +482,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   let audioMap: string[];
   const hasCutBranch = segments.length > 1 || cuts.length > 0;
   // overlays sit between the framed body and the captions, so captions stay readable over a logo or b-roll;
-  // the watermark logo is the last of them (ffmpeg inputs 1..n, in this order)
+  // the watermark logo is the last of them (ffmpeg inputs 1..n, in this order), then the music input
   const composited = [...(withOverlays ? overlayItems.items : []), ...logo];
+  const withMusic = withOverlays && music.length > 0;
   const captioned = (inLabel: string) => {
     if (!composited.length) return `${inLabel}ass='${escapeFilterPath(assPath)}'${vOut}`;
     const o = overlayChain(composited, 1, OUT_W, OUT_H, inLabel);
@@ -532,14 +535,25 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     graph = ovl ? `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)}[body];${captioned("[body]")}` : `${src.prefix}${chain.replace("[0:v]", src.labels[0]!)},ass='${escapeFilterPath(assPath)}'${vOut}`;
     audioMap = ["-map", "0:a:0?"];
   }
+  // the body's audio as one labelled stream when something has to be mixed in or joined after it
+  let bodyAudio = hasCutBranch ? "[ca]" : "0:a:0?";
+  if ((withBumpers || withMusic) && !hasCutBranch) {
+    // concat / amix need audio in every slot: the no-cuts branch has optional audio, so give it a guaranteed [ca]
+    graph += `;${srcHasAudio ? "[0:a:0]anull[ca]" : `anullsrc=r=48000:cl=stereo,atrim=end=${duration.toFixed(3)}[ca]`}`;
+    bodyAudio = "[ca]";
+  }
+  if (withMusic) {
+    graph += `;${musicMix(music, 1 + nOverlayInputs, bodyAudio, outDuration)}`;
+    bodyAudio = "[mixed]";
+    audioMap = ["-map", bodyAudio];
+  }
   if (withBumpers) {
-    // concat needs audio in every slot: the no-cuts branch has optional audio, so give it a guaranteed [ca]
-    if (!hasCutBranch) graph += `;${srcHasAudio ? "[0:a:0]anull[ca]" : `anullsrc=r=48000:cl=stereo,atrim=end=${duration.toFixed(3)}[ca]`}`;
     // the burned-in captions are on the body's own timeline, so the intro never shifts them
-    // ffmpeg inputs: 0 = source, then the overlays, then the intro and outro
-    const introInput = bumpers.intro ? 1 + nOverlayInputs : undefined;
-    const outroInput = bumpers.outro ? 1 + nOverlayInputs + (bumpers.intro ? 1 : 0) : undefined;
-    graph += `;${bumperConcat({ introInput, outroInput, bodyVideo: "[bodyraw]", bodyAudio: "[ca]", bodySec: outDuration })}`;
+    // ffmpeg inputs: 0 = source, then the overlays (+ logo), then the music tracks, then the intro and outro
+    const base = 1 + nOverlayInputs + (withMusic ? music.length : 0);
+    const introInput = bumpers.intro ? base : undefined;
+    const outroInput = bumpers.outro ? base + (bumpers.intro ? 1 : 0) : undefined;
+    graph += `;${bumperConcat({ introInput, outroInput, bodyVideo: "[bodyraw]", bodyAudio, bodySec: outDuration })}`;
     audioMap = ["-map", "[a]"];
   }
   return { graph, audioMap };
@@ -552,6 +566,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     [
       "-ss", clip.startSec.toFixed(3), "-t", duration.toFixed(3), "-i", sourcePath,
       ...[...(withOverlays ? overlayItems.items : []), ...logo].flatMap((o) => ["-i", o.path]),
+      ...(withOverlays ? music.flatMap((m) => [...(m.loop ? ["-stream_loop", "-1"] : []), "-i", m.path]) : []),
       ...(withBumpers && bumpers.intro ? ["-i", bumpers.intro.path] : []),
       ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
       "-filter_complex", graph,
@@ -580,7 +595,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   };
   let attached: { introSec: number; outroSec: number };
   let usedBumpers = !!(bumpers.intro || bumpers.outro);
-  let usedOverlays = overlayItems.items.length > 0;
+  // the "extras" that the first retry drops together: overlays and music
+  let usedOverlays = overlayItems.items.length > 0 || music.length > 0;
   try {
     attached = await encode(usedBumpers, usedOverlays);
   } catch (err) {
@@ -622,6 +638,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
 
   log.debug({ intro: bumpers.intro?.id ?? null, outro: bumpers.outro?.id ?? null, used: usedBumpers, introSec: attached.introSec, outroSec: attached.outroSec, skipped: bumpers.skipped, fromClip: chosen.fromClip }, "bumpers");
   if (clip.overlays?.length) log.debug({ requested: clip.overlays.length, used: usedOverlays ? overlayItems.items.length : 0, skipped: overlayItems.skipped, items: overlayItems.items.map((o) => ({ id: o.id, asset: o.assetId, kind: o.kind, from: o.start, to: o.end, x: o.x, y: o.y, w: o.w })) }, "overlays");
+  if (clip.audio) log.debug({ requested: clipAudioList(clip.audio).length, used: usedOverlays ? music.length : 0, tracks: music.map((m) => ({ id: m.id, asset: m.assetId, from: m.start, to: m.end, volume: m.volume, duck: m.duck, fade: m.fade, loop: m.loop })) }, "music");
   const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),
@@ -651,7 +668,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const committed = await svc.tx(async (u) => {
     const [cur] = await u.db.select({ gen: schema.clips.renderGen, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!cur || cur.gen !== gen) return false;
-    await u.db.update(schema.clips).set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
+    // the caption lines as burned in, in the video's own seconds, so an SRT / VTT export matches the file
+    const captions = renderedCaptions(words, resolveStyle(settings, clip.style), attached.introSec);
+    await u.db.update(schema.clips).set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, captions, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(projectId, "clip.done", { clipId, index: clip.index });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
@@ -723,7 +742,7 @@ export interface LoadedOverlay {
   id: string;
   assetId: string;
   path: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   /** body seconds (after cuts) */
   start: number;
   end: number;
@@ -790,6 +809,113 @@ export async function watermarkLogo(file: string, bodySec: number, log: Logger):
   return [{ id: "watermark", assetId: "", path: file, kind: "image", start: 0, end: Number((bodySec + 1).toFixed(3)), x: WATERMARK_LOGO.x, y: WATERMARK_LOGO.y, w: WATERMARK_LOGO.w, opacity: WATERMARK_LOGO.opacity }];
 }
 
+/** Background music ready for the graph: a local file and its window in post-cut body seconds. */
+export interface LoadedMusic {
+  id: string;
+  assetId: string;
+  path: string;
+  /** body seconds (after cuts) */
+  start: number;
+  end: number;
+  /** seconds into the track to start from */
+  offset: number;
+  volume: number;
+  duck: boolean;
+  fade: number;
+  loop: boolean;
+}
+
+/**
+ * The clip's music as a local library file with its window mapped from source seconds to the body's
+ * post-cut clock. Defaults from CLIP_AUDIO_DEFAULTS. A missing or foreign asset, or a window the cuts
+ * removed, is skipped with a plain-language event; the clip renders without music rather than failing.
+ */
+async function loadMusic(ctx: StageContext, userId: string, tracks: ClipAudio[], clipStart: number, duration: number, mapTime: (t: number) => number, clipId: string, log: Logger): Promise<LoadedMusic[]> {
+  const { svc, projectId, db } = ctx;
+  const out: LoadedMusic[] = [];
+  for (const audio of tracks) {
+    const skip = async (reason: string, error?: unknown) => {
+      log.warn({ trackId: audio.id, assetId: audio.assetId, err: error }, "music skipped");
+      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, overlayId: audio.id, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
+    };
+    const a = Math.max(0, audio.start - clipStart);
+    const b = Math.min(duration, audio.end - clipStart);
+    if (b - a < 0.5) continue; // outside the clip after a retrim: nothing to play
+    const start = mapTime(a);
+    const end = mapTime(b);
+    if (end - start < 0.5) {
+      await skip("the music's whole time range was removed by cuts");
+      continue;
+    }
+    const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, audio.assetId) });
+    if (!asset || asset.userId !== userId) {
+      await skip("the music file is no longer in the library");
+      continue;
+    }
+    if (asset.kind !== "audio") {
+      await skip("that library item is not an audio file");
+      continue;
+    }
+    try {
+      const dir = path.join(svc.paths.root, "bumpers", asset.id);
+      await fs.mkdir(dir, { recursive: true });
+      const file = await svc.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
+      out.push({ id: audio.id, assetId: asset.id, path: file, start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), offset: audio.offset ?? 0, volume: audio.volume ?? CLIP_AUDIO_DEFAULTS.volume, duck: audio.duck ?? CLIP_AUDIO_DEFAULTS.duck, fade: audio.fade ?? CLIP_AUDIO_DEFAULTS.fade, loop: audio.loop ?? CLIP_AUDIO_DEFAULTS.loop });
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      await skip("the music file could not be read", err);
+    }
+  }
+  return out;
+}
+
+const AFMT = "aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp";
+/** music beds are normalised to −20 LUFS (one pass is enough for a bed) before the track's own level */
+const MUSIC_LOUDNORM = "loudnorm=I=-20:TP=-2:LRA=11";
+
+/**
+ * Filter-graph segment that mixes music tracks under the body's speech. Each track is trimmed to its
+ * window (offset in, looped by the input when asked), faded at both ends, set to its level, delayed to
+ * its start and padded to the body. Tracks that duck are summed and compressed by the speech (sidechain:
+ * roughly 10 dB down while someone talks, back within half a second); tracks that don't are summed as
+ * they are. Everything is mixed without amix's level drop. Inputs start at `firstInput`, in track order.
+ * Emits `[mixed]`.
+ */
+export function musicMix(tracks: LoadedMusic[], firstInput: number, bodyAudio: string, bodySec: number): string {
+  const parts: string[] = [];
+  const ducked: string[] = [];
+  const plain: string[] = [];
+  tracks.forEach((m, i) => {
+    const len = Math.max(0.1, m.end - m.start);
+    const fade = Math.min(m.fade, len / 2);
+    const fades = fade > 0 ? `,afade=t=in:st=0:d=${fade.toFixed(3)},afade=t=out:st=${Math.max(0, len - fade).toFixed(3)}:d=${fade.toFixed(3)}` : "";
+    const delay = Math.round(m.start * 1000);
+    const label = `[mu${i}]`;
+    // loudnorm first: every track sits at −20 LUFS before its level, so "60%" means the same for a quiet file and a loud one
+    parts.push(`[${firstInput + i}:a]atrim=start=${m.offset.toFixed(3)}:end=${(m.offset + len).toFixed(3)},asetpts=PTS-STARTPTS,${AFMT},${MUSIC_LOUDNORM}${fades},volume=${m.volume.toFixed(3)},adelay=${delay}|${delay},apad=whole_dur=${bodySec.toFixed(3)},atrim=end=${bodySec.toFixed(3)}${label}`);
+    (m.duck ? ducked : plain).push(label);
+  });
+  // sum each group to one stream (a single track just passes through under the group's label)
+  const sum = (labels: string[], out: string) => (labels.length === 1 ? `${labels[0]}anull${out}` : `${labels.join("")}amix=inputs=${labels.length}:duration=longest:normalize=0${out}`);
+  const mixIn: string[] = ["[speech]"];
+  if (ducked.length && plain.length) parts.push(`${bodyAudio}${AFMT},asplit=2[speech][key]`);
+  else if (ducked.length) parts.push(`${bodyAudio}${AFMT},asplit=2[speech][key]`);
+  else parts.push(`${bodyAudio}${AFMT}[speech]`);
+  if (ducked.length) {
+    parts.push(sum(ducked, "[musicd]"));
+    // threshold 0.02 (≈ −34 dBFS) under conversational speech (≈ −26 dB) at ratio 6: about 6 dB down while someone
+    // talks, a bed rather than silence; the short pauses between words let it back up only a little (release 400 ms)
+    parts.push(`[musicd][key]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=400:knee=2:makeup=1[ducked]`);
+    mixIn.push("[ducked]");
+  }
+  if (plain.length) {
+    parts.push(sum(plain, "[musicp]"));
+    mixIn.push("[musicp]");
+  }
+  parts.push(`${mixIn.join("")}amix=inputs=${mixIn.length}:duration=first:normalize=0[mixed]`);
+  return parts.join(";");
+}
+
 /** The clip's text overlays as caption-file events, windows mapped from source seconds to the body's post-cut clock. */
 export function textOverlayEvents(overlays: ClipOverlay[], clipStart: number, duration: number, mapTime: (t: number) => number): TextOverlayEvent[] {
   const out: TextOverlayEvent[] = [];
@@ -801,7 +927,7 @@ export function textOverlayEvents(overlays: ClipOverlay[], clipStart: number, du
     const start = mapTime(a);
     const end = mapTime(b);
     if (end - start < 0.05) continue;
-    out.push({ text: o.text, start, end, x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1 });
+    out.push({ text: o.text, start, end, x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1, ...(o.font ? { font: o.font } : {}) });
   }
   return out;
 }

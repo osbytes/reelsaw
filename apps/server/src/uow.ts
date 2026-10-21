@@ -66,6 +66,7 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "clip.restored": "info",
   "clip.deleted": "info",
   "project.updated": "info",
+  "transcript.imported": "info",
   "clip.done": "info",
   "clip.failed": "error",
   "clip.retrying": "warn",

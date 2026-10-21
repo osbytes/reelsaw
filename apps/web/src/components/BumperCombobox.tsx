@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Music } from "lucide-react";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
 import { ScrollArea } from "./scroll-area";
 import { Skeleton } from "./ui";
@@ -11,7 +11,7 @@ import { Skeleton } from "./ui";
 /** What the combobox needs to know about a library asset (a subset of the `bumpers.list` row). */
 export interface PickerAsset {
   id: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   name: string;
   durationSec: number;
   width: number;
@@ -32,13 +32,15 @@ export const durationText = (sec: number) => `${sec.toFixed(sec % 1 ? 1 : 0)} s`
 export const assetFacts = (a: PickerAsset) => `${a.kind} · ${durationText(a.durationSec)} · ${a.width}×${a.height}`;
 
 /** The 9:16 thumbnail in a fixed box, so nothing moves while the image loads. */
-export function Thumb({ asset, className = "h-9 w-5" }: { asset: Pick<PickerAsset, "name" | "thumbnailUrl">; className?: string }) {
+export function Thumb({ asset, className = "h-9 w-5" }: { asset: Pick<PickerAsset, "name" | "thumbnailUrl"> & { kind?: PickerAsset["kind"] }; className?: string }) {
   return (
-    <span className={`relative inline-block shrink-0 overflow-hidden rounded-[4px] border border-line bg-sunk ${className}`}>
-      {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />}
+    <span className={`relative inline-grid shrink-0 place-items-center overflow-hidden rounded-[4px] border border-line bg-sunk text-ink3 ${className}`}>
+      {asset.kind === "audio" ? <Music className="h-3 w-3" aria-hidden /> : asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" /> : null}
     </span>
   );
 }
+/** "2:31" for music, "4 s" for the short intros and outros. */
+export const clockText = (sec: number) => (sec >= 60 ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}` : durationText(sec));
 
 const Badge = ({ children, tone = "plain" }: { children: ReactNode; tone?: "plain" | "acc" }) => (
   <span className={`shrink-0 rounded-[5px] px-1 py-px text-[10px] font-semibold ${tone === "acc" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink2"}`}>{children}</span>
@@ -49,9 +51,7 @@ function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
       <Badge>{a.kind}</Badge>
-      <span className="font-mono">
-        {durationText(a.durationSec)} · {a.width}×{a.height}
-      </span>
+      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
       {isDefault && <Badge tone="acc">default {slot}</Badge>}
       {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
     </span>

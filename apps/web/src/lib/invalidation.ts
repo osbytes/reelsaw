@@ -41,6 +41,7 @@ export const INVALIDATION: Record<ProjectEventType, Rule> = {
   "clip.restored": ["project", "list"],
   "clip.deleted": ["project", "list"],
   "project.updated": ["project", "list"],
+  "transcript.imported": ["project", "list", "transcript"],
   "project.done": ["project", "list"],
   "project.failed": ["project", "list"],
 };

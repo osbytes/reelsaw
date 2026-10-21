@@ -19,6 +19,7 @@ import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./bumpers/service.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { restorableFor } from "./projects/service.js";
+import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
 
 function mmss(s: number) {
@@ -186,6 +187,29 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
           out += line;
         }
         return truncated || segs.length ? out : out + "(empty)";
+      }),
+  );
+
+  server.registerTool(
+    "get_clip_captions",
+    TOOLS.get_clip_captions,
+    ({ id, format, words }) => run(async () => (await api.clips.captions({ id, format, words })).text),
+  );
+
+  server.registerTool(
+    "get_project_transcript_file",
+    TOOLS.get_project_transcript_file,
+    ({ id, format, words }) => run(async () => (await api.projects.transcriptFile({ id, format, words })).text),
+  );
+
+  server.registerTool(
+    "import_transcript",
+    TOOLS.import_transcript,
+    ({ id, text: body, uploadId, url, format, language }) =>
+      run(async () => {
+        if ([body, uploadId, url].filter((v) => v !== undefined).length !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Give exactly one of text, uploadId or url" });
+        // a link is fetched here (public addresses only) and passed on as text, so the procedure has one input path
+        return api.projects.importTranscript({ id, text: url ? await fetchSubtitleText(url) : body, uploadId, format, language });
       }),
   );
 

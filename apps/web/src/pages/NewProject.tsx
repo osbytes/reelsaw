@@ -160,7 +160,7 @@ export function NewProjectPage() {
   }
 
   // only what differs from the user's default travels; "None" is an explicit null
-  const libAssets = library.data?.assets ?? [];
+  const libAssets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = (c: string) => c === "default" || c === "none" || libAssets.some((a) => a.id === c);
   const chosen = { intro: known(bump.intro) ? bump.intro : "default", outro: known(bump.outro) ? bump.outro : "default" };
   const bumperSettings: Partial<ProjectSettings> = {};
