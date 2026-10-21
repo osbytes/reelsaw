@@ -57,4 +57,4 @@ Every commit carries a `Signed-off-by` trailer certifying the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/). This agreement adds the
 licence grants above; it does not replace the certificate.
 
-Questions: legal@reelsaw.com.
+Questions: hi+reelsaw@osbytes.io.
