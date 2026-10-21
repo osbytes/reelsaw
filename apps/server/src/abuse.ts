@@ -15,6 +15,7 @@
  */
 import { and, eq, gte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { ACCOUNT_EXISTS_MESSAGE } from "@reelsaw/shared";
 import disposable from "disposable-email-domains/index.json" with { type: "json" };
 import { schema, type Db } from "./db/index.js";
 import type { Services } from "./services.js";
@@ -82,7 +83,7 @@ export async function signupGuard(db: Db, s: Pick<RuntimeSettings, "MAX_SIGNUPS_
   const [dup] = await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.emailKey, key)).limit(1);
   if (dup) {
     log.warn({ ip: input.ip }, "sign-up refused: same mailbox as an existing account");
-    throw new SignupRefused("An account already exists for this email address. Sign in, or reset your password.");
+    throw new SignupRefused(ACCOUNT_EXISTS_MESSAGE);
   }
   if (s.MAX_SIGNUPS_PER_IP_PER_DAY > 0 && input.ip) {
     const [{ n }] = await db

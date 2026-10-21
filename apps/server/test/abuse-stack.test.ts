@@ -50,7 +50,7 @@ describe("abuse guards", () => {
 
   it("refuses a temporary-address domain with a sentence", async () => {
     const r = await trySignup(`t-${randomUUID().slice(0, 8)}@mailinator.com`, "203.0.113.9");
-    assert.equal(r.status, 403, r.text);
+    assert.equal(r.status, 422, r.text);
     assert.match(r.text, /Temporary email addresses cannot be used here/);
   });
 
@@ -64,10 +64,10 @@ describe("abuse guards", () => {
     assert.equal(b.status, 200, b.text);
     made.push(b.userId!);
     const c = await trySignup(`third.${tag}@example.test`, ip);
-    assert.equal(c.status, 403, c.text);
+    assert.equal(c.status, 422, c.text);
     assert.match(c.text, /Too many accounts were created from this network today/);
     const dup = await trySignup(`Guard.${tag}+promo@example.test`, "203.0.113.250");
-    assert.equal(dup.status, 403, dup.text);
+    assert.equal(dup.status, 422, dup.text);
     assert.match(dup.text, /An account already exists for this email address/);
     const stored = await pool.query(`select email_key, signup_ip from "user" where id = $1`, [a.userId]);
     assert.equal(stored.rows[0].email_key, `guard.${tag}@example.test`);

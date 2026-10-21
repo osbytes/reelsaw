@@ -1,3 +1,4 @@
+import { PENDING_APPROVAL_MESSAGE } from "@reelsaw/shared";
 import { Logo, ThemeToggle } from "../App";
 import { signOut } from "../lib/auth";
 import { useMe } from "../lib/account";
@@ -16,7 +17,7 @@ export function PendingPage() {
         <Logo />
         <h1 className="text-[22px] font-bold tracking-tight">{suspended ? "Account suspended" : "Waiting for approval"}</h1>
         <p className="text-sm leading-relaxed text-ink2">
-          {blocked?.reason ?? "Your account is waiting for an admin to approve it."}
+          {blocked?.reason ?? PENDING_APPROVAL_MESSAGE}
           {!suspended && " This page refreshes on its own; you can also come back later."}
         </p>
         <p className="min-h-5 text-xs text-ink3">{me.data ? `Signed in as ${me.data.email}` : ""}</p>

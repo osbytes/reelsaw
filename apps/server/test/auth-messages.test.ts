@@ -1,0 +1,46 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  ACCOUNT_EXISTS_MESSAGE,
+  CONFIRM_EMAIL_THEN_SIGN_IN,
+  PENDING_APPROVAL_MESSAGE,
+  REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD,
+  repeatSignUpMessage,
+  signupCreatedNotice,
+  unverifiedSignInMessage,
+} from "@reelsaw/shared";
+
+const pending = { kind: "pending" as const, reason: PENDING_APPROVAL_MESSAGE };
+const banned = { kind: "banned" as const, reason: "This account is suspended." };
+
+describe("repeat sign-up", () => {
+  it("tells a pending account the waiting sentence and that the password did not change", () => {
+    const message = repeatSignUpMessage(pending);
+    assert.equal(message.startsWith(PENDING_APPROVAL_MESSAGE), true);
+    assert.equal(message.includes(REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD), true);
+  });
+
+  it("tells a suspended account why, and everyone else that the account exists", () => {
+    assert.equal(repeatSignUpMessage(banned), banned.reason);
+    assert.equal(repeatSignUpMessage(null), ACCOUNT_EXISTS_MESSAGE);
+  });
+});
+
+describe("sign-in while the email is unconfirmed", () => {
+  it("uses the waiting sentence for a pending account and leaves an approved account to Better Auth", () => {
+    const message = unverifiedSignInMessage(pending);
+    assert.equal(message?.startsWith(PENDING_APPROVAL_MESSAGE), true);
+    assert.equal(message?.includes(CONFIRM_EMAIL_THEN_SIGN_IN), true);
+    assert.equal(unverifiedSignInMessage(null), null);
+    assert.equal(unverifiedSignInMessage(banned), banned.reason);
+  });
+});
+
+describe("sign-up that created an account and no session", () => {
+  it("says the account is waiting when sign-up needs approval, and only the confirmation otherwise", () => {
+    assert.equal(signupCreatedNotice("approval").startsWith(PENDING_APPROVAL_MESSAGE), true);
+    assert.equal(signupCreatedNotice("approval").includes("first sign-up"), true);
+    assert.equal(signupCreatedNotice("open").includes(PENDING_APPROVAL_MESSAGE), false);
+    assert.equal(signupCreatedNotice("open").includes(CONFIRM_EMAIL_THEN_SIGN_IN), true);
+  });
+});

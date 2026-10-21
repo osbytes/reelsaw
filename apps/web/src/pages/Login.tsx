@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { useNavigate, Navigate } from "react-router";
+import { useNavigate, Navigate, useLocation } from "react-router";
+import { signupCreatedNotice } from "@reelsaw/shared";
 import { authClient, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
@@ -45,6 +46,9 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const location = useLocation();
+  const routedNotice = location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string" ? location.state.notice : null;
+  const [notice, setNotice] = useState<string | null>(routedNotice);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const status = useSystemStatus();
@@ -71,6 +75,18 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       setCaptchaToken(null);
       return setError(res.error.message ?? "Something went wrong");
     }
+    // Verification is required, so the account exists and there is no session. Stay here and switch
+    // to sign-in with the password they just chose. Leaving for a fresh form is where a password
+    // manager offers a new strong password, and that sign-in then fails.
+    if (mode === "signup" && res.data && res.data.token == null) {
+      const text = signupCreatedNotice(signupMode);
+      setBusy(false);
+      setCaptchaToken(null);
+      setNotice(text);
+      setMode("login");
+      if (window.location.pathname !== "/login") nav("/login", { replace: true, state: { notice: text } });
+      return;
+    }
     if (oauthQuery) {
       const r = await authClient.$fetch<{ redirect_uri: string }>("/oauth2/continue", { method: "POST", body: { oauth_query: oauthQuery } });
       if (r.data?.redirect_uri) return window.location.assign(r.data.redirect_uri);
@@ -95,16 +111,26 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
         {mode === "signup" && (
           <div>
             <label className="label">Name</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            <input className="input" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
         )}
         <div>
           <label className="label">Email</label>
-          <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <div>
           <label className="label">Password</label>
-          <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input
+            key={mode}
+            className="input"
+            name="password"
+            type="password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            required
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
         {mode === "signup" && plan && <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>}
         {mode === "signup" && signupMode === "approval" && <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>}
@@ -118,6 +144,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
         )}
         {oauthQuery && <p className="text-xs leading-relaxed text-ink2">An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</p>}
         {captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
+        {notice && <p className="rounded-[10px] bg-warn-soft px-3 py-2 text-sm leading-relaxed text-ink">{notice}</p>}
         {error && <p className="rounded-[10px] bg-err-soft px-3 py-2 text-sm text-ink">{error}</p>}
         <button className="btn-primary w-full py-2.5 text-sm" disabled={busy || (!!captcha && !captchaToken)}>
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
