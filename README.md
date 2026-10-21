@@ -610,6 +610,8 @@ Sentry's OTLP endpoint takes traces and logs (`…/integration/otlp`, plus `OTEL
 
 Spans: inbound HTTP (`/api/health` excluded), Postgres queries, outbound fetch to AI vendors, `pipeline.<stage>` per job with `reelsaw.project_id` / `reelsaw.clip_id` / `reelsaw.attempt`, `exec ffmpeg|ffprobe|yt-dlp`, and the AI SDK's own `ai.generateText` / `ai.transcribe` spans (inputs/outputs not recorded). pg-boss propagates trace context from `send()` into the worker span, so one trace follows a project from the create mutation through every stage.
 
+The browser exports its own spans as `reelsaw-web` (page load, clicks, fetch, and live subscriptions) and sends `traceparent` on API calls, including the subscription stream, so a click and the server work it starts are one trace. `OTEL_TRACES_SAMPLE_RATE` (default `1`) is the fraction kept, on the browser and the server together. The Sentry browser SDK does not trace; those spans would be a second copy.
+
 ## Entity-aware transcription
 
 Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optional:

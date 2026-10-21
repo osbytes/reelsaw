@@ -10,11 +10,12 @@
  * `x-sentry-auth=sentry%20sentry_key%3D<public>`). Sentry accepts OTLP traces and logs
  * (`/v1/logs`); when metrics are left on, telemetry.ts sends those through the Sentry SDK
  * instead of `/v1/metrics`. Application logs are pino lines forwarded by log.ts.
- * Resolution helpers live in otel-config.ts.
+ * OTEL_TRACES_SAMPLE_RATE (default 1) is the fraction kept. The browser uses the same rate,
+ * and a trace it drops stays dropped here. Resolution helpers live in otel-config.ts.
  */
 import { createRequire } from "node:module";
 import { trace, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
-import { publicFromResolved, resolveOtlp, type OtelPublic } from "./otel-config.js";
+import { applyServerSampler, publicFromResolved, resolveOtlp, type OtelPublic } from "./otel-config.js";
 import { setOtelLogsEnabled } from "./otel-log.js";
 
 export type { OtelPublic } from "./otel-config.js";
@@ -43,6 +44,8 @@ export function setSpanMetric(fn: SpanMetric | null): void {
 function start(): Otel {
   if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
   const cfg = resolveOtlp(process.env);
+  // Before the SDK loads: it reads OTEL_TRACES_SAMPLER when it starts. The browser uses cfg.sampleRate.
+  applyServerSampler(process.env, cfg.sampleRate);
   const require = createRequire(import.meta.url);
   const { NodeSDK, metrics } = require("@opentelemetry/sdk-node");
   const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
@@ -104,6 +107,7 @@ function start(): Otel {
       metrics: cfg.metrics,
       sentryMetrics: cfg.sentryMetrics,
       sentry: cfg.sentry,
+      sampleRate: cfg.sampleRate,
       msg: "opentelemetry enabled",
     }) + "\n",
   );
