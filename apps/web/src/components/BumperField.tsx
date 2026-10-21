@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { Ban, Equal, Loader2, Music, Pencil, Star, Trash2, Upload, X } from "lucide-react";
+import { Ban, Equal, Loader2, Music, Pause, Pencil, Play, Star, Trash2, Upload, X } from "lucide-react";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
@@ -42,17 +42,12 @@ export function useBumperLibrary() {
 }
 
 /** The server-made thumbnail in a fixed 9:16 box (a placeholder shows until it loads, so nothing moves). Click opens the viewer. */
-function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "kind" | "name" | "thumbnailUrl">; onOpen: () => void }) {
+function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "id" | "kind" | "name" | "durationSec" | "thumbnailUrl">; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
+  if (asset.kind === "audio") return <AudioThumb asset={asset} onOpen={onOpen} />;
   return (
     <button type="button" className="relative block aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk" aria-label={`View ${asset.name}`} title="View larger" onClick={onOpen}>
-      {asset.kind === "audio" ? (
-        <span className="absolute inset-0 grid place-items-center text-ink3">
-          <Music className="h-8 w-8" aria-hidden />
-        </span>
-      ) : (
-        !failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />
-      )}
+      {!failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
       {asset.kind === "video" && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
     </button>
   );
@@ -174,7 +169,95 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       () => (refresh(), true),
       (e) => (fail(e), false),
     );
-  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds };
+  /** New label; only the name changes, nothing re-renders. Resolves true when saved. */
+  const rename = (a: LibraryAsset, name: string) => {
+    const next = name.trim();
+    if (!next || next === a.name) return Promise.resolve(false);
+    return updateM.mutateAsync({ id: a.id, name: next }).then(
+      () => (refresh(), toast(`Renamed to ${next}`), true),
+      (e) => (fail(e), toast.error((e as Error).message), false),
+    );
+  };
+  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename };
+}
+
+/** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
+let playingAudio: HTMLAudioElement | null = null;
+const playOnly = (el: HTMLAudioElement) => {
+  if (playingAudio && playingAudio !== el) playingAudio.pause();
+  playingAudio = el;
+  void el.play().catch(() => {});
+};
+
+/** The music glyph with a play / pause button and a thin progress line; the glyph itself opens the viewer. */
+function AudioThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "id" | "name" | "durationSec">; onOpen: () => void }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [pct, setPct] = useState(0);
+  const toggle = () => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.paused) playOnly(el);
+    else el.pause();
+  };
+  return (
+    <div className="relative aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk">
+      <audio
+        ref={ref}
+        src={`/media/bumpers/${asset.id}`}
+        preload="none"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPct(0)}
+        onTimeUpdate={(e) => setPct(e.currentTarget.duration ? e.currentTarget.currentTime / e.currentTarget.duration : 0)}
+      />
+      <button type="button" className="absolute inset-0 grid place-items-center text-ink3" aria-label={`View ${asset.name}`} title="Details" onClick={onOpen}>
+        <Music className="h-8 w-8" aria-hidden />
+      </button>
+      <button type="button" className="absolute bottom-1.5 right-1.5 grid h-7 w-7 place-items-center rounded-full bg-white/90 text-[#1c1c1e] hover:bg-white" aria-label={playing ? `Pause ${asset.name}` : `Play ${asset.name}`} aria-pressed={playing} title={playing ? "Pause" : "Play"} onClick={toggle}>
+        {playing ? <Pause className="h-3.5 w-3.5" fill="currentColor" /> : <Play className="h-3.5 w-3.5 translate-x-px" fill="currentColor" />}
+      </button>
+      <div className="absolute inset-x-0 bottom-0 h-1 bg-black/20" aria-hidden>
+        <div className="h-full bg-acc transition-[width] duration-200" style={{ width: `${pct * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** A pencil that opens a small popover with the name field; Enter or Save renames. */
+function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pick<LibraryAsset, "name">; busy: boolean; onRename: (name: string) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(a.name);
+  const save = () => {
+    const next = v.trim();
+    if (next && next !== a.name) onRename(next);
+    setOpen(false);
+  };
+  return (
+    <Popover.Root open={open} onOpenChange={(o) => (o && setV(a.name), setOpen(o))}>
+      <Popover.Trigger asChild>
+        <button type="button" className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`} aria-label={`Rename ${a.name}`} title="Rename">
+          <Pencil className="h-3 w-3" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+          <label className="flex flex-col gap-1 text-ink2">
+            Name
+            <input className="input h-8 px-2 py-0 text-xs" type="text" maxLength={120} value={v} disabled={busy} autoFocus aria-label="New name" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+          </label>
+          <div className="flex justify-end gap-1.5">
+            <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-ink px-2 py-1 text-xs" disabled={busy || !v.trim() || v.trim() === a.name} onClick={save}>
+              Save
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
 }
 
 /** The dashed dropzone card: choose files, limits, and the batch progress in space that is always reserved. */
@@ -396,14 +479,17 @@ function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; bus
 }
 
 /** One library card: fixed-size thumbnail, one-line name and facts, an always-present status line, and equal-width actions. */
-export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void }) {
+export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds, onRename }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void; onRename: (name: string) => void }) {
   return (
     <div id={`asset-${a.id}`} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <CardThumb asset={a} onOpen={onOpen} />
       <div className="min-w-0 text-xs">
-        <button type="button" className="block w-full truncate text-left font-semibold text-ink" onClick={onSelect} title={`${a.name} (link to this item)`}>
-          {a.name}
-        </button>
+        <div className="flex items-center gap-1">
+          <button type="button" className="block min-w-0 flex-1 truncate text-left font-semibold text-ink" onClick={onSelect} title={`${a.name} (link to this item)`}>
+            {a.name}
+          </button>
+          <RenamePopover asset={a} busy={busy} onRename={onRename} />
+        </div>
         <div className="flex h-4 items-center gap-1 overflow-hidden whitespace-nowrap font-mono text-ink3">
           {a.kind === "image" ? (
             <>
@@ -479,7 +565,7 @@ function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAss
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove }: { asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void }) {
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename }: { asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -489,21 +575,35 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
             <>
               <div className="flex items-center gap-2">
                 <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
+                <RenamePopover asset={a} busy={busy} onRename={onRename} />
                 <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
                   <X className="h-4 w-4" />
                 </Dialog.Close>
               </div>
-              <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
-                {a.kind === "video" ? (
-                  <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
-                ) : (
-                  <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
-                )}
-              </div>
+              {a.kind === "audio" ? (
+                <div className="flex flex-col items-center gap-4 rounded-[12px] bg-sunk px-4 py-8">
+                  <Music className="h-12 w-12 text-ink3" aria-hidden />
+                  <audio key={a.id} src={`/media/bumpers/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
+                </div>
+              ) : (
+                <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
+                  {a.kind === "video" ? (
+                    <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
+                  )}
+                </div>
+              )}
               <p className="truncate font-mono text-xs text-ink3">
-                {a.kind} · {lengthText(a)} · {a.width}×{a.height} · {sizeText(a.sizeBytes)}
+                {a.kind === "audio" ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}` : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
+              {(a.usedBy > 0 || a.usedByClips > 0) && (
+                <div className="rounded-[12px] border border-line p-3">
+                  <b className="text-xs">Where it’s used</b>
+                  <UsageList id={a.id} className="mt-2 max-h-[min(200px,30vh)]" />
+                </div>
+              )}
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
               <p className="text-center text-xs text-ink3">
                 New project with it as the{" "}
@@ -557,7 +657,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
                   <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled moment"}
                 </Link>
                 <span className="shrink-0 text-ink3">
-                  {c.slots.join(" + ")} · {c.via === "clip" ? "clip’s own choice" : "from project"}
+                  {c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s)).join(" + ")} · {c.via === "clip" ? "on the clip" : "from project"}
                 </span>
               </div>
             ))}
@@ -576,7 +676,7 @@ export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsse
         <>
           <p className="text-sm leading-relaxed text-ink2">
             {asset.usedBy
-              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
+              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
               : `“${asset.name}” will be removed. You can restore it for 30 days.`}
           </p>
           {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35vh)]" />}

@@ -257,7 +257,7 @@ export const TOOLS = {
 
   list_bumpers: {
     title: "List intros and outros",
-    description: "Your intro/outro library. Returns { assets: [{ id, name, kind, durationSec, isDefaultIntro, isDefaultOutro, usedBy, thumbnailUrl }], removed: [...] } (removed items stay restorable for 30 days). Use the ids with set_project_bumpers, set_clip_bumpers or set_default_bumper.",
+    description: "Your library: intros/outros (video, image), overlays and music (audio). Returns { assets: [{ id, name, kind, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] } (removed items stay restorable for 30 days; usedBy counts intro, outro, overlay and music uses; url is the file itself). Use the ids with set_project_bumpers, set_clip_bumpers, set_default_bumper or update_clip overlays/audio.",
     annotations: { readOnlyHint: true },
   },
   add_bumper: {
@@ -293,8 +293,8 @@ export const TOOLS = {
     annotations: { idempotentHint: true },
   },
   bumper_usage: {
-    title: "Where an intro/outro is used",
-    description: "The projects and clips that use a library item. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via }] }] }, via saying whether through the project or the clip's own choice. Check before removing one.",
+    title: "Where a library item is used",
+    description: "The projects and clips that use a library item, as intro, outro, overlay or music. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }] }: slots are the roles on that clip, via says whether through the project or the clip, overlays/music count the uses. Check before removing one.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },

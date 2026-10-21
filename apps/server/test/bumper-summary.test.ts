@@ -66,4 +66,12 @@ describe("countBumperUsage", () => {
     assert.deepEqual(m.get("a"), { projects: 2, clips: 3 });
     assert.deepEqual(m.get("b"), { projects: 1, clips: 1 });
   });
+  it("overlays and music tracks count, the same track twice counts once, an old one-object audio row is read", () => {
+    const m = countBumperUsage([
+      { settings: {}, clips: [{ bumpers: null, overlays: [{ assetId: "logo" }, { assetId: null }], audio: [{ id: "m1", assetId: "song", start: 0, end: 5 }, { id: "m2", assetId: "song", start: 5, end: 9 }] }, { bumpers: null, audio: { assetId: "song", start: 0, end: 5 } }] },
+      { settings: { introAssetId: "logo" }, clips: [clip(), { bumpers: null, overlays: [{ assetId: "logo" }] }] },
+    ]);
+    assert.deepEqual(m.get("logo"), { projects: 2, clips: 3 });
+    assert.deepEqual(m.get("song"), { projects: 1, clips: 2 });
+  });
 });

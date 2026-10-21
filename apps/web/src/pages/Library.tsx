@@ -102,6 +102,7 @@ export function LibraryPage() {
               onOpen={() => setViewingId(a.id)}
               onUse={(slot) => actions.setDefault(slot, a, slot === "intro" ? defaults?.introAssetId : defaults?.outroAssetId)}
               onRemove={() => remove(a)}
+              onRename={(name) => void actions.rename(a, name)}
             />
           ))}
         </div>
@@ -118,6 +119,7 @@ export function LibraryPage() {
             setViewingId(null);
             remove(viewing);
           }}
+          onRename={(name) => viewing && void actions.rename(viewing, name)}
         />
         <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={fadeOut} />
       </main>

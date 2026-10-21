@@ -930,7 +930,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { api, user } = await bumperApi(svc, undefined);
     if (sub === "list") {
       const lib = await libraryView(svc, api, user.id);
-      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy });
+      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips });
       table(lib.assets.map(row));
       if (lib.removed.length) {
         console.log("\nremoved (restorable for 30 days)");
@@ -941,7 +941,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!u.projects.length) console.log("(not used)");
       for (const p of u.projects) {
         console.log(`${p.title}  ${p.id}  project slots: ${p.slots.join(",") || "-"}`);
-        for (const c of p.clips) console.log(`  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.join(",")} via ${c.via}`);
+        for (const c of p.clips) console.log(`  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay×${c.overlays}` : s === "music" && c.music > 1 ? `music×${c.music}` : s)).join(",")} via ${c.via}`);
       }
     } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
       await api.bumpers.setDefault({ slot: a, assetId: b === "none" ? null : b });

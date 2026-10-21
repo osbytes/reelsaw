@@ -239,6 +239,8 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     usedBy: a.usedBy,
     usedByClips: a.usedByClips,
     thumbnailUrl: abs(a.thumbnailUrl),
+    /** the file itself (play the music, view the image or video); same auth as this server */
+    url: abs(`/media/bumpers/${a.id}`),
   });
   return { assets: lib.assets.map(row), removed: lib.deleted.map(row) };
 }
@@ -291,8 +293,8 @@ export async function projectBumperSummaries(
 export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number }>> {
   const projects = await db.select({ id: schema.projects.id, settings: schema.projects.settings }).from(schema.projects).where(eq(schema.projects.userId, userId));
   if (!projects.length) return new Map();
-  const clips = await db.select({ projectId: schema.clips.projectId, bumpers: schema.clips.bumpers }).from(schema.clips).where(inArray(schema.clips.projectId, projects.map((p) => p.id)));
-  const byProject = new Map<string, { bumpers: (typeof clips)[number]["bumpers"] }[]>();
+  const clips = await db.select({ projectId: schema.clips.projectId, bumpers: schema.clips.bumpers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.projectId, projects.map((p) => p.id)));
+  const byProject = new Map<string, Omit<(typeof clips)[number], "projectId">[]>();
   for (const c of clips) {
     const list = byProject.get(c.projectId) ?? [];
     list.push(c);
