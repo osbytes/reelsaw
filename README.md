@@ -66,6 +66,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 - **Intro and outro library** – the **Library** page keeps several videos or images (PNG or JPG, shown 1 to 10 s); drop many files at once (duplicates are detected), view them enlarged, see which projects and clips use each one, remove with Undo, and choose the default new projects start with. Each clip is rendered as intro + clip + outro in a single encode, fitted to vertical over a blurred background.
 - **Per project and per clip** – a project follows the default, uses none or a specific item; each clip can follow the project, use none or pick its own, set in the editor, from a clip card or for several selected clips at once. The editor shows what a clip adds around its source range, changes re-render only when confirmed, and an unusable asset is skipped with a plain-language event instead of failing the clip.
+- **Overlays** – library items can also be laid over part of a clip (the editor's Overlays lane, `update_clip { overlays }`, `reelsaw clip-overlays`), with position, size and opacity; an unusable one is skipped the same way.
 
 **Agents and automation**
 
@@ -291,9 +292,10 @@ them), so a single-user box stays as it is:
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
   plan, else the UTC calendar month. Length is checked once the video is probed, so an over-long
   download fails the project with that reason.
-- **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns `WATERMARK_TEXT` ("reelsaw.com") into
-  the clips of accounts that are not admins; a paid plan removes it, and an admin can switch it per
-  user on the Users page (Limits). Decided at render time, so a re-render after the change applies it.
+- **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
+  `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan
+  removes it, and an admin can switch it per user on the Users page (Limits). Decided at render time,
+  so a re-render after the change applies it.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
@@ -388,7 +390,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
 | `get_project_events` | The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. |
 | `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. |
-| `update_clip` | Edit one clip: only the fields you pass change; style and layoutSections replace the clip's whole value (null = back to the project's). |
+| `update_clip` | Edit one clip: only the fields you pass change; style, layoutSections and overlays replace the whole value (null = project's / none). |
 | `create_clip` | Add a clip from a time range of the source (needs a transcript). |
 | `delete_clip` | Delete one clip of your project; a render in progress stops. |
 | `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
@@ -474,6 +476,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] \| --remove <overlayId> \| --clear] [--rerender]` | library images/videos or lines of text laid over part of a clip (source seconds, x/y/w/size as fractions of the 9:16 frame); with no change flag it lists them |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |

@@ -260,6 +260,13 @@
       "when": 1792517647514,
       "tag": "0036_worker_disk",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792588308080,
+      "tag": "0037_clip_overlays",
+      "breakpoints": true
     }
   ]
 }

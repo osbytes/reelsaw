@@ -14,7 +14,7 @@ writing; search for the function name if they drifted.
 
 | layout | source looks like | 9:16 output | automatic trigger (config) | user override |
 |---|---|---|---|---|
-| `face` | one speaker, big in frame | full-height 9:16 crop that follows the face (heavy-tripod smoothing) | face in at least `LAYOUT_MIN_FACE_RATIO` (0.6) of sampled frames, median face height at least `LAYOUT_MIN_FACE_SIZE` (0.18), not in a corner, no second face, no side panel (`decideLayout`, `layout.ts:92`) | section mode "Follow speaker"; drag the picture to offset |
+| `face` | one speaker, big in frame | full-height 9:16 crop that follows the face (heavy-tripod smoothing) | face in at least `LAYOUT_MIN_FACE_RATIO` (0.6) of sampled frames, median face height at least `LAYOUT_MIN_FACE_SIZE` (0.18), not in a corner, no second face, no side panel (`decideLayout`, `layout.ts:92`) | section mode "Follow speaker"; drag the picture to offset (`offsetX`/`offsetY`), or point at another person (`subjectX`) |
 | `split` | two people in one wide shot | two speaker-sized crops, one above the other | a second face (at least 8% tall) in at least 50% of frames (`layout.ts:116`); inside it the crop follows whoever talks when `activeSpeakers` is confident (`render.ts:276`) | section mode "Two stacked" |
 | `stack` | small webcam over a screen share or slides | whole frame on top, zoomed speaker below | median face under `LAYOUT_MIN_FACE_SIZE`, or face centre in a corner (x < 0.22 or > 0.78 and y < 0.3 or > 0.7) (`layout.ts:106`) | section mode "Screen + speaker" |
 | `stack` with a content region | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectContentRegion` (`content-region.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
@@ -38,6 +38,9 @@ Where the user can override: project setting `reframe` (`reframeModeSchema`, `pa
 per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; `coverTimeline`,
 `layout.ts:418`), the editor's section mode select and drag-to-offset, and the MCP `layoutOverride` /
 `layoutSections` fields. A section in any mode but Auto is "manual": automatic post-passes leave it alone.
+Each pane of a section has its own adjustment: `offsetX` / `offsetY` for the top (or only) pane,
+`offsetX2` / `offsetY2` for the bottom of a split, and `subjectX` / `subjectX2` to follow the person at that
+x (a fixed crop there when no face is found). See [specs/editor-tracks.md](specs/editor-tracks.md).
 
 ## 2. How the decision is made
 

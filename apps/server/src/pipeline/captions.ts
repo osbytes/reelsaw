@@ -3,6 +3,8 @@ import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lin
 export interface CaptionOptions {
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
   watermark?: string;
+  /** the logo is composited above the text (render.ts `watermarkLogo`): the text goes smaller and sits right under it */
+  watermarkUnderLogo?: boolean;
   width: number;
   height: number;
   font: string;
@@ -12,7 +14,47 @@ export interface CaptionOptions {
   /** Key words to colour (matched case/punctuation-insensitively). */
   emphasis?: string[];
   maxLineSeconds?: number;
+  /** text overlays (clip overlays of kind "text"), in the body's own seconds; drawn above the captions */
+  texts?: TextOverlayEvent[];
 }
+
+/** One text overlay as the ASS file draws it: centre position and size as fractions of the frame. */
+export interface TextOverlayEvent {
+  text: string;
+  start: number;
+  end: number;
+  x: number;
+  y: number;
+  /** font size as a fraction of the frame height */
+  size: number;
+  /** #RRGGBB */
+  color: string;
+  /** dark plate behind the text instead of an outline */
+  box: boolean;
+  opacity: number;
+}
+
+/**
+ * Where the logo watermark sits (fractions of the 9:16 frame): top-left, just under the platform's
+ * top band (TikTok, Shorts and Reels all keep that corner clear; the bottom fifth is their username
+ * and description, the right edge their buttons). The text line sits tight under the logo. Shared
+ * by the compositor (render.ts) and the caption file.
+ */
+export const WATERMARK_LOGO = {
+  /** centre of the logo */
+  x: 0.15,
+  y: 0.095,
+  /** width as a fraction of the frame width; the file is 900x240 */
+  w: 0.18,
+  aspect: 900 / 240,
+  opacity: 0.95,
+  /** text size as a fraction of the frame height */
+  textSize: 0.017,
+  /** gap between the logo's bottom edge and the text, fraction of the frame height */
+  gap: 0.004,
+} as const;
+/** Centre y of the text line under the logo (logo height = w × 9/16 ÷ aspect of the frame height). */
+export const watermarkTextY = () => WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2 + WATERMARK_LOGO.gap + WATERMARK_LOGO.textSize / 2;
 
 /** "#RRGGBB" → ASS "&HBBGGRR&" */
 export function assColor(hex: string): string {
@@ -79,6 +121,8 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 ${captionStyle}
 Style: Hook,${font},${hookSize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,${Math.round(14 * scale)},0,5,${margin},${margin},0,1
 Style: Watermark,${font},${Math.round(height * 0.024)},&H50FFFFFF,&H50FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,${Math.round(1.5 * scale)},0,1,${Math.max(1, Math.round(1.5 * scale))},0,5,${margin},${margin},0,1
+Style: Text,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outline},1,5,${margin},${margin},0,1
+Style: TextBox,${font},${captionSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,3,${Math.round(12 * scale)},0,5,${margin},${margin},0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -87,8 +131,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   const events: string[] = [];
   const clipEnd = words.length ? words[words.length - 1]!.end : 0;
 
+  // text overlays: above the captions (layer 1), below the watermark; size, colour and alpha per event
+  for (const t of opts.texts ?? []) {
+    if (t.end - t.start < 0.05) continue;
+    const alpha = Math.round((1 - Math.max(0.1, Math.min(1, t.opacity))) * 255);
+    const a = alpha ? `\\alpha&H${alpha.toString(16).toUpperCase().padStart(2, "0")}&` : "";
+    const fs = Math.max(8, Math.round(t.size * height));
+    events.push(`Dialogue: 1,${assTime(t.start)},${assTime(t.end)},${t.box ? "TextBox" : "Text"},,0,0,0,,${pos(t.x, t.y)}{\\fs${fs}\\c${assColor(t.color)}${a}}${esc(t.text)}`);
+  }
+
   // the whole clip, on its own layer; libass renders it from the ASS file, so no extra ffmpeg filter is needed
-  if (opts.watermark) events.push(`Dialogue: 2,${assTime(0)},${assTime(Math.max(clipEnd, 1) + 3600)},Watermark,,0,0,0,,${pos(0.5, 0.91)}${esc(opts.watermark)}`);
+  if (opts.watermark) {
+    // under the logo: a bit smaller, just below the logo's bottom edge (WATERMARK_LOGO in render.ts)
+    const place = opts.watermarkUnderLogo ? `${pos(WATERMARK_LOGO.x, watermarkTextY())}{\\fs${Math.round(height * WATERMARK_LOGO.textSize)}}` : pos(0.5, 0.91);
+    events.push(`Dialogue: 2,${assTime(0)},${assTime(Math.max(clipEnd, 1) + 3600)},Watermark,,0,0,0,,${place}${esc(opts.watermark)}`);
+  }
 
   if (style.showHook && opts.hook && style.hookSeconds > 0) {
     const end = Math.min(style.hookSeconds, Math.max(clipEnd, style.hookSeconds));

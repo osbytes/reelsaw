@@ -5,7 +5,7 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS } from "@reelsaw/shared";
 import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
@@ -13,9 +13,9 @@ export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short 
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
-- change: update_clip (one clip's text, bounds, framing, style), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
+- change: update_clip (one clip's text, bounds, framing, style, overlays), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
-Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips.
+Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items can be laid over part of a clip as overlays (a logo, a sticker, b-roll), and so can lines of text: update_clip { overlays: [{ id, assetId, start, end, x, y, w }, { id, kind: "text", text, start, end, x, y, size, color, box }] }.
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
@@ -135,7 +135,7 @@ export const TOOLS = {
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style and layoutSections replace the clip's whole value (null = back to the project's). Text-only edits (title, caption, hashtags) apply at once; bounds, hook, framing, style and emphasis are burned into the video and re-render in the background (~1 min) unless rerender is false. Returns the clip summary with its new status; poll get_clip until done.",
+    description: "Edit one clip: only the fields you pass change; style, layoutSections and overlays replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and overlays are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x. Returns the clip summary; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
@@ -148,6 +148,7 @@ export const TOOLS = {
       layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional().describe("Framing per time range (max 50), source seconds; replaces all sections; null or [] = automatic"),
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
+      overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional().describe(`Things laid over the clip for a time range (max ${MAX_CLIP_OVERLAYS}): kind asset = a library image/video (list_bumpers; logos, stickers, b-roll), kind text = a line of text (size, color, box). Replaces the list; null or [] = none`),
       rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
     },
   },

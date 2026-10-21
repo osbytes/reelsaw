@@ -83,7 +83,8 @@ export function BumperCombobox({
   known?: PickerAsset[];
   /** the user's default asset for this slot, badged in the list */
   defaultId?: string | null;
-  slot: "intro" | "outro";
+  /** what is being picked ("intro", "outro", "overlay"): names the search box and the default badge */
+  slot: string;
   label: string;
   className?: string;
 }) {

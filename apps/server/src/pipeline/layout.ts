@@ -525,22 +525,48 @@ export function suffixLabels(chain: string, suffix: string, input: string): stri
 
 export type TimelineMode = "auto" | Layout;
 
+/**
+ * The user's per-pane adjustments of a section: offsets are relative to the followed face, a subject
+ * picks which face the pane follows (pane 1 = the only pane or the top of a split, pane 2 = the bottom).
+ */
+export interface SectionAdjust {
+  offsetX?: number;
+  offsetY?: number;
+  offsetX2?: number;
+  offsetY2?: number;
+  subjectX?: number;
+  subjectX2?: number;
+}
+const ADJUST_KEYS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
+/** Only the adjustment fields that do something, or undefined when there are none. */
+export function cleanAdjust(a: SectionAdjust | undefined): SectionAdjust | undefined {
+  if (!a) return undefined;
+  const out: SectionAdjust = {};
+  for (const k of ADJUST_KEYS) {
+    const v = a[k];
+    if (v === undefined) continue;
+    if (k.startsWith("subject") ? Number.isFinite(v) : Math.abs(v) >= 1e-4) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+const sameAdjust = (a: SectionAdjust | undefined, b: SectionAdjust | undefined) => JSON.stringify(cleanAdjust(a) ?? null) === JSON.stringify(cleanAdjust(b) ?? null);
+
 /** A clip-relative stretch of time with the framing mode that applies to it. */
 export interface TimelinePiece {
   start: number;
   end: number;
   mode: TimelineMode;
   manual: boolean;
-  offsetX?: number;
+  adjust?: SectionAdjust;
 }
 
 /**
  * Cover [0, duration] with the user's sections (clip-relative) and the default mode in the gaps.
  * Later sections win where they overlap; slivers under 0.1 s are dropped.
  */
-export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode; offsetX?: number }>, defaultMode: TimelineMode): TimelinePiece[] {
+export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode): TimelinePiece[] {
   const clean = sections
-    .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), mode: s.mode, offsetX: s.offsetX }))
+    .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), mode: s.mode, adjust: cleanAdjust(s) }))
     .filter((s) => s.end - s.start >= 0.1);
   const edges = [...new Set([0, duration, ...clean.flatMap((s) => [s.start, s.end])])].sort((a, b) => a - b);
   const out: TimelinePiece[] = [];
@@ -552,12 +578,37 @@ export function coverTimeline(duration: number, sections: Array<{ start: number;
     const hit = [...clean].reverse().find((s) => s.start <= mid && s.end >= mid);
     const mode = hit?.mode ?? defaultMode;
     const manual = !!hit && hit.mode !== "auto";
-    const offsetX = hit?.offsetX || undefined;
+    const adjust = hit?.adjust;
     const last = out[out.length - 1];
-    if (last && last.mode === mode && last.manual === manual && last.offsetX === offsetX) last.end = b;
-    else out.push({ start: a, end: b, mode, manual, ...(offsetX ? { offsetX } : {}) });
+    if (last && last.mode === mode && last.manual === manual && sameAdjust(last.adjust, adjust)) last.end = b;
+    else out.push({ start: a, end: b, mode, manual, ...(adjust ? { adjust } : {}) });
   }
   return out.length ? out : [{ start: 0, end: duration, mode: defaultMode, manual: false }];
+}
+
+/**
+ * The track of the person at `subjectX`: every sample's nearest box, kept by continuity like
+ * `assignPair`, smoothed by the tripod. When the face is missing in most samples (nobody there,
+ * or the detector cannot see them) the pane becomes a fixed crop at `subjectX` instead of drifting
+ * to whoever the detector found elsewhere.
+ */
+export function subjectTrack(samples: FaceSample[], subjectX: number, sceneCuts: number[], start: number, opts = { reach: 0.15, minSeen: 0.3 }): { track: LayoutDecision["track"]; size: number; fixed: boolean } {
+  const cx = (b: FaceBox) => (b.x1 + b.x2) / 2;
+  let at = subjectX;
+  const picked: FaceSample[] = [];
+  let seen = 0;
+  for (const s of samples) {
+    let best: FaceBox | null = null;
+    for (const b of s.boxes) if (Math.abs(cx(b) - at) <= opts.reach && (!best || Math.abs(cx(b) - at) < Math.abs(cx(best) - at))) best = b;
+    if (best) {
+      at = cx(best);
+      seen++;
+    }
+    picked.push({ t: s.t, box: best, boxes: [] });
+  }
+  if (!samples.length || seen / samples.length < opts.minSeen) return { track: [{ t: start, x: subjectX, y: 0.45 }], size: 0, fixed: true };
+  const size = median(picked.filter((s) => s.box).map((s) => s.box!.y2 - s.box!.y1));
+  return { track: tripodTrack(picked, sceneCuts), size: Number(size.toFixed(3)), fixed: false };
 }
 
 export function staticDecision(layout: Layout, reason: string): LayoutDecision {
@@ -583,15 +634,47 @@ function shiftDecision(d: LayoutDecision, by: number): LayoutDecision {
 
 export interface ResolvedSegment extends LayoutSegment {
   manual: boolean;
-  offsetX?: number;
+  adjust?: SectionAdjust;
+  /** what a subject request came to, per pane */
+  subject?: "followed" | "fixed";
+  subject2?: "followed" | "fixed";
 }
 
-/** Shift a decision's crop horizontally; a static centre crop becomes a fixed crop at 0.5 + offset. */
-export function offsetDecision(d: LayoutDecision, offsetX: number | undefined, start: number): LayoutDecision {
-  if (!offsetX || d.layout === "fit" || d.layout === "none") return d;
-  const sh = (tr: LayoutDecision["track"]) => tr.map((p) => ({ ...p, x: Math.max(0, Math.min(1, p.x + offsetX)) }));
-  if (!d.track.length) return { ...d, track: [{ t: start, x: Math.max(0, Math.min(1, 0.5 + offsetX)), y: 0.45 }] };
-  return { ...d, track: sh(d.track), track2: d.track2 ? sh(d.track2) : undefined };
+/**
+ * Apply the user's adjustments to a decision: a subject re-assigns the pane's track to the person
+ * at that x (or fixes the crop there), then the pane's offset shifts the crop relative to what it
+ * follows. Pane 1 moves `track`, pane 2 moves `track2`. Whole-frame layouts are left alone.
+ */
+export function adjustDecision(d: LayoutDecision, adjust: SectionAdjust | undefined, samples: FaceSample[], sceneCuts: number[], start: number): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
+  const a = cleanAdjust(adjust);
+  if (!a || d.layout === "fit" || d.layout === "none") return { decision: d };
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  let out: LayoutDecision = { ...d };
+  let subject: "followed" | "fixed" | undefined;
+  let subject2: "followed" | "fixed" | undefined;
+  const notes: string[] = [];
+  if (a.subjectX !== undefined) {
+    const s = subjectTrack(samples, a.subjectX, sceneCuts, start);
+    subject = s.fixed ? "fixed" : "followed";
+    out = { ...out, track: s.track, ...(s.size ? { faceSize: s.size, ...(out.speakerSizes ? { speakerSizes: [s.size, out.speakerSizes[1]] as [number, number] } : {}) } : {}) };
+    notes.push(s.fixed ? `no face at ${Math.round(a.subjectX * 100)}%, fixed crop` : `following the person at ${Math.round(a.subjectX * 100)}%`);
+  }
+  if (a.subjectX2 !== undefined && d.layout === "split") {
+    const s = subjectTrack(samples, a.subjectX2, sceneCuts, start);
+    subject2 = s.fixed ? "fixed" : "followed";
+    out = { ...out, track2: s.track, ...(s.size ? { speakerSizes: [out.speakerSizes?.[0] ?? out.faceSize, s.size] as [number, number] } : {}) };
+    notes.push(s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`);
+  }
+  const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) => (dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx), y: clamp(p.y + dy) })) : tr);
+  if (a.offsetX || a.offsetY) {
+    out = { ...out, track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }] };
+  }
+  if ((a.offsetX2 || a.offsetY2) && d.layout === "split") {
+    const base = out.track2?.length ? out.track2 : out.track;
+    out = { ...out, track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }] };
+  }
+  if (notes.length) out = { ...out, reason: `${out.reason}; ${notes.join("; ")}` };
+  return { decision: out, ...(subject ? { subject } : {}), ...(subject2 ? { subject2 } : {}) };
 }
 
 /**
@@ -617,19 +700,25 @@ export function resolveSegments(
       }
       const local = inside.map((s) => ({ ...s, t: s.t - pc.start }));
       const segs = segmentLayouts(local, config, cutsIn.map((c) => c - pc.start), pc.end - pc.start, undefined, diag);
-      if (!segs.length) out.push({ start: pc.start, end: pc.end, decision: offsetDecision(inside.length ? decideLayout(inside, config, cutsIn) : staticDecision("fit", "no frames sampled"), pc.offsetX, pc.start), manual: false, offsetX: pc.offsetX });
-      for (const sg of segs) out.push({ start: sg.start + pc.start, end: sg.end + pc.start, decision: offsetDecision(shiftDecision(sg.decision, pc.start), pc.offsetX, sg.start + pc.start), manual: false, offsetX: pc.offsetX });
+      const push = (start: number, end: number, decision: LayoutDecision) => {
+        const within = samples.filter((s) => s.t >= start && s.t < end);
+        const adj = adjustDecision(decision, pc.adjust, within, sceneCuts.filter((c) => c > start && c < end), start);
+        out.push({ start, end, decision: adj.decision, manual: false, adjust: pc.adjust, ...(adj.subject ? { subject: adj.subject } : {}), ...(adj.subject2 ? { subject2: adj.subject2 } : {}) });
+      };
+      if (!segs.length) push(pc.start, pc.end, inside.length ? decideLayout(inside, config, cutsIn) : staticDecision("fit", "no frames sampled"));
+      for (const sg of segs) push(sg.start + pc.start, sg.end + pc.start, shiftDecision(sg.decision, pc.start));
       continue;
     }
     const layout = pc.mode;
     const needsTrack = layout === "face" || layout === "split" || layout === "stack";
     const decision = needsTrack ? (hasDetector ? forcedDecision(inside, layout, config, cutsIn) : staticDecision("center", "manual (no face detector)")) : staticDecision(layout, "manual");
-    out.push({ start: pc.start, end: pc.end, decision: offsetDecision(decision, pc.offsetX, pc.start), manual: pc.manual, offsetX: pc.offsetX });
+    const adj = adjustDecision(decision, pc.adjust, inside, cutsIn, pc.start);
+    out.push({ start: pc.start, end: pc.end, decision: adj.decision, manual: pc.manual, adjust: pc.adjust, ...(adj.subject ? { subject: adj.subject } : {}), ...(adj.subject2 ? { subject2: adj.subject2 } : {}) });
   }
   const merged: ResolvedSegment[] = [];
   for (const seg of out) {
     const last = merged[merged.length - 1];
-    if (last && sameFraming(last.decision, seg.decision) && last.manual === seg.manual && last.offsetX === seg.offsetX) {
+    if (last && sameFraming(last.decision, seg.decision) && last.manual === seg.manual && sameAdjust(last.adjust, seg.adjust) && last.subject === seg.subject && last.subject2 === seg.subject2) {
       last.end = seg.end;
       last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
     } else merged.push({ ...seg, decision: { ...seg.decision } });

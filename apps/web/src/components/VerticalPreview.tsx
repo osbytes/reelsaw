@@ -22,6 +22,69 @@ export interface PreviewWord {
   end: number;
 }
 
+/** An overlay as the preview draws it (fractions of the 9:16 frame): a library image/video, or a line of text. */
+export type PreviewAssetOverlay =
+  | {
+      kind: "asset";
+      id: string;
+      /** image to draw (the asset itself, or a video's poster) */
+      url: string;
+      name: string;
+      /** asset width / height, so the box keeps the file's shape like the renderer's scale=w:-2 */
+      aspect: number;
+      x: number;
+      y: number;
+      w: number;
+      opacity: number;
+    }
+  | {
+      kind: "text";
+      id: string;
+      text: string;
+      x: number;
+      y: number;
+      /** font size as a fraction of the frame height (mirrors the ASS event) */
+      size: number;
+      color: string;
+      box: boolean;
+      opacity: number;
+    };
+
+/** Where a layout's crop panes sit in the 9:16 frame, as [top, bottom] fractions; a stack's top part is content, not a crop. */
+export function paneBands(f: Framing, srcW: number, srcH: number): Array<[number, number]> {
+  if (f.layout === "split") return [[0, 0.5], [0.5, 1]];
+  if (f.layout === "stack") return [[isFullFrame(f.content) ? Math.min(0.9, (1080 * srcH) / srcW / 1920) : 0.5, 1]];
+  if (f.layout === "face" || f.layout === "center") return [[0, 1]];
+  return [];
+}
+/** Which crop pane the pointer is over at a frame position: 0 = the only pane or the top of a split, 1 = the bottom of a split. */
+export function paneAt(f: Framing, srcW: number, srcH: number, yFrac: number): 0 | 1 | null {
+  const bands = paneBands(f, srcW, srcH);
+  const i = bands.findIndex(([a, b]) => yFrac >= a && yFrac < b);
+  return i === 0 ? 0 : i === 1 ? 1 : null;
+}
+
+/** The crop window of a pane as fractions of the source: how far the picture moves per unit of drag, and how far a face can be nudged before it leaves the pane. */
+export function paneCrop(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { w: number; h: number } {
+  const halfAspect = 9 / 8; // a split / stack half is 1080x960
+  if (f.layout === "split") {
+    const c = speakerCrop(srcW, srcH, halfAspect, pane === 0 ? { cy: f.cy, size: f.size ?? 0.3 } : { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 });
+    return { w: c.w / srcW, h: c.h / srcH };
+  }
+  if (f.layout === "stack" && !isFullFrame(f.content)) {
+    const g = contentStackGeometry(srcW, srcH, f.content!, { cy: f.cy, size: f.size ?? 0.3 }, halfAspect);
+    return { w: g.zoom.w / srcW, h: g.zoom.h / srcH };
+  }
+  if (f.layout === "stack") {
+    const topH = (1080 * srcH) / srcW;
+    const botH = Math.max(1, 1920 - topH);
+    const c = speakerCrop(srcW, srcH, 1080 / botH, { cy: f.cy, size: f.size ?? 0.17 });
+    return { w: c.w / srcW, h: c.h / srcH };
+  }
+  const v = verticalCrop(srcW, srcH);
+  return { w: v.w / srcW, h: v.h / srcH };
+}
+
 interface Props {
   /** Video or image element to sample frames from; null draws a placeholder. */
   source: HTMLVideoElement | HTMLImageElement | null;
@@ -38,8 +101,18 @@ interface Props {
   /** always show the hook (style editing) instead of only during the first seconds */
   alwaysShowHook?: boolean;
   onStyleChange?: (patch: Partial<Style>) => void;
-  /** drag the picture to re-centre the crop; delta is in source-width fractions */
-  onPan?: (deltaX: number) => void;
+  /** drag the picture to re-centre a pane's crop; deltas are fractions of the source width / height */
+  onPan?: (pane: 0 | 1, deltaX: number, deltaY: number) => void;
+  /** the drag on a pane ended (the editor decides whether it was a nudge or a new subject) */
+  onPanEnd?: (pane: 0 | 1) => void;
+  /** library overlays active at `time`, drawn over the frame; the selected one can be dragged and resized */
+  assetOverlays?: PreviewAssetOverlay[];
+  selectedOverlay?: string | null;
+  onOverlaySelect?: (id: string | null) => void;
+  /** drag / resize of the selected overlay (`w` for an asset, `size` for text); `key` groups one gesture into one undo step */
+  onOverlayChange?: (id: string, patch: { x?: number; y?: number; w?: number; size?: number }, key: string) => void;
+  /** a still shown instead of the video (the intro/outro poster while its block is selected) with its tag */
+  still?: { url: string; tag: string } | null;
   showSafeZones?: boolean;
   platform?: Platform;
   /** small label in the top-left corner (e.g. which framing is showing) */
@@ -75,12 +148,13 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
-  const [drag, setDrag] = useState<null | "caption" | "hook" | "pan">(null);
+  const [drag, setDrag] = useState<null | "caption" | "hook" | { pan: 0 | 1 } | { overlay: string; mode: "move" | "size"; key: string; grab: { x: number; y: number }; orig: { x: number; y: number; w: number }; text: boolean }>(null);
   const panX = useRef(0);
+  const panY = useRef(0);
   const [snappedX, setSnappedX] = useState(false);
   const [snappedY, setSnappedY] = useState(false);
   const framingRef = useRef(framing);
@@ -139,22 +213,54 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   }
   const pannable = !!onPan && framing.layout !== "fit" && framing.layout !== "none";
   function onPanStart(e: React.PointerEvent) {
-    if (!pannable || e.button !== 0) return;
+    if (!pannable || e.button !== 0 || !boxRef.current) return;
+    const r = boxRef.current.getBoundingClientRect();
+    const pane = paneAt(framing, srcW, srcH, (e.clientY - r.top) / r.height);
+    if (pane === null) return;
     e.preventDefault();
-    boxRef.current?.setPointerCapture(e.pointerId);
+    boxRef.current.setPointerCapture(e.pointerId);
     panX.current = e.clientX;
-    setDrag("pan");
+    panY.current = e.clientY;
+    onOverlaySelect?.(null);
+    setDrag({ pan: pane });
+  }
+  function onOverlayStart(o: PreviewAssetOverlay, mode: "move" | "size", e: React.PointerEvent) {
+    if (!onOverlayChange || e.button !== 0 || !boxRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    boxRef.current.setPointerCapture(e.pointerId);
+    onOverlaySelect?.(o.id);
+    const r = boxRef.current.getBoundingClientRect();
+    // for text the "width" being resized is the font size (fraction of the height)
+    setDrag({ overlay: o.id, mode, key: `g:ov-${mode}:${Date.now()}`, grab: { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }, orig: { x: o.x, y: o.y, w: o.kind === "text" ? o.size : o.w }, text: o.kind === "text" });
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (drag === "pan" && boxRef.current && onPan) {
+    if (drag && typeof drag === "object" && "pan" in drag && boxRef.current && onPan) {
       const W = boxRef.current.clientWidth;
+      const H = boxRef.current.clientHeight;
       const dx = e.clientX - panX.current;
+      const dy = e.clientY - panY.current;
       panX.current = e.clientX;
-      // dragging the picture right moves the crop window left
-      if (dx) onPan(-(dx / W) * cropFraction(framing, srcW, srcH, W, boxRef.current.clientHeight));
+      panY.current = e.clientY;
+      if (!dx && !dy) return;
+      // dragging the picture right moves the crop window left; the pane's own height scales the vertical drag
+      const crop = paneCrop(framing, srcW, srcH, drag.pan);
+      const band = paneBands(framing, srcW, srcH)[drag.pan] ?? [0, 1];
+      const paneH = H * (band[1] - band[0]);
+      onPan(drag.pan, -(dx / W) * crop.w, crop.h >= 0.999 ? 0 : -(dy / paneH) * crop.h);
       return;
     }
-    if (!drag || !boxRef.current || !onStyleChange) return;
+    if (drag && typeof drag === "object" && "overlay" in drag && boxRef.current && onOverlayChange) {
+      const r = boxRef.current.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width;
+      const py = (e.clientY - r.top) / r.height;
+      const r3 = (n: number) => Math.round(n * 1000) / 1000;
+      if (drag.mode === "move") onOverlayChange(drag.overlay, { x: r3(Math.max(0, Math.min(1, drag.orig.x + px - drag.grab.x))), y: r3(Math.max(0, Math.min(1, drag.orig.y + py - drag.grab.y))) }, drag.key);
+      else if (drag.text) onOverlayChange(drag.overlay, { size: r3(Math.max(0.02, Math.min(0.12, drag.orig.w + (py - drag.grab.y) * 0.5))) }, drag.key);
+      else onOverlayChange(drag.overlay, { w: r3(Math.max(0.05, Math.min(1, drag.orig.w + 2 * (px - drag.grab.x)))) }, drag.key);
+      return;
+    }
+    if (!drag || typeof drag !== "string" || !boxRef.current || !onStyleChange) return;
     const r = boxRef.current.getBoundingClientRect();
     // kept 15–85% horizontally and 4–94% vertically so text never leaves the frame; centre snap within 3%, Alt skips
     let x = (e.clientX - r.left) / r.width;
@@ -171,10 +277,12 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     onStyleChange(drag === "caption" ? { captionX: r3(x), captionY: r3(y) } : { hookX: r3(x), hookY: r3(y) });
   }
   function onPointerUp() {
+    if (drag && typeof drag === "object" && "pan" in drag) onPanEnd?.(drag.pan);
     setDrag(null);
     setSnappedX(false);
     setSnappedY(false);
   }
+  const panning = !!drag && typeof drag === "object" && "pan" in drag;
 
   const capPx = h * CAPTION_FONT_FRAC * style.captionSize;
   const hookPx = h * HOOK_FONT_FRAC;
@@ -183,17 +291,74 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   return (
     <div
       ref={boxRef}
-      className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (drag === "pan" ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
-      title={pannable ? "Drag the picture to re-centre the crop" : undefined}
+      className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
+      title={pannable ? (framing.layout === "split" ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them" : "Drag the picture to re-centre the crop") : undefined}
       onPointerDown={onPanStart}
       onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      {showSafeZones && <SafeZones platform={platform} />}
-      {tag && <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>}
-      {drag && drag !== "pan" && snappedX && <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-0 border-l-2 border-snap" />}
-      {drag && drag !== "pan" && snappedY && <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0 border-t-2 border-snap" />}
+      {assetOverlays.map((o) => {
+        const sel = o.id === selectedOverlay;
+        const name = o.kind === "text" ? `“${o.text}”` : o.name;
+        const handle = sel && onOverlayChange && (
+          <span className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc" onPointerDown={(e) => onOverlayStart(o, "size", e)} aria-label={`Resize ${name}`} />
+        );
+        const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
+        if (o.kind === "text") {
+          // same font and plate as the captions, so the preview matches the ASS event the renderer writes
+          const px = h * o.size;
+          return (
+            <div
+              key={o.id}
+              className={`${frame} whitespace-nowrap text-center font-bold leading-tight`}
+              style={{
+                left: `${o.x * 100}%`,
+                top: `${o.y * 100}%`,
+                fontFamily: FONT,
+                fontSize: px,
+                maxWidth: width * 0.88,
+                color: o.color,
+                opacity: o.opacity,
+                ...(o.box ? { background: "rgba(0,0,0,0.63)", padding: `${px * 0.12}px ${px * 0.25}px` } : { WebkitTextStroke: `${Math.max(1, px * 0.06)}px #000`, paintOrder: "stroke fill", textShadow: `0 ${px * 0.04}px ${px * 0.06}px rgba(0,0,0,0.5)` }),
+              }}
+              onPointerDown={(e) => onOverlayStart(o, "move", e)}
+              title={onOverlayChange ? `${name} · drag to move, corner to resize` : name}
+            >
+              {o.text}
+              {handle}
+            </div>
+          );
+        }
+        const wPx = o.w * width;
+        const hPx = wPx / Math.max(0.05, o.aspect);
+        return (
+          <div key={o.id} className={frame} style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }} onPointerDown={(e) => onOverlayStart(o, "move", e)} title={onOverlayChange ? `${name} · drag to move, corner to resize` : name}>
+            <img src={o.url} alt="" draggable={false} className="h-full w-full object-cover" />
+            {handle}
+          </div>
+        );
+      })}
+      {still && (
+        <div className="absolute inset-0 z-[5] bg-black">
+          <img src={still.url} alt="" className="h-full w-full object-cover" />
+          <span className="pointer-events-none absolute left-2 top-2 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{still.tag}</span>
+        </div>
+      )}
+      {showSafeZones && !still && <SafeZones platform={platform} />}
+      {tag && !still && <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-[6px] bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">{tag}</span>}
+      {panning &&
+        (() => {
+          const pane = drag && typeof drag === "object" && "pan" in drag ? drag.pan : 0;
+          const band = paneBands(framing, srcW, srcH)[pane];
+          return band && !(band[0] === 0 && band[1] === 1) ? <div className="pointer-events-none absolute inset-x-0 z-10 outline outline-2 -outline-offset-2 outline-acc" style={{ top: `${band[0] * 100}%`, height: `${(band[1] - band[0]) * 100}%` }} /> : null;
+        })()}
+      {drag === "caption" || drag === "hook" ? (
+        <>
+          {snappedX && <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-0 border-l-2 border-snap" />}
+          {snappedY && <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0 border-t-2 border-snap" />}
+        </>
+      ) : null}
 
-      {showHook && (
+      {showHook && !still && (
         <div
           className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{ left: `${style.hookX * 100}%`, top: `${style.hookY * 100}%`, fontFamily: FONT, fontSize: hookPx, maxWidth: width * 0.88, width: "max-content", background: "#fff", color: "#000", padding: `${hookPx * 0.2}px ${hookPx * 0.3}px` }}
@@ -204,7 +369,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
         </div>
       )}
 
-      {style.captions !== "none" && line && (
+      {style.captions !== "none" && line && !still && (
         <div
           className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "caption" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{
@@ -258,17 +423,6 @@ function SafeZones({ platform }: { platform: Platform }) {
       </span>
     </>
   );
-}
-
-/** Width of the crop window as a fraction of the source width, per layout (mirrors paint()). */
-function cropFraction(f: Framing, srcW: number, srcH: number, W: number, H: number) {
-  if (f.layout === "split") return speakerCrop(srcW, srcH, W / (H / 2), { cy: f.cy, size: f.size ?? 0.3 }).w / srcW;
-  if (f.layout === "stack" && !isFullFrame(f.content)) return contentStackGeometry(srcW, srcH, f.content!, { cy: f.cy, size: f.size ?? 0.3 }, W / (H / 2)).zoom.w / srcW;
-  if (f.layout === "stack") {
-    const botH = H - (W * srcH) / srcW;
-    return speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }).w / srcW;
-  }
-  return verticalCrop(srcW, srcH).w / srcW;
 }
 
 // ---------- canvas painter, mirrors layoutFilter() in apps/server/src/pipeline/render.ts ----------

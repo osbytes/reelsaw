@@ -70,6 +70,7 @@ const EVENT_LEVEL: Record<string, "info" | "warn" | "error"> = {
   "clip.failed": "error",
   "clip.retrying": "warn",
   "clip.bumper_skipped": "warn",
+  "clip.overlay_skipped": "warn",
   "clip.cut_unverified": "warn",
   "job.stalled": "warn",
 };

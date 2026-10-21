@@ -169,6 +169,8 @@ export const envSchema = z.object({
   /** Burn a small watermark into the clips of accounts that are not admins (a paid plan or an admin's per-user choice removes it). */
   WATERMARK_NON_ADMINS: boolTrue,
   WATERMARK_TEXT: z.string().trim().min(1).max(60).default("reelsaw.com"),
+  /** PNG composited above the watermark text (the logo); an unreadable file leaves the text alone */
+  WATERMARK_LOGO_PATH: z.string().default(path.resolve(process.cwd(), "assets/watermark.png")),
   // retention (0 = keep forever): stored sources / rendered clips older than this are deleted; rows stay, "Retry" re-fetches
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
