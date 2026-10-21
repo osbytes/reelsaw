@@ -2,11 +2,12 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { apiKey } from "@better-auth/api-key";
 import { captcha } from "better-auth/plugins/captcha";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import type { BetterAuthPlugin } from "better-auth";
 import { jwt } from "better-auth/plugins/jwt";
 import { mcp } from "@better-auth/mcp";
 import { eq, sql } from "drizzle-orm";
+import { PENDING_APPROVAL_MESSAGE, repeatSignUpMessage, unverifiedSignInMessage } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { Email } from "./email.js";
@@ -106,14 +107,17 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
           // inserted as a plain user and promoted in `after` by one conditional update under a lock.
           before: async (user, ctx) => {
             // checked here, at request time, so closing sign-ups applies to the next request without a restart
-            if (mode() === "closed") throw new APIError("FORBIDDEN", { message: "Sign-ups are closed on this Reelsaw." });
-            // abuse guards (abuse.ts): accounts per address per day, temporary domains, one account per mailbox
+            if (mode() === "closed") throw new APIError("UNPROCESSABLE_ENTITY", { message: "Sign-ups are closed on this Reelsaw." });
+            // abuse guards (abuse.ts): accounts per address per day, temporary domains, one account per mailbox.
+            // 422, not 403: with email verification on, Better Auth rewrites a 403 from this hook into a fake
+            // success (no session, and the submitted password is not saved). The form looks like the sign-up
+            // worked, and a password manager stores a password that is not the one in the database.
             const headers = ctx?.request?.headers ?? ctx?.headers ?? new Headers();
             let guard: { emailKey: string; signupIp: string | null };
             try {
               guard = await signupGuard(db, settings.get(), { email: user.email, ip: clientIp(headers, config.TRUST_PROXY) }, log);
             } catch (err) {
-              if (err instanceof SignupRefused) throw new APIError("FORBIDDEN", { message: err.message });
+              if (err instanceof SignupRefused) throw new APIError("UNPROCESSABLE_ENTITY", { message: err.message });
               throw err;
             }
             const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
@@ -150,6 +154,41 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
     },
     emailAndPassword,
     emailVerification,
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-up/email") return;
+        const email = typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+        if (!email) return;
+        // Better Auth itself returns a 200 with a made-up user when this email already exists and
+        // verification is required (or auto sign-in is off). The password from that request is hashed
+        // and discarded. Refuse first, with the same sentence the account would hear on the waiting page.
+        const existing = await db.query.user.findFirst({
+          where: eq(schema.user.email, email),
+          columns: { id: true, approvedAt: true, banned: true, banReason: true },
+        });
+        if (!existing) return;
+        const message = repeatSignUpMessage(blockedReason(existing));
+        log.warn({ userId: existing.id, pending: !existing.approvedAt, banned: existing.banned }, "sign-up refused: account already exists");
+        throw new APIError("UNPROCESSABLE_ENTITY", { message, code: "USER_ALREADY_EXISTS" });
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-in/email" || !isAPIError(ctx.context.returned)) return;
+        const code = ctx.context.returned.body?.code;
+        if (code !== "EMAIL_NOT_VERIFIED") return;
+        const email = typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+        if (!email) return;
+        // Password already matched. "Email not verified" hides a pending or suspended account; the
+        // waiting page says the other sentence, and sign-in should too.
+        const existing = await db.query.user.findFirst({
+          where: eq(schema.user.email, email),
+          columns: { id: true, approvedAt: true, banned: true, banReason: true },
+        });
+        const message = unverifiedSignInMessage(existing ? blockedReason(existing) : null);
+        if (!message || !existing) return;
+        log.info({ userId: existing.id, pending: !existing.approvedAt, banned: existing.banned }, "sign-in told the account why it cannot continue");
+        throw new APIError("FORBIDDEN", { message, code: existing.banned ? "ACCOUNT_SUSPENDED" : "ACCOUNT_PENDING" });
+      }),
+    },
     session: { cookieCache: { enabled: true, maxAge: 60 } },
     plugins: [
       captchaGate,
@@ -212,7 +251,7 @@ export function bearerToken(headers: Headers): string | null {
 
 export function blockedReason(u: Pick<AuthUser, "approvedAt" | "banned" | "banReason">): Requester["blocked"] {
   if (u.banned) return { kind: "banned", reason: u.banReason ? `This account is suspended: ${u.banReason}` : "This account is suspended." };
-  if (!u.approvedAt) return { kind: "pending", reason: "Your account is waiting for an admin to approve it." };
+  if (!u.approvedAt) return { kind: "pending", reason: PENDING_APPROVAL_MESSAGE };
   return null;
 }
 

@@ -117,7 +117,7 @@ export function createApp(svc: Services) {
     if (status < 400) {
       if (action === "sign-in" || action === "sign-up") return; // logged with the user id by the database hooks in auth.ts
       void auth.api.getSession({ headers: c.req.raw.headers }).then((s) => log.info({ action, status, userId: s?.user.id }, "auth"), () => log.info({ action, status }, "auth"));
-    } else log[status >= 500 ? "error" : "warn"]({ action, status, reason: status === 401 ? "bad credentials or unknown account" : status === 403 ? "not allowed (unverified email, captcha or suspended)" : status === 429 ? "rate limited" : "rejected" }, "auth failed");
+    } else log[status >= 500 ? "error" : "warn"]({ action, status, reason: status === 401 ? "bad credentials or unknown account" : status === 403 ? "not allowed (unverified email, waiting for approval, captcha or suspended)" : status === 422 ? "sign-up refused" : status === 429 ? "rate limited" : "rejected" }, "auth failed");
   };
   // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
   // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
