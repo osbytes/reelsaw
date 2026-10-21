@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2 } from "lucide-react";
+import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { readHash, writeHash, linkWith, fmtSec } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
-import { VerticalPreview, safeZoneWarning, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout } from "./VerticalPreview";
-import { Timeline, normalizeSections, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection } from "./Timeline";
+import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout, type PreviewAssetOverlay } from "./VerticalPreview";
+import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type OverlayBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
-import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom } from "./BumperField";
+import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
+import { BumperCombobox, Thumb } from "./BumperCombobox";
 import { ThemeToggle } from "../App";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
@@ -21,10 +23,19 @@ import {
   defaultStyle,
   formatTime,
   resolveStyle,
+  paneOf,
+  withPane,
+  hasAdjust,
+  overlayKind,
+  MAX_CLIP_OVERLAYS,
+  TEXT_OVERLAY_DEFAULTS,
+  ASSET_OVERLAY_DEFAULT_W,
   type ClipDiagnostics,
   type ClipBumpers,
+  type ClipOverlay,
   type DetectedSegment,
   type LayoutSection,
+  type PaneAdjust,
   type ProjectSettings,
   type SectionMode,
   type SourceOverlay,
@@ -51,6 +62,7 @@ export interface EditorClip {
   style: StyleOverride | null;
   emphasis: string[];
   bumpers?: ClipBumpers | null;
+  overlays?: ClipOverlay[];
   status: string;
   diagnostics: ClipDiagnostics | null;
 }
@@ -82,9 +94,12 @@ interface Props {
 const FRAME = 1 / 30;
 const MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
-type Tab = "captions" | "framing" | "text" | "cuts" | "transcript";
+type Tab = "captions" | "framing" | "overlays" | "text" | "cuts" | "transcript";
+const PANE_NAME = ["Top", "Bottom"] as const;
+const newOverlayId = () => `ov-${Math.random().toString(36).slice(2, 6)}`;
 type Layout = "classic" | "transcript";
 const LAYOUT_KEY = "rs-editor-layout";
+const SNAP_KEY = "rs-editor-snap";
 
 interface EditorDoc {
   range: [number, number];
@@ -97,6 +112,8 @@ interface EditorDoc {
   emphasis: string[];
   /** this clip's own intro/outro: missing key = the project's, null = none */
   bumpers: ClipBumpers;
+  /** library images/videos laid over the clip, absolute source seconds */
+  overlays: ClipOverlay[];
 }
 
 const MODE_EXPLAIN: Record<string, string> = {
@@ -219,6 +236,13 @@ function Swatches({ colors, value, onChange, label }: { colors: string[]; value:
 
 const HL = ["#C6A8FF", "#FFD84D", "#5EE0A0", "#FFFFFF"];
 const KW = ["#FFD84D", "#FF8A5C", "#5EE0A0", "#C6A8FF"];
+const TEXT_COLORS = ["#FFFFFF", "#FFD84D", "#5EE0A0", "#C6A8FF", "#FF8A5C", "#000000"];
+/** text overlay sizes as fractions of the frame height (the default is M) */
+const TEXT_SIZES: Array<{ v: number; l: string }> = [
+  { v: 0.032, l: "S" },
+  { v: 0.045, l: "M" },
+  { v: 0.065, l: "L" },
+];
 const SIZES: Array<{ v: number; l: string }> = [
   { v: 0.8, l: "S" },
   { v: 1, l: "M" },
@@ -231,10 +255,11 @@ function LiveTimeline({ clock, ...props }: Omit<ComponentProps<typeof Timeline>,
 }
 
 /** The 9:16 preview, re-rendered per frame on its own (framing and caption time follow the clock). */
-function LivePreview({ clock, framingAt, rangeStart, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time"> & { clock: Clock; framingAt: (t: number) => Framing; rangeStart: number }) {
+function LivePreview({ clock, framingAt, assetOverlaysAt, rangeStart, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays"> & { clock: Clock; framingAt: (t: number) => Framing; assetOverlaysAt: (t: number) => PreviewAssetOverlay[]; rangeStart: number }) {
   const t = useClock(clock);
   const framing = useMemo(() => framingAt(t), [framingAt, t]);
-  return <VerticalPreview {...props} framing={framing} time={t - rangeStart} />;
+  const assetOverlays = useMemo(() => assetOverlaysAt(t), [assetOverlaysAt, t]);
+  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} />;
 }
 
 /**
@@ -259,15 +284,47 @@ export function ClipEditor(props: Props) {
     style: resolveStyle(settings, clip.style),
     emphasis: clip.emphasis,
     bumpers: clip.bumpers ?? {},
+    overlays: clip.overlays ?? [],
   }));
-  const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers } = history.state;
+  const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers, overlays: assetOverlays } = history.state;
   const [bumpersDialog, setBumpersDialog] = useState(false);
+  const [selectedOverlay, setSelectedOverlayRaw] = useState<string | null>(null);
+  const [selectedBumper, setSelectedBumperRaw] = useState<BumperSlot | null>(null);
+  const [addOverlayOpen, setAddOverlayOpen] = useState(false);
+  const library = useBumperLibrary();
+  const libraryAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
+  const assetById = (id: string | null | undefined): LibraryAsset | undefined => (id ? libraryAssets.find((a) => a.id === id) : undefined);
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) => history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelectedRaw] = useState<number | null>(null);
+  // one selection at a time: a section, an overlay or an intro/outro block
+  const setSelected = (i: number | null) => {
+    setSelectedRaw(i);
+    if (i !== null) {
+      setSelectedOverlayRaw(null);
+      setSelectedBumperRaw(null);
+    }
+  };
+  const setSelectedOverlay = (id: string | null) => {
+    setSelectedOverlayRaw(id);
+    if (id !== null) {
+      setSelectedRaw(null);
+      setSelectedBumperRaw(null);
+    }
+  };
+  const setSelectedBumper = (slot: BumperSlot | null) => {
+    setSelectedBumperRaw(slot);
+    if (slot !== null) {
+      setSelectedRaw(null);
+      setSelectedOverlayRaw(null);
+    }
+  };
   useEffect(() => {
-    if (selected !== null && selected >= sections.length) setSelected(sections.length - 1);
+    if (selected !== null && selected >= sections.length) setSelectedRaw(sections.length - 1);
   }, [sections.length, selected]);
+  useEffect(() => {
+    if (selectedOverlay && !assetOverlays.some((o) => o.id === selectedOverlay)) setSelectedOverlayRaw(null);
+  }, [assetOverlays, selectedOverlay]);
   const [styleScope, setStyleScope] = useState<"clip" | "all">("clip");
   const [playing, setPlaying] = useState(false);
   // `current` follows timeupdate (~4 Hz) and seeks; `clock` is the per-frame position, read only by
@@ -276,7 +333,7 @@ export function ClipEditor(props: Props) {
   const clock = useMemo(() => createClock(clip.startSec), []);
   const [buffering, setBuffering] = useState(true);
   // deep link: #tab=<tab>&t=<seconds into the clip>
-  const TABS: Tab[] = ["captions", "framing", "text", "cuts", "transcript"];
+  const TABS: Tab[] = ["captions", "framing", "overlays", "text", "cuts", "transcript"];
   const [tab, setTab] = useState<Tab>(() => {
     const h = readHash().get("tab") as Tab | null;
     return h && TABS.includes(h) ? h : "captions";
@@ -284,6 +341,21 @@ export function ClipEditor(props: Props) {
   useEffect(() => writeHash({ tab: tab === "captions" ? null : tab }), [tab]);
   const [safe, setSafe] = useState(true);
   const [platform, setPlatform] = useState<Platform>("tiktok");
+  const [snap, setSnapRaw] = useState(() => {
+    try {
+      return localStorage.getItem(SNAP_KEY) !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const setSnap = (v: boolean) => {
+    setSnapRaw(v);
+    try {
+      localStorage.setItem(SNAP_KEY, v ? "on" : "off");
+    } catch {
+      /* private mode */
+    }
+  };
   const [kwDraft, setKwDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
   const [guard, setGuard] = useState(false);
@@ -319,11 +391,13 @@ export function ClipEditor(props: Props) {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
   const updateStyle = useMutation(trpc.projects.updateStyle.mutationOptions());
 
+  /** Overlays clamped to the clip; one that no longer fits is dropped (a retrim past it). */
+  const clampOverlays = (list: ClipOverlay[], r: [number, number]) => list.map((o) => ({ ...o, start: Math.max(r[0], o.start), end: Math.min(r[1], o.end) })).filter((o) => o.end - o.start >= 0.3);
   const setRange = (r: [number, number], key?: string) => {
     const a = Math.max(0, Number(r[0].toFixed(2)));
     const b = Math.min(durationSec || Infinity, Number(r[1].toFixed(2)));
     if (b - a < 3) return;
-    edit((d) => ({ range: [a, b], sections: normalizeSections(d.sections, [a, b]) }), key);
+    edit((d) => ({ range: [a, b], sections: normalizeSections(d.sections, [a, b]), overlays: clampOverlays(d.overlays, [a, b]) }), key);
   };
   const setSections = (s: EditorSection[], key?: string) => edit((d) => ({ sections: normalizeSections(s, d.range) }), key);
 
@@ -385,10 +459,12 @@ export function ClipEditor(props: Props) {
     v.currentTime = Math.max(0, t);
     clock.set(Math.max(0, t));
     setCurrent(Math.max(0, t));
+    setSelectedBumperRaw(null);
   };
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
+    setSelectedBumperRaw(null);
     if (v.paused) {
       if (v.currentTime < range[0] - 0.05 || v.currentTime >= range[1] - 0.05) v.currentTime = range[0];
       v.play().catch((err) => reportClientError("error", err));
@@ -434,24 +510,46 @@ export function ClipEditor(props: Props) {
     const det = clip.layoutSegments.find((d) => t >= d.start && t < d.end) ?? clip.layoutSegments.find((d) => !d.manual);
     const fallback: PreviewLayout = clip.layout && clip.layout !== "mixed" ? (clip.layout as PreviewLayout) : "fit";
     const lay: PreviewLayout = sec.mode === "auto" ? (det && !det.manual ? det.layout : fallback) : sec.mode;
-    let x = det?.cx ?? 0.5;
-    const tr = det?.track;
-    if (tr?.length) {
+    const clamp = (v: number) => Math.max(0, Math.min(1, v));
+    const at = (tr: Array<[number, number]> | undefined): number | undefined => {
+      if (!tr?.length) return undefined;
       const k = tr.findIndex(([pt]) => pt > t);
-      if (k <= 0) x = tr[k === 0 ? 0 : tr.length - 1]![1];
-      else {
-        const [t0, x0] = tr[k - 1]!;
-        const [t1, x1] = tr[k]!;
-        x = x0 + ((x1 - x0) * (t - t0)) / Math.max(0.01, t1 - t0);
+      if (k <= 0) return tr[k === 0 ? 0 : tr.length - 1]![1];
+      const [t0, x0] = tr[k - 1]!;
+      const [t1, x1] = tr[k]!;
+      return x0 + ((x1 - x0) * (t - t0)) / Math.max(0.01, t1 - t0);
+    };
+    // what the last render followed in each pane, with the adjustments it applied taken back out
+    const rendered = (pane: 0 | 1) => {
+      const off = pane === 0 ? { x: det?.offsetX ?? 0, y: det?.offsetY ?? 0, subject: det?.subjectX } : { x: det?.offsetX2 ?? 0, y: det?.offsetY2 ?? 0, subject: det?.subjectX2 };
+      const x = at(pane === 0 ? det?.track : det?.track2) ?? (pane === 0 ? det?.cx : det?.cx2);
+      const y = pane === 0 ? det?.cy : det?.cy2;
+      return x === undefined ? undefined : { x: x - off.x, y: (y ?? 0.45) - off.y, subject: off.subject };
+    };
+    // a pane's centre: the person it follows (the detector's pick, or the subject the user pointed at), then its offset
+    const centre = (pane: 0 | 1): { x: number; y: number } => {
+      const a = paneOf(sec, pane);
+      const own = rendered(pane);
+      // a split that has not been rendered yet has no second track: mirror the first speaker's spot for the bottom pane
+      const first = rendered(0);
+      let base = own ? { x: own.x, y: own.y } : pane === 1 ? { x: clamp(1 - (first?.x ?? 0.5)), y: first?.y ?? 0.45 } : { x: 0.5, y: 0.45 };
+      if (a.subjectX !== undefined && (own?.subject === undefined || Math.abs(own.subject - a.subjectX) > 0.02)) {
+        // not rendered with this subject yet: follow whichever rendered track is that person, else hold the spot
+        const other = rendered(pane === 0 ? 1 : 0);
+        const near = [own, other].find((c) => c && Math.abs(c.x - a.subjectX!) <= 0.12);
+        base = near ? { x: near.x, y: near.y } : { x: a.subjectX, y: base.y };
       }
-    }
-    const base = lay === "center" ? 0.5 : x - (det?.offsetX ?? 0);
+      if (lay === "center") base = { x: 0.5, y: base.y };
+      return { x: clamp(base.x + (a.offsetX ?? 0)), y: clamp(base.y + (a.offsetY ?? 0)) };
+    };
+    const c1 = centre(0);
+    const c2 = lay === "split" ? centre(1) : undefined;
     return {
       layout: lay,
-      cx: Math.max(0, Math.min(1, base + (sec.offsetX ?? 0))),
-      cy: det?.cy ?? 0.45,
-      cx2: det?.cx2 !== undefined ? det.cx2 - (det.offsetX ?? 0) + (sec.offsetX ?? 0) : undefined,
-      cy2: det?.cy2,
+      cx: c1.x,
+      cy: c1.y,
+      cx2: c2?.x,
+      cy2: c2?.y,
       size: det?.size,
       size2: det?.size2,
       // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top
@@ -461,14 +559,110 @@ export function ClipEditor(props: Props) {
   const framing = useMemo(() => framingAt(current), [framingAt, current]);
   const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map(layoutLabel))].join(" / ");
 
-  const panSection = (dx: number) => {
+  const panKey = useRef<string>("");
+  const setPane = (i: number, pane: 0 | 1, a: PaneAdjust, key?: string) => setSections(sections.map((s, j) => (j === i ? withPane(s, pane, a) : s)), key);
+  /** Drag on a pane of the preview: nudge its offset (one undo step per gesture). */
+  const panPane = (pane: 0 | 1, dx: number, dy: number) => {
     const i = secIdx;
-    setSections(
-      sections.map((s, j) => (j === i ? { ...s, offsetX: Math.max(-0.5, Math.min(0.5, Number(((s.offsetX ?? 0) + dx).toFixed(4)))) } : s)),
-      `pan-${i}`,
-    );
+    const a = paneOf(sections[i]!, pane);
+    if (!panKey.current) panKey.current = `g:pan-${i}-${pane}-${Date.now()}`;
+    const r4 = (n: number) => Number(n.toFixed(4));
+    setPane(i, pane, { ...a, offsetX: r4(Math.max(-0.5, Math.min(0.5, (a.offsetX ?? 0) + dx))), offsetY: r4(Math.max(-0.5, Math.min(0.5, (a.offsetY ?? 0) + dy))) }, panKey.current);
   };
-  const resetOffset = (i: number) => setSections(sections.map((s, j) => (j === i ? { ...s, offsetX: undefined } : s)));
+  /**
+   * Follow awareness: when the drag carried the pane so far that the face it followed left the crop,
+   * the user meant "follow the person here", not "nudge": the drop point becomes the pane's subject
+   * and the offset resets. A smaller drag stays an offset and keeps following the same person.
+   */
+  const panEnd = (pane: 0 | 1) => {
+    const key = panKey.current;
+    panKey.current = "";
+    const i = secIdx;
+    const s = sections[i]!;
+    const a = paneOf(s, pane);
+    if (!a.offsetX) return;
+    const f = framingAt(current);
+    const half = paneCrop(f, srcW, srcH, pane).w / 2;
+    if (Math.abs(a.offsetX) <= half * 0.85) return;
+    const followed = (pane === 0 ? f.cx : (f.cx2 ?? f.cx)) - a.offsetX; // where the followed face sits
+    const subjectX = Number(Math.max(0, Math.min(1, followed + a.offsetX)).toFixed(3));
+    setPane(i, pane, { subjectX, offsetY: a.offsetY }, key);
+    toast(`${f.layout === "split" ? PANE_NAME[pane] : "The crop"} now follows the person at ${Math.round(subjectX * 100)}% (re-render to track them)`);
+  };
+  const resetOffset = (i: number) => setSections(sections.map((s, j) => (j === i ? withPane(withPane(s, 0, {}), 1, {}) : s)));
+  const resetPane = (i: number, pane: 0 | 1) => setPane(i, pane, {});
+  /** How many crop panes a section has in the preview: 2 for a split, 0 for whole-frame, else 1. */
+  const paneCount = (s: EditorSection, i: number): 0 | 1 | 2 => {
+    const lay = s.mode === "auto" ? (clip.layoutSegments.find((d) => !d.manual && d.end > s.start && d.start < s.end)?.layout ?? (i === secIdx ? framing.layout : "fit")) : s.mode;
+    return lay === "split" ? 2 : lay === "fit" || lay === "none" ? 0 : 1;
+  };
+
+  // ----- overlays (library images / videos over the clip) -----
+  const setOverlays = (list: ClipOverlay[], key?: string) => edit((d) => ({ overlays: clampOverlays(list, d.range) }), key);
+  const patchOverlay = (id: string, patch: Partial<ClipOverlay>, key?: string) => setOverlays(assetOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o)), key);
+  const overlayWindow = (t: number, len: number): [number, number] => {
+    const start = Number(Math.max(range[0], Math.min(range[1] - 0.3, t)).toFixed(2));
+    return [start, Number(Math.min(range[1], start + len).toFixed(2))];
+  };
+  const pushOverlay = (o: ClipOverlay, note: string) => {
+    if (assetOverlays.length >= MAX_CLIP_OVERLAYS) return toast(`A clip can have at most ${MAX_CLIP_OVERLAYS} overlays`);
+    setOverlays([...assetOverlays, o]);
+    setSelectedOverlay(o.id);
+    if (current < o.start || current > o.end) seek(o.start);
+    if (tab !== "overlays" && tab !== "transcript") setTab("overlays");
+    toast(note);
+  };
+  const addAssetOverlay = (asset: LibraryAsset, t: number) => {
+    const video = asset.kind === "video";
+    const [start, end] = overlayWindow(t, video ? Math.max(1, Math.min(asset.durationSec, range[1] - t)) : 4);
+    pushOverlay({ id: newOverlayId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: video ? 0.5 : 0.18, w: video ? 1 : ASSET_OVERLAY_DEFAULT_W }, `${asset.name} added ${video ? "as b-roll" : "as an overlay"} · drag it on the preview`);
+  };
+  const addTextOverlay = (t: number) => {
+    const [start, end] = overlayWindow(t, 4);
+    pushOverlay({ id: newOverlayId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color }, "Text added · type it in the Overlays tab, drag it on the preview");
+  };
+  const removeOverlay = (id: string) => {
+    setOverlays(assetOverlays.filter((o) => o.id !== id));
+    if (selectedOverlay === id) setSelectedOverlayRaw(null);
+  };
+  const overlayBlocks: OverlayBlock[] = useMemo(
+    () =>
+      assetOverlays.map((o) => {
+        if (overlayKind(o) === "text") return { id: o.id, start: o.start, end: o.end, name: o.text ?? "", kind: "text" as const };
+        const a = assetById(o.assetId);
+        return { id: o.id, start: o.start, end: o.end, name: a?.name ?? (library.isPending ? "…" : "removed"), kind: a?.kind ?? "image", thumbnailUrl: a?.thumbnailUrl };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assetOverlays, libraryAssets, library.isPending],
+  );
+  const previewOverlaysAt = (t: number): PreviewAssetOverlay[] =>
+    assetOverlays
+      .filter((o) => t >= o.start - 0.001 && t <= o.end + 0.001)
+      .flatMap((o): PreviewAssetOverlay[] => {
+        if (overlayKind(o) === "text") return [{ kind: "text", id: o.id, text: o.text ?? "", x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1 }];
+        const a = assetById(o.assetId);
+        if (!a) return [];
+        return [{ kind: "asset", id: o.id, url: a.kind === "image" ? `/media/bumpers/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: o.x, y: o.y, w: o.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: o.opacity ?? 1 }];
+      });
+
+  // ----- intro / outro as blocks on the timeline -----
+  const bumperBlock = (slot: BumperSlot): BumperBlock | null => {
+    const own = bumpers[slot];
+    const id = effectiveAsset(own, slot === "intro" ? settings.introAssetId : settings.outroAssetId);
+    const a = assetById(id);
+    if (!id || !a) return null;
+    const sec = a.kind === "video" ? a.durationSec : (effectiveSeconds(bumpers[`${slot}Sec`], own, slot === "intro" ? settings.introSec : settings.outroSec, a.durationSec) ?? a.durationSec);
+    return { name: a.name, sec: Math.round(sec * 10) / 10, kind: a.kind, thumbnailUrl: a.thumbnailUrl, source: own === undefined ? "project" : "clip" };
+  };
+  const bumperBlocks = { intro: bumperBlock("intro"), outro: bumperBlock("outro") };
+  const setBumperSeconds = (slot: BumperSlot, sec: number, key?: string) => {
+    const own = bumpers[slot];
+    const id = effectiveAsset(own, slot === "intro" ? settings.introAssetId : settings.outroAssetId);
+    if (!id) return;
+    // dragging the length makes the choice the clip's own, so the seconds have somewhere to live
+    edit({ bumpers: { ...bumpers, [slot]: id, [`${slot}Sec`]: sec } }, key);
+  };
+  const still = selectedBumper && bumperBlocks[selectedBumper]?.thumbnailUrl ? { url: bumperBlocks[selectedBumper]!.thumbnailUrl!, tag: `${selectedBumper === "intro" ? "Intro" : "Outro"} · ${bumperBlocks[selectedBumper]!.sec} s` } : null;
 
   const clipWords = useMemo(
     () => words.filter((w) => w.end > range[0] && w.start < range[1]).map((w) => ({ text: w.text, start: Math.max(0, w.start - range[0]), end: w.end - range[0] })),
@@ -477,8 +671,15 @@ export function ClipEditor(props: Props) {
   const cutSpans = useMemo(() => flags.filter((f) => f.kind === "disfluency" && (f.status === "auto" || f.status === "accepted")).map((f) => ({ start: f.start, end: f.end })), [flags]);
 
   // ----- dirty tracking + save -----
-  const toSaved = (s: { start: number; end: number; mode: SectionMode; offsetX?: number }) => ({ start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)), mode: s.mode, ...(s.offsetX ? { offsetX: Number(s.offsetX.toFixed(4)) } : {}) });
-  const forcedSections = sections.filter((s) => s.mode !== "auto" || s.offsetX).map(toSaved);
+  const toSaved = (s: LayoutSection): LayoutSection => {
+    const r4 = (n: number | undefined) => (n ? Number(n.toFixed(4)) : undefined);
+    const r3 = (n: number | undefined) => (n === undefined ? undefined : Number(n.toFixed(3)));
+    const out: LayoutSection = { start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)), mode: s.mode };
+    const extra: Partial<LayoutSection> = { offsetX: r4(s.offsetX), offsetY: r4(s.offsetY), offsetX2: r4(s.offsetX2), offsetY2: r4(s.offsetY2), subjectX: r3(s.subjectX), subjectX2: r3(s.subjectX2) };
+    for (const k of Object.keys(extra) as Array<keyof typeof extra>) if (extra[k] !== undefined) Object.assign(out, { [k]: extra[k] });
+    return out;
+  };
+  const forcedSections = sections.filter((s) => s.mode !== "auto" || hasAdjust(s)).map(toSaved);
   const sectionsChanged = JSON.stringify(forcedSections) !== JSON.stringify(clip.layoutSections.map(toSaved)) || (!!clip.layoutOverride && !forcedSections.length && clip.layoutOverride !== "auto");
   const styleOverride: StyleOverride = useMemo(() => {
     const o: Record<string, unknown> = {};
@@ -494,9 +695,29 @@ export function ClipEditor(props: Props) {
   // the seconds count too: a changed intro/outro length needs a re-render like a changed asset
   const bumperKey = (b: ClipBumpers | null | undefined) => JSON.stringify({ intro: b?.intro, outro: b?.outro, introSec: b?.introSec ?? null, outroSec: b?.outroSec ?? null });
   const bumpersChanged = bumperKey(bumpers) !== bumperKey(clip.bumpers);
-  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged].filter(Boolean).length;
+  // a fixed key order: jsonb hands keys back in its own order, so a plain stringify of the row would always differ
+  const overlayKey = (list: ClipOverlay[]) =>
+    JSON.stringify(
+      [...list]
+        .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+        .map((o) => [
+          o.id,
+          overlayKind(o),
+          overlayKind(o) === "text" ? o.text : o.assetId,
+          Number(o.start.toFixed(2)),
+          Number(o.end.toFixed(2)),
+          Number(o.x.toFixed(3)),
+          Number(o.y.toFixed(3)),
+          overlayKind(o) === "text" ? Number((o.size ?? TEXT_OVERLAY_DEFAULTS.size).toFixed(3)) : Number((o.w ?? ASSET_OVERLAY_DEFAULT_W).toFixed(3)),
+          overlayKind(o) === "text" ? (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase() : "",
+          overlayKind(o) === "text" ? !!o.box : false,
+          o.opacity !== undefined && o.opacity < 1 ? Number(o.opacity.toFixed(3)) : 1,
+        ]),
+    );
+  const overlaysChanged = overlayKey(assetOverlays) !== overlayKey(clip.overlays ?? []);
+  const dirtyCount = [title !== clip.title, hookChanged, caption !== clip.caption, tagsChanged, boundsChanged, sectionsChanged, styleChanged, emphasisChanged, bumpersChanged, overlaysChanged].filter(Boolean).length;
   const changed = dirtyCount > 0;
-  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged;
+  const needsRender = boundsChanged || sectionsChanged || styleChanged || emphasisChanged || hookChanged || bumpersChanged || overlaysChanged;
 
   async function save(rerender: boolean): Promise<boolean> {
     try {
@@ -511,6 +732,7 @@ export function ClipEditor(props: Props) {
         endSec: range[1],
         ...(emphasisChanged ? { emphasis } : {}),
         ...(bumpersChanged ? { bumpers } : {}),
+        ...(overlaysChanged ? { overlays: assetOverlays } : {}),
         ...(sectionsChanged ? { layoutSections: forcedSections, layoutOverride: null } : {}),
         ...(styleChanged && styleScope === "clip" ? { style: Object.keys(styleOverride).length ? styleOverride : null } : {}),
         rerender,
@@ -569,11 +791,13 @@ export function ClipEditor(props: Props) {
         togglePlay();
       } else if (k === "i") setIn(clock.get());
       else if (k === "o") setOut(clock.get());
+      else if (k === "s") setSnap(!snap);
       else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         videoRef.current?.pause();
         seek(clock.get() + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null && selected > 0) mergeSection(selected, "left");
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedOverlay) removeOverlay(selectedOverlay);
+      else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null && selected > 0) mergeSection(selected, "left");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -868,28 +1092,153 @@ export function ClipEditor(props: Props) {
               <Select size="sm" className="ml-auto w-[9.5rem]" ariaLabel="Section mode" value={s.mode} onClick={(e) => e.stopPropagation()} onValueChange={(v) => setMode(i, v as SectionMode)} options={MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))} />
             </div>
             <p className="text-xs leading-snug text-ink2">{explain}</p>
-            {s.offsetX ? (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-ink3">Re-centred</span>
-                <span className="font-mono">
-                  {s.offsetX > 0 ? "+" : ""}
-                  {Math.round(s.offsetX * 100)}%
-                </span>
-                <button
-                  className="font-semibold text-acc-text"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    resetOffset(i);
-                  }}
-                >
-                  Reset
-                </button>
-              </div>
-            ) : null}
+            {(() => {
+              const n = paneCount(s, i);
+              if (!n) return null;
+              const panes: Array<0 | 1> = n === 2 ? [0, 1] : [0];
+              return (
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-xs">
+                  {panes.map((pane) => {
+                    const a = paneOf(s, pane);
+                    const has = !!(a.offsetX || a.offsetY || a.subjectX !== undefined);
+                    const label = has ? adjustLabel({ offsetX: a.offsetX, offsetY: a.offsetY, subjectX: a.subjectX }) : "follows the speaker";
+                    return (
+                      <Fragment key={pane}>
+                        <span className="text-ink3">{n === 2 ? PANE_NAME[pane] : "Crop"}</span>
+                        <span className={`truncate font-mono ${has ? "text-ink" : "text-ink3"}`} title={a.subjectX !== undefined ? "Follows the person at this position (fixed there when nobody is found)" : undefined}>
+                          {label}
+                        </span>
+                        <button
+                          className="font-semibold text-acc-text disabled:invisible"
+                          disabled={!has}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            resetPane(i, pane);
+                          }}
+                        >
+                          Reset
+                        </button>
+                      </Fragment>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
-      <p className="text-[11px] leading-snug text-ink3">Drag the picture to re-centre the section under the playhead. On the timeline: drag a transition to move it, double-click to remove it, right-click for more.</p>
+      <p className="text-[11px] leading-snug text-ink3">Drag the picture to re-centre the section under the playhead; in a split, drag either speaker. Drop a pane on someone else and it follows them instead. On the timeline: drag a transition to move it, double-click to remove it, right-click for more.</p>
+    </div>
+  );
+
+  const overlaysTab = (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button className="btn-ghost text-xs" disabled={assetOverlays.length >= MAX_CLIP_OVERLAYS} onClick={() => setAddOverlayOpen(true)}>
+          <ImageIcon className="h-3.5 w-3.5" /> Image or video
+        </button>
+        <button className="btn-ghost text-xs" disabled={assetOverlays.length >= MAX_CLIP_OVERLAYS} onClick={() => addTextOverlay(current)}>
+          <Type className="h-3.5 w-3.5" /> Text
+        </button>
+        <span className="ml-auto text-[11px] text-ink3">
+          {assetOverlays.length}/{MAX_CLIP_OVERLAYS}
+        </span>
+      </div>
+      {assetOverlays.length === 0 && <p className="text-xs leading-snug text-ink2">A logo, a sticker, a piece of b-roll from your library, or a line of text, shown over part of the clip from the playhead. Captions stay on top of images and video.</p>}
+      {[...assetOverlays]
+        .sort((a, b) => a.start - b.start)
+        .map((o) => {
+          const isText = overlayKind(o) === "text";
+          const a = isText ? undefined : assetById(o.assetId);
+          const sel = o.id === selectedOverlay;
+          const sizeIdx = TEXT_SIZES.findIndex((s) => Math.abs(s.v - (o.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004);
+          return (
+            <div
+              key={o.id}
+              onClick={() => {
+                setSelectedOverlay(o.id);
+                if (current < o.start || current > o.end) seek(o.start);
+              }}
+              className={`flex cursor-pointer flex-col gap-2 rounded-[12px] p-2.5 ${sel ? "border-2 border-acc" : "border border-line"}`}
+            >
+              <div className="flex items-center gap-2">
+                {isText ? (
+                  <span className="grid h-9 w-5 shrink-0 place-items-center rounded-[4px] bg-sunk text-ink2">
+                    <Type className="h-3.5 w-3.5" />
+                  </span>
+                ) : a ? (
+                  <Thumb asset={a} className="h-9 w-5" />
+                ) : (
+                  <span className="h-9 w-5 shrink-0 rounded-[4px] bg-sunk" />
+                )}
+                <span className="min-w-0 flex-1">
+                  {isText ? (
+                    <input
+                      className="input h-7 w-full px-2 py-0 text-[13px] font-semibold"
+                      value={o.text ?? ""}
+                      maxLength={120}
+                      placeholder="Your text"
+                      aria-label="Overlay text"
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => patchOverlay(o.id, { text: e.target.value }, `ov-t-${o.id}`)}
+                    />
+                  ) : (
+                    <span className="block truncate text-[13px] font-semibold">{a?.name ?? (library.isPending ? "…" : "Removed from the library")}</span>
+                  )}
+                  <span className="block font-mono text-[11px] text-ink3">
+                    {fmtPrecise(o.start - range[0])}–{fmtPrecise(o.end - range[0])} · {isText ? "text" : (a?.kind ?? "image")}
+                  </span>
+                </span>
+                <button
+                  className="grid h-7 w-7 place-items-center rounded-[8px] text-ink3 hover:bg-sunk hover:text-ink"
+                  aria-label="Remove overlay"
+                  title="Remove overlay (Delete)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeOverlay(o.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {isText ? (
+                <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Size">
+                      <Segmented size="sm" value={sizeIdx >= 0 ? TEXT_SIZES[sizeIdx]!.v : -1} onChange={(v) => patchOverlay(o.id, { size: v })} options={TEXT_SIZES.map((s) => ({ value: s.v, label: s.l }))} ariaLabel="Text size" />
+                    </Field>
+                    <Field label="Opacity" hint={<span className="font-mono">{Math.round((o.opacity ?? 1) * 100)}%</span>}>
+                      <input type="range" min={10} max={100} step={5} value={Math.round((o.opacity ?? 1) * 100)} onChange={(e) => patchOverlay(o.id, { opacity: Number(e.target.value) === 100 ? undefined : Number(e.target.value) / 100 }, `ov-o-${o.id}`)} className="accent-[var(--acc)]" aria-label="Text opacity" />
+                    </Field>
+                  </div>
+                  <Field label="Colour">
+                    <Swatches label="Text colour" colors={TEXT_COLORS} value={o.color ?? TEXT_OVERLAY_DEFAULTS.color} onChange={(c) => patchOverlay(o.id, { color: c })} />
+                  </Field>
+                  <Switch checked={!!o.box} onChange={(v) => patchOverlay(o.id, { box: v || undefined })} label="Dark plate behind the text" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3" onClick={(e) => e.stopPropagation()}>
+                  <Field label="Width" hint={<span className="font-mono">{Math.round((o.w ?? ASSET_OVERLAY_DEFAULT_W) * 100)}%</span>}>
+                    <input type="range" min={5} max={100} step={1} value={Math.round((o.w ?? ASSET_OVERLAY_DEFAULT_W) * 100)} onChange={(e) => patchOverlay(o.id, { w: Number(e.target.value) / 100 }, `ov-w-${o.id}`)} className="accent-[var(--acc)]" aria-label="Overlay width" />
+                  </Field>
+                  <Field label="Opacity" hint={<span className="font-mono">{Math.round((o.opacity ?? 1) * 100)}%</span>}>
+                    <input type="range" min={10} max={100} step={5} value={Math.round((o.opacity ?? 1) * 100)} onChange={(e) => patchOverlay(o.id, { opacity: Number(e.target.value) === 100 ? undefined : Number(e.target.value) / 100 }, `ov-o-${o.id}`)} className="accent-[var(--acc)]" aria-label="Overlay opacity" />
+                  </Field>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
+                <span className="text-ink3">From</span>
+                <TimeField label="Overlay start" value={o.start - range[0]} onCommit={(t) => patchOverlay(o.id, { start: Math.min(o.end - 0.3, range[0] + Math.max(0, t)) })} />
+                <span className="text-ink3">to</span>
+                <TimeField label="Overlay end" value={o.end - range[0]} onCommit={(t) => patchOverlay(o.id, { end: Math.max(o.start + 0.3, range[0] + t) })} />
+                <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => patchOverlay(o.id, { start: range[0], end: range[1] })} title="Show it for the whole clip">
+                  Whole clip
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      <p className="text-[11px] leading-snug text-ink3">Drag an overlay on the preview to move it, its corner to resize it. On the timeline: drag the block to move it, its edges to trim it, double-click the lane to add one.</p>
     </div>
   );
 
@@ -1001,7 +1350,8 @@ export function ClipEditor(props: Props) {
   const tabs: Array<[Tab, string]> = [
     ["captions", "Captions"],
     ["framing", "Framing"],
-    ["text", "Text"],
+    ["overlays", assetOverlays.length ? `Overlays · ${assetOverlays.length}` : "Overlays"],
+    ["text", "Details"],
     ["cuts", "Cuts"],
   ];
   if (layout !== "transcript" || compact) tabs.push(["transcript", "Transcript"]);
@@ -1025,6 +1375,7 @@ export function ClipEditor(props: Props) {
           <div className="p-4">
             {activeTab === "captions" && captionsTab}
             {activeTab === "framing" && framingTab}
+            {activeTab === "overlays" && overlaysTab}
             {activeTab === "text" && textTab}
             {activeTab === "cuts" && cutsTab}
           </div>
@@ -1034,7 +1385,6 @@ export function ClipEditor(props: Props) {
   );
 
   // ----- preview -----
-  const frameTag = curSec ? (curSec.mode === "auto" ? `Auto → ${layoutLabel(framing) ?? framing.layout}` : MODE_LABEL[curSec.mode]) : undefined;
   const len = range[1] - range[0];
   const tbtn = "grid h-[34px] min-w-[34px] place-items-center rounded-[10px] border border-line bg-panel px-2 text-[13px] text-ink hover:bg-sunk";
   const preview = (
@@ -1051,13 +1401,18 @@ export function ClipEditor(props: Props) {
           words={clipWords}
           hook={hook}
           emphasis={emphasis}
-          onPan={panSection}
+          onPan={panPane}
+          onPanEnd={panEnd}
           overlays={overlays}
+          assetOverlaysAt={previewOverlaysAt}
+          selectedOverlay={selectedOverlay}
+          onOverlaySelect={setSelectedOverlay}
+          onOverlayChange={(id, patch, key) => patchOverlay(id, patch, key)}
+          still={still}
           alwaysShowHook={activeTab === "captions" && !playing}
           onStyleChange={(p) => setStyle(p, "drag-text")}
           showSafeZones={safe}
           platform={platform}
-          tag={frameTag}
         />
         {buffering && <div className="pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">Loading…</div>}
         {/* overlaid on the frame: a warning that pushed the transport down would move the buttons under the cursor */}
@@ -1066,81 +1421,34 @@ export function ClipEditor(props: Props) {
         )}
         <video ref={videoRef} src={sourceVideoUrl} preload="auto" playsInline className="pointer-events-none absolute h-px w-px opacity-0" />
       </div>
-      {/* one centred column, about the preview's width, so the controls line up with the video */}
-      <div className="mx-auto flex w-full max-w-[26rem] flex-col items-stretch gap-2.5">
-      <div className="flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-ink2">
-        <span className="flex items-center gap-1.5" title={cropLayout ? "Drag the picture to re-centre this section" : `Not adjustable in ${MODE_LABEL[framing.layout]}`}>
-          Offset <span className="font-mono text-ink">{curSec?.offsetX ? `${curSec.offsetX > 0 ? "+" : ""}${Math.round(curSec.offsetX * 100)}%` : "0%"}</span>
-          <button className="btn-ghost px-2 py-0.5 text-xs" disabled={!curSec?.offsetX} onClick={() => resetOffset(secIdx)}>
-            Reset
-          </button>
-        </span>
-        <span className="flex items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" /> Safe zones
-          </label>
-          <Select size="sm" disabled={!safe} className="w-[9rem]" ariaLabel="Platform" value={platform} onValueChange={(v) => setPlatform(v as Platform)} options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))} />
-        </span>
-        {overlays.length > 0 && (
-          <span className="flex items-center gap-1.5 rounded-full bg-acc-soft px-2.5 py-1 text-ink" title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours">
-            <span className="font-mono text-[10px]">CC</span> Burned-in text blurred
-            <button
-              className="font-semibold text-acc-text disabled:opacity-50"
-              disabled={setSourceText.isPending}
-              onClick={() =>
-                setSourceText
-                  .mutateAsync({ id: projectId, sourceText: "keep" })
-                  .then((r) => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) }).then(() => toast(`Source text kept · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}`)))
-                  .catch((err) => toast.error((err as Error).message))
-              }
-              title="Show the source's own text in every clip of this project (re-renders them)"
-            >
-              Show it
-            </button>
-          </span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-1.5">
-        <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current - FRAME))} title="Previous frame (←)">
-          ◀︎❙
-        </button>
-        <button className="grid h-[38px] w-[46px] place-items-center rounded-[12px] bg-ink text-bg" onClick={togglePlay} title="Play / pause (Space)" aria-label={playing ? "Pause" : "Play"}>
-          {playing ? "❚❚" : "▶"}
-        </button>
-        <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current + FRAME))} title="Next frame (→)">
-          ❙▶︎
-        </button>
-        <span className="mx-2 font-mono text-xs text-ink2">
-          {fmtPrecise(Math.max(0, current - range[0]))} / {fmtPrecise(len)}
-        </span>
-        <button className={tbtn} onClick={() => setIn(current)} title="Set in point at playhead (I)">
-          [ In
-        </button>
-        <button className={tbtn} onClick={() => setOut(current)} title="Set out point at playhead (O)">
-          Out ]
-        </button>
-      </div>
-      {/* fixed height at each width, so a seconds field appearing never moves anything */}
-      <section className="flex h-[6.75rem] flex-col gap-1.5 max-sm:h-[9.75rem]" aria-label="Intro and outro">
-        <div className="flex h-5 items-center justify-between text-xs">
-          <span className="font-semibold text-ink2">Intro and outro</span>
-          <button className="text-acc-text hover:underline" onClick={() => setBumpersDialog(true)} title="Intro and outro for the whole project">
-            Project settings…
-          </button>
-        </div>
-        <BumperSelects reserveSec value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} />
-      </section>
-      </div>
     </div>
   );
-
+  // ----- the timeline's action bar: edit actions | transport | view tools -----
+  const canRemove = !!selectedOverlay || (selected !== null && selected > 0);
+  const removeSelected = () => {
+    if (selectedOverlay) removeOverlay(selectedOverlay);
+    else if (selected !== null && selected > 0) mergeSection(selected, "left");
+  };
+  const abtn = "inline-flex h-[30px] items-center gap-1 rounded-[8px] border border-line bg-panel px-2 text-xs text-ink hover:bg-sunk disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-panel";
+  // the bar holds only what acts on the tracks; adding things lives on the lanes and in the inspector
+  const actionBar = (
+    <>
+      <button className={abtn} onClick={() => splitAt(current)} title={`Split the framing at the playhead (${SPLIT_SHORTCUT})`}>
+        <Scissors className="h-3.5 w-3.5" /> Split
+      </button>
+      <button className={abtn} disabled={!canRemove} onClick={removeSelected} title={selectedOverlay ? "Remove the selected overlay (Delete)" : selected !== null && selected > 0 ? "Remove the selected transition (Delete)" : "Select an overlay or a framing transition first"}>
+        <Trash2 className="h-3.5 w-3.5" /> Remove
+      </button>
+    </>
+  );
+  /** In / out points, in the popover from the clip block's length label. */
   const nudge = (which: "in" | "out", d: number) => (which === "in" ? setIn(range[0] + d) : setOut(range[1] + d));
   const nb = "rounded-[7px] border border-line bg-panel px-1.5 py-1 font-mono text-[11px] text-ink hover:bg-sunk";
-  const trimTools = (
-    <>
+  const clipRangeEditor = () => (
+    <div className="flex flex-col gap-2 text-xs" aria-label="Clip in and out points">
       {(["in", "out"] as const).map((k) => (
         <div key={k} className="flex items-center gap-1">
-          <span className="w-7 text-xs font-semibold text-ink2">{k === "in" ? "In" : "Out"}</span>
+          <span className="w-7 font-semibold text-ink2">{k === "in" ? "In" : "Out"}</span>
           <button className={nb} onClick={() => nudge(k, -1)}>
             −1
           </button>
@@ -1156,8 +1464,112 @@ export function ClipEditor(props: Props) {
           </button>
         </div>
       ))}
+      <span className="text-[11px] text-ink3">
+        {len.toFixed(1)}s · source seconds · I / O set them at the playhead
+      </span>
+    </div>
+  );
+  const transport = (
+    <>
+      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current - FRAME))} title="Previous frame (←)" aria-label="Previous frame">
+        ◀︎❙
+      </button>
+      <button className="grid h-[34px] w-[44px] place-items-center rounded-[10px] bg-ink text-bg" onClick={togglePlay} title="Play / pause (Space)" aria-label={playing ? "Pause" : "Play"}>
+        {playing ? "❚❚" : "▶"}
+      </button>
+      <button className={tbtn} onClick={() => (videoRef.current?.pause(), seek(current + FRAME))} title="Next frame (→)" aria-label="Next frame">
+        ❙▶︎
+      </button>
+      <span className="mx-1.5 min-w-[7.5rem] text-center font-mono text-xs text-ink2">
+        {fmtPrecise(Math.max(0, current - range[0]))} / {fmtPrecise(len)}
+      </span>
+      <button className={tbtn} onClick={() => setIn(current)} title="Set the in point at the playhead (I)">
+        [ In
+      </button>
+      <button className={tbtn} onClick={() => setOut(current)} title="Set the out point at the playhead (O)">
+        Out ]
+      </button>
     </>
   );
+  // the canvas header: what the frame under the playhead is doing, and how it is viewed
+  const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 text-xs text-ink";
+  const canvasHeader = (
+    <div className={`flex w-full flex-wrap items-center gap-2 ${compact ? "" : "min-h-9"}`}>
+      {curSec && (
+        <span className={chip} title="Framing of the section under the playhead (Framing tab for all sections)">
+          <Select size="sm" className="-ml-2 h-6 border-0 bg-transparent" ariaLabel="Section framing" value={curSec.mode} onValueChange={(v) => setMode(secIdx, v as SectionMode)} options={MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))} />
+          {curSec.mode === "auto" && <span className="text-ink3">→ {layoutLabel(framing) ?? framing.layout}</span>}
+        </span>
+      )}
+      <span className={chip} title={cropLayout ? (framing.layout === "split" ? "Drag either speaker on the preview to re-centre that pane" : "Drag the picture to re-centre this section") : `Not adjustable in ${MODE_LABEL[framing.layout]}`}>
+        Crop <span className="max-w-[12rem] truncate font-mono">{curSec && hasAdjust(curSec) ? adjustLabel(curSec) : "follows the speaker"}</span>
+        <button className="font-semibold text-acc-text disabled:hidden" disabled={!curSec || !hasAdjust(curSec)} onClick={() => resetOffset(secIdx)}>
+          Reset
+        </button>
+      </span>
+      <span className="flex-1" />
+      <Popover.Root>
+        <Popover.Trigger asChild>
+          <button className={chip} title="Safe zones, platform, burned-in text" aria-label="Preview options">
+            <Eye className="h-3.5 w-3.5" /> {safe ? PLATFORM_NAME[platform] : "No safe zones"}
+            {overlays.length > 0 && <span className="font-mono text-[10px] text-ink3">CC</span>}
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className="z-[80] flex w-[17rem] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span>Safe zones</span>
+              <input type="checkbox" checked={safe} onChange={(e) => setSafe(e.target.checked)} className="accent-[var(--acc)]" />
+            </label>
+            <Field label="Platform">
+              <Select size="sm" disabled={!safe} ariaLabel="Platform" value={platform} onValueChange={(v) => setPlatform(v as Platform)} options={(Object.keys(PLATFORM_NAME) as Platform[]).map((k) => ({ value: k, label: PLATFORM_NAME[k] }))} />
+            </Field>
+            {overlays.length > 0 && (
+              <div className="flex flex-col gap-1 border-t border-line pt-3" title="Text already in the video (captions, logos) is blurred so it doesn't clash with yours">
+                <span>
+                  <span className="mr-1 font-mono text-[10px]">CC</span> Burned-in text is blurred in every clip
+                </span>
+                <button
+                  className="w-max font-semibold text-acc-text disabled:opacity-50"
+                  disabled={setSourceText.isPending}
+                  onClick={() =>
+                    setSourceText
+                      .mutateAsync({ id: projectId, sourceText: "keep" })
+                      .then((r) => qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) }).then(() => toast(`Source text kept · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}`)))
+                      .catch((err) => toast.error((err as Error).message))
+                  }
+                  title="Show the source's own text in every clip of this project (re-renders them)"
+                >
+                  Show it instead
+                </button>
+              </div>
+            )}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    </div>
+  );
+  /** The intro / outro choices, in the popover anchored on the block that was clicked on the timeline. */
+  const bumperEditor = (slot: BumperSlot) => (
+    <div className="flex flex-col gap-2.5" aria-label={`${slot === "intro" ? "Intro" : "Outro"} for this clip`}>
+      <div className="flex h-5 items-center justify-between text-xs">
+        <span className="font-semibold text-ink2">Intro and outro of this clip</span>
+        <button
+          className="text-acc-text hover:underline"
+          onClick={() => {
+            setSelectedBumper(null);
+            setBumpersDialog(true);
+          }}
+          title="Intro and outro for the whole project"
+        >
+          Project settings…
+        </button>
+      </div>
+      <BumperSelects reserveSec value={choicesFrom(bumpers)} onChange={(v) => edit({ bumpers: clipBumpersFrom(v) })} projectIntroId={settings.introAssetId} projectOutroId={settings.outroAssetId} />
+      <p className="text-[11px] leading-snug text-ink3">{slot === "intro" ? "Plays before the clip." : "Plays after the clip."} Drag an image block's outer edge on the timeline to change how long it shows. Needs a re-render.</p>
+    </div>
+  );
+
   const timeline = (
     <LiveTimeline
       clock={clock}
@@ -1185,8 +1597,30 @@ export function ClipEditor(props: Props) {
         if (i !== null && tab === "transcript") setTab("framing");
       }}
       detected={clip.layoutSegments}
-      toolbar={trimTools}
+      toolbar={actionBar}
+      transport={transport}
+      snap={snap}
+      onSnap={setSnap}
       compactHints={short || compact}
+      overlays={overlayBlocks}
+      selectedOverlay={selectedOverlay}
+      onOverlaySelect={(id) => {
+        setSelectedOverlay(id);
+        if (id && tab !== "overlays" && tab !== "transcript") setTab("overlays");
+      }}
+      onOverlayChange={(id, r, key) => patchOverlay(id, { start: r[0], end: r[1] }, key)}
+      onOverlayAdd={(t, kind) => {
+        seek(t);
+        if (kind === "text") addTextOverlay(t);
+        else setAddOverlayOpen(true);
+      }}
+      onOverlayRemove={removeOverlay}
+      renderClipEditor={clipRangeEditor}
+      bumpers={bumperBlocks}
+      selectedBumper={selectedBumper}
+      onBumperSelect={setSelectedBumper}
+      onBumperSeconds={setBumperSeconds}
+      renderBumperEditor={bumperEditor}
     />
   );
 
@@ -1267,9 +1701,10 @@ export function ClipEditor(props: Props) {
     ["Back / forward 1s", "⇧← ⇧→"],
     ["Set in / out at playhead", "I  O"],
     ["Split framing at playhead", `${MOD}B`],
-    ["Remove selected transition", "Delete"],
+    ["Remove selected overlay / transition", "Delete"],
     ["Undo / redo", `${MOD}Z  ⇧${MOD}Z`],
     ["Save", `${MOD}S`],
+    ["Snapping on / off", "S"],
     ["Disable snapping while dragging", "hold Alt"],
     ["Zoom timeline", `${MOD} + scroll`],
   ];
@@ -1281,6 +1716,7 @@ export function ClipEditor(props: Props) {
       {compact ? (
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col">
+            <div className="px-4 pt-3">{canvasHeader}</div>
             {preview}
             <div className="border-y border-line bg-panel">{timeline}</div>
             <div className="flex h-[70vh] flex-col bg-panel">{inspector}</div>
@@ -1297,7 +1733,10 @@ export function ClipEditor(props: Props) {
               {transcript}
             </div>
           )}
-          <div className="flex min-h-0 min-w-0 flex-col">{preview}</div>
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="shrink-0 px-4 pt-3">{canvasHeader}</div>
+            {preview}
+          </div>
           <div className="flex min-h-0 flex-col border-l border-line bg-panel">{inspector}</div>
           <div className="border-t border-line bg-panel" style={{ gridColumn: "1 / -1" }}>
             {timeline}
@@ -1306,6 +1745,26 @@ export function ClipEditor(props: Props) {
       )}
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
+
+      <Modal open={addOverlayOpen} onOpenChange={setAddOverlayOpen} title="Add an overlay">
+        <p className="text-sm leading-relaxed text-ink2">
+          A library image or video, shown from <span className="font-mono">{fmtPrecise(Math.max(0, current - range[0]))}</span>. New files are added on the Library page.
+        </p>
+        <BumperCombobox
+          slot="overlay"
+          label="Overlay asset"
+          value=""
+          fixed={[]}
+          assets={library.data?.assets ?? []}
+          loading={library.isPending}
+          onChange={(id) => {
+            const a = assetById(id);
+            setAddOverlayOpen(false);
+            if (a) addAssetOverlay(a, current);
+          }}
+        />
+        {!library.isPending && !(library.data?.assets ?? []).length && <p className="text-xs text-ink3">Your library is empty.</p>}
+      </Modal>
 
       <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">

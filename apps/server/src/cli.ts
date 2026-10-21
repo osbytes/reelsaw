@@ -71,6 +71,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           a clip's own choice (inherit the project's, none or an item);
  *                                           both act as the project's owner;
  *                                           --rerender re-renders only the affected clips
+ *   clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]
+ *                                           library images/videos or lines of text laid over part of a clip (source seconds,
+ *                                           x/y/w/size as fractions of the 9:16 frame); with no change flag it lists them
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
@@ -120,7 +123,8 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime } from "@reelsaw/shared";
+import { formatTime, clipOverlaySchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W } from "@reelsaw/shared";
+import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
 import { runMcpStdio } from "./mcp-stdio.js";
@@ -133,6 +137,18 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
+
+/** "x+12% y-5% | x2+3%": the per-pane offsets of a layout segment, empty when none. */
+function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number; offsetY2?: number }) {
+  const pct = (name: string, v: number | undefined) => (v ? `${name}${v > 0 ? "+" : ""}${Math.round(v * 100)}%` : "");
+  const top = [pct("x", s.offsetX), pct("y", s.offsetY)].filter(Boolean).join(" ");
+  const bottom = [pct("x2", s.offsetX2), pct("y2", s.offsetY2)].filter(Boolean).join(" ");
+  return [top, bottom].filter(Boolean).join(" | ");
+}
+/** "followed" / "fixed" for the top pane, with a "·" prefixed second pane when the segment has one. */
+function subjectLabel(s: { subject?: string; subject2?: string }) {
+  return [s.subject, s.subject2 ? `·${s.subject2}` : ""].filter(Boolean).join(" ");
+}
 
 function table(rows: Array<Record<string, unknown>>) {
   if (!rows.length) return console.log("(none)");
@@ -561,7 +577,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { diagnostics, layoutSegments, ...rest } = c;
     console.log(JSON.stringify(rest, null, 2));
     console.log("\nlayout segments");
-    table((layoutSegments ?? []).map((s) => ({ range: `${s.start}-${s.end}`, layout: s.layout, manual: s.manual, cx: s.cx, offset: s.offsetX ?? "", reason: s.reason })));
+    table((layoutSegments ?? []).map((s) => ({ range: `${s.start}-${s.end}`, layout: s.layout, manual: s.manual, cx: s.cx, offsets: offsetsLabel(s), subject: subjectLabel(s), reason: s.reason })));
     console.log("\nlast render");
     if (!diagnostics) return console.log("(no diagnostics; rendered before diagnostics existed)");
     console.log(`  at ${diagnostics.renderedAt} in ${diagnostics.renderMs} ms, ${diagnostics.outDurationSec}s out, layout ${diagnostics.layout}`);
@@ -920,6 +936,40 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await api.clips.setBumpersMany(clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
     console.log(`updated ${r.updated} clip(s); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
   },
+  async "clip-overlays"(svc) {
+    const { pos: p, rerender, set, add, addText, remove, clear, from, to, x, y, w, size, color, box, opacity } = bumperArgs();
+    const usage =
+      "usage: reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] | --remove <overlayId> | --clear] [--rerender]";
+    if (p.length < 2) throw new Error(usage);
+    const { api } = await bumperApi(svc, p[0]);
+    const clip = await svc.database.db.query.clips.findFirst({ where: and(eq(schema.clips.id, p[1]!), eq(schema.clips.projectId, p[0]!)), columns: { id: true, overlays: true } });
+    if (!clip) throw new Error("clip not found in this project");
+    const current = clip.overlays ?? [];
+    const modes = [set !== undefined, add !== undefined, addText !== undefined, remove !== undefined, clear].filter(Boolean).length;
+    if (modes > 1) throw new Error(`pick one of --set, --add, --add-text, --remove, --clear\n${usage}`);
+    let next = current;
+    const newId = () => `ov-${Math.random().toString(36).slice(2, 6).padEnd(4, "0")}`;
+    if (set !== undefined) {
+      const parsed = z.array(clipOverlaySchema).safeParse(JSON.parse(set));
+      if (!parsed.success) throw new Error(`--set needs a JSON array of overlays: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      next = parsed.data;
+    } else if (add !== undefined || addText !== undefined) {
+      if (from === undefined || to === undefined) throw new Error(`--add / --add-text need --from and --to\n${usage}`);
+      const common = { id: newId(), start: from, end: to, x: x ?? 0.5, y: y ?? 0.5, ...(opacity !== undefined ? { opacity } : {}) };
+      const parsed = clipOverlaySchema.safeParse(
+        addText !== undefined ? { ...common, kind: "text", text: addText, ...(size !== undefined ? { size } : {}), ...(color ? { color } : {}), ...(box ? { box: true } : {}) } : { ...common, kind: "asset", assetId: add, w: w ?? ASSET_OVERLAY_DEFAULT_W },
+      );
+      if (!parsed.success) throw new Error(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      next = [...current, parsed.data];
+    } else if (remove !== undefined) {
+      next = current.filter((o) => o.id !== remove);
+      if (next.length === current.length) throw new Error(`no overlay ${remove} on this clip`);
+    } else if (clear) next = [];
+    if (modes) await api.clips.update({ id: clip.id, overlays: next, rerender });
+    table(next.map((o) => ({ id: o.id, kind: overlayKind(o), what: overlayKind(o) === "text" ? `“${o.text}”` : o.assetId, source: `${o.start}-${o.end}`, x: o.x, y: o.y, size: overlayKind(o) === "text" ? `${o.size ?? TEXT_OVERLAY_DEFAULTS.size}${o.box ? " box" : ""}` : `w ${o.w ?? ASSET_OVERLAY_DEFAULT_W}`, opacity: o.opacity ?? 1 })));
+    if (!modes) return;
+    console.log(rerender ? "re-render requested" : "saved; no re-render requested (pass --rerender to apply now)");
+  },
 
   async overlays(svc) {
     const id = pos[0]!;
@@ -955,7 +1005,30 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 
 /** Flags for the bumper commands (--rerender is boolean, so positional parsing must not treat the next word as its value). */
 function bumperArgs() {
-  const out = { pos: [] as string[], rerender: false, user: undefined as string | undefined, intro: undefined as string | undefined, outro: undefined as string | undefined, introSec: undefined as number | undefined, outroSec: undefined as number | undefined };
+  const out = {
+    pos: [] as string[],
+    rerender: false,
+    clear: false,
+    user: undefined as string | undefined,
+    intro: undefined as string | undefined,
+    outro: undefined as string | undefined,
+    introSec: undefined as number | undefined,
+    outroSec: undefined as number | undefined,
+    // clip-overlays
+    set: undefined as string | undefined,
+    add: undefined as string | undefined,
+    addText: undefined as string | undefined,
+    remove: undefined as string | undefined,
+    from: undefined as number | undefined,
+    to: undefined as number | undefined,
+    x: undefined as number | undefined,
+    y: undefined as number | undefined,
+    w: undefined as number | undefined,
+    size: undefined as number | undefined,
+    color: undefined as string | undefined,
+    box: false,
+    opacity: undefined as number | undefined,
+  };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     const val = () => {
@@ -964,6 +1037,20 @@ function bumperArgs() {
       return v;
     };
     if (a === "--rerender") out.rerender = true;
+    else if (a === "--clear") out.clear = true;
+    else if (a === "--set") out.set = val();
+    else if (a === "--add") out.add = val();
+    else if (a === "--add-text") out.addText = val();
+    else if (a === "--size") out.size = Number(val());
+    else if (a === "--color") out.color = val();
+    else if (a === "--box") out.box = true;
+    else if (a === "--remove") out.remove = val();
+    else if (a === "--from") out.from = Number(val());
+    else if (a === "--to") out.to = Number(val());
+    else if (a === "--x") out.x = Number(val());
+    else if (a === "--y") out.y = Number(val());
+    else if (a === "--w") out.w = Number(val());
+    else if (a === "--opacity") out.opacity = Number(val());
     else if (a === "--user") out.user = val();
     else if (a === "--intro") out.intro = val();
     else if (a === "--outro") out.outro = val();
@@ -1011,7 +1098,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|clip-overlays|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

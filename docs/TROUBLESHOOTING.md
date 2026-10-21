@@ -89,6 +89,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--box] [--opacity f] \| --remove <overlayId> \| --clear] [--rerender]` | library images/videos or lines of text laid over part of a clip (source seconds, x/y/w/size as fractions of the 9:16 frame); with no change flag it lists them |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
@@ -360,6 +361,12 @@ and list it in `SUPPORTED` in `language.ts`.
   re-running the detector (eval `overlays/mask-residual`): 0 frames with caption text left.
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
+- **Overlay skipped.** `clip.overlay_skipped` (payload `clipId`, `overlayId`, `reason`, sometimes `error`) means a
+  clip overlay was left out and the clip still rendered (never failed). Reasons: its whole time range was removed
+  by cuts; the library file is gone (removed and purged); the file could not be read; or the render with overlays
+  failed and was retried without any (no `overlayId`, `error` holds the ffmpeg lines). Fix the asset or the range
+  in the editor's Overlays lane (or `reelsaw clip-overlays`) and re-render. `ClipDiagnostics.overlays` lists what
+  was applied and skipped.
 
 ## Measuring at scale
 

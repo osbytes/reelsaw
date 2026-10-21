@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, styleSchema, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, styleSchema, type ClipOverlay, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -69,6 +69,7 @@ function publicClip(c: schema.Clip) {
     layoutSegments: c.layoutSegments ?? [],
     style: c.style ?? null,
     bumpers: c.bumpers ?? null,
+    overlays: c.overlays ?? [],
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -249,11 +250,31 @@ async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, wh
 }
 
 /** Every asset id is one of the user's library (an id the clip already uses stays valid even if it was removed since). */
-async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = []) {
+async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
   const rows = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(inArray(schema.bumperAssets.id, want), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
-  if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: "That intro or outro is not in your library" });
+  if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
+}
+
+/** Overlays as stored: ordered by start, ids unique, windows at least 0.1 s, numbers rounded. */
+function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: { startSec: number; endSec: number }): ClipOverlay[] | null {
+  if (!list?.length) return null;
+  const seen = new Set<string>();
+  const out: ClipOverlay[] = [];
+  for (const o of list) {
+    if (seen.has(o.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay id “${o.id}” is used twice` });
+    seen.add(o.id);
+    const start = Math.max(clip.startSec, o.start);
+    const end = Math.min(clip.endSec, o.end);
+    if (end - start < 0.1) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay “${o.id}” lies outside the clip or lasts under 0.1 s` });
+    const r3 = (n: number) => Number(n.toFixed(3));
+    const kind = overlayKind(o);
+    const base = { id: o.id, kind, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), x: r3(o.x), y: r3(o.y), ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: r3(o.opacity) } : {}) };
+    if (kind === "text") out.push({ ...base, text: o.text!, size: r3(o.size ?? TEXT_OVERLAY_DEFAULTS.size), color: (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(), ...(o.box ? { box: true } : {}) });
+    else out.push({ ...base, assetId: o.assetId!, w: r3(o.w ?? ASSET_OVERLAY_DEFAULT_W) });
+  }
+  return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
 }
 
 /**
@@ -1300,6 +1321,8 @@ export const appRouter = router({
           emphasis: z.array(z.string().min(1).max(40)).max(30).optional(),
           /** This clip's own intro/outro choice, replacing the whole value: a missing key inherits the project, null is none. */
           bumpers: clipBumpersSchema.nullable().optional(),
+          /** Library images/videos laid over the clip, replacing the whole list; null or [] = none. */
+          overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
           rerender: z.boolean().optional(),
@@ -1324,10 +1347,13 @@ export const appRouter = router({
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
         const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
-        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged; // these are burned into the video
+        const cleanedOverlays = input.overlays !== undefined ? cleanOverlays(input.overlays, { startSec, endSec }) : undefined;
+        const overlaysChanged = cleanedOverlays !== undefined && JSON.stringify(cleanedOverlays) !== JSON.stringify(c.overlays?.length ? c.overlays : null);
+        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || overlaysChanged; // these are burned into the video
         const cur = c;
         // ownership of the chosen assets is checked in the unit of work that writes
         if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
+        if (overlaysChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedOverlays ?? []).map((o) => o.assetId), (cur.overlays ?? []).map((o) => o.assetId), "overlay");
         const [row] = await u.db
           .update(schema.clips)
           .set({
@@ -1340,6 +1366,7 @@ export const appRouter = router({
             ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
             ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
+            ...(cleanedOverlays !== undefined ? { overlays: cleanedOverlays } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
             editedAt: new Date(), // a clip the user touched survives a re-analyze

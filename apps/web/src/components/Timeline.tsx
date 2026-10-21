@@ -1,17 +1,56 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { Scissors, Undo2, Redo2, Check } from "lucide-react";
-import { formatTime, contentLabel, type ContentRegion, type DetectedSegment, type SectionMode, type Word } from "@reelsaw/shared";
+import * as Popover from "@radix-ui/react-popover";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type } from "lucide-react";
+import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 export const SPLIT_SHORTCUT = `${MOD}B`;
 
-export interface EditorSection {
+/** A framing section as edited: the stored shape (mode + per-pane adjustments), absolute source seconds. */
+export type EditorSection = LayoutSection;
+
+/** A library overlay as the timeline draws it. */
+export interface OverlayBlock {
+  id: string;
   start: number;
   end: number;
-  mode: SectionMode;
-  /** manual horizontal re-centring, fraction of source width */
-  offsetX?: number;
+  name: string;
+  kind: "video" | "image" | "text";
+  thumbnailUrl?: string;
+}
+/** The intro or outro a clip will render with, as a block on the clip lane. */
+export interface BumperBlock {
+  name: string;
+  sec: number;
+  kind: "video" | "image";
+  thumbnailUrl?: string;
+  /** where the choice comes from */
+  source: "clip" | "project";
+}
+export type BumperSlot = "intro" | "outro";
+const MIN_OVERLAY = 0.3;
+const OV_ROW = 24;
+const MAX_OV_ROWS = 3;
+const BUMPER_SEC = { min: 1, max: 10 };
+
+/** Pack overlapping overlays into rows (first free row wins), capped: the lane never grows past MAX_OV_ROWS. */
+export function packOverlayRows(blocks: OverlayBlock[]): Map<string, number> {
+  const rows: number[] = []; // end time of the last block per row
+  const out = new Map<string, number>();
+  for (const b of [...blocks].sort((p, q) => p.start - q.start || p.id.localeCompare(q.id))) {
+    let r = rows.findIndex((end) => end <= b.start + 0.001);
+    if (r < 0) {
+      if (rows.length < MAX_OV_ROWS) {
+        rows.push(b.end);
+        r = rows.length - 1;
+      } else r = rows.length - 1;
+    }
+    rows[r] = Math.max(rows[r]!, b.end);
+    out.set(b.id, r);
+  }
+  return out;
 }
 
 export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
@@ -66,10 +105,32 @@ interface Props {
   /** spans removed as disfluencies, drawn hatched on the words lane */
   cuts?: Array<{ start: number; end: number }>;
   onResetOffset?: (index: number) => void;
-  /** controls shown at the left of the toolbar (trim fields) */
-  toolbar?: React.ReactNode;
+  /** the action bar: editing actions on the left, the transport in the middle, view tools on the right (zoom is the timeline's own) */
+  toolbar?: ReactNode;
+  transport?: ReactNode;
+  tools?: ReactNode;
+  /** snap drags to words, scene changes, the playhead and the clip edges (Alt skips it for one drag) */
+  snap?: boolean;
+  onSnap?: (v: boolean) => void;
   /** hide the hint line on short screens */
   compactHints?: boolean;
+  /** library overlays on their own lane (drag to move, edges to trim, double-click the lane to add) */
+  overlays?: OverlayBlock[];
+  selectedOverlay?: string | null;
+  onOverlaySelect?: (id: string | null) => void;
+  onOverlayChange?: (id: string, range: [number, number], key?: string) => void;
+  onOverlayAdd?: (t: number, kind: "asset" | "text") => void;
+  onOverlayRemove?: (id: string) => void;
+  /** the in/out editor (fields and nudges), shown in a popover from the clip block's length label */
+  renderClipEditor?: () => ReactNode;
+  /** the intro and outro the clip renders with, drawn as blocks around the clip range */
+  bumpers?: { intro: BumperBlock | null; outro: BumperBlock | null };
+  selectedBumper?: BumperSlot | null;
+  onBumperSelect?: (slot: BumperSlot | null) => void;
+  /** an image bumper's length, changed by dragging its outer edge */
+  onBumperSeconds?: (slot: BumperSlot, sec: number, key?: string) => void;
+  /** the editor for a slot, shown in a popover anchored on its block */
+  renderBumperEditor?: (slot: BumperSlot) => ReactNode;
 }
 
 type DragState =
@@ -77,15 +138,22 @@ type DragState =
   | { kind: "start" | "end" }
   | { kind: "move"; grabT: number; orig: [number, number] }
   | { kind: "boundary"; index: number }
-  | { kind: "pan"; grabX: number; orig: [number, number] };
+  | { kind: "pan"; grabX: number; orig: [number, number] }
+  | { kind: "ov-move"; id: string; grabT: number; orig: [number, number] }
+  | { kind: "ov-start" | "ov-end"; id: string }
+  | { kind: "bumper"; slot: BumperSlot };
 
 /**
  * Multi-lane editor timeline: time ruler (click/drag to scrub), transcript words, the clip range
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, compactHints }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, overlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, onOverlayAdd, onOverlayRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
+  const [clipEditorOpen, setClipEditorOpen] = useState(false);
+  const ovRows = useMemo(() => packOverlayRows(overlays), [overlays]);
+  const ovRowCount = Math.max(1, Math.min(MAX_OV_ROWS, overlays.length ? Math.max(...[...ovRows.values()]) + 1 : 1));
+  const ovLaneH = ovRowCount * OV_ROW - 2;
   const [w, setW] = useState(600);
   const fitView = useCallback((): [number, number] => {
     const len = range[1] - range[0];
@@ -98,7 +166,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const [hoverLane, setHoverLane] = useState<string | null>(null);
   const gesture = useRef<string | undefined>(undefined);
   /** where the context menu was opened: time + lane + section under the cursor */
-  const [menuAt, setMenuAt] = useState<{ t: number; lane: string; section: number } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ t: number; lane: string; section: number; overlay: string | null } | null>(null);
 
   useEffect(() => {
     const el = lanesRef.current;
@@ -129,9 +197,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const visibleWords = useMemo(() => words.filter((wd) => wd.end >= view[0] && wd.start <= view[1]), [words, view]);
 
   const [snapHit, setSnapHit] = useState<{ t: number; kind: string } | null>(null);
-  /** Snap within 8px to word edges, scene changes and the playhead. Alt disables. */
+  /** Snap within 8px to word edges, scene changes, the playhead and the clip edges. Alt disables for one drag, the toolbar toggle for good. */
   const snapT = (t: number, prefer: "start" | "end" | "any", alt: boolean) => {
-    if (alt) {
+    if (alt || !snap) {
       setSnapHit(null);
       return t;
     }
@@ -153,6 +221,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
     }
     for (const c of sceneCuts) if (c >= view[0] && c <= view[1]) consider(c, "scene change");
     consider(current, "playhead");
+    consider(range[0], "clip start");
+    consider(range[1], "clip end");
+    for (const s of sections.slice(1)) consider(s.start, "framing change");
     setSnapHit(kind ? { t: best, kind } : null);
     return Number(best.toFixed(2));
   };
@@ -229,6 +300,22 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
       const d = ((drag.grabX - e.clientX) / w) * span;
       const s = Math.max(0, drag.orig[0] + d);
       setView([s, s + span]);
+    } else if (drag.kind === "ov-move") {
+      const len = drag.orig[1] - drag.orig[0];
+      let s = drag.orig[0] + (t - drag.grabT);
+      s = Math.max(range[0], Math.min(range[1] - len, s));
+      const snapped = Math.max(range[0], Math.min(range[1] - len, snapT(s, "start", alt)));
+      onOverlayChange?.(drag.id, [snapped, Number((snapped + len).toFixed(2))], gesture.current);
+    } else if (drag.kind === "ov-start" || drag.kind === "ov-end") {
+      const o = overlays.find((b) => b.id === drag.id);
+      if (!o) return;
+      if (drag.kind === "ov-start") onOverlayChange?.(drag.id, [Math.max(range[0], Math.min(o.end - MIN_OVERLAY, snapT(t, "start", alt))), o.end], gesture.current);
+      else onOverlayChange?.(drag.id, [o.start, Math.min(range[1], Math.max(o.start + MIN_OVERLAY, snapT(t, "end", alt)))], gesture.current);
+    } else if (drag.kind === "bumper") {
+      // the outer edge of an image intro/outro sets how long it shows
+      const raw = drag.slot === "intro" ? range[0] - t : t - range[1];
+      const sec = Math.max(BUMPER_SEC.min, Math.min(BUMPER_SEC.max, Math.round(raw * 2) / 2));
+      onBumperSeconds?.(drag.slot, sec, gesture.current);
     }
   }
   function end(e: React.PointerEvent) {
@@ -241,12 +328,77 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const sectionAt = (t: number) => sections.findIndex((s) => t >= s.start && t < s.end);
   const canSplitAt = (t: number) => sections.some((s) => t > s.start + MIN_SECTION && t < s.end - MIN_SECTION);
   function onContext(e: React.MouseEvent) {
-    const lane = (e.target as HTMLElement).closest<HTMLElement>("[data-lane]")?.dataset.lane ?? "ruler";
+    const el = e.target as HTMLElement;
+    const lane = el.closest<HTMLElement>("[data-lane]")?.dataset.lane ?? "ruler";
+    const overlay = el.closest<HTMLElement>("[data-ov]")?.dataset.ov ?? null;
     const t = Number(tAt(e.clientX).toFixed(2));
     const section = sectionAt(Math.max(range[0], Math.min(range[1] - 0.01, t)));
-    setMenuAt({ t, lane, section });
+    setMenuAt({ t, lane, section, overlay });
     if (lane === "layout" && section >= 0) onSelect(section);
+    if (overlay) onOverlaySelect?.(overlay);
   }
+  const inClip = (t: number) => t >= range[0] && t <= range[1];
+  const bumperBlock = (slot: BumperSlot) => {
+    const b = bumpers?.[slot] ?? null;
+    const open = selectedBumper === slot;
+    const left = slot === "intro" ? (b ? x(range[0] - b.sec) : x(range[0]) - 68) : x(range[1]) + (b ? 0 : 4);
+    const width = b ? Math.max(28, slot === "intro" ? x(range[0]) - x(range[0] - b.sec) : x(range[1] + b.sec) - x(range[1])) : 64;
+    const label = slot === "intro" ? "Intro" : "Outro";
+    const node = b ? (
+      <div
+        className={`absolute inset-y-0 flex cursor-pointer items-center gap-1.5 overflow-hidden border-2 border-dashed px-1.5 ${slot === "intro" ? "rounded-l-[8px] border-r-0" : "rounded-r-[8px] border-l-0"} ${open ? "border-acc bg-acc-soft" : "border-line2 bg-panel hover:bg-sunk"}`}
+        style={{ left, width }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          onBumperSelect?.(open ? null : slot);
+        }}
+        title={`${label}: ${b.name} · ${b.sec} s${b.source === "project" ? " (project default)" : ""} · click to change`}
+      >
+        {b.thumbnailUrl ? <img src={b.thumbnailUrl} alt="" className="h-[26px] w-[15px] shrink-0 rounded-[3px] object-cover" /> : b.kind === "video" ? <Film className="h-3.5 w-3.5 shrink-0 text-ink3" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0 text-ink3" />}
+        {width > 70 && (
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-[11px] font-bold">
+              {label} · {b.sec} s
+            </span>
+            <span className="block truncate text-[10px] text-ink3">
+              {b.name}
+              {b.source === "project" ? " · project" : ""}
+            </span>
+          </span>
+        )}
+      </div>
+    ) : (
+      <button
+        type="button"
+        className={`absolute inset-y-1 flex w-16 items-center justify-center gap-1 rounded-[8px] border border-dashed text-[11px] font-semibold ${open ? "border-acc bg-acc-soft text-acc-text" : "border-line2 text-ink3 hover:border-ink hover:text-ink"}`}
+        style={{ left }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => onBumperSelect?.(open ? null : slot)}
+        title={`Add an ${slot}`}
+      >
+        <Plus className="h-3 w-3" /> {label}
+      </button>
+    );
+    return (
+      <Popover.Root key={slot} open={open} onOpenChange={(o) => !o && onBumperSelect?.(null)}>
+        <Popover.Anchor asChild>{node}</Popover.Anchor>
+        {b?.kind === "image" && onBumperSeconds && (
+          <div
+            className="absolute inset-y-0 z-[3] w-3 cursor-ew-resize"
+            style={{ left: slot === "intro" ? left - 6 : left + width - 6 }}
+            onPointerDown={(e) => begin(e, { kind: "bumper", slot })}
+            title={`Drag to change how long the ${slot} shows (${BUMPER_SEC.min}–${BUMPER_SEC.max} s)`}
+          />
+        )}
+        <Popover.Portal>
+          <Popover.Content side="top" align={slot === "intro" ? "start" : "end"} sideOffset={8} collisionPadding={12} className="z-[80] w-[min(26rem,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop" onOpenAutoFocus={(e) => e.preventDefault()}>
+            {renderBumperEditor?.(slot)}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    );
+  };
 
   // ruler ticks
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
@@ -264,11 +416,21 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
 
   return (
     <div className="select-none">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
-        {toolbar}
-        <span className="font-mono text-xs text-ink2">{len.toFixed(1)}s</span>
-        <span className={`rounded-full px-2.5 py-[3px] font-mono text-[11px] whitespace-nowrap ${snapHit && drag ? "bg-acc text-acc-ink" : "bg-sunk text-ink2"}`}>{snapHit && drag ? `snap: ${snapHit.kind}` : "snapping on"}</span>
-        <div className="ml-auto flex items-center gap-2 text-xs text-ink2">
+      {/* action bar: edit actions | transport | view tools + zoom. Wraps into rows on narrow screens. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-1.5">{toolbar}</div>
+        <div className="mx-auto flex items-center gap-1.5">{transport}</div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink2">
+          {tools}
+          <button
+            type="button"
+            className={`min-w-[7.5rem] rounded-full px-2.5 py-[3px] text-center font-mono text-[11px] whitespace-nowrap ${snapHit && drag ? "bg-acc text-acc-ink" : snap ? "bg-sunk text-ink2 hover:text-ink" : "border border-dashed border-line2 text-ink3 hover:text-ink"}`}
+            aria-pressed={snap}
+            onClick={() => onSnap?.(!snap)}
+            title={snap ? "Snapping to words, scene changes, the playhead and the clip edges (S toggles; hold Alt for one drag)" : "Snapping off (S toggles)"}
+          >
+            {snapHit && drag ? `snap: ${snapHit.kind}` : snap ? "snap on" : "snap off"}
+          </button>
           <span>Zoom</span>
           <input
             type="range"
@@ -293,6 +455,28 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         <div className="shrink-0" style={{ width: LABEL_W }}>
           <div className="h-6" />
           <div className={`${label} h-[26px]`}>Words</div>
+          <div className={`${label} mt-1.5 justify-between pr-2`} style={{ height: ovLaneH }}>
+            Overlays
+            {onOverlayAdd && (
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button type="button" className="grid h-5 w-5 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" aria-label="Add an overlay at the playhead" title="Add an overlay at the playhead">
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content side="top" align="start" sideOffset={6} className="menu w-[200px]">
+                    <DropdownMenu.Item className="menu-item" onSelect={() => onOverlayAdd(inClip(current) ? current : range[0], "asset")}>
+                      <ImageIcon className="h-3.5 w-3.5" /> Image or video…
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item className="menu-item" onSelect={() => onOverlayAdd(inClip(current) ? current : range[0], "text")}>
+                      <Type className="h-3.5 w-3.5" /> Text
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
+          </div>
           <div className={`${label} mt-1.5 h-[34px]`}>Clip</div>
           <div className={`${label} mt-1.5 h-[38px]`}>Framing</div>
         </div>
@@ -329,15 +513,90 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             })}
           </div>
 
-          {/* clip range */}
+          {/* overlays: packed rows; double-click adds one at that time */}
+          <div
+            data-lane="overlays"
+            className={`${lane} mt-1.5 rounded-[8px] bg-sunk/60`}
+            style={{ height: ovLaneH }}
+            onPointerDown={(e) => {
+              if (e.button !== 0 || (e.target as HTMLElement).closest("[data-ov]")) return;
+              onOverlaySelect?.(null);
+              begin(e, { kind: "pan", grabX: e.clientX, orig: view });
+            }}
+            onDoubleClick={(e) => {
+              if ((e.target as HTMLElement).closest("[data-ov]")) return;
+              const t = tAt(e.clientX);
+              if (inClip(t)) onOverlayAdd?.(Number(t.toFixed(2)), "asset");
+            }}
+            title={onOverlayAdd ? "Double-click to add an image or video here; + for text" : undefined}
+          >
+            {overlays.map((o) => {
+              const left = x(o.start);
+              const width = Math.max(6, x(o.end) - left);
+              const row = ovRows.get(o.id) ?? 0;
+              const sel = o.id === selectedOverlay;
+              return (
+                <div
+                  key={o.id}
+                  data-ov={o.id}
+                  className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${sel ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
+                  style={{ left, width, top: row * OV_ROW }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    onOverlaySelect?.(o.id);
+                    begin(e, { kind: "ov-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
+                  }}
+                  title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim`}
+                >
+                  {o.kind === "text" ? <Type className="h-3 w-3 shrink-0 text-ink3" /> : o.thumbnailUrl ? <img src={o.thumbnailUrl} alt="" className="h-[16px] w-[10px] shrink-0 rounded-[2px] object-cover" /> : o.kind === "video" ? <Film className="h-3 w-3 shrink-0 text-ink3" /> : <ImageIcon className="h-3 w-3 shrink-0 text-ink3" />}
+                  {width > 50 && <span className="truncate text-[10px] font-semibold leading-none">{o.name}</span>}
+                  {(["ov-start", "ov-end"] as const).map((k) => (
+                    <div
+                      key={k}
+                      className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ov-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
+                      onPointerDown={(e) => {
+                        onOverlaySelect?.(o.id);
+                        begin(e, { kind: k, id: o.id });
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* clip range, with the intro and outro it renders with on either side */}
           <div data-lane="clip" className={`${lane} mt-1.5 h-[34px] rounded-[8px] bg-sunk`}>
+            {bumpers && bumperBlock("intro")}
+            {bumpers && bumperBlock("outro")}
             <div
-              className="absolute inset-y-0 flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
+              className="absolute inset-y-0 z-[2] flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
               style={{ left: x(range[0]), width: Math.max(4, x(range[1]) - x(range[0])) }}
               onPointerDown={(e) => begin(e, { kind: "move", grabT: tAt(e.clientX), orig: range })}
               title="Drag to slide the whole clip"
             >
-              <span className="pointer-events-none font-mono text-[11px] font-semibold text-acc-text">{len.toFixed(1)}s</span>
+              {renderClipEditor ? (
+                <Popover.Root open={clipEditorOpen} onOpenChange={setClipEditorOpen}>
+                  <Popover.Trigger asChild>
+                    <button
+                      type="button"
+                      className={`rounded-[6px] px-1.5 font-mono text-[11px] font-semibold text-acc-text hover:bg-acc/20 ${clipEditorOpen ? "bg-acc/20" : ""}`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      title="Clip length · click to edit the in and out points"
+                      aria-label="Edit the in and out points"
+                    >
+                      {len.toFixed(1)}s
+                    </button>
+                  </Popover.Trigger>
+                  <Popover.Portal>
+                    <Popover.Content side="top" align="center" sideOffset={10} collisionPadding={12} className="z-[80] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop" onOpenAutoFocus={(e) => e.preventDefault()}>
+                      {renderClipEditor()}
+                    </Popover.Content>
+                  </Popover.Portal>
+                </Popover.Root>
+              ) : (
+                <span className="pointer-events-none font-mono text-[11px] font-semibold text-acc-text">{len.toFixed(1)}s</span>
+              )}
             </div>
             {(["start", "end"] as const).map((k) => (
               <div
@@ -376,7 +635,8 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
                   {width > 44 && <span className="truncate text-[11px] font-bold leading-tight">{MODE_LABEL[s.mode]}</span>}
                   {width > 70 && (
                     <span className="truncate text-[10px] leading-tight opacity-75">
-                      {auto ? (chose ? `→ ${chose}` : "→ decided at render") : s.offsetX ? `offset ${s.offsetX > 0 ? "+" : ""}${Math.round(s.offsetX * 100)}%` : "forced"}
+                      {auto ? (chose ? `→ ${chose}` : "→ decided at render") : hasAdjust(s) ? adjustLabel(s) : "forced"}
+                      {auto && hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}
                     </span>
                   )}
                 </div>
@@ -438,26 +698,41 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             onRedo={onRedo}
             canUndo={canUndo}
             canRedo={canRedo}
+            overlay={menuAt?.overlay ? (overlays.find((o) => o.id === menuAt.overlay) ?? null) : null}
+            onOverlayAdd={onOverlayAdd && ((t, kind) => inClip(t) && onOverlayAdd(t, kind))}
+            onOverlayRemove={onOverlayRemove}
           />
         </ContextMenu.Portal>
         </ContextMenu.Root>
       </div>
       {!compactHints && (
         <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pr-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
-          <span>Drag the handles to trim; drag the clip to slide it</span>
+          <span>Drag the handles to trim; drag the clip to slide it · click the intro or outro to change it</span>
           <span>Snaps to words, scene changes and the playhead · hold Alt to drag freely</span>
-          <span>{MOD} + scroll zooms · right-click for framing</span>
+          <span>{MOD} + scroll zooms · right-click for framing and overlays</span>
         </div>
       )}
     </div>
   );
 }
 
+/** "x +12% · y −5% · bottom x +3% · follows 72%" for a section's per-pane adjustments. */
+export function adjustLabel(s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">): string {
+  const pct = (v: number) => `${v > 0 ? "+" : "−"}${Math.round(Math.abs(v) * 100)}%`;
+  const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined) => [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
+  const a = pane(s.offsetX, s.offsetY, s.subjectX);
+  const b = pane(s.offsetX2, s.offsetY2, s.subjectX2);
+  return [a, b ? `bottom ${b}` : ""].filter(Boolean).join(" · ");
+}
+
 const MENU_MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
 const item = "menu-item";
 
 function TimelineMenu(p: {
-  at: { t: number; lane: string; section: number } | null;
+  at: { t: number; lane: string; section: number; overlay: string | null } | null;
+  overlay: OverlayBlock | null;
+  onOverlayAdd?: (t: number, kind: "asset" | "text") => void;
+  onOverlayRemove?: (id: string) => void;
   sections: EditorSection[];
   detected: DetectedSegment[];
   range: [number, number];
@@ -486,6 +761,20 @@ function TimelineMenu(p: {
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
         <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ml-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
+      {p.overlay && p.onOverlayRemove ? (
+        <ContextMenu.Item className={item} onSelect={() => p.onOverlayRemove!(p.overlay!.id)}>
+          <Trash2 className="h-3.5 w-3.5" /> Remove overlay “{p.overlay.name}” <span className="kbd ml-auto">⌫</span>
+        </ContextMenu.Item>
+      ) : p.onOverlayAdd ? (
+        <>
+          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onOverlayAdd!(at.t, "asset")}>
+            <ImageIcon className="h-3.5 w-3.5" /> Add image or video here
+          </ContextMenu.Item>
+          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onOverlayAdd!(at.t, "text")}>
+            <Type className="h-3.5 w-3.5" /> Add text here
+          </ContextMenu.Item>
+        </>
+      ) : null}
       {sec && (
         <>
           <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
@@ -510,7 +799,7 @@ function TimelineMenu(p: {
             Merge with next
           </ContextMenu.Item>
           {p.onResetOffset && (
-            <ContextMenu.Item className={item} disabled={!sec.offsetX} onSelect={() => p.onResetOffset!(at.section)}>
+            <ContextMenu.Item className={item} disabled={!hasAdjust(sec)} onSelect={() => p.onResetOffset!(at.section)}>
               Reset re-centring
             </ContextMenu.Item>
           )}

@@ -113,10 +113,74 @@ export const layoutSectionSchema = z.object({
   start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
   end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
   mode: sectionModeSchema,
-  /** Manual re-centring: shifts the crop horizontally by this fraction of the source width. */
-  offsetX: z.number().min(-0.5).max(0.5).optional().describe("Shift the crop sideways by this fraction of the source width (-0.5 to 0.5)"),
+  /** Manual re-centring of the first pane (the only pane, or the top of a split): shifts the crop by this fraction of the source width, relative to the tracked face. */
+  offsetX: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop sideways by this fraction of the source width (-0.5 to 0.5), relative to the face it follows"),
+  offsetY: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop up or down by this fraction of the source height; only matters where the crop is shorter than the frame (split, stack)"),
+  /** Second pane of a split (the bottom speaker). */
+  offsetX2: z.number().min(-0.5).max(0.5).optional().describe("Split only: shift the bottom crop sideways (-0.5 to 0.5)"),
+  offsetY2: z.number().min(-0.5).max(0.5).optional().describe("Split only: shift the bottom crop up or down (-0.5 to 0.5)"),
+  /** Follow the person at this x instead of the detector's pick: the render re-assigns the pane's track to the face nearest it (no face there = a fixed crop at that x). */
+  subjectX: z.number().min(0).max(1).optional().describe("Follow the person at this x (0-1 of the source width) in the top/only pane; the offset still applies on top"),
+  subjectX2: z.number().min(0).max(1).optional().describe("Split only: follow the person at this x in the bottom pane"),
 });
 export type LayoutSection = z.infer<typeof layoutSectionSchema>;
+/** One pane's adjustment: pane 0 is the only pane or the top of a split, pane 1 the bottom of a split. */
+export interface PaneAdjust {
+  offsetX?: number;
+  offsetY?: number;
+  subjectX?: number;
+}
+export function paneOf(s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">, pane: 0 | 1): PaneAdjust {
+  return pane === 0 ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX } : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2 };
+}
+/** Write one pane's adjustment back onto a section (undefined fields are removed). */
+export function withPane<T extends Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">>(s: T, pane: 0 | 1, a: PaneAdjust): T {
+  const out: T = { ...s };
+  const keys = pane === 0 ? (["offsetX", "offsetY", "subjectX"] as const) : (["offsetX2", "offsetY2", "subjectX2"] as const);
+  const vals = [a.offsetX, a.offsetY, a.subjectX];
+  keys.forEach((k, i) => {
+    const v = vals[i];
+    if (v === undefined || (k !== "subjectX" && k !== "subjectX2" && Math.abs(v) < 1e-4)) delete out[k];
+    else out[k] = v;
+  });
+  return out;
+}
+/** True when a section carries any manual adjustment (and so must be stored even in Auto mode). */
+export const hasAdjust = (s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">) =>
+  !!(s.offsetX || s.offsetY || s.offsetX2 || s.offsetY2 || s.subjectX !== undefined || s.subjectX2 !== undefined);
+
+/**
+ * An image or short video from the library laid over part of the clip (a logo, a sticker, b-roll).
+ * Times are absolute source seconds like sections; position and size are fractions of the 9:16 output.
+ */
+export const clipOverlaySchema = z
+  .object({
+    id: z.string().min(1).max(40).describe("Stable id for this overlay (any short string; keep it when editing)"),
+    /** absent = asset (rows stored before text overlays existed) */
+    kind: z.enum(["asset", "text"]).optional().describe("asset (default): a library image or video; text: a line of text"),
+    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (list_bumpers), an image or a video"),
+    text: z.string().trim().min(1).max(120).optional().describe("text: the line to show (1-120 chars)"),
+    start: z.number().min(0).describe("Shown from this second of the source video"),
+    end: z.number().min(0).describe("Hidden after this second of the source video"),
+    x: z.number().min(0).max(1).describe("Centre, fraction of the output width (0-1)"),
+    y: z.number().min(0).max(1).describe("Centre, fraction of the output height (0-1)"),
+    w: z.number().min(0.05).max(1).optional().describe("asset: width, fraction of the output width (0.05-1); the height follows the file. Default 0.3"),
+    size: z.number().min(0.02).max(0.12).optional().describe("text: font size as a fraction of the output height (0.02-0.12), default 0.045"),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .optional()
+      .describe("text: colour as #RRGGBB, default white"),
+    box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
+    opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
+  })
+  .refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
+export type ClipOverlay = z.infer<typeof clipOverlaySchema>;
+export const MAX_CLIP_OVERLAYS = 20;
+/** The kind of an overlay, "asset" for rows stored before text overlays existed. */
+export const overlayKind = (o: Pick<ClipOverlay, "kind">): "asset" | "text" => o.kind ?? "asset";
+export const TEXT_OVERLAY_DEFAULTS = { size: 0.045, color: "#FFFFFF" } as const;
+export const ASSET_OVERLAY_DEFAULT_W = 0.3;
 
 /** What the renderer actually used for each piece of a clip, absolute source seconds. */
 export interface DetectedSegment {
@@ -136,8 +200,19 @@ export interface DetectedSegment {
   cy2?: number;
   /** crop centre over time, ~1 point/s: [absolute seconds, x] (offset already applied) */
   track?: Array<[number, number]>;
-  /** manual offset that was applied */
+  /** manual offsets that were applied (first pane, and the second pane of a split) */
   offsetX?: number;
+  offsetY?: number;
+  offsetX2?: number;
+  offsetY2?: number;
+  /** the pane follows the person the user pointed at (subjectX); "fixed" when no face was found there */
+  subject?: "followed" | "fixed";
+  subject2?: "followed" | "fixed";
+  /** the subject x each pane was asked to follow */
+  subjectX?: number;
+  subjectX2?: number;
+  /** second speaker's crop centre over time, like `track` */
+  track2?: Array<[number, number]>;
   /** "stack" only: the part of the frame shown on top (absent = the whole frame) */
   content?: ContentRegion;
 }
@@ -172,6 +247,8 @@ export interface ClipDiagnostics {
   outDurationSec: number;
   /** intro/outro attached to this render (ids, seconds) and which were skipped, and why */
   bumpers?: { introId?: string; outroId?: string; introSec: number; outroSec: number; skipped?: string[]; fromClip?: Array<"intro" | "outro"> };
+  /** overlays composited (and any that were skipped, with reasons) */
+  overlays?: { used: number; skipped?: string[] };
   renderMs: number;
 }
 
@@ -372,6 +449,8 @@ export const PROJECT_EVENT_TYPES = [
   "clip.retrying",
   /** an intro/outro could not be used; the clip rendered without it */
   "clip.bumper_skipped",
+  /** an overlay (logo, sticker, b-roll) could not be used; the clip rendered without it */
+  "clip.overlay_skipped",
   /** a cut the user made was applied without a seam check (the audio around it couldn't be matched) */
   "clip.cut_unverified",
   /** no progress for a long time on a running clip/stage (watchdog) */

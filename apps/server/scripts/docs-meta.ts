@@ -143,7 +143,8 @@ export const DOCS: Record<string, [GroupId, string]> = {
   MAX_STORAGE_MB: ["limits", "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited."],
   MAX_SOURCE_MINUTES_PER_MONTH: ["limits", "Quota: minutes of source video per account per period: the billing period when the account has a plan (ee), else the UTC calendar month. 0 = unlimited."],
   WATERMARK_NON_ADMINS: ["limits", "Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits)."],
-  WATERMARK_TEXT: ["limits", "The watermark text."],
+  WATERMARK_TEXT: ["limits", "The watermark text, shown under the logo."],
+  WATERMARK_LOGO_PATH: ["limits", "PNG composited above the watermark text (top-left under the platform top band, 18% of the frame width, 95% opacity). An unreadable file logs a warning and leaves the text watermark alone."],
   SOURCE_RETENTION_DAYS: ["limits", "Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep."],
   CLIP_RETENTION_DAYS: ["limits", "Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep."],
   EVENT_RETENTION_DAYS: ["limits", "Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep."],
@@ -289,6 +290,7 @@ export const ENV_VALUE: Record<"root" | "deploy", Record<string, string>> = {
     TEXT_MODEL_PATH: "apps/server/models/ppocrv4-det.onnx",
     VAD_MODEL_PATH: "apps/server/models/silero-vad.onnx",
     ALIGN_MODEL_DIR: "apps/server/models/wav2vec2-base-960h",
+    WATERMARK_LOGO_PATH: "apps/server/assets/watermark.png",
     LOG_FILE: "/data/logs/reelsaw.log",
   },
   deploy: {

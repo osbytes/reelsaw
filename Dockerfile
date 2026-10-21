@@ -102,6 +102,8 @@ WORKDIR /app
 # --chown on the copy (not a recursive chown afterwards) so the app layer is not stored twice
 COPY --from=server --chown=node:node /out/server /app/server
 COPY --from=build --chown=node:node /app/apps/server/drizzle /app/server/drizzle
+# the watermark logo (WATERMARK_LOGO_PATH)
+COPY --from=build --chown=node:node /app/apps/server/assets /app/server/assets
 COPY --from=build --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node THIRD_PARTY.md /app/THIRD_PARTY.md
 # operator CLI: docker compose exec app reelsaw status <projectId> (drops to node when invoked as root)

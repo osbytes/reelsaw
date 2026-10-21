@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -457,6 +457,8 @@ export const clips = pgTable(
     style: jsonb("style").$type<StyleOverride>(),
     /** user decision per slot: missing key = inherit the project, null = none, string = that library asset (survives pipeline re-runs) */
     bumpers: jsonb("bumpers").$type<ClipBumpers>(),
+    /** library images/videos laid over the clip for a time range (logos, stickers, b-roll); null = none */
+    overlays: jsonb("overlays").$type<ClipOverlay[]>(),
     /** last time the user edited the clip (clips.update); an edited clip survives a re-analyze */
     editedAt: timestamp("edited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

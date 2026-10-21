@@ -37,6 +37,7 @@ services:
       DATA_DIR: /data
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
+      WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
       # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
       LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "true"
@@ -65,6 +66,7 @@ services:
       DATA_DIR: /data
       FACE_MODEL_PATH: /app/server/models/ultraface-rfb-320.onnx
       TEXT_MODEL_PATH: /app/server/models/ppocrv4-det.onnx
+      WATERMARK_LOGO_PATH: /app/server/assets/watermark.png
       # JSON logs also go here (rotated daily, 7 kept) so they survive container re-creation: `reelsaw logs <id>`
       LOG_FILE: /data/logs/reelsaw.log
       RUN_HTTP: "false"
