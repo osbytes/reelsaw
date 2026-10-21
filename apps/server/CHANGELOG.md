@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.16.0
+
+### Minor Changes
+
+- Background music from the library plays under a clip: several tracks per clip on their own lane, each with window, offset, level, fade and loop, loudness-normalised and ducked while someone speaks. Captions and transcripts export as SRT/VTT (routes, zip, MCP, CLI), and an SRT/VTT file can be imported as a project's transcript. Text overlays take a font from the image (DejaVu, Liberation, Roboto, Open Sans, Lato, Inter, Bebas Neue), and ⌘C/⌘V copy and paste overlays and tracks in the editor. New: `clips.audio`, `clips.captions`, `update_clip { audio }`, `get_clip_captions`, `get_project_transcript_file`, `import_transcript`, `reelsaw clip-audio`, `captions`, `transcript-file`, `import-transcript`, `GET /api/fonts/:family`.
+
+### Patch Changes
+
+- [#92](https://github.com/osbytes/reelsaw/pull/92) [`0f3a7dd`](https://github.com/osbytes/reelsaw/commit/0f3a7dddd51a372b50772fe496f26b9b4b90faa5) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Keyboard shortcuts go through one binding helper (react-hotkeys-hook) instead of hand-rolled listeners, so the typing rule and the platform modifier are the same on every screen. ⌘K no longer splits framing in the clip editor; it only opens the command palette (⌘B splits, as the `?` sheet says).
+
 ## 0.15.0
 
 ### Minor Changes
