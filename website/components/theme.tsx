@@ -1,14 +1,37 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
+import { THEME_KEY } from "@/lib/theme-script";
 
 export type Theme = "light" | "dark";
-export const THEME_KEY = "rs-theme";
+export { THEME_KEY };
 
 // Same contract as the app (apps/web/src/lib/theme.ts): <html data-theme>, remembered per browser.
 const listeners = new Set<() => void>();
 const read = (): Theme => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
+function preferred(): Theme {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    if (t === "dark" || t === "light") return t;
+  } catch {
+    /* private mode */
+  }
+  try {
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** Re-apply the remembered theme. React can clear data-theme while rebuilding <html>. */
+function applyStoredTheme() {
+  const t = preferred();
+  if (document.documentElement.dataset.theme === t) return;
+  document.documentElement.dataset.theme = t;
+  for (const l of listeners) l();
+}
 
 function setTheme(t: Theme) {
   document.documentElement.dataset.theme = t;
@@ -28,10 +51,14 @@ const subscribe = (l: () => void) => {
       l();
     }
   };
+  // The boot script restored the attribute after this render read it.
+  const onSync = () => l();
   window.addEventListener("storage", onStorage);
+  window.addEventListener("rs-theme", onSync);
   return () => {
     listeners.delete(l);
     window.removeEventListener("storage", onStorage);
+    window.removeEventListener("rs-theme", onSync);
   };
 };
 
@@ -41,8 +68,13 @@ export function useTheme(): [Theme | null, () => void] {
   return [theme, () => setTheme(read() === "dark" ? "light" : "dark")];
 }
 
-/** Runs before first paint so the page never flashes the wrong theme. Inlined in <head>. */
-export const THEME_BOOT_SCRIPT = `try{var t=localStorage.getItem(${JSON.stringify(THEME_KEY)})||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}catch(e){}`;
+/** Mount once under <body>. Runs after React strips data-theme and before paint. */
+export function ThemeSync() {
+  useLayoutEffect(() => {
+    applyStoredTheme();
+  }, []);
+  return null;
+}
 
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, toggle] = useTheme();
