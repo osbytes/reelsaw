@@ -488,8 +488,10 @@ export const appRouter = router({
         .from(schema.projects)
         .where(and(eq(schema.projects.userId, ctx.user.id), or(sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`, sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`)))
         .limit(500);
+      // overlays are a jsonb list; audio is a list too, except rows written before several tracks per clip (one object)
+      const ref = JSON.stringify([{ assetId: input.id }]);
       const clipRows = await db
-        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
+        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, overlays: schema.clips.overlays, audio: schema.clips.audio, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
         .from(schema.clips)
         .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
         .where(
@@ -500,12 +502,16 @@ export const appRouter = router({
               sql`${schema.clips.bumpers} ->> 'outro' = ${input.id}`,
               sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`,
               sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`,
+              sql`${schema.clips.overlays} @> ${ref}::jsonb`,
+              sql`(jsonb_typeof(${schema.clips.audio}) = 'array' and ${schema.clips.audio} @> ${ref}::jsonb)`,
+              sql`(jsonb_typeof(${schema.clips.audio}) = 'object' and ${schema.clips.audio} ->> 'assetId' = ${input.id})`,
             ),
           ),
         )
         .orderBy(schema.clips.index)
         .limit(2000);
-      type Clip = { id: string; index: number; title: string; slots: Array<"intro" | "outro">; via: "clip" | "project" };
+      type Role = "intro" | "outro" | "overlay" | "music";
+      type Clip = { id: string; index: number; title: string; slots: Role[]; via: "clip" | "project"; overlays: number; music: number };
       const out = new Map<string, { id: string; title: string; slots: Array<"intro" | "outro">; via: "project"; clips: Clip[] }>();
       for (const p of projectRows) out.set(p.id, { id: p.id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === input.id), clips: [] });
       for (const c of clipRows) {
@@ -513,10 +519,13 @@ export const appRouter = router({
         const mine = slots.filter((s) => own[s] === input.id);
         // a slot the clip leaves alone follows the project
         const inherited = slots.filter((s) => own[s] === undefined && c.settings[key[s]] === input.id);
-        if (!mine.length && !inherited.length) continue;
+        const overlays = (c.overlays ?? []).filter((o) => o.assetId === input.id).length;
+        const music = clipAudioList(c.audio).filter((m) => m.assetId === input.id).length;
+        if (!mine.length && !inherited.length && !overlays && !music) continue;
         const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
         out.set(p.id, p);
-        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: slots.filter((s) => mine.includes(s) || inherited.includes(s)), via: mine.length ? "clip" : "project" });
+        const roles: Role[] = [...slots.filter((s) => mine.includes(s) || inherited.includes(s)), ...(overlays ? (["overlay"] as const) : []), ...(music ? (["music"] as const) : [])];
+        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: roles, via: mine.length || overlays || music ? "clip" : "project", overlays, music });
       }
       // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
       const bare = [...out.values()].filter((p) => !p.clips.length).map((p) => p.id);

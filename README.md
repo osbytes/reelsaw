@@ -404,13 +404,13 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
-| `list_bumpers` | Your intro/outro library. |
+| `list_bumpers` | Your library: intros/outros (video, image), overlays and music (audio). |
 | `add_bumper` | Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. |
 | `rename_bumper` | Rename one of your library items (removed ones too). |
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
 | `remove_bumper` | Remove an item from your library and from your defaults. |
 | `restore_bumper` | Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. |
-| `bumper_usage` | The projects and clips that use a library item. |
+| `bumper_usage` | The projects and clips that use a library item, as intro, outro, overlay or music. |
 | `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
 | `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |

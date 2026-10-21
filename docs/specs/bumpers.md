@@ -164,9 +164,19 @@ is unchanged.
   cards and downloads include them naturally.
 - Tokens only, `ScrollArea` for lists, labelled icon buttons, status as glyph plus word.
 
+- **Library page:** one card per item. The name has a pencil (rename; only the label changes, nothing
+  re-renders), audio cards play in place (one at a time, a progress line under the glyph) and the viewer
+  has a full `<audio controls>`. "Used by N projects · M clips" counts every role an item plays: intro,
+  outro, overlay or music track; the popover and the viewer list the projects and clips with the role on
+  each ("overlay ×2", "music", "intro · from project").
+
 ## API, MCP, CLI
 tRPC `bumpers.*`; the ids ride on project settings and user defaults. MCP gets optional ids on project
 creation and read-only `list_bumpers` (uploading stays in the web UI). CLI: `reelsaw bumpers`.
+`bumpers.list` / `list_bumpers` carry `usedBy`, `usedByClips` (intro, outro, overlay and music uses) and
+`url` (the file itself, for playing or viewing); `bumpers.usage` / `bumper_usage` / `reelsaw bumpers usage`
+return the roles per clip (`slots`, with `overlays` and `music` counts). `bumpers.update` / `rename_bumper` /
+`reelsaw bumpers rename` change the label.
 
 ## Edge cases
 - Source without audio: body gets generated silence, so concat always has audio.
