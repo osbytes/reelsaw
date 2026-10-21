@@ -6,7 +6,7 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useLocation } from "react-router";
 import { readHash, writeHash, linkWith } from "../lib/hash";
-import { useShortcuts } from "../lib/shortcuts";
+import { useShortcut, useShortcuts } from "../lib/shortcuts";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin, isVisibleWithin } from "../lib/scroll";
 import type { Playback } from "../lib/playback";
@@ -406,30 +406,21 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     ["Unpin", "Esc"],
   ]);
   // N next fix · A accept · R reject · ↑/↓ previous/next while a fix is pinned
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || el.closest("input, textarea, select, [contenteditable]")) return;
-      const k = e.key.toLowerCase();
-      if (k === "n" && orderedFlags.length) {
-        e.preventDefault();
-        nextPending();
-        return;
-      }
-      const cur = pinnedFlag ? orderedFlags.find((f) => f.id === pinnedFlag) : undefined;
-      if (!cur) return;
-      if (k === "a") decide(cur.id, { status: "accepted" });
-      else if (k === "p" && playback) toggleLoop(cur);
-      else if (k === "r") decide(cur.id, { status: "rejected" });
-      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const i = orderedFlags.indexOf(cur);
-        jumpToFlag((i + (e.key === "ArrowDown" ? 1 : -1) + orderedFlags.length) % orderedFlags.length);
-      } else if (e.key === "Escape") onPinClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  const pinned = pinnedFlag ? orderedFlags.find((f) => f.id === pinnedFlag) : undefined;
+  useShortcut("n", () => nextPending(), { enabled: orderedFlags.length > 0 });
+  useShortcut("a", () => pinned && decide(pinned.id, { status: "accepted" }), { enabled: !!pinned, preventDefault: false });
+  useShortcut("r", () => pinned && decide(pinned.id, { status: "rejected" }), { enabled: !!pinned, preventDefault: false });
+  useShortcut("p", () => pinned && toggleLoop(pinned), { enabled: !!pinned && !!playback, preventDefault: false });
+  useShortcut("escape", () => onPinClose(), { enabled: !!pinned, preventDefault: false });
+  useShortcut(
+    "up, down",
+    (e) => {
+      if (!pinned) return;
+      const i = orderedFlags.indexOf(pinned);
+      jumpToFlag((i + (e.key === "ArrowDown" ? 1 : -1) + orderedFlags.length) % orderedFlags.length);
+    },
+    { enabled: !!pinned },
+  );
   useEffect(() => {
     if (looping && openFlag !== looping) stopLoop();
     // eslint-disable-next-line react-hooks/exhaustive-deps

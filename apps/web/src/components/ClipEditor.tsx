@@ -19,7 +19,7 @@ import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
-import { useShortcuts } from "../lib/shortcuts";
+import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ShortcutSheet } from "./ShortcutSheet";
 import {
   defaultStyle,
@@ -909,60 +909,34 @@ export function ClipEditor(props: Props) {
   }, [changed]);
 
   // keyboard
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      const mod = e.metaKey || e.ctrlKey;
-      const k = e.key.toLowerCase();
-      if (mod && (k === "z" || k === "y") && !el.closest("[data-native-undo]")) {
-        e.preventDefault();
-        if (k === "y" || e.shiftKey) history.redo();
-        else history.undo();
-        return;
-      }
-      if (mod && k === "s") {
-        e.preventDefault();
-        if (changed && !busy) void save(needsRender);
-        return;
-      }
-      if (mod && (k === "b" || k === "k")) {
-        e.preventDefault();
-        splitAt(clock.get());
-        return;
-      }
-      if (el.closest("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]")) return;
-      // copy / paste the selected overlay or music track; typing in a field keeps the browser's own clipboard
-      if (mod && k === "c" && !window.getSelection()?.toString() && copySelection()) {
-        e.preventDefault();
-        return;
-      }
-      if (mod && k === "v" && pasteSelection()) {
-        e.preventDefault();
-        return;
-      }
-      if (mod) return;
-      if (e.key === "Escape") {
-        if (keysOpen) setKeysOpen(false);
-        return;
-      }
-      if (e.key === "?") setKeysOpen((o) => !o);
-      else if (e.key === " ") {
-        e.preventDefault();
-        togglePlay();
-      } else if (k === "i") setIn(clock.get());
-      else if (k === "o") setOut(clock.get());
-      else if (k === "s") setSnap(!snap);
-      else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        videoRef.current?.pause();
-        seek(clock.get() + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedOverlay) removeOverlay(selectedOverlay);
-      else if ((e.key === "Delete" || e.key === "Backspace") && selectedMusic) removeMusic(selectedMusic);
-      else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null && selected > 0) mergeSection(selected, "left");
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  // a field with its own undo stack (text inputs opt in with data-native-undo) keeps ⌘Z
+  const nativeUndo = (e: KeyboardEvent) => !!(e.target as HTMLElement | null)?.closest?.("[data-native-undo]");
+  useShortcut("mod+z", (e) => !nativeUndo(e) && (e.preventDefault(), history.undo()), { inFields: true, preventDefault: false });
+  useShortcut("mod+shift+z, mod+y", (e) => !nativeUndo(e) && (e.preventDefault(), history.redo()), { inFields: true, preventDefault: false });
+  useShortcut("mod+s", () => changed && !busy && void save(needsRender), { inFields: true });
+  useShortcut("mod+b", () => splitAt(clock.get()), { inFields: true }); // ⌘K belongs to the command palette
+  // copy / paste the selected overlay or music track; a text selection keeps the browser's own clipboard
+  useShortcut("mod+c", (e) => !window.getSelection()?.toString() && copySelection() && e.preventDefault(), { preventDefault: false });
+  useShortcut("mod+v", (e) => pasteSelection() && e.preventDefault(), { preventDefault: false });
+  useShortcut("escape", () => setKeysOpen(false), { enabled: keysOpen, preventDefault: false });
+  useSheetKey(() => setKeysOpen((o) => !o));
+  useShortcut("space", () => togglePlay());
+  useShortcut("i", () => setIn(clock.get()), { preventDefault: false });
+  useShortcut("o", () => setOut(clock.get()), { preventDefault: false });
+  useShortcut("s", () => setSnap(!snap), { preventDefault: false });
+  useShortcut("left, right, shift+left, shift+right", (e) => {
+    videoRef.current?.pause();
+    seek(clock.get() + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : FRAME));
   });
+  useShortcut(
+    "delete, backspace",
+    () => {
+      if (selectedOverlay) removeOverlay(selectedOverlay);
+      else if (selectedMusic) removeMusic(selectedMusic);
+      else if (selected !== null && selected > 0) mergeSection(selected, "left");
+    },
+    { preventDefault: false },
+  );
 
   // ----- transcript (panel or tab) -----
   const txViewport = useRef<HTMLDivElement>(null);

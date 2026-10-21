@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useHotkeys } from "react-hotkeys-hook";
 
 /** The ⌘ / Ctrl prefix for this platform. */
 export const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -50,15 +51,47 @@ export function useShortcutGroups(): ShortcutGroup[] {
 
 /** `?` toggles the sheet from anywhere on the screen, except while typing. */
 export function useSheetKey(toggle: () => void) {
-  const t = useRef(toggle);
-  t.current = toggle;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
-      e.preventDefault();
-      t.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useShortcut("?", toggle, { useKey: true });
+}
+
+/**
+ * One keyboard binding (react-hotkeys-hook underneath). `keys` is its syntax: "mod+s", "shift+left",
+ * "space", "delete", or several in one string separated by commas. Typing in a text field never
+ * triggers a binding unless `inFields` is set (checkboxes and sliders still allow it, like
+ * `isTypingTarget`). The handler is read through a ref, so no dependency list is needed and the
+ * binding never fires a stale closure. Pass `preventDefault: false` to decide per event.
+ */
+export function useShortcut(
+  keys: string,
+  handler: (e: KeyboardEvent) => void,
+  opts: {
+    enabled?: boolean;
+    /** also fire while typing in inputs / textareas / contenteditable */
+    inFields?: boolean;
+    preventDefault?: boolean;
+    /** match `event.key` (for "?", "!" and other shifted characters) instead of the physical key */
+    useKey?: boolean;
+    /** fire whatever modifiers are held (a shifted character needs this) */
+    ignoreModifiers?: boolean;
+  } = {},
+) {
+  const h = useRef(handler);
+  h.current = handler;
+  const inFields = opts.inFields ?? false;
+  useHotkeys(
+    keys,
+    (e) => h.current(e),
+    {
+      enabled: opts.enabled ?? true,
+      // the library's own form-tag rule is coarser than ours (it would also skip checkboxes and sliders)
+      enableOnFormTags: true,
+      enableOnContentEditable: true,
+      // a shifted character is matched on `event.key` with modifiers ignored, so ⌘? / Alt+! are refused here
+      ignoreEventWhen: (e) => (!inFields && isTypingTarget(e.target)) || (!!opts.useKey && !opts.ignoreModifiers && (e.metaKey || e.ctrlKey || e.altKey)),
+      preventDefault: opts.preventDefault ?? true,
+      useKey: opts.useKey ?? false,
+      ignoreModifiers: opts.ignoreModifiers ?? opts.useKey ?? false,
+    },
+    [keys, opts.enabled, inFields, opts.preventDefault, opts.useKey, opts.ignoreModifiers],
+  );
 }

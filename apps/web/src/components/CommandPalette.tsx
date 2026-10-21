@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
+import { useShortcut } from "../lib/shortcuts";
 import { useSession } from "../lib/auth";
 import { isOnlyUrls } from "../lib/links";
 
@@ -27,15 +28,16 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
     setQ(initial);
     setOpen(true);
   };
+  useShortcut(
+    "mod+k",
+    () => {
+      setOpen((o) => !o);
+      setQ("");
+    },
+    { enabled: !!session, inFields: true },
+  );
   useEffect(() => {
     if (!session) return;
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen((o) => !o);
-        setQ("");
-      }
-    };
     const onPaste = (e: ClipboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.closest("input, textarea, select, [contenteditable]")) return;
@@ -45,12 +47,8 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
         show(oneLine(text));
       }
     };
-    window.addEventListener("keydown", onKey);
     window.addEventListener("paste", onPaste);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("paste", onPaste);
-    };
+    return () => window.removeEventListener("paste", onPaste);
   }, [session]);
   return (
     <Ctx.Provider value={show}>
