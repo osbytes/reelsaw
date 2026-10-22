@@ -6,6 +6,7 @@
  * Templates send multipart HTML + plain text. HTML is table-based and inline-styled for mail
  * clients; no remote images or tracking pixels. The plain-text part keeps the same links.
  */
+import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
 
@@ -118,11 +119,22 @@ function linkFallback(href: string): string {
   );
 }
 
+/** Muted footer under the card: brand + source repo (no tracking). */
+function footerHtml(): string {
+  const href = escapeHtml(REPO_URL);
+  return (
+    `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`
+  );
+}
+
+function footerText(): string {
+  return `Sent by Reelsaw · ${REPO_URL} · No tracking.`;
+}
+
 /** Shared shell: soft page background, white card, brand, body, muted footer. */
-export function layout(opts: { preheader: string; title: string; bodyHtml: string; footer?: string }): string {
+export function layout(opts: { preheader: string; title: string; bodyHtml: string }): string {
   const preheader = escapeHtml(opts.preheader);
   const title = escapeHtml(opts.title);
-  const footer = escapeHtml(opts.footer ?? "Sent by Reelsaw. No tracking.");
   return (
     `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light only"><title>${title}</title></head>` +
     `<body style="margin:0;padding:0;background-color:${bg};color:${ink}">` +
@@ -139,16 +151,16 @@ export function layout(opts: { preheader: string; title: string; bodyHtml: strin
     opts.bodyHtml +
     `</td></tr>` +
     `</table>` +
-    `<p style="margin:20px 0 0;max-width:480px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.4;color:${ink3};text-align:center">${footer}</p>` +
+    `<p style="margin:20px 0 0;max-width:480px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.4;color:${ink3};text-align:center">${footerHtml()}</p>` +
     `</td></tr></table></body></html>`
   );
 }
 
-function message(opts: { subject: string; preheader: string; title: string; text: string; bodyHtml: string; footer?: string }): Omit<Mail, "to"> {
+function message(opts: { subject: string; preheader: string; title: string; text: string; bodyHtml: string }): Omit<Mail, "to"> {
   return {
     subject: opts.subject,
-    text: opts.text,
-    html: layout({ preheader: opts.preheader, title: opts.title, bodyHtml: opts.bodyHtml, footer: opts.footer }),
+    text: `${opts.text.trimEnd()}\n\n${footerText()}\n`,
+    html: layout({ preheader: opts.preheader, title: opts.title, bodyHtml: opts.bodyHtml }),
   };
 }
 

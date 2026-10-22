@@ -15,7 +15,7 @@ import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
 import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
-import { BILLING_PATH } from "@reelsaw/shared";
+import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
@@ -60,7 +60,17 @@ export function SettingsPage() {
           <div>
             <div className="flex flex-wrap items-baseline gap-x-3">
               <h1 className="text-[28px] font-bold tracking-tight">Settings</h1>
-              <span className="min-h-5 font-mono text-xs text-ink3">{status.data ? `Reelsaw ${status.data.version}` : ""}</span>
+              <span className="min-h-5 font-mono text-xs text-ink3">
+                {status.data ? (
+                  <>
+                    Reelsaw {status.data.version}
+                    {" · "}
+                    <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
+                      github.com/osbytes/reelsaw
+                    </a>
+                  </>
+                ) : null}
+              </span>
             </div>
             <p className="mt-1 min-h-5 text-sm text-ink2">
               {system ? "This machine and this instance. Models, access, limits, pipeline, retention and operations change here without a restart; the rest comes from .env." : billing ? "Your plan, what you have used this period, and the plans on offer." : "Your account, your defaults for new projects, and keys for agents and tools."}

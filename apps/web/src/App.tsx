@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -12,7 +12,7 @@ import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
 import { initOtel } from "./lib/otel";
-import { BILLING_PATH } from "@reelsaw/shared";
+import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
@@ -110,6 +110,11 @@ function Avatar() {
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
             <LifeBuoy className="h-4 w-4" /> Report an issue…
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" asChild>
+            <a href={REPO_URL} target="_blank" rel="noreferrer">
+              <ExternalLink className="h-4 w-4" /> Source on GitHub
+            </a>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={() => signOut().then(() => window.location.assign("/login"))}>
             <LogOut className="h-4 w-4" /> Sign out

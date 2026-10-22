@@ -11,10 +11,11 @@
  * Running from source (version "dev") still shows the latest release but cannot say if it is newer.
  */
 import semver from "semver";
+import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
 
-export const REPO_URL = "https://github.com/osbytes/reelsaw";
+export { REPO_URL };
 export const UPGRADE_DOCS_URL = `${REPO_URL}/blob/main/deploy/README.md#upgrade`;
 /** "Check now" asks GitHub again only after this long (60 unauthenticated requests per hour per IP). */
 export const MIN_CHECK_GAP_MS = 60_000;

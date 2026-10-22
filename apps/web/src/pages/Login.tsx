@@ -1,12 +1,11 @@
 import { useCallback, useState } from "react";
 import { useNavigate, Navigate, useLocation } from "react-router";
-import { signupCreatedNotice } from "@reelsaw/shared";
+import { signupCreatedNotice, billingPlanPath, INTERVAL_PARAM, PLAN_PARAM, REPO_URL } from "@reelsaw/shared";
 import { authClient, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
 import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
-import { billingPlanPath, INTERVAL_PARAM, PLAN_PARAM } from "@reelsaw/shared";
 import { ScrollArea } from "../components/scroll-area";
 
 /** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
@@ -157,6 +156,11 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           <p className="min-h-4 text-center text-xs text-ink3">Sign-ups are closed on this instance.</p>
         )}
       </form>
+      <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
+        <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
+          github.com/osbytes/reelsaw
+        </a>
+      </p>
     </div>
     </ScrollArea>
   );

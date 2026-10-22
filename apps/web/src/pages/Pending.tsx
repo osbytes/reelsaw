@@ -1,4 +1,4 @@
-import { PENDING_APPROVAL_MESSAGE } from "@reelsaw/shared";
+import { PENDING_APPROVAL_MESSAGE, REPO_URL } from "@reelsaw/shared";
 import { Logo, ThemeToggle } from "../App";
 import { signOut } from "../lib/auth";
 import { useMe } from "../lib/account";
@@ -32,6 +32,11 @@ export function PendingPage() {
           </button>
         </div>
       </div>
+      <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">
+        <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
+          github.com/osbytes/reelsaw
+        </a>
+      </p>
     </div>
     </ScrollArea>
   );
