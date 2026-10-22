@@ -1,17 +1,26 @@
 import { formatTime, type ProjectEvent } from "@reelsaw/shared";
+import { summarizeError } from "./errors";
 
 const STAGE: Record<string, string> = { prepare: "Clip preparation", ingest: "Preparing source", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
 const STEP: Record<string, string> = { entities: "names", disfluency: "disfluencies", scenes: "scene changes", overlays: "on-screen text" };
-
 export type Tone = "ok" | "run" | "warn" | "err";
 
 const REASON: Record<string, string> = { created: "new project", retry: "retry", rerender: "re-render", refine: "refine", reanalyze: "re-analyze", clip_added: "clip added" };
 export const reasonLabel = (r: unknown) => (typeof r === "string" ? (REASON[r] ?? r) : null);
 const sec = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+export type DescribeOpts = {
+  expectedSec?: (stage: string) => number | null;
+  /** Admins see env-key / ops hints in failure lines; everyone else gets user-safe copy. */
+  admin?: boolean;
+};
+
 /** Event log in plain sentences. Raw payloads stay in the CLI (`reelsaw events`). */
 /** `expectedSec` (per stage) adds "(expected ~4:00)" to a finished stage. */
-export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => number | null): { text: string; tone: Tone } | null {
+export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: string) => number | null)): { text: string; tone: Tone } | null {
+  // older callers passed `expectedSec` as the second arg; keep that working
+  const o: DescribeOpts = typeof opts === "function" ? { expectedSec: opts } : (opts ?? {});
+  const errText = (v: unknown) => (typeof v === "string" && v.trim() ? summarizeError(v, { admin: o.admin }).summary : "Something went wrong");
   const p = e.payload as Record<string, unknown>;
   const clip = typeof p.index === "number" ? `Clip ${p.index + 1}` : "A clip";
   switch (e.type) {
@@ -32,13 +41,13 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
     }
     case "stage.completed": {
       const d = sec(p.durationSec);
-      const exp = d !== null && expectedSec ? expectedSec(String(p.stage)) : null;
+      const exp = d !== null && o.expectedSec ? o.expectedSec(String(p.stage)) : null;
       return { text: `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`, tone: "ok" };
     }
     case "stage.failed":
-      return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${p.error}`, tone: "err" };
+      return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };
     case "project.failed":
-      return { text: `Stopped: ${p.error}`, tone: "err" };
+      return { text: `Stopped: ${errText(p.error)}`, tone: "err" };
     case "project.done": {
       const t = sec(p.runSec);
       const why = p.runReason === "created" ? null : reasonLabel(p.runReason);
@@ -51,7 +60,7 @@ export function describeEvent(e: ProjectEvent, expectedSec?: (stage: string) => 
     case "clip.done":
       return { text: `${clip} is ready`, tone: "ok" };
     case "clip.failed":
-      return { text: `A clip failed to render: ${p.error}`, tone: "err" };
+      return { text: `A clip failed to render: ${errText(p.error)}`, tone: "err" };
     case "clip.retrying":
       return { text: `Retrying ${p.step} (attempt ${p.attempt} of ${p.max}) after: ${p.reason}`, tone: "warn" };
     case "clip.bumper_skipped":

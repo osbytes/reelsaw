@@ -11,6 +11,8 @@ import { Skeleton, SkeletonRegion, StatusText } from "../components/ui";
 import { ScrollArea } from "../components/scroll-area";
 import { formatTime } from "@reelsaw/shared";
 import { ago } from "../lib/time";
+import { useMe } from "../lib/account";
+import { summarizeError } from "../lib/errors";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
@@ -108,6 +110,7 @@ function CardSkeleton({ i }: { i: number }) {
 export function ProjectsPage() {
   const trpc = useTRPC();
   const qc = useQueryClient();
+  const isAdmin = useMe().data?.role === "admin";
   const q = useInfiniteQuery(
     trpc.projects.list.infiniteQueryOptions(
       { limit: PAGE },
@@ -198,7 +201,7 @@ export function ProjectsPage() {
             const active = ACTIVE.has(p.status);
             const detail =
               p.status === "failed"
-                ? (p.error ?? "Something went wrong").split("\n")[0]
+                ? summarizeError(p.error ?? "Something went wrong", { admin: isAdmin }).summary
                 : p.clipCount
                   ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;

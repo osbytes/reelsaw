@@ -9,6 +9,7 @@ import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useProjectEvents } from "../lib/projectEvents";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
+import { summarizeError } from "../lib/errors";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ProjectPageSkeleton } from "../components/PageSkeletons";
 import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
@@ -23,11 +24,14 @@ import { BatchBar } from "../components/BatchBar";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
+import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
+/** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
 const STAGE_INDEX: Record<string, number> = { queued: -1, ingesting: 0, transcribing: 1, refining: 2, analyzing: 3, rendering: 4, done: 5, failed: 99 };
+const STAGE_REACHED: Record<string, number> = { ingest: 0, transcribe: 1, refine: 2, analyze: 3, render: 4 };
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 const TONE_GLYPH: Record<Tone, string> = { ok: "●", run: "◔", warn: "◷", err: "▲" };
 const TONE_FG: Record<Tone, string> = { ok: "text-ok", run: "text-acc-text", warn: "text-warn", err: "text-err" };
@@ -47,6 +51,8 @@ export function ProjectPage() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
+  const me = useMe();
+  const isAdmin = me.data?.role === "admin";
   const q = useQuery(trpc.projects.get.queryOptions({ id }));
   // the words, segments and flags are megabytes on a long source: their own query, refreshed only by transcript changes
   const tq = useQuery(trpc.transcripts.get.queryOptions({ projectId: id }));
@@ -134,7 +140,11 @@ export function ProjectPage() {
   }, [id]);
 
   const p = q.data;
-  const stageIdx = p ? (STAGE_INDEX[p.status] ?? -1) : -1;
+  const stageIdx = p
+    ? p.status === "failed" && p.stage
+      ? (STAGE_REACHED[p.stage] ?? -1)
+      : (STAGE_INDEX[p.status] ?? -1)
+    : -1;
   const active = !!p && ACTIVE.has(p.status);
   const sortedClips = useMemo(() => (p?.clips ?? []).slice().sort((a, b) => a.index - b.index), [p]);
   const readyCount = sortedClips.filter((c) => c.status === "done").length;
@@ -147,9 +157,14 @@ export function ProjectPage() {
   const now = useNow(active);
   // the log grouped by run (newest first); each finished event carries its own duration from the server
   const runGroups = useMemo(
-    () => groupByRun(log, (e) => describeEvent(e, (stage) => expectedFor(stage)?.expectedSec ?? null), hasOlder),
+    () =>
+      groupByRun(
+        log,
+        (e) => describeEvent(e, { expectedSec: (stage) => expectedFor(stage)?.expectedSec ?? null, admin: isAdmin }),
+        hasOlder,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [log, estimates, hasOlder],
+    [log, estimates, hasOlder, isAdmin],
   );
   const activity = useMemo(() => runGroups.flatMap((g) => g.entries), [runGroups]);
   // the latest run is open, older ones collapsed; a click or #run=<seq> overrides
@@ -531,29 +546,41 @@ export function ProjectPage() {
     </div>
   );
 
+  const fail = p.status === "failed" && p.error ? summarizeError(p.error, { admin: isAdmin }) : null;
+  const failStage = STAGE_LABEL[p.stage ?? ""] ?? "Processing";
   const alert =
-    p.status === "failed" && p.error ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err bg-err-soft px-4 py-3 shadow-pop sm:mx-5">
-        <span className="font-mono text-lg leading-6 text-err">▲</span>
-        <div className="min-w-0 flex-[1_1_320px]">
-          <b>{STAGE_LABEL[p.stage ?? ""] ?? "Processing"} failed.</b>
-          <div className="mt-0.5 line-clamp-3 font-mono text-xs text-ink2">{p.error}</div>
-          <div className="mt-1 text-[13px]">Earlier results are kept. Retry picks up from this step.</div>
+    fail ? (
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err/50 bg-err-soft px-4 py-3 sm:mx-5">
+        <span className="mt-0.5 font-mono text-sm leading-none text-err" aria-hidden>
+          ▲
+        </span>
+        <div className="min-w-0 flex-[1_1_280px]">
+          <b className="text-[15px]">{failStage} failed</b>
+          <p className="mt-0.5 text-[13px] leading-snug text-ink2">{fail.summary}</p>
+          {fail.detail && (
+            <details className="mt-1.5">
+              <summary className="cursor-pointer select-none text-xs font-semibold text-ink3 hover:text-ink">Technical details</summary>
+              <pre className="mt-1.5 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-sunk/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink3">{fail.detail}</pre>
+            </details>
+          )}
+          <p className="mt-1.5 text-xs text-ink3">Earlier results are kept. Retry picks up from this step.</p>
         </div>
-        <button className="btn-ink" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
-          ↻ Retry from {STAGE_LABEL[p.stage ?? ""] ?? "last step"}
+        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+          ↻ Retry
         </button>
       </div>
     ) : stalled ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn bg-warn-soft px-4 py-3 shadow-pop sm:mx-5">
-        <span className="font-mono text-lg leading-6 text-warn">◷</span>
-        <div className="min-w-0 flex-[1_1_320px] text-[13px]">
+      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn/50 bg-warn-soft px-4 py-3 sm:mx-5">
+        <span className="mt-0.5 font-mono text-sm leading-none text-warn" aria-hidden>
+          ◷
+        </span>
+        <div className="min-w-0 flex-[1_1_280px] text-[13px]">
           <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b> {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
         </div>
         <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
           Keep waiting
         </button>
-        <button className="btn-ink" onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+        <button className="btn-ink shrink-0" onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
           ↻ Restart this step
         </button>
       </div>
@@ -612,8 +639,10 @@ export function ProjectPage() {
               <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
                 Source removed · fetch again
               </button>
+            ) : p.status === "failed" ? (
+              "Source unavailable"
             ) : (
-              "no source video"
+              "No source video"
             )}
           </span>
         )}
@@ -668,25 +697,35 @@ export function ProjectPage() {
   const transcriptStage = stageIdx >= 2 || p.status === "done" || !!p.transcript;
   const transcribePct = Math.round((progress?.stage === "transcribe" ? progress.value : (p.stageProgress ?? 0)) * 100);
   const waitingHeading =
-    stageIdx <= 0
-      ? (progress?.message ?? (p.sourceType === "upload" ? "Preparing your upload…" : "Downloading…"))
-      : `Transcribing… ${transcribePct}%`;
+    p.status === "failed"
+      ? "Stopped before the transcript"
+      : stageIdx <= 0
+        ? (progress?.message ?? (p.sourceType === "upload" ? "Preparing your upload…" : "Downloading…"))
+        : `Transcribing… ${transcribePct}%`;
   const waiting = (
     <div className="flex min-h-0 flex-1 items-start justify-center border-t border-line px-5 py-10">
       <div className="flex w-full max-w-[560px] flex-col gap-3">
         <b className="text-base">{waitingHeading}</b>
-        <span className="text-[13px] leading-relaxed text-ink2">The transcript appears here when transcription finishes. Fixes, then clips, follow. You can leave; this keeps running on the server.</span>
-        <ProgressBar value={progress?.value ?? p.stageProgress ?? 0} />
-        <div className="flex h-5 justify-between font-mono text-xs tabular-nums leading-5 text-ink3">
-          <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
-          <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the source is ready"}</span>
-        </div>
-        {[92, 78, 85, 60, 88, 70].map((w, i) => (
-          <div key={i} className="flex gap-2.5">
-            <div className="h-3.5 w-10 rounded-full bg-sunk" />
-            <div className="h-3.5 rounded-full bg-sunk" style={{ width: `${w}%` }} />
-          </div>
-        ))}
+        <span className="text-[13px] leading-relaxed text-ink2">
+          {p.status === "failed"
+            ? "Retry from the notice above when you’re ready. The transcript will show up here after transcription finishes."
+            : "The transcript appears here when transcription finishes. Fixes, then clips, follow. You can leave; this keeps running on the server."}
+        </span>
+        {p.status !== "failed" && (
+          <>
+            <ProgressBar value={progress?.value ?? p.stageProgress ?? 0} />
+            <div className="flex h-5 justify-between font-mono text-xs tabular-nums leading-5 text-ink3">
+              <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
+              <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the source is ready"}</span>
+            </div>
+            {[92, 78, 85, 60, 88, 70].map((w, i) => (
+              <div key={i} className="flex gap-2.5">
+                <div className="h-3.5 w-10 rounded-full bg-sunk" />
+                <div className="h-3.5 rounded-full bg-sunk" style={{ width: `${w}%` }} />
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -706,9 +745,15 @@ export function ProjectPage() {
               <div key={i} className="film h-[56px] w-[32px] rounded-[6px] opacity-40" />
             ))}
           </div>
-          <b className="mt-1">{active ? "Clips appear here as soon as moments are found" : "No clips found"}</b>
+          <b className="mt-1">
+            {active ? "Clips appear here as soon as moments are found" : p.status === "failed" && !p.transcript ? "No clips yet" : "No clips found"}
+          </b>
           <span className="text-[13px] text-ink2">
-            {active ? "They stream in one by one while the rest render." : "Nothing in this video stood on its own. Try a different focus, or select text in the transcript and make a clip yourself."}
+            {active
+              ? "They stream in one by one while the rest render."
+              : p.status === "failed" && !p.transcript
+                ? "Clips appear after the source is prepared and moments are found."
+                : "Nothing in this video stood on its own. Try a different focus, or select text in the transcript and make a clip yourself."}
           </span>
           {!active && p.transcript && (
             <button className="btn-ghost mt-1" onClick={() => setConfirm("repick")}>

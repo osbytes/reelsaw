@@ -153,15 +153,38 @@ export function parseDownloadTick(line: string): { fraction: number; message: st
 }
 
 /**
- * yt-dlp failures in plain words. Datacentre IPs are often refused by YouTube ("Sign in to confirm
- * you're not a bot", 403): say so and point at the way out, instead of a wall of stderr.
+ * yt-dlp failures in plain words for every user. No env keys or ops advice here — those are
+ * admin-only in the UI (`summarizeError({ admin: true })`). Datacentre IPs are often refused by
+ * YouTube; misconfigured proxies surface as 407 / Tunnel connection failed.
  */
 export function describeDownloadFailure(err: Error, stderr: string): string {
   const text = `${err.message}\n${stderr}`;
+  if (/Tunnel connection failed|ProxyError|407\s*NO_USER|Unable to connect to proxy/i.test(text)) {
+    return "Could not download: a network proxy blocked the connection. Try uploading the file instead (New project → Upload).";
+  }
   if (/sign in to confirm|not a bot|HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
-    const why = /private/i.test(text) ? "the video is private" : /unavailable/i.test(text) ? "the video is unavailable" : /age/i.test(text) ? "the video is age-restricted" : "the site refused the download from this server (bot check)";
-    return `Could not download: ${why}. Upload the file instead (New project → Upload), or set YTDLP_PROXY / YTDLP_COOKIES_FILE on the server.`;
+    const why = /private/i.test(text) ? "the video is private" : /unavailable/i.test(text) ? "the video is unavailable" : /age/i.test(text) ? "the video is age-restricted" : "the site blocked the download";
+    return `Could not download: ${why}. Try uploading the file instead (New project → Upload).`;
+  }
+  if (/Unsupported URL|No video formats|Requested format is not available/i.test(text)) {
+    return "Could not download: no usable video was found for this link. Try another URL, or upload the file instead (New project → Upload).";
   }
   const last = stderr.split("\n").map((l) => l.trim()).filter((l) => /^ERROR/i.test(l)).at(-1);
-  return last ? `Download failed: ${last.replace(/^ERROR:\s*/i, "").slice(0, 300)}` : err.message;
+  if (!last) return scrubStoredDownloadError(err.message.slice(0, 300));
+  // Drop the "please report this on github" trailer — keep a short ERROR line without ops advice.
+  const cleaned = last
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/;?\s*please report this issue on https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+  return scrubStoredDownloadError(`Could not download: ${cleaned}`);
+}
+
+/** Stored project errors are visible to every owner; never persist env keys in them. */
+function scrubStoredDownloadError(msg: string): string {
+  return msg
+    .replace(/\bYTDLP_\w+\b/g, "download settings")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }

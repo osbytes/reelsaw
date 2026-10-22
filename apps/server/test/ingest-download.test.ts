@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ingestScratchMB, parseDownloadTick } from "../src/pipeline/ingest.js";
+import { describeDownloadFailure, ingestScratchMB, parseDownloadTick } from "../src/pipeline/ingest.js";
 import { lineSplitter } from "../src/media.js";
 
 describe("ingestScratchMB", () => {
@@ -27,6 +27,28 @@ describe("parseDownloadTick", () => {
     assert.equal(parseDownloadTick("[download] Destination: source.f137.mp4"), null);
     assert.equal(parseDownloadTick("[Merger] Merging formats into \"source.mp4\""), null);
     assert.equal(parseDownloadTick(""), null);
+  });
+});
+
+describe("describeDownloadFailure", () => {
+  it("explains a proxy / tunnel rejection without env keys (admins get those in the UI)", () => {
+    const err = new Error("Download failed");
+    const stderr = "ERROR: [youtube] 9hSfOfgrL1I: Unable to download API page: <urlopen error Tunnel connection failed: 407 NO_USER> (caused by ProxyError('<urlopen error Tunnel connection failed: 407 NO_USER>')); please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=";
+    const msg = describeDownloadFailure(err, stderr);
+    assert.match(msg, /proxy blocked/i);
+    assert.doesNotMatch(msg, /YTDLP_/);
+    assert.doesNotMatch(msg, /please report this issue/i);
+    assert.doesNotMatch(msg, /github\.com/);
+  });
+  it("explains a bot check / 403 without env keys", () => {
+    const msg = describeDownloadFailure(new Error("x"), "ERROR: [youtube] Sign in to confirm you’re not a bot");
+    assert.match(msg, /blocked the download/i);
+    assert.match(msg, /uploading the file/i);
+    assert.doesNotMatch(msg, /YTDLP_/);
+  });
+  it("keeps a short ERROR line without the github trailer", () => {
+    const msg = describeDownloadFailure(new Error("x"), "ERROR: Something obscure broke; please report this issue on https://github.com/yt-dlp/yt-dlp/issues?q=");
+    assert.equal(msg, "Could not download: Something obscure broke");
   });
 });
 
