@@ -39,11 +39,17 @@ describe("email templates", () => {
     assert.match(mail.html, /a&quot;b@c\.com/);
   });
 
-  it("layout wraps content in a branded card", () => {
+  it("layout wraps content in a branded card with a source link", () => {
     const html = layout({ preheader: "Peek", title: "Hello", bodyHtml: "<p>Hi</p>" });
     assert.match(html, /Peek/);
     assert.match(html, /Hello/);
     assert.match(html, /<p>Hi<\/p>/);
     assert.match(html, /No tracking/);
+    assert.match(html, /href="https:\/\/github\.com\/osbytes\/reelsaw"/);
+  });
+
+  it("plain text includes the source repository", () => {
+    const mail = templates.verifyEmail("https://app.example.com/v");
+    assert.match(mail.text, /https:\/\/github\.com\/osbytes\/reelsaw/);
   });
 });

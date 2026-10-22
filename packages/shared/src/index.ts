@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/** Canonical source repository (app UI, emails, update checks). */
+export const REPO_URL = "https://github.com/osbytes/reelsaw";
+
 // ---------- Project lifecycle ----------
 
 export const PROJECT_STATUSES = [
