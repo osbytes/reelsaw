@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.17.1
+
+### Patch Changes
+
+- [#97](https://github.com/osbytes/reelsaw/pull/97) [`11c78d7`](https://github.com/osbytes/reelsaw/commit/11c78d7f3252196660bcedcd5a2c5ca3a658a12a) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Project failures show a short plain-language message instead of a wall of yt-dlp stderr. Admins see operator hints (env keys) and optional technical details; everyone else gets a generic line with no platform details. Download errors from a broken proxy are explained clearly.
+
+- [#99](https://github.com/osbytes/reelsaw/pull/99) [`bd478e4`](https://github.com/osbytes/reelsaw/commit/bd478e43bd06324f48bbe72b99d7fdde0a22419b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - App and transactional emails link to the source on GitHub (`github.com/osbytes/reelsaw`): login and pending pages, the account menu, Settings next to the version, and the email footer (HTML and plain text).
+
 ## 0.17.0
 
 ### Minor Changes
