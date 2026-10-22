@@ -9,7 +9,9 @@ import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { ClipBumpersDialog } from "./BumperField";
+import { useMe } from "../lib/account";
 import { clipMeta, clipText } from "../lib/clipMeta";
+import { summarizeError } from "../lib/errors";
 import { MODE_LABEL } from "./Timeline";
 
 export interface ClipView {
@@ -85,6 +87,7 @@ export function ClipCard({
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
+  const isAdmin = useMe().data?.role === "admin";
   const done = clip.status === "done";
   const working = clip.status === "rendering" || clip.status === "preparing";
   const pct = Math.round((progress ?? 0) * 100);
@@ -95,9 +98,10 @@ export function ClipCard({
       .then(() => void toast("Title, caption + hashtags copied"))
       .catch(() => void toast.error("Couldn’t copy"));
   const meta = clipMeta(clip, { modeLabel: MODE_LABEL, projectHasIntro: !!projectIntroId, projectHasOutro: !!projectOutroId });
-  const detail =
-    clip.status === "failed"
-      ? { text: clip.error ?? "Render failed", cls: "bg-err-soft" }
+  const fail = clip.status === "failed" ? summarizeError(clip.error ?? "Render failed", { admin: isAdmin }) : null;
+  const detail: { text: string; cls: string; title?: string } | null =
+    fail
+      ? { text: fail.summary, cls: "bg-err-soft", title: isAdmin ? (clip.error ?? undefined) : undefined }
       : clip.status === "pending"
         ? { text: "Waiting for a render slot.", cls: "bg-warn-soft" }
         : clip.status === "preparing"
@@ -160,7 +164,11 @@ export function ClipCard({
       </div>
 
       {clip.status === "rendering" && <ProgressBar value={progress ?? 0} />}
-      {detail && <div className={`rounded-[8px] px-2.5 py-1.5 text-xs leading-snug text-ink ${detail.cls}`}>{detail.text}</div>}
+      {detail && (
+        <div className={`rounded-[8px] px-2.5 py-1.5 text-xs leading-snug text-ink ${detail.cls}`} title={detail.title}>
+          {detail.text}
+        </div>
+      )}
 
       {bdOpen && (
         <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-2.5">
