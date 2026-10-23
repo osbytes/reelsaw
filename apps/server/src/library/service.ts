@@ -100,11 +100,13 @@ export async function updateBumperAsset(svc: Services, userId: string, id: strin
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
     if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
     const name = patch.name?.trim();
+    // tags are lowercase words, each once; the same list is stored and returned
+    const tags = patch.tags === undefined ? undefined : [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))];
     await u.db
       .update(schema.libraryAssets)
-      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(patch.category !== undefined ? { category: patch.category } : {}), ...(patch.tags !== undefined ? { tags: [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))] } : {}) })
+      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(patch.category !== undefined ? { category: patch.category } : {}), ...(tags !== undefined ? { tags } : {}) })
       .where(eq(schema.libraryAssets.id, a.id));
-    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, category: patch.category !== undefined ? patch.category : a.category, tags: patch.tags ?? a.tags, previousName: a.name };
+    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, category: patch.category !== undefined ? patch.category : a.category, tags: tags ?? a.tags, previousName: a.name };
   });
 }
 
