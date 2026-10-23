@@ -35,7 +35,7 @@ export function ModelsSection() {
     void qc.invalidateQueries({ queryKey: trpc.admin.models.catalog.pathKey() });
     void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
   };
-  const saveCredentials = useMutation(trpc.admin.providers.set.mutationOptions({ onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()) }));
+  const saveCredentials = useMutation(trpc.admin.providers.set.mutationOptions({ onSuccess: (st) => void (toast(`${st.title} connected`), refreshCatalogs()), onError: (e) => toast.error(e.message) }));
   const clearCredentials = useMutation(trpc.admin.providers.clear.mutationOptions({ onSuccess: (st) => void (toast(`${st.title}: back to .env`), refreshCatalogs()), onError: (e) => toast.error(e.message) }));
   const onSaveCredentials = (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => saveCredentials.mutateAsync({ provider, ...patch });
   const onClearCredentials = (provider: string) => clearCredentials.mutateAsync({ provider });

@@ -311,21 +311,21 @@ function ProviderForm({
 }) {
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(state.baseUrl ?? "");
-  const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
   const wantsKey = state.keyEnv.length > 0 || state.provider !== "openai";
   const wantsUrl = !!state.baseUrlEnv;
   const submit = async () => {
-    setError(null);
+    setHint(null);
     const patch: { apiKey?: string | null; baseUrl?: string | null } = {};
     if (apiKey.trim()) patch.apiKey = apiKey.trim();
     if (wantsUrl && baseUrl.trim() !== (state.baseUrl ?? "")) patch.baseUrl = baseUrl.trim() || null;
-    if (!Object.keys(patch).length) return setError(wantsUrl && !state.keyEnv.length ? "Enter the server's URL" : "Enter a key");
+    if (!Object.keys(patch).length) return setHint(wantsUrl && !state.keyEnv.length ? "Enter the server's URL" : "Enter a key");
     try {
       await onSave(state.provider, patch);
       setApiKey("");
       onDone?.();
-    } catch (e) {
-      setError((e as Error).message);
+    } catch {
+      /* mutation onError already toasted */
     }
   };
   return (
@@ -356,7 +356,7 @@ function ProviderForm({
           <input type="password" className="input font-mono text-xs" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={state.keyHint ?? "…"} autoComplete="off" spellCheck={false} />
         </label>
       )}
-      {error && <div className="text-[12px] text-warn">{error}</div>}
+      {hint && <div className="text-[12px] text-warn">{hint}</div>}
       <div className="flex items-center justify-between gap-2">
         {state.docsUrl ? (
           <a href={state.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-ink3 hover:text-ink">

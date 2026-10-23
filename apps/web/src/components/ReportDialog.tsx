@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useShortcut } from "../lib/shortcuts";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import type { ReportInclude } from "@reelsaw/shared";
@@ -39,72 +39,44 @@ export function ReportDialog() {
   const feedbackOnly = !caps.zip && caps.feedback;
   const project = useQuery({ ...trpc.projects.get.queryOptions({ id: projectId ?? "" }), enabled: !!projectId && open });
   const clips = (project.data?.clips ?? []).slice().sort((a, b) => a.index - b.index);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const previewQ = useQuery({
+    queryKey: ["report-preview", projectId],
+    queryFn: async (): Promise<Preview | null> => {
+      const r = await fetch(`/api/projects/${projectId}/report/preview`, { credentials: "include" });
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: open && !!projectId && !feedbackOnly,
+  });
+  const preview = previewQ.data ?? null;
   const [text, setText] = useState("");
   const [clipIds, setClipIds] = useState<string[]>([]);
   const [inc, setInc] = useState<ReportInclude>({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
-  // "!" opens the report from anywhere (ignored while typing)
-  useShortcut(REPORT_SHORTCUT, () => openReportHere(), { useKey: true });
-
-  // reset per opening; fetch media sizes for the checkboxes (zip mode only)
-  useEffect(() => {
-    if (!open) return;
-    setText("");
-    setError(null);
-    setClipIds(target?.clipId ? [target.clipId] : []);
-    setInc({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
-    setPreview(null);
-    if (!projectId || feedbackOnly) return;
-    let live = true;
-    fetch(`/api/projects/${projectId}/report/preview`, { credentials: "include" })
-      .then((r) => (r.ok ? (r.json() as Promise<Preview>) : null))
-      .then((p) => live && setPreview(p))
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [open, projectId, target?.clipId, caps.system, feedbackOnly]);
-
-  async function sendFeedback() {
-    if (text.trim().length < 3) return setError("Describe what went wrong (a sentence is enough).");
-    setBusy(true);
-    setError(null);
-    try {
-      const client = clientContext();
-      const tags: Record<string, string> = { source: "report-dialog" };
-      if (projectId) tags.projectId = projectId;
-      if (clipIds.length) tags.clipIds = clipIds.join(",");
-      if (client.route) tags.route = client.route;
-      const sent = await sendIssueFeedback({
-        message: text.trim(),
-        name: me.data?.name,
-        email: me.data?.email,
-        tags,
-        properties: {
-          project_id: projectId ?? null,
-          clip_count: clipIds.length,
-          route: client.route ?? null,
-          via: feedbackOnly ? "feedback" : "zip",
-        },
-      });
-      if (!sent.sentry && !sent.posthog) throw new Error("Feedback channels are not available right now.");
-      closeReport();
-      toast("Thanks — we got your report");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function download() {
-    if (text.trim().length < 3) return setError("Describe what went wrong (a sentence is enough).");
-    setBusy(true);
-    setError(null);
-    try {
+  const submitM = useMutation({
+    mutationFn: async () => {
+      if (feedbackOnly) {
+        const client = clientContext();
+        const tags: Record<string, string> = { source: "report-dialog" };
+        if (projectId) tags.projectId = projectId;
+        if (clipIds.length) tags.clipIds = clipIds.join(",");
+        if (client.route) tags.route = client.route;
+        const sent = await sendIssueFeedback({
+          message: text.trim(),
+          name: me.data?.name,
+          email: me.data?.email,
+          tags,
+          properties: {
+            project_id: projectId ?? null,
+            clip_count: clipIds.length,
+            route: client.route ?? null,
+            via: "feedback",
+          },
+        });
+        if (!sent.sentry && !sent.posthog) throw new Error("Feedback channels are not available right now.");
+        return { kind: "feedback" as const };
+      }
       const include = { ...inc, system: caps.system && inc.system, instance: !!caps.instance && inc.instance };
       const res = await fetch(projectId ? `/api/projects/${projectId}/report` : "/api/report", {
         method: "POST",
@@ -112,7 +84,11 @@ export function ReportDialog() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ description: text, clipIds, include, client: clientContext() }),
       });
-      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Couldn't build the report (${res.status})`);
+      if (!res.ok) {
+        const body: unknown = await res.json().catch(() => null);
+        const msg = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn't build the report (${res.status})`;
+        throw new Error(msg);
+      }
       const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "reelsaw-report.zip";
       const url = URL.createObjectURL(await res.blob());
       const a = Object.assign(document.createElement("a"), { href: url, download: name });
@@ -120,7 +96,6 @@ export function ReportDialog() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      // also land in Sentry/PostHog when those are configured (hosted admins, self-host with telemetry)
       if (caps.feedback) {
         const client = clientContext();
         void sendIssueFeedback({
@@ -131,16 +106,41 @@ export function ReportDialog() {
           properties: { project_id: projectId ?? null, clip_count: clipIds.length, route: client.route ?? null, via: "zip" },
         }).catch(() => {});
       }
+      return { kind: "zip" as const, name };
+    },
+    onSuccess: (r) => {
       closeReport();
-      toast(`Saved ${name} to your downloads · send it to the Reelsaw team`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
+      toast(r.kind === "feedback" ? "Thanks — we got your report" : `Saved ${r.name} to your downloads · send it to the Reelsaw team`);
+    },
+  });
 
-  const submit = () => void (feedbackOnly ? sendFeedback() : download());
+  // "!" opens the report from anywhere (ignored while typing)
+  useShortcut(REPORT_SHORTCUT, () => openReportHere(), { useKey: true });
+
+  // reset per opening
+  useEffect(() => {
+    if (!open) return;
+    setText("");
+    setHint(null);
+    setClipIds(target?.clipId ? [target.clipId] : []);
+    setInc({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
+    submitM.reset();
+    // reset is stable; opening is the trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, projectId, target?.clipId, caps.system]);
+
+  const submit = () => {
+    if (text.trim().length < 3) {
+      submitM.reset();
+      setHint("Describe what went wrong (a sentence is enough).");
+      return;
+    }
+    setHint(null);
+    submitM.mutate();
+  };
+
+  const error = submitM.error?.message ?? hint;
+  const busy = submitM.isPending;
 
   const row = (key: keyof ReportInclude, label: string, hint: ReactNode, disabled = false) => (
     <label className={`flex items-start gap-2.5 ${disabled ? "opacity-50" : "cursor-pointer"}`}>

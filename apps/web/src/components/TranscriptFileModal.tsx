@@ -4,37 +4,33 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "./ui";
-import { useTRPC } from "../lib/trpc";
+import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { uploadFile } from "../lib/uploads";
 
 /** Get the transcript as SRT / VTT, or replace it with a subtitle file made elsewhere. */
 export function TranscriptFileModal({ open, onOpenChange, projectId, hasTranscript, canImport, whyNot }: { open: boolean; onOpenChange: (o: boolean) => void; projectId: string; hasTranscript: boolean; canImport: boolean; whyNot: string }) {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const qc = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const imp = useMutation(trpc.projects.importTranscript.mutationOptions());
-  const base = `/api/projects/${projectId}/transcript`;
-
-  const run = async () => {
-    if (!file) return;
-    setBusy(true);
-    try {
+  const imp = useMutation({
+    mutationFn: async ({ file, language }: { file: File; language?: string }) => {
       const uploadId = await uploadFile(file);
-      const r = await imp.mutateAsync({ id: projectId, uploadId, language: language.trim() || undefined });
+      return client.projects.importTranscript.mutate({ id: projectId, uploadId, language });
+    },
+    onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
       void qc.invalidateQueries({ queryKey: trpc.transcripts.pathKey() });
       toast.success(r.message, { description: r.warnings[0] });
       setFile(null);
       onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message.slice(0, 200) : "Could not import that file");
-    } finally {
-      setBusy(false);
-    }
-  };
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message.slice(0, 200) : "Could not import that file"),
+  });
+  const busy = imp.isPending;
+  const base = `/api/projects/${projectId}/transcript`;
 
   return (
     <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title="Transcript files" width={460}>
@@ -85,7 +81,7 @@ export function TranscriptFileModal({ open, onOpenChange, projectId, hasTranscri
         <button className="btn-ghost" disabled={busy} onClick={() => onOpenChange(false)}>
           Close
         </button>
-        <button className="btn-primary min-w-[96px] justify-center" disabled={!file || !canImport || busy} onClick={() => void run()}>
+        <button className="btn-primary min-w-[96px] justify-center" disabled={!file || !canImport || busy} onClick={() => file && imp.mutate({ file, language: language.trim() || undefined })}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Importing" /> : "Import"}
         </button>
       </div>
