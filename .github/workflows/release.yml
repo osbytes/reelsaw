@@ -14,8 +14,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create the GitHub release
-  packages: write   # push to GHCR
+  contents: write      # create the GitHub release
+  packages: write      # push to GHCR
+  id-token: write      # sign the build provenance attestation (Sigstore, via GitHub OIDC)
+  attestations: write  # store it on the repository and next to the image
 
 jobs:
   image:
@@ -72,11 +74,15 @@ jobs:
 
       # one multi-arch build, pushed under a staging tag; checked; then retagged without rebuilding
       - name: Build (amd64 + arm64)
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: runtime
           platforms: linux/amd64,linux/arm64
+          # BuildKit attaches an SBOM and SLSA provenance to the image index (docker buildx imagetools inspect ... shows them)
+          provenance: mode=max
+          sbom: true
           # zstd: multi-threaded and several times faster to compress than gzip, slightly smaller.
           # Pulling needs Docker Engine 23+ / containerd 1.5+.
           outputs: type=image,name=${{ env.GHCR_IMAGE }}:sha-${{ steps.v.outputs.commit }},push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
@@ -101,6 +107,14 @@ jobs:
               'require("onnxruntime-node").InferenceSession.create(process.env.FACE_MODEL_PATH).then(s=>console.log("onnx ok",process.arch,s.inputNames.join(",")))' \
               | grep "onnx ok" || { echo "onnxruntime failed on $arch"; exit 1; }
           done
+
+      # GitHub artifact attestation for the image digest: `gh attestation verify oci://ghcr.io/osbytes/reelsaw:<tag> --owner osbytes`
+      # proves an image came from this workflow in this repository. The digest is the same under every tag below.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       # only version tags publish; a manual run stops at the staging tag
       - name: Publish tags
