@@ -15,12 +15,14 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # the Release PR branch and the version tag (through RELEASE_TOKEN)
+      pull-requests: write  # open and update the Release PR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
