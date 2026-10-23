@@ -233,6 +233,15 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - **Operable by default.** Logs are the first debugging tool (see "Logging" under Backend /
   Structure). Every diagnosis you need more than once becomes a `reelsaw` CLI command. Events are
   readable in the activity feed.
+- **Test on the binaries you ship.** The pipeline's output depends on native tools as much as
+  on our code: ffmpeg (filters, libass, scene scores), yt-dlp, the ONNX runtime and models, Node.
+  Each one is pinned in exactly one place (a version plus a hash, the way the Dockerfile pins
+  yt-dlp and `scripts/download-models.sh` pins the models), and CI, the image and a developer's
+  machine read that one place, so an eval run proves the build that ships and not a neighbour of
+  it. A tool CI gets from somewhere else (a distro package, a "latest" download) is a known gap:
+  write it down next to the pin with what differs, and close it rather than widen it. Bumping a
+  tool is a deliberate change with an eval run and a release note; automated updaters bump
+  digests and patches within a major, never the major.
 
 ## Frontend
 

@@ -381,6 +381,13 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
    skipped; suites whose source video is not in git (`scenes`, `speakers`, the overlay aggregates) skip
    those cases; the rest (selection, framing, pauses, alignment, overlay frames, disfluency rules)
    run and are compared with the baselines, and a regression fails the build.
+3. ffmpeg and ffprobe come from one static BtbN build pinned by release tag and sha256 in
+   `ci.yml` and kept in the GitHub cache (apt took five minutes per run). **Known gap** (see
+   "Test on the binaries you ship" in PRINCIPLES.md): the image installs Debian bookworm's
+   ffmpeg 5.1 from apt, unpinned, while CI runs 8.1, so the media suites prove the logic on a
+   newer ffmpeg than the one that renders. Closing it means the Dockerfile installing the same
+   pinned build (amd64 and arm64 assets exist) from values both files read, after a full eval
+   run and a render check on the new ffmpeg.
 
 ### Stack tests in CI
 
