@@ -1,5 +1,17 @@
 # @reelsaw/server
 
+## 0.18.0
+
+### Minor Changes
+
+- [#102](https://github.com/osbytes/reelsaw/pull/102) [`0f27072`](https://github.com/osbytes/reelsaw/commit/0f270722b001dbbc2666cc51671edd3ce9ad5824) Thanks [@dillonstreator](https://github.com/dillonstreator)! - One library for everything a clip can carry: intros and outros, logos, stickers, b-roll, music and sound effects, now including GIF, WebP and SVG. Clips hold one Layers list (image / video, text, sound) on a single editor lane that replaces the Overlays and Music lanes (`update_clip { layers }`, `reelsaw clip-layers`). The Library page and the editor pickers share one finder that searches your items, the bundled Reelsaw catalog (CC0 / permissive sounds, icons and emoji) and, with an admin-provided key, Pexels, Pixabay, Freesound, Iconify, Giphy and Klipy; adding a result imports it once per instance as a shared asset with its license and credit recorded, and "Add to clip" in the editor does both in one step. Usage counts come from an `asset_refs` table instead of scanning clips. New MCP tools: `list_assets`, `add_asset`, `update_asset`, `remove_asset`, `restore_asset`, `asset_usage`, `search_library`, `import_asset` `search_assets` finds items in your library, the catalog and providers (`library.search`), and `add_asset` adds from an upload, a link or a search hit (`library.add`). One `library` router replaces `bumpers` and the user-facing `catalog` router. Migration 0039.
+  
+  Removed: the MCP tools `list_assets` (use `search_assets` with `source: "library"` and an empty `q`), `search_library` (`search_assets`), `import_asset` (`add_asset` with `provider` + `externalId`) and the `*_bumper` aliases (`list_bumpers`, `add_bumper`, `rename_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`; use the `*_asset` tools); the CLI commands `reelsaw bumpers`, `clip-overlays` and `clip-audio` (use `reelsaw library …` and `clip-layers`; `library import` is now `library add <provider:externalId>` and `--provider` is `--source`); and the `overlays` / `audio` inputs of `update_clip` and fields of `get_clip` (use `layers`).
+
+### Patch Changes
+
+- [#103](https://github.com/osbytes/reelsaw/pull/103) [`a9cb821`](https://github.com/osbytes/reelsaw/commit/a9cb8211674b64c658bc31d2d1b8f964c9a9ad5b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Confirmation links work for 24 hours and only once. An expired or superseded link opens a page that sends a new one, and sign-in offers the same when the mailbox is not confirmed yet.
+
 ## 0.17.2
 
 ### Patch Changes
