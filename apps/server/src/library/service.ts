@@ -16,17 +16,17 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import { bumperSecondsSchema, type AssetCategory } from "@reelsaw/shared";
+import { assetCategorySchema, assetTagsSchema, bumperSecondsSchema, clipLayers, type AssetCategory } from "@reelsaw/shared";
 import type { Services } from "../services.js";
 import type { appRouter } from "../trpc/router.js";
 import { userDefaults } from "../pipeline/settings.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
-import { BUMPER_MAX_BYTES, BUMPER_VIDEO_EXTS, BUMPER_IMAGE_EXTS, BUMPER_IMAGE_SEC, resolveClipBumpers } from "../pipeline/bumpers.js";
-import { and, eq, inArray } from "drizzle-orm";
+import { ASSET_MIME, BUMPER_MAX_BYTES, BUMPER_IMAGE_SEC, resolveClipBumpers } from "../pipeline/bumpers.js";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
-import { bumperCoverage, countBumperUsage, type BumperCoverage, type SlotCoverage } from "./summary.js";
+import { bumperCoverage, type BumperCoverage, type SlotCoverage } from "./summary.js";
 
 export const FETCH_MAX_BYTES = BUMPER_MAX_BYTES;
 export const FETCH_TIMEOUT_MS = 60_000;
@@ -55,6 +55,16 @@ export const setClipBumpersInput = {
   introSec: bumperSecondsSchema.optional().describe("Seconds an intro image shows on these clips (1-10)"),
   outroSec: bumperSecondsSchema.optional().describe("Seconds an outro image shows on these clips (1-10)"),
   rerender: z.boolean().describe("true = re-render only these clips now; false = apply on their next render"),
+};
+/** add_asset: add_bumper plus a category and tags; the url takes every format the library stores. */
+export const addAssetInput = {
+  url: z.url().optional().describe("http(s) link to a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC); the server downloads it (max 50 MB, 60 s)"),
+  uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
+  name: z.string().min(1).max(120).optional().describe("Library name (url only; default: the file name). update_asset changes it later"),
+  category: assetCategorySchema.optional().describe("What it is for: intro, outro, logo, sticker, icon, broll, music or sfx (default: sfx / music by length for audio)"),
+  tags: assetTagsSchema.optional().describe("Search tags (lowercase words; max 20)"),
+  imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional().describe("How long a still image shows as an intro/outro (1-10 s)"),
+  setDefault: z.enum(["intro", "outro"]).optional().describe("Also make it your default intro or outro for new projects"),
 };
 export const addBumperInput = {
   url: z.url().optional().describe("http(s) link to an MP4/MOV/WebM (max 10 s) or PNG/JPG; the server downloads it (max 50 MB, 60 s)"),
@@ -104,8 +114,9 @@ export function requireOneSource(i: { url?: string; uploadId?: string }) {
 
 // ── bounded download ───────────────────────────────────────────────────────
 
-const TYPE_EXT: Record<string, string> = { "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg" };
-const ALLOWED_EXTS: readonly string[] = [...BUMPER_VIDEO_EXTS, ...BUMPER_IMAGE_EXTS];
+/** Every format the library stores (ASSET_MIME); `bumpers.create` then probes the file and refuses what it cannot use. */
+const ALLOWED_EXTS: readonly string[] = Object.keys(ASSET_MIME);
+const TYPE_EXT: Record<string, string> = Object.fromEntries(Object.entries(ASSET_MIME).reverse().map(([ext, mime]) => [mime, ext]));
 
 export function isPrivateAddress(ip: string): boolean {
   if (net.isIPv4(ip)) {
@@ -157,7 +168,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   const urlExt = path.extname(target.pathname).toLowerCase();
   const ext = ALLOWED_EXTS.includes(urlExt) ? urlExt : TYPE_EXT[type];
-  if (!ext) throw new Error("Use an MP4, MOV or WebM video, or a PNG, JPG, WebP, GIF or SVG image.");
+  if (!ext) throw new Error("Use a video (MP4, MOV, WebM), an image (PNG, JPG, WebP, GIF, SVG) or a sound (MP3, M4A, AAC, WAV, OGG, FLAC).");
   const id = randomUUID();
   const dest = path.join(svc.paths.uploads, `${id}${ext}`);
   try {
@@ -182,6 +193,22 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   } finally {
     await fs.rm(dest, { force: true }).catch(() => {});
   }
+}
+
+/** A file on this machine as an uploads row (what POST /api/upload makes), for `reelsaw library add <file>`. */
+export async function uploadLocalFile(svc: Services, userId: string, file: string): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
+  const st = await fs.stat(file).catch(() => null);
+  if (!st?.isFile()) throw new Error(`${file} is not a file`);
+  if (st.size === 0) throw new Error("The file is empty");
+  if (st.size > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(st.size / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
+  const ext = path.extname(file).toLowerCase();
+  if (!ALLOWED_EXTS.includes(ext)) throw new Error(`${ext || "That file type"} is not a library format (video, image or sound)`);
+  const id = randomUUID();
+  const filename = path.basename(file).slice(0, 200);
+  const storageKey = keys.upload(id, ext);
+  await svc.storage.putFile(storageKey, file);
+  await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: st.size });
+  return { uploadId: id, filename, sizeBytes: st.size };
 }
 
 // ── read side ──────────────────────────────────────────────────────────────
@@ -236,6 +263,11 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     height: a.height,
     isDefaultIntro: defaults.introAssetId === a.id,
     isDefaultOutro: defaults.outroAssetId === a.id,
+    mime: a.mime,
+    category: a.category,
+    tags: a.tags,
+    provenance: a.provenance,
+    system: a.system,
     usedBy: a.usedBy,
     usedByClips: a.usedByClips,
     thumbnailUrl: abs(a.thumbnailUrl),
@@ -289,16 +321,88 @@ export async function projectBumperSummaries(
   return new Map([...coverage].map(([id, c]) => [id, { intro: slot(c.intro), outro: slot(c.outro) }]));
 }
 
-/** Per asset id, the projects and clips that use it (see `countBumperUsage`); loads the user's projects and clips once. */
+/**
+ * Per asset id, the projects and clips that use it: one grouped query over `asset_refs` (docs/specs/library.md #4).
+ * A project counts once however many of its rows name the asset; a clip counts when it names the asset itself
+ * (its own intro / outro or a layer; a clip that merely inherits the project's intro is counted through the project).
+ * Deleted projects and clips a re-analyze replaced are left out.
+ */
 export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number }>> {
-  const projects = await db.select({ id: schema.projects.id, settings: schema.projects.settings }).from(schema.projects).where(eq(schema.projects.userId, userId));
-  if (!projects.length) return new Map();
-  const clips = await db.select({ projectId: schema.clips.projectId, bumpers: schema.clips.bumpers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.projectId, projects.map((p) => p.id)));
-  const byProject = new Map<string, Omit<(typeof clips)[number], "projectId">[]>();
-  for (const c of clips) {
-    const list = byProject.get(c.projectId) ?? [];
-    list.push(c);
-    byProject.set(c.projectId, list);
+  const res = await db.execute(sql`
+    select r.asset_id as asset_id, count(distinct r.project_id)::int as projects, count(distinct r.clip_id)::int as clips
+    from asset_refs r
+    join projects p on p.id = r.project_id and p.user_id = ${userId} and p.deleted_at is null
+    left join clips c on c.id = r.clip_id
+    where r.clip_id is null or c.deleted_at is null
+    group by r.asset_id`);
+  return new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips }]));
+}
+
+export interface AssetUsageClip {
+  id: string;
+  index: number;
+  title: string;
+  slots: Array<"intro" | "outro" | "overlay" | "music">;
+  via: "clip" | "project";
+  overlays: number;
+  music: number;
+}
+export interface AssetUsageProject {
+  id: string;
+  title: string;
+  slots: Array<"intro" | "outro">;
+  via: "project";
+  clips: AssetUsageClip[];
+}
+
+/**
+ * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own choice
+ * or layer. Reads `asset_refs` for the asset, then only the clips those rows name (plus the clips of projects whose
+ * settings name it, to see who inherits). Clips a re-analyze replaced are skipped (they render nowhere; their rows
+ * still keep the asset from being purged until the clip itself is purged). A layer counts as `overlays` for image /
+ * video / text layers and as `music` for audio layers.
+ */
+export async function bumperAssetUsage(db: Db, userId: string, assetId: string): Promise<{ projects: AssetUsageProject[] }> {
+  const slots = ["intro", "outro"] as const;
+  const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
+  const refs = await db
+    .select({ projectId: schema.assetRefs.projectId, clipId: schema.assetRefs.clipId, title: schema.projects.title, settings: schema.projects.settings })
+    .from(schema.assetRefs)
+    .innerJoin(schema.projects, eq(schema.assetRefs.projectId, schema.projects.id))
+    .where(and(eq(schema.assetRefs.assetId, assetId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)))
+    .limit(5000);
+  const projects = new Map<string, { title: string; settings: (typeof refs)[number]["settings"] }>();
+  const clipIds = new Set<string>();
+  const projectLevel = new Set<string>();
+  for (const r of refs) {
+    projects.set(r.projectId, { title: r.title, settings: r.settings });
+    if (r.clipId) clipIds.add(r.clipId);
+    else projectLevel.add(r.projectId);
   }
-  return countBumperUsage(projects.map((p) => ({ settings: p.settings, clips: byProject.get(p.id) ?? [] })));
+  if (!projects.size) return { projects: [] };
+  const cols = { id: schema.clips.id, projectId: schema.clips.projectId, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio };
+  const where = [clipIds.size ? inArray(schema.clips.id, [...clipIds]) : undefined, projectLevel.size ? inArray(schema.clips.projectId, [...projectLevel]) : undefined].filter((x) => x !== undefined);
+  const clipRows = await db.select(cols).from(schema.clips).where(and(isNull(schema.clips.deletedAt), sql`(${sql.join(where, sql` or `)})`)).orderBy(schema.clips.index).limit(5000);
+  const out = new Map<string, AssetUsageProject>();
+  for (const [id, p] of projects) out.set(id, { id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === assetId), clips: [] });
+  const hasClips = new Set<string>();
+  for (const c of clipRows) {
+    hasClips.add(c.projectId);
+    const p = out.get(c.projectId);
+    if (!p) continue;
+    const settings = projects.get(c.projectId)!.settings;
+    const own = c.bumpers ?? {};
+    const mine = slots.filter((s) => own[s] === assetId);
+    // a slot the clip leaves alone follows the project
+    const inherited = slots.filter((s) => own[s] === undefined && settings[key[s]] === assetId);
+    const layers = clipLayers(c);
+    const overlays = layers.filter((l) => l.kind !== "audio" && l.kind !== "text" && l.assetId === assetId).length;
+    const music = layers.filter((l) => l.kind === "audio" && l.assetId === assetId).length;
+    if (!mine.length && !inherited.length && !overlays && !music) continue;
+    const roles: AssetUsageClip["slots"] = [...slots.filter((s) => mine.includes(s) || inherited.includes(s)), ...(overlays ? (["overlay"] as const) : []), ...(music ? (["music"] as const) : [])];
+    p.clips.push({ id: c.id, index: c.index, title: c.title, slots: roles, via: mine.length || overlays || music ? "clip" : "project", overlays, music });
+  }
+  // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
+  for (const [id, p] of out) if (!p.clips.length && hasClips.has(id)) out.delete(id);
+  return { projects: [...out.values()] };
 }

@@ -4,6 +4,7 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare } from "../pipeline/lifecycle.js";
 import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
+import { backfillAssetRefs } from "../library/refs.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -90,6 +91,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
       .then(() => detectStalls(svc, svc.settings.get().STALL_MINUTES))
       .then(() => sweepRetention(svc))
       .then(() => pruneHistory(svc)) // daily per table, batched and resumable; a no-op between runs
+      .then(() => backfillAssetRefs(svc)) // one-time, resumable, bounded per tick; a no-op once done
       .then(async () => {
         // leftover files nothing points at: at most hourly (a safety net for crashes between commit and delete)
         if (Date.now() - lastSweep < 60 * 60_000) return;

@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/library/service.js";
+import { addAssetInput, addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/library/service.js";
 import type { Services } from "../src/services.js";
 
 const clipIn = z.object(setClipBumpersInput);
@@ -42,6 +42,15 @@ describe("tool input schemas", () => {
     assert.throws(() => requireOneSource({}), /exactly one/);
     assert.throws(() => requireOneSource({ url: "https://x.test/a.png", uploadId: "u" }), /exactly one/);
     requireOneSource({ uploadId: "u" });
+  });
+});
+
+describe("add_asset input", () => {
+  const assetIn = z.object(addAssetInput);
+  it("takes a category from the fixed list and tidy tags", () => {
+    assert.ok(assetIn.safeParse({ url: "https://x.test/a.gif", category: "sticker", tags: ["fun", "party"] }).success);
+    assert.ok(!assetIn.safeParse({ url: "https://x.test/a.gif", category: "meme" }).success);
+    assert.ok(!assetIn.safeParse({ url: "https://x.test/a.gif", tags: Array(50).fill("t") }).success);
   });
 });
 
@@ -106,7 +115,7 @@ describe("downloadAsUpload", () => {
     await assert.rejects(downloadAsUpload(h.svc, "u", "file:///etc/passwd", { fetch: f, lookup: pub }), /http/);
     const redirect = async () => new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } });
     await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/a.png", { fetch: redirect, lookup: pub }), /not reachable/);
-    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/page", { fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }), lookup: pub }), /MP4, MOV or WebM/);
+    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/page", { fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }), lookup: pub }), /Use a video/);
     assert.equal(h.rows.length, 0);
   });
   it("enforces the size limit by header and while streaming", async () => {
