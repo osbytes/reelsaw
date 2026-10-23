@@ -25,6 +25,7 @@ export const BUMPER_IMAGE_SEC = { min: 1, max: 10, default: DEFAULT_IMAGE_BUMPER
 export const BUMPER_AUDIO_EXTS = [".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac"] as const;
 export const BUMPER_AUDIO_MAX_BYTES = 30 * 1024 * 1024;
 export const BUMPER_AUDIO_MAX_SEC = 15 * 60;
+export const BUMPER_AUDIO_MIN_SEC = 0.05;
 export const bumperKind = (ext: string): "video" | "image" | "audio" | null =>
   (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext) ? "audio" : null;
 /** GIF and WebP can hold an animation; the probe decides whether they are a video or a still. */
@@ -65,7 +66,8 @@ export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: 
     if (slot) return "An audio file can be music under a clip, not an intro or outro. Add it without a slot.";
     if (file.sizeBytes > BUMPER_AUDIO_MAX_BYTES) return `This audio file is ${Math.ceil(file.sizeBytes / 1024 / 1024)} MB. Music can be at most ${BUMPER_AUDIO_MAX_BYTES / 1024 / 1024} MB.`;
     if (probe.hasAudio === false) return "This file has no audio stream that could be read.";
-    if (!(probe.durationSec >= 0.5)) return "This audio is too short to use (under 0.5 s).";
+    // a sound effect can be a few hundredths of a second (a click, a pop); the lane gives it a half-second window
+    if (!(probe.durationSec >= BUMPER_AUDIO_MIN_SEC)) return `This audio is too short to use (under ${BUMPER_AUDIO_MIN_SEC} s).`;
     if (probe.durationSec > BUMPER_AUDIO_MAX_SEC + 0.05) return `This audio is ${Math.round(probe.durationSec / 60)} min long. Music can be at most ${BUMPER_AUDIO_MAX_SEC / 60} min.`;
     return null;
   }
