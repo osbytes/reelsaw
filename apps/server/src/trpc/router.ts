@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, isVisualLayer, assetCategorySchema, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, deriveCategory, layersToLegacy, isVisualLayer, assetCategorySchema, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -498,10 +498,39 @@ const bumpersRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
-      const rows = await db.select().from(schema.libraryAssets).where(eq(schema.libraryAssets.userId, ctx.user.id)).orderBy(desc(schema.libraryAssets.createdAt));
+      // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
+      const own = await db.select().from(schema.libraryAssets).where(eq(schema.libraryAssets.userId, ctx.user.id));
+      const savedRows = await db
+        .select({ asset: schema.libraryAssets, savedAt: schema.librarySaves.createdAt })
+        .from(schema.librarySaves)
+        .innerJoin(schema.libraryAssets, eq(schema.librarySaves.assetId, schema.libraryAssets.id))
+        .where(and(eq(schema.librarySaves.userId, ctx.user.id), isNull(schema.libraryAssets.userId)));
+      const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
       const usage = await bumperUsageCounts(db, ctx.user.id);
       // audio has no thumbnail: the pickers draw a music glyph instead
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0, mime: r.mime, category: r.category, tags: r.tags, provenance: r.provenance, system: r.system });
+      const pub = (r: (typeof rows)[number]) => ({
+        id: r.id,
+        kind: r.kind,
+        name: r.name,
+        durationSec: r.durationSec,
+        width: r.width,
+        height: r.height,
+        hasAudio: r.hasAudio,
+        sizeBytes: r.sizeBytes,
+        createdAt: r.createdAt.toISOString(),
+        thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`,
+        usedBy: usage.get(r.id)?.projects ?? 0,
+        usedByClips: usage.get(r.id)?.clips ?? 0,
+        mime: r.mime,
+        /** derived (deriveCategory): never set by hand; `r.category` is only the seed a catalog or provider item carried */
+        category: deriveCategory({ kind: r.kind, durationSec: r.durationSec, width: r.width, height: r.height, mime: r.mime, name: r.name, hint: r.category, provider: r.provenance?.provider ?? null, usedAs: usage.get(r.id)?.roles ?? [] }),
+        tags: r.tags,
+        provenance: r.provenance,
+        system: r.system,
+        /** "me": the user's own upload; "shared": an instance row every account can use (saved into this library) */
+        owner: (r.userId ? "me" : "shared") as "me" | "shared",
+        saved: r.saved,
+      });
       // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
@@ -518,6 +547,20 @@ const bumpersRouter = router({
       const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id)));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
       return bumperAssetUsage(db, ctx.user.id, input.id);
+    }),
+    /** Keep an instance-shared asset (catalog / provider import) in this user's library; an own upload is always there. */
+    save: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      return ctx.svc.tx(async (u) => {
+        const [a] = await u.db.select({ id: schema.libraryAssets.id, userId: schema.libraryAssets.userId }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), isNull(schema.libraryAssets.deletedAt)));
+        if (!a || (a.userId && a.userId !== ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not available" });
+        if (!a.userId) await u.db.insert(schema.librarySaves).values({ userId: ctx.user.id, assetId: a.id }).onConflictDoNothing();
+        return { ok: true, saved: true };
+      });
+    }),
+    /** Take an instance-shared asset out of this user's library (the file stays for everyone who still uses it). */
+    unsave: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      await ctx.svc.database.db.delete(schema.librarySaves).where(and(eq(schema.librarySaves.userId, ctx.user.id), eq(schema.librarySaves.assetId, input.id)));
+      return { ok: true, saved: false };
     }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
     update: protectedProcedure

@@ -331,15 +331,15 @@ export async function projectBumperSummaries(
  * (its own intro / outro or a layer; a clip that merely inherits the project's intro is counted through the project).
  * Deleted projects and clips a re-analyze replaced are left out.
  */
-export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number }>> {
+export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>> {
   const res = await db.execute(sql`
-    select r.asset_id as asset_id, count(distinct r.project_id)::int as projects, count(distinct r.clip_id)::int as clips
+    select r.asset_id as asset_id, count(distinct r.project_id)::int as projects, count(distinct r.clip_id)::int as clips, array_agg(distinct r.role) as roles
     from asset_refs r
     join projects p on p.id = r.project_id and p.user_id = ${userId} and p.deleted_at is null
     left join clips c on c.id = r.clip_id
     where r.clip_id is null or c.deleted_at is null
     group by r.asset_id`);
-  return new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips }]));
+  return new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips, roles: r.roles ?? [] }]));
 }
 
 export interface AssetUsageClip {

@@ -281,6 +281,13 @@
       "when": 1792765637800,
       "tag": "0039_library_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792769946175,
+      "tag": "0040_shared_assets_saves",
+      "breakpoints": true
     }
   ]
 }

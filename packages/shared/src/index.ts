@@ -319,8 +319,47 @@ export const assetProvenanceSchema = z.object({
 });
 export type AssetProvenance = z.infer<typeof assetProvenanceSchema>;
 
-/** The treatment a sound gets when it lands on the lane: a short file is a one-shot effect, a long one is music. */
+/** Sound effects are short; anything longer is music. */
 export const SFX_MAX_SEC = 8;
+
+/**
+ * The category of a library asset, derived, never set by hand: what it is (kind, length, shape, format), where it came
+ * from (the catalog and the providers say what they hand out) and how it is used (an intro / outro). `hint` is the
+ * seed a catalog or provider item carried; a user's own upload has none.
+ */
+export function deriveCategory(a: {
+  kind: AssetKind;
+  durationSec: number;
+  width?: number | null;
+  height?: number | null;
+  mime?: string | null;
+  name?: string | null;
+  hint?: string | null;
+  provider?: string | null;
+  /** roles the asset currently plays (asset_refs / user defaults) */
+  usedAs?: ReadonlyArray<"intro" | "outro" | "layer">;
+}): AssetCategory | null {
+  if (a.kind === "audio") return a.durationSec <= SFX_MAX_SEC ? "sfx" : "music";
+  if (a.usedAs?.some((r) => r === "intro" || r === "outro")) return "intro";
+  if (a.hint && (ASSET_CATEGORIES as ReadonlyArray<{ id: string }>).some((c) => c.id === a.hint)) return a.hint as AssetCategory;
+  const name = (a.name ?? "").toLowerCase();
+  if (/\blogo\b|\bwatermark\b|\bbrand\b/.test(name)) return "logo";
+  const mime = a.mime ?? "";
+  if (mime === "image/svg+xml" || mime === "image/gif") return "sticker";
+  if (a.provider === "iconify" || a.provider === "giphy" || a.provider === "klipy") return "sticker";
+  if (a.provider === "pexels" || a.provider === "pixabay" || a.provider === "openverse") return "broll";
+  const w = a.width ?? 0;
+  const h = a.height ?? 0;
+  if (a.kind === "video") return w > h ? "broll" : null;
+  if (w && h) {
+    if (w / h >= 1.8) return "logo"; // a banner-shaped picture is a wordmark or a lower third
+    if (Math.max(w, h) <= 1024 && Math.abs(w - h) / Math.max(w, h) < 0.35) return "sticker"; // small and square-ish
+    if (w > h) return "broll";
+  }
+  return null;
+}
+
+/** The treatment a sound gets when it lands on the lane: a short file is a one-shot effect, a long one is music. */
 export const audioLayerDefaultsFor = (asset: { durationSec: number; category?: string | null }) =>
   asset.category === "sfx" || (asset.category !== "music" && asset.durationSec <= SFX_MAX_SEC) ? SFX_AUDIO_DEFAULTS : CLIP_AUDIO_DEFAULTS;
 

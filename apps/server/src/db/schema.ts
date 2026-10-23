@@ -300,9 +300,8 @@ export const libraryAssets = pgTable(
   "bumper_assets",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    /** the account that uploaded it; null = an instance-shared row (imported from the catalog or a provider, visible to every account) */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     kind: text("kind").$type<"video" | "image" | "audio">().notNull().default("video"),
     /** exact format (image/svg+xml, image/gif, video/mp4, audio/mpeg…); null for rows made before it existed */
     mime: text("mime"),
@@ -333,6 +332,21 @@ export const libraryAssets = pgTable(
   ],
 );
 export type LibraryAsset = typeof libraryAssets.$inferSelect;
+
+/** An instance-shared asset a user keeps in their library ("Add" on a catalog or provider item); removing it unsaves. */
+export const librarySaves = pgTable(
+  "library_saves",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => libraryAssets.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.assetId] }), index("library_saves_asset_idx").on(t.assetId)],
+);
 
 /**
  * Which library assets a project or clip uses, and how, maintained in the same transaction as the write
