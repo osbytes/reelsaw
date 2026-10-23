@@ -84,8 +84,7 @@ without leaving the editor or finding files on my disk.
    - **Kind from the probe** (`assetKind(ext, probe)`): an animated GIF or WebP (more than one frame, or
      longer than 0.1 s) is `kind: video` with its own duration and no audio; a still GIF / WebP and every
      SVG is `kind: image`.
-   - **SVG**: built, not as first written, with **`@resvg/resvg-js`** (MIT, prebuilt binaries for linux
-     x64/arm64 and darwin) instead of ffmpeg's librsvg: the dev Macs' ffmpeg has no librsvg and the
+   - **SVG**: built, not as first written, with **`@resvg/resvg-wasm`** (MIT, resvg compiled to WebAssembly: no per-platform binary, so a multi-arch image built on one host works on both) instead of ffmpeg's librsvg: the dev Macs' ffmpeg has no librsvg and the
      Docker image's would differ in fonts and features, so one renderer everywhere. Rasterised once into
      `assets/<id>/raster.v1.1080.png` (`keys.assetRaster`, `ensureRaster`, idempotent like
      `ensureNormalised`) at 1080 px wide, the output frame's width. The compositor, the 270x480 thumbnail
