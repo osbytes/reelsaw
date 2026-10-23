@@ -35,10 +35,12 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
           NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if ! git diff --name-only "origin/main...HEAD" | grep -qE '^(pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|apps/|packages/|Dockerfile$)'; then
+          changed=$(git diff --name-only "origin/main...HEAD")
+          if ! grep -qE '^(pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|apps/|packages/|Dockerfile$)' <<<"$changed"; then
             echo "no app package changed; no changeset needed"; exit 0
           fi
-          if ls .changeset/*.md 2>/dev/null | grep -v README.md | grep -q .; then
+          # only files this PR adds count: main holds the changesets waiting for the next release
+          if grep -qE '^\.changeset/.+\.md$' <<<"$changed"; then
             echo "the PR already carries a changeset"; exit 0
           fi
           f=".changeset/dependabot-$NUMBER.md"
