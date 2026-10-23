@@ -68,6 +68,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id>|rename <id> <name…> [--user <email>]
  *                                           the intro/outro library. The user is --user, else the only account
  *                                           on this install; otherwise pass --user
+ *   library search <q…> [--provider p] [--kind video|image|audio] [--license cc0|by] [--user <email>]
+ *                                           search the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy)
+ *   library import <provider> <externalId> [--color #hex] [--user <email>]
+ *                                           add a search result to the library (license and credit are recorded)
+ *   catalog status|refresh                  the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now
  *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
  *                                           a project's intro/outro: the library default, none or a specific item
  *   clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
@@ -135,6 +140,7 @@ import { formatTime, clipOverlaySchema, clipAudioSchema, clipAudioList, CLIP_AUD
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall } from "./library/service.js";
+import { libraryProviders } from "./library/import.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
@@ -954,6 +960,33 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
     } else throw new Error("usage: reelsaw bumpers list|usage <id>|default <intro|outro> <id|none>|remove <id>|restore <id>|rename <id> <name…> [--user <email>]");
   },
+  /** Search the Reelsaw catalog and the enabled providers, and import a result. Same procedures as Browse and the MCP tools. */
+  async library(svc) {
+    const o = bumperArgs();
+    const [sub, ...rest] = o.pos;
+    if (sub === "search" && rest.length) {
+      const { api } = await bumperApi(svc, undefined);
+      const kind = o.kind as "video" | "image" | "audio" | undefined;
+      const r = await api.catalog.search({ provider: o.provider, q: rest.join(" "), kind, license: o.license as "cc0" | "by" | undefined, limit: 24 });
+      if (r.unavailable) console.log(r.unavailable);
+      table(r.items.map((i) => ({ provider: i.provider, externalId: i.externalId, kind: i.kind, name: i.name, license: i.license.name, sec: i.durationSec ?? "", attribution: i.attribution ?? "" })));
+      if (r.nextCursor) console.log(`more results exist: narrow the query (the web Browse panel pages through them)`);
+    } else if (sub === "import" && rest.length === 2) {
+      const { api } = await bumperApi(svc, undefined);
+      const r = await api.catalog.import({ provider: rest[0]!, externalId: rest[1]!, color: o.color });
+      console.log(`${r.duplicate ? "already in the library" : "added"}${r.restored ? " (restored)" : ""}: ${r.name}  ${r.id}  (${r.kind}${r.category ? `, ${r.category}` : ""})`);
+    } else throw new Error("usage: reelsaw library search <q…> [--provider p] [--kind video|image|audio] [--license cc0|by] [--user <email>] | library import <provider> <externalId> [--color #hex] [--user <email>]");
+  },
+  /** The Reelsaw catalog manifest: what is in force, and a refresh from CATALOG_URL. */
+  async catalog(svc) {
+    const sub = pos[0];
+    const { catalog, registry } = libraryProviders(svc);
+    if (sub !== "status" && sub !== "refresh") throw new Error("usage: reelsaw catalog status|refresh");
+    const st = sub === "refresh" ? (await catalog.refresh({ force: true })).status : await catalog.status();
+    console.log(`catalog v${st.version} (${st.items} items, ${st.source}; bundled v${st.bundledVersion}) generated ${st.generatedAt}`);
+    console.log(`source ${st.url}  etag ${st.etag ?? "-"}  last checked ${st.lastCheckedAt ?? "never"}${st.lastError ? `  last error: ${st.lastError}` : ""}`);
+    console.log(`providers: ${registry.list().map((p) => `${p.id}${p.available ? "" : " (rate limited)"}`).join(", ")}`);
+  },
   async "project-bumpers"(svc) {
     const { pos: p, rerender, ...o } = bumperArgs();
     if (!p[0]) throw new Error("usage: reelsaw project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
@@ -1109,6 +1142,10 @@ function bumperArgs() {
     duck: false,
     noDuck: false,
     noLoop: false,
+    // library search / import
+    provider: undefined as string | undefined,
+    kind: undefined as string | undefined,
+    license: undefined as string | undefined,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -1133,6 +1170,9 @@ function bumperArgs() {
     else if (a === "--duck") out.duck = true;
     else if (a === "--no-duck") out.noDuck = true;
     else if (a === "--no-loop") out.noLoop = true;
+    else if (a === "--provider") out.provider = val();
+    else if (a === "--kind") out.kind = val();
+    else if (a === "--license") out.license = val();
     else if (a === "--remove") out.remove = val();
     else if (a === "--from") out.from = Number(val());
     else if (a === "--to") out.to = Number(val());
@@ -1187,7 +1227,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|project-bumpers|clip-bumpers|clip-audio|clip-overlays|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|bumpers|library|catalog|project-bumpers|clip-bumpers|clip-audio|clip-overlays|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

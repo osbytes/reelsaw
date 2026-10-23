@@ -19,6 +19,7 @@ import { schema } from "./db/index.js";
 import { checkStorageQuota } from "./quota.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
+import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { requireMcpAuth } from "@better-auth/mcp";
@@ -241,6 +242,21 @@ export function createApp(svc: Services) {
       c.get("log").warn({ err, family }, "font lookup failed");
       return c.text("font not available", 404);
     }
+  });
+
+  // The starter pack bundled with the install (assets/catalog/files): public, nothing user-specific, content-addressed by id.
+  app.get("/media/catalog/:file", async (c) => {
+    const name = c.req.param("file");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name)) return c.text("not found", 404);
+    const file = path.join(DEFAULT_BUNDLED_DIR, "files", name);
+    if (!(await fsp.stat(file).then((s) => s.isFile(), () => false))) return c.text("not found", 404);
+    const res = await sendFile(c.req.raw, file);
+    res.headers.set("Cache-Control", "public, max-age=86400");
+    // static pack files only; the extension decides the type (the shared map has no svg until the library widens it)
+    if (name.endsWith(".svg")) res.headers.set("Content-Type", "image/svg+xml");
+    // a bundled SVG is ours, but never let a catalog file run script in the app's origin
+    res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    return res;
   });
 
   app.get("/media/bumpers/:id", async (c) => {

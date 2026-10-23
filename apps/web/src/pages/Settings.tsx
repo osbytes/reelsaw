@@ -14,7 +14,7 @@ import { ModelsSection } from "../components/ModelsSection";
 import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
-import { ACCESS_FIELDS, InstanceSettingsGroup, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
+import { ACCESS_FIELDS, InstanceSettingsGroup, LIBRARY_FIELDS, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
 import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
@@ -338,6 +338,7 @@ function SystemTab() {
         />
         <InstanceSettingsGroup id="retention" title="Retention" intro="How long files and history stay. Sweeps run every few minutes; a shorter number removes what is already older on the next sweep." fields={RETENTION_FIELDS} />
         <InstanceSettingsGroup id="operations" title="Operations" intro="Watchdog, update checks and what the health endpoint tells anonymous callers." fields={OPERATIONS_FIELDS} />
+        <InstanceSettingsGroup id="library" title="Library" intro="Where Browse finds sounds, icons and media. The Reelsaw catalog and Iconify need nothing; paste a free key to switch a provider on. Keys are stored encrypted and never shown again." fields={LIBRARY_FIELDS} />
 
         <div id="log-level" className="scroll-mt-4">
           <LogLevelSection />

@@ -26,6 +26,7 @@ export const SETTING_GROUPS = [
   ["limits", "Limits"],
   ["pipeline", "Pipeline"],
   ["retention", "Retention"],
+  ["library", "Library"],
   ["operations", "Operations"],
 ] as const;
 export type SettingGroup = (typeof SETTING_GROUPS)[number][0];
@@ -87,6 +88,15 @@ export const RUNTIME_SETTINGS = {
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),
   UPDATE_CHECK: def("operations", z.boolean(), "Ask GitHub for the latest release and tell admins when a newer Reelsaw exists. Only the request leaves the machine."),
   HEALTH_DETAILS: def("operations", z.boolean(), "Include machine numbers in GET /api/health for anonymous callers (private networks only). Admins always get them."),
+
+  CATALOG_URL: def("library", z.string().trim().url().max(500), "Where the Reelsaw catalog manifest (sounds, icons, stickers) is fetched from, hourly; the starter pack bundled with Reelsaw is used until a newer one arrives."),
+  PEXELS_API_KEY: def("library", z.string().trim().max(200), "Pexels API key (free): enables stock photos and portrait videos in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
+  PIXABAY_API_KEY: def("library", z.string().trim().max(200), "Pixabay API key (free): enables photos, illustrations, vectors and videos in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
+  FREESOUND_API_KEY: def("library", z.string().trim().max(200), "Freesound API key (free): enables sound effects in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
+  GIPHY_API_KEY: def("library", z.string().trim().max(200), "Giphy API key: enables GIFs and stickers in Browse. Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
+  KLIPY_API_KEY: def("library", z.string().trim().max(200), "Klipy API key: enables GIF search in Browse (experimental). Stored encrypted; empty = provider hidden.", { optional: true, secret: true }),
+  ICONIFY_API_URL: def("library", z.string().trim().url().max(500), "Iconify API used for icon search; the public one by default, or your own self-hosted instance (https)."),
+  OPENVERSE_ENABLED: def("library", z.boolean(), "Show Openverse (Creative Commons images and audio, no key) in Browse. Off by default until you have checked its limits for your use."),
 } satisfies Record<string, Def>;
 
 export type RuntimeKey = keyof typeof RUNTIME_SETTINGS;

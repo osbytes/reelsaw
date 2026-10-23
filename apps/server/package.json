@@ -67,6 +67,7 @@
     "cockatiel": "^3.2.1",
     "disposable-email-domains": "1.0.62",
     "drizzle-orm": "^0.45.4",
+    "fuse.js": "7.1.0",
     "hono": "^4.13.13",
     "langfuse": "3.39.2",
     "nodemailer": "^10.1.2",

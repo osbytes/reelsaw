@@ -406,6 +406,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
 | `list_bumpers` | Your library: intros/outros (video, image), overlays and music (audio). |
 | `add_bumper` | Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. |
+| `search_library` | Find sounds, icons, stickers, photos, videos and GIFs to add to your library. |
+| `import_asset` | Add one search_library result to your library: downloaded server-side (max 50 MB), catalog checksum verified, license and attribution recorded. |
 | `rename_bumper` | Rename one of your library items (removed ones too). |
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
 | `remove_bumper` | Remove an item from your library and from your defaults. |
@@ -482,6 +484,9 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
 | `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw library search <q…> [--provider p] [--kind video\|image\|audio] [--license cc0\|by] [--user <email>]` | search the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy) |
+| `reelsaw library import <provider> <externalId> [--color #hex] [--user <email>]` | add a search result to the library (license and credit are recorded) |
+| `reelsaw catalog status\|refresh` | the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw clip-audio <projectId> <clipId> [--add <assetId> [--from <sec>] [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--no-duck] [--no-loop] \| --track <trackId> [same options, --duck] \| --remove <trackId> \| --clear] [--rerender]` | background music tracks under parts of a clip from library audio items (source seconds; the same item may repeat); ducked under speech unless --no-duck; with no flag it lists them |
