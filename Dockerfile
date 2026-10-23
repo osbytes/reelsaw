@@ -11,7 +11,7 @@ COPY scripts/download-models.sh /tmp/download-models.sh
 RUN sh /tmp/download-models.sh /models
 
 # ---------- system: OS packages and media tools (shared by dev and runtime) ----------
-FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS system
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS system
 # yt-dlp is pinned and verified. To bump: take the tag from https://github.com/yt-dlp/yt-dlp/releases,
 # then the linux `yt-dlp` line of that release's SHA2-256SUMS file, and update both args (and THIRD_PARTY.md).
 # The `yt-dlp` file is a Python zipapp, the same for amd64 and arm64.
@@ -34,7 +34,7 @@ RUN apt-get update \
 COPY --from=models /models /app/server/models
 
 # ---------- build: once, natively ----------
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
+FROM --platform=$BUILDPLATFORM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS build
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
