@@ -60,7 +60,7 @@ describe("mcp", () => {
 
   it("lists the tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "rerender_clips", "export_project", "delete_project", "list_bumpers", "add_bumper", "set_default_bumper", "remove_bumper", "restore_bumper", "bumper_usage", "set_project_bumpers", "set_clip_bumpers", "restore_project", "restore_clip", "update_project", "delete_clip", "rename_bumper", "list_assets", "add_asset", "update_asset", "remove_asset", "restore_asset", "asset_usage"]) assert.ok(names.includes(n), n);
+    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "rerender_clips", "export_project", "delete_project", "search_assets", "set_default_bumper", "set_project_bumpers", "set_clip_bumpers", "restore_project", "restore_clip", "update_project", "delete_clip", "add_asset", "update_asset", "remove_asset", "restore_asset", "asset_usage"]) assert.ok(names.includes(n), n);
   });
 
   it("sees only the caller's projects", async () => {
@@ -89,9 +89,9 @@ describe("mcp", () => {
     assert.equal(r.isError, true);
   });
 
-  it("lists an empty bumper library and validates set_clip_bumpers input", async () => {
-    const r = await client.callTool({ name: "list_bumpers", arguments: {} });
-    assert.deepEqual(JSON.parse((r.content as Array<{ text: string }>)[0]!.text), { assets: [], removed: [] });
+  it("searches an empty library and validates set_clip_bumpers input", async () => {
+    const r = await client.callTool({ name: "search_assets", arguments: { source: "library" } });
+    assert.deepEqual(JSON.parse((r.content as Array<{ text: string }>)[0]!.text), { provider: "library", items: [] });
     const noClips = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: mine, clipIds: [], rerender: false } });
     assert.equal(noClips.isError, true);
     const foreign = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: theirs, clipIds: [randomUUID()], intro: "none", rerender: false } });
@@ -152,15 +152,15 @@ describe("mcp", () => {
     assert.equal((await call("delete_clip", { id: theirClip })).isError, true);
   });
 
-  it("rename_bumper renames only the caller's library items", async () => {
+  it("update_asset renames only the caller's library items", async () => {
     const asset = randomUUID();
     await pool.query(`insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Old', 3, 1080, 1920, false, 'bumpers/x.png', 10)`, [asset, owner.userId]);
-    const r = await call<{ name: string; previousName: string }>("rename_bumper", { assetId: asset, name: "  New name " });
+    const r = await call<{ name: string; previousName: string }>("update_asset", { assetId: asset, name: "  New name " });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual([r.data.previousName, r.data.name], ["Old", "New name"]);
     assert.equal((await pool.query(`select name from assets where id = $1`, [asset])).rows[0]!.name, "New name");
-    assert.equal((await call("rename_bumper", { assetId: asset, name: "   " })).isError, true);
-    assert.equal((await call("rename_bumper", { assetId: randomUUID(), name: "x" })).isError, true);
+    assert.equal((await call("update_asset", { assetId: asset, name: "   " })).isError, true);
+    assert.equal((await call("update_asset", { assetId: randomUUID(), name: "x" })).isError, true);
   });
 
   it("update_asset replaces tags; asset_usage reads asset_refs", async () => {

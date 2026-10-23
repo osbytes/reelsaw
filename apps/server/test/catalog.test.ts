@@ -1,7 +1,7 @@
 /**
  * The Reelsaw catalog (library/catalog.ts) and the import path (library/import.ts): bundled vs online manifest by
  * version, ETag refresh, failure handling, Fuse search, the committed starter pack's integrity, and an import that
- * verifies the sha256 and lands in `bumpers.create` with system provenance. No network, no database.
+ * verifies the sha256 and lands in `library.add` with system provenance. No network, no database.
  */
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";

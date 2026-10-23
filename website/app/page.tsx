@@ -100,7 +100,7 @@ const FEATURES = [
   },
 ];
 
-const MCP_TOOLS = ["create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "rerender_clip", "delete_clip", "restore_clip", "list_bumpers", "download"];
+const MCP_TOOLS = ["create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "rerender_clip", "delete_clip", "restore_clip", "search_assets", "download"];
 
 function SectionHeading({ eyebrow, title, body, id }: { eyebrow: string; title: string; body?: string; id?: string }) {
   return (

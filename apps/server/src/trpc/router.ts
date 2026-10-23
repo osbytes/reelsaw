@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, isVisualLayer, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -22,7 +22,7 @@ import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault } from "../library/service.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload } from "../library/service.js";
 import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
@@ -74,10 +74,8 @@ function publicClip(c: schema.Clip) {
     layoutSegments: c.layoutSegments ?? [],
     style: c.style ?? null,
     bumpers: c.bumpers ?? null,
-    /** everything laid over or played under the clip; `overlays` / `audio` are the same list split the old way */
+    /** everything laid over or played under the clip: assets, text and sounds */
     layers: clipLayers(c),
-    overlays: layersToLegacy(clipLayers(c)).overlays,
-    audio: layersToLegacy(clipLayers(c)).audio,
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -478,49 +476,79 @@ const headRouter = router({
   }),
 });
 
+/** The library as the screens and tools list it: live rows with usage, and the removals of the last 30 days. */
+async function listLibrary(svc: Services, userId: string) {
+    const db = svc.database.db;
+    // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
+    const own = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
+    const savedRows = await db
+      .select({ asset: schema.assets, savedAt: schema.assetSaves.createdAt })
+      .from(schema.assetSaves)
+      .innerJoin(schema.assets, eq(schema.assetSaves.assetId, schema.assets.id))
+      .where(and(eq(schema.assetSaves.userId, userId), isNull(schema.assets.userId)));
+    const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
+    const usage = await bumperUsageCounts(db, userId);
+    // audio has no thumbnail: the pickers draw a music glyph instead
+    const pub = (r: (typeof rows)[number]) => ({
+      id: r.id,
+      kind: r.kind,
+      name: r.name,
+      durationSec: r.durationSec,
+      width: r.width,
+      height: r.height,
+      hasAudio: r.hasAudio,
+      sizeBytes: r.sizeBytes,
+      createdAt: r.createdAt.toISOString(),
+      thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
+      usedBy: usage.get(r.id)?.projects ?? 0,
+      usedByClips: usage.get(r.id)?.clips ?? 0,
+      mime: r.mime,
+      tags: r.tags,
+      provenance: r.provenance,
+      system: r.system,
+      /** "me": the user's own upload; "shared": an instance row every account can use (saved into this library) */
+      owner: (r.userId ? "me" : "shared") as "me" | "shared",
+      saved: r.saved,
+    });
+    // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+    return {
+      assets: rows.filter((r) => !r.deletedAt).map(pub),
+      deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
+    };
+}
+type LibraryRow = Awaited<ReturnType<typeof listLibrary>>["assets"][number];
+
+/** A library row in the shape of a search hit, so one picker lists catalog, provider and own items alike. */
+function libraryHit(r: LibraryRow) {
+  return {
+    provider: "library",
+    externalId: r.id,
+    kind: r.kind,
+    mime: r.mime ?? undefined,
+    name: r.name,
+    previewUrl: `/media/assets/${r.id}`,
+    thumbUrl: r.thumbnailUrl,
+    durationSec: r.durationSec,
+    width: r.width || undefined,
+    height: r.height || undefined,
+    license: r.provenance?.license ?? { id: "own", name: "Your upload" },
+    attribution: r.provenance?.attribution,
+    url: r.provenance?.url,
+  };
+}
+
+/** What `library.add` answers for every source. */
+interface AddedAsset extends ImportedAsset {
+  mime: string | null;
+  owner: "me" | "shared";
+  saved: boolean;
+}
+
 /** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
-const bumpersRouter = router({
+const libraryRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
-    list: protectedProcedure.query(async ({ ctx }) => {
-      const db = ctx.svc.database.db;
-      // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
-      const own = await db.select().from(schema.assets).where(eq(schema.assets.userId, ctx.user.id));
-      const savedRows = await db
-        .select({ asset: schema.assets, savedAt: schema.assetSaves.createdAt })
-        .from(schema.assetSaves)
-        .innerJoin(schema.assets, eq(schema.assetSaves.assetId, schema.assets.id))
-        .where(and(eq(schema.assetSaves.userId, ctx.user.id), isNull(schema.assets.userId)));
-      const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
-      const usage = await bumperUsageCounts(db, ctx.user.id);
-      // audio has no thumbnail: the pickers draw a music glyph instead
-      const pub = (r: (typeof rows)[number]) => ({
-        id: r.id,
-        kind: r.kind,
-        name: r.name,
-        durationSec: r.durationSec,
-        width: r.width,
-        height: r.height,
-        hasAudio: r.hasAudio,
-        sizeBytes: r.sizeBytes,
-        createdAt: r.createdAt.toISOString(),
-        thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
-        usedBy: usage.get(r.id)?.projects ?? 0,
-        usedByClips: usage.get(r.id)?.clips ?? 0,
-        mime: r.mime,
-        tags: r.tags,
-        provenance: r.provenance,
-        system: r.system,
-        /** "me": the user's own upload; "shared": an instance row every account can use (saved into this library) */
-        owner: (r.userId ? "me" : "shared") as "me" | "shared",
-        saved: r.saved,
-      });
-      // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
-      const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-      return {
-        assets: rows.filter((r) => !r.deletedAt).map(pub),
-        deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
-      };
-    }),
+    list: protectedProcedure.query(({ ctx }) => listLibrary(ctx.svc, ctx.user.id)),
     /**
      * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
      * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
@@ -532,36 +560,71 @@ const bumpersRouter = router({
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
       return bumperAssetUsage(db, ctx.user.id, input.id);
     }),
-    /** Keep an instance-shared asset (catalog / provider import) in this user's library; an own upload is always there. */
-    save: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      return ctx.svc.tx(async (u) => {
-        const [a] = await u.db.select({ id: schema.assets.id, userId: schema.assets.userId }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.deletedAt)));
-        if (!a || (a.userId && a.userId !== ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not available" });
-        if (!a.userId) await u.db.insert(schema.assetSaves).values({ userId: ctx.user.id, assetId: a.id }).onConflictDoNothing();
-        return { ok: true, saved: true };
-      });
-    }),
-    /** Take an instance-shared asset out of this user's library (the file stays for everyone who still uses it). */
-    unsave: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      await ctx.svc.database.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id)));
-      return { ok: true, saved: false };
-    }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
     update: protectedProcedure
       .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional(), tags: assetTagsSchema.optional() }))
       .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, tags: input.tags })),
-    /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. The category is derived, never given. */
-    create: protectedProcedure
+    /**
+     * Add to the library from exactly one source: an `uploadId` (POST /api/upload), a public `url` (downloaded
+     * server-side), or a catalog / provider result (`provider` + `externalId`: one shared copy per instance, saved
+     * into this account). The file is probed and limited like every upload; `setDefault` also makes it the intro or outro.
+     */
+    add: protectedProcedure
       .input(
         z.object({
-          uploadId: z.string().min(1).max(100),
+          uploadId: z.string().min(1).max(100).optional(),
+          url: z.url().optional(),
+          provider: z.string().min(1).max(40).optional(),
+          externalId: z.string().min(1).max(200).optional(),
+          color: z.string().max(9).optional(),
           imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(),
           setDefault: z.enum(["intro", "outro"]).optional(),
           name: bumperNameSchema.optional(),
           tags: assetTagsSchema.optional(),
         }),
       )
-      .mutation(({ ctx, input }) => createAsset(ctx.svc, { ...input, userId: ctx.user.id, actorId: ctx.user.id })),
+      .mutation(async ({ ctx, input }): Promise<AddedAsset> => {
+        try {
+          requireOneSource(input);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : String(err) });
+        }
+        if (input.provider) {
+          if (input.setDefault || input.imageSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
+          const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
+          return { ...r, mime: r.mime ?? null, owner: "shared", saved: true };
+        }
+        const uploadId = input.uploadId ?? (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then((d) => d.uploadId, (err) => asTrpc(err)));
+        const created = await createAsset(ctx.svc, { uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, name: input.name, tags: input.tags, userId: ctx.user.id, actorId: ctx.user.id });
+        return { ...created, owner: "me", saved: false };
+      }),
+    /**
+     * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or
+     * "catalog" = the Reelsaw catalog; otherwise a provider an admin enabled (see `providers`). Same hit shape for all.
+     */
+    search: protectedProcedure
+      .input(
+        z.object({
+          q: z.string().max(200).default(""),
+          source: z.string().min(1).max(40).optional().describe('"library", "catalog" (default) or a provider id'),
+          kind: z.enum(["video", "image", "audio"]).optional(),
+          cursor: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(60).default(24),
+          license: z.enum(["cc0", "by"]).optional(),
+        }),
+      )
+      .query(async ({ ctx, input }) => {
+        const { source, ...rest } = input;
+        if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
+        const q = input.q.trim().toLowerCase();
+        const lib = await listLibrary(ctx.svc, ctx.user.id);
+        const hits = lib.assets.filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
+        const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
+        const page = hits.slice(from, from + input.limit);
+        return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
+      }),
+    /** The sources search and add accept besides "library": the catalog and the providers an admin switched on. */
+    providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
     /** Make a library asset the user's default intro or outro for new projects (assetId null clears it). */
     setDefault: protectedProcedure.input(z.object({ slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
@@ -570,7 +633,7 @@ const bumpersRouter = router({
       });
     }),
     /** Soft delete: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
-    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         // an instance-shared row is never removed by a user: this drops the user's save only (the sweep owns the row)
         const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId)));
@@ -611,25 +674,8 @@ const bumpersRouter = router({
 });
 
 const restRouter = router({
-  /** The Browse panel's backend: the Reelsaw catalog and the remote providers an admin switched on (library/import.ts). */
+  /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
   catalog: router({
-    providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
-    search: protectedProcedure
-      .input(
-        z.object({
-          provider: z.string().min(1).max(40).optional().describe("omitted = the Reelsaw catalog"),
-          q: z.string().max(200).default(""),
-          kind: z.enum(["video", "image", "audio"]).optional(),
-          cursor: z.string().max(200).optional(),
-          limit: z.number().int().min(1).max(60).default(24),
-          license: z.enum(["cc0", "by"]).optional(),
-        }),
-      )
-      .query(({ ctx, input }) => catalogSearch(ctx.svc, input)),
-    import: protectedProcedure
-      .input(z.object({ provider: z.string().min(1).max(40), externalId: z.string().min(1).max(200), color: z.string().max(9).optional(), tags: assetTagsSchema.optional() }))
-      // one shared row per source item for the whole instance, saved into this user's library (library/import.ts)
-      .mutation(({ ctx, input }): Promise<ImportedAsset> => importAsset(ctx.svc, ctx.user.id, input)),
     status: adminProcedure.query(async ({ ctx }) => ({ ...(await libraryProviders(ctx.svc).catalog.status()), providers: libraryProviders(ctx.svc).registry.list() })),
     refresh: adminProcedure.mutation(async ({ ctx }) => {
       try {
@@ -1374,11 +1420,7 @@ const restRouter = router({
           emphasis: z.array(z.string().min(1).max(40)).max(30).optional(),
           /** This clip's own intro/outro choice, replacing the whole value: a missing key inherits the project, null is none. */
           bumpers: clipBumpersSchema.nullable().optional(),
-          /** Library images/videos laid over the clip, replacing the whole list; null or [] = none. */
-          overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional(),
-          /** Background music tracks under the clip (library audio assets), replacing the whole list; null or [] = none. */
-          audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional(),
-          /** Everything laid over or played under the clip (assets, text, sounds), replacing the whole list; null or [] = none. Supersedes overlays + audio, which now edit their half of this list. */
+          /** Everything laid over or played under the clip (assets, text, sounds), replacing the whole list; null or [] = none. */
           layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
@@ -1404,15 +1446,9 @@ const restRouter = router({
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
         const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
-        // layers replace the whole list; the older overlays / audio inputs each replace their half of it (legacy MCP clients, CLI)
+        // layers replace the whole list
         const currentLayers = clipLayers(c);
-        let nextLayers: ClipLayer[] | undefined;
-        if (input.layers !== undefined) nextLayers = input.layers ?? [];
-        else if (input.overlays !== undefined || input.audio !== undefined) {
-          const visual = input.overlays !== undefined ? clipLayers({ overlays: input.overlays ?? [] }) : currentLayers.filter(isVisualLayer);
-          const sounds = input.audio !== undefined ? (input.audio ?? []).map((a) => ({ ...a, kind: "audio" as const })) : currentLayers.filter((l) => l.kind === "audio");
-          nextLayers = [...visual, ...sounds];
-        }
+        const nextLayers: ClipLayer[] | undefined = input.layers !== undefined ? (input.layers ?? []) : undefined;
         const cleanedLayers = nextLayers !== undefined ? cleanLayers(nextLayers, { startSec, endSec }) : undefined;
         const layersChanged = cleanedLayers !== undefined && JSON.stringify(cleanedLayers) !== JSON.stringify(currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
         const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || layersChanged; // these are burned into the video
@@ -1563,5 +1599,5 @@ const restRouter = router({
   }),
 });
 
-export const appRouter = mergeRouters(headRouter, router({ bumpers: bumpersRouter, library: bumpersRouter }), restRouter);
+export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter }), restRouter);
 export type AppRouter = typeof appRouter;

@@ -24,13 +24,13 @@ const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|we
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
-/** One `bumpers.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
-export type LibraryAsset = inferRouterOutputs<AppRouter>["bumpers"]["list"]["assets"][number];
+/** One `library.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
+export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["assets"][number];
 
 /** The user's library (live assets and recently removed ones). */
 export function useBumperLibrary() {
   const trpc = useTRPC();
-  return useQuery(trpc.bumpers.list.queryOptions());
+  return useQuery(trpc.library.list.queryOptions());
 }
 
 export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);
@@ -59,17 +59,16 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const finished = useRef({ ok: 0, failed: 0 });
   const dupRef = useRef(onDuplicate);
   dupRef.current = onDuplicate;
-  const create = useMutation(trpc.bumpers.create.mutationOptions());
-  const setDefaultM = useMutation(trpc.bumpers.setDefault.mutationOptions());
-  const removeM = useMutation(trpc.bumpers.delete.mutationOptions());
-  const restoreM = useMutation(trpc.bumpers.restore.mutationOptions());
-  const saveM = useMutation(trpc.library.save.mutationOptions());
-  const updateM = useMutation(trpc.bumpers.update.mutationOptions());
+  const create = useMutation(trpc.library.add.mutationOptions());
+  const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
+  const removeM = useMutation(trpc.library.remove.mutationOptions());
+  const restoreM = useMutation(trpc.library.restore.mutationOptions());
+  const updateM = useMutation(trpc.library.update.mutationOptions());
   const busy = setDefaultM.isPending || removeM.isPending || restoreM.isPending || updateM.isPending;
   const uploading = jobs.some((j) => j.state === "queued" || j.state === "uploading" || j.state === "saving");
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
-    void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
   };
   const fail = (e: unknown) => setError((e as Error).message.slice(0, 200));
   const patch = (key: string, p: Partial<UploadJob>) => setJobs((js) => js.map((j) => (j.key === key ? { ...j, ...p } : j)));
@@ -141,7 +140,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
   const remove = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(a.owner === "me" ? `Removed ${a.name}` : `Removed ${a.name} from your library`, { duration: 8000, action: { label: "Undo", onClick: () => void (a.owner === "me" ? restore(a) : saveM.mutateAsync({ id: a.id }).then(refresh)) } }), true),
+      () => (refresh(), toast(a.owner === "me" ? `Removed ${a.name}` : `Removed ${a.name} from your library`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
       (e) => (fail(e), false),
     );
   /** Image length; resolves true when saved. */
@@ -568,7 +567,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
 /** Projects that use an asset (default or override) with the clips under each, and where each use comes from. */
 export function UsageList({ id, className = "" }: { id: string; className?: string }) {
   const trpc = useTRPC();
-  const q = useQuery(trpc.bumpers.usage.queryOptions({ id }));
+  const q = useQuery(trpc.library.usage.queryOptions({ id }));
   const projects = q.data?.projects ?? [];
   return (
     <ScrollArea className={className}>
@@ -871,7 +870,7 @@ export function ProjectBumpersModal({
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-          void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+          void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
           toast(r.rerendered ? `Saved · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Saved");
           setPick({});
           onOpenChange(false);

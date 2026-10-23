@@ -1,5 +1,7 @@
 # Intro and outro scenes (bumpers)
 
+> Historical: the library grew past intros and outros. Current names and surfaces are in [library.md](library.md) (`library.*`, `search_assets` / `add_asset`, `reelsaw library`); the names below are the originals.
+
 ## Job
 When I publish clips, I want my own intro and/or outro (a short video, or an image shown for a few
 seconds) attached to every clip automatically, so that every export is on-brand without opening
@@ -172,12 +174,12 @@ is unchanged.
   each ("overlay ×2", "music", "intro · from project").
 
 ## API, MCP, CLI
-tRPC `bumpers.*`; the ids ride on project settings and user defaults. MCP gets optional ids on project
-creation and read-only `list_bumpers` (uploading stays in the web UI). CLI: `reelsaw bumpers`.
-`bumpers.list` / `list_bumpers` carry `usedBy`, `usedByClips` (intro, outro, overlay and music uses) and
-`url` (the file itself, for playing or viewing); `bumpers.usage` / `bumper_usage` / `reelsaw bumpers usage`
-return the roles per clip (`slots`, with `overlays` and `music` counts). `bumpers.update` / `rename_bumper` /
-`reelsaw bumpers rename` change the label.
+tRPC `library.*` (first `bumpers.*`); the ids ride on project settings and user defaults. MCP gets optional ids on project
+creation and read-only `search_assets` with source library (first `list_bumpers`; uploading stays in the web UI). CLI: `reelsaw library`.
+`library.list` carries `usedBy`, `usedByClips` (intro, outro, overlay and music uses) and
+`url` (the file itself, for playing or viewing); `library.usage` / `asset_usage` / `reelsaw library usage`
+return the roles per clip (`slots`, with `overlays` and `music` counts). `library.update` / `update_asset` /
+`reelsaw library rename` change the label.
 
 ## Edge cases
 - Source without audio: body gets generated silence, so concat always has audio.
@@ -196,7 +198,7 @@ timing identical to a render without bumpers.
 selection (inherit / none / asset per slot, replacing the opt-out) with bulk apply and a card
 popover, editor label, a library of several assets with restore, "Used by N projects".
 
-**Phase 3:** image + sound, loudness warning, MCP and CLI (done: `list_bumpers`, `add_bumper`, `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`, `set_project_bumpers`, `set_clip_bumpers`, effective bumpers in `get_project`/`get_clip`; `reelsaw bumpers|project-bumpers|clip-bumpers`), cleanup job, optional 0.15 s crossfade.
+**Phase 3:** image + sound, loudness warning, MCP and CLI (done, now `search_assets`, `add_asset`, `set_default_bumper`, `remove_asset`, `restore_asset`, `asset_usage`, `set_project_bumpers`, `set_clip_bumpers`, effective bumpers in `get_project`/`get_clip`; `reelsaw library|project-bumpers|clip-bumpers`), cleanup job, optional 0.15 s crossfade.
 
 ## Risks
 - Concat needs audio in every slot; the no-cuts branch has optional audio today.

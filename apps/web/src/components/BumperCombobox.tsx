@@ -9,7 +9,7 @@ import { Skeleton } from "./ui";
 
 // Rich rows (thumbnails, badges) live here; for a plain list with typeahead use `Combobox` in ui.tsx.
 
-/** What the combobox needs to know about a library asset (a subset of the `bumpers.list` row). */
+/** What the combobox needs to know about a library asset (a subset of the `library.list` row). */
 export interface PickerAsset {
   id: string;
   kind: "video" | "image" | "audio";

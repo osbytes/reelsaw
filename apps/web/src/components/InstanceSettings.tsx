@@ -135,7 +135,7 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
         void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.system.status.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.admin.updates.pathKey() });
-        void qc.invalidateQueries({ queryKey: trpc.catalog.pathKey() }); // Browse lists providers by their keys
+        void qc.invalidateQueries({ queryKey: trpc.library.pathKey() }); // Browse lists providers by their keys
       },
       onError: (e) => toast.error(e.message),
     }),

@@ -59,20 +59,16 @@ export const setClipBumpersInput = {
   outroSec: bumperSecondsSchema.optional().describe("Seconds an outro image shows on these clips (1-10)"),
   rerender: z.boolean().describe("true = re-render only these clips now; false = apply on their next render"),
 };
-/** add_asset: add_bumper plus tags (there are no categories); the url takes every format the library stores. */
+/** add_asset: exactly one of uploadId, url or provider + externalId (`library.add`); the url takes every format the library stores. */
 export const addAssetInput = {
   url: z.url().optional().describe("http(s) link to a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC); the server downloads it (max 50 MB, 60 s)"),
   uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
-  name: z.string().min(1).max(120).optional().describe("Library name (url only; default: the file name). update_asset changes it later"),
+  provider: z.string().min(1).max(40).optional().describe("A search_assets hit's provider (catalog or an enabled provider), together with externalId; instead of url / uploadId"),
+  externalId: z.string().min(1).max(200).optional().describe("A search_assets hit's externalId, together with provider"),
+  color: z.string().max(9).optional().describe("iconify hits only: icon color as hex, e.g. #ffffff (default white)"),
+  name: z.string().min(1).max(120).optional().describe("Library name (url or uploadId; default: the file name). update_asset changes it later"),
   tags: assetTagsSchema.optional().describe("Search tags (lowercase words; max 20)"),
   imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional().describe("How long a still image shows as an intro/outro (1-10 s)"),
-  setDefault: z.enum(["intro", "outro"]).optional().describe("Also make it your default intro or outro for new projects"),
-};
-export const addBumperInput = {
-  url: z.url().optional().describe("http(s) link to an MP4/MOV/WebM (max 10 s) or PNG/JPG; the server downloads it (max 50 MB, 60 s)"),
-  uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
-  name: z.string().min(1).max(120).optional().describe("Library name (url only; default: the file name). rename_bumper changes it later"),
-  imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional().describe("How long an image shows (1-10 s)"),
   setDefault: z.enum(["intro", "outro"]).optional().describe("Also make it your default intro or outro for new projects"),
 };
 
@@ -264,8 +260,10 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
   }
 }
 
-export function requireOneSource(i: { url?: string; uploadId?: string }) {
-  if (!!i.url === !!i.uploadId) throw new Error("Give exactly one of url or uploadId");
+/** `library.add` takes exactly one source: an upload, a link, or a catalog / provider result (provider + externalId together). */
+export function requireOneSource(i: { url?: string; uploadId?: string; provider?: string; externalId?: string }) {
+  if (!!i.provider !== !!i.externalId) throw new Error("provider and externalId go together");
+  if ([i.url, i.uploadId, i.provider].filter(Boolean).length !== 1) throw new Error("Give exactly one of uploadId, url or provider + externalId");
 }
 
 // ── bounded download ───────────────────────────────────────────────────────
@@ -411,7 +409,7 @@ type Api = ReturnType<typeof appRouter.createCaller>;
 
 /** The library as an agent or operator wants to read it: `bumpers.list` plus which asset is the user's default intro and outro. */
 export async function libraryView(svc: Services, api: Api, userId: string, abs: (p: string) => string = (p) => p) {
-  const [lib, defaults] = await Promise.all([api.bumpers.list(), userDefaults(svc.database.db, userId)]);
+  const [lib, defaults] = await Promise.all([api.library.list(), userDefaults(svc.database.db, userId)]);
   const row = (a: (typeof lib.assets)[number]) => ({
     id: a.id,
     name: a.name,

@@ -29,7 +29,7 @@ export interface TileModel {
   license?: string;
   /** the library row behind it (own, saved shared, or the row a catalog / provider result was imported as) */
   row?: LibraryAsset;
-  /** a shared row that exists on the instance but is not in this library yet (needs `library.save`) */
+  /** a shared row that exists on the instance but is not in this library yet (`library.restore` saves it) */
   unsavedShared?: boolean;
   /** "2 clips" / "1 project" for a library item that is in use */
   usage?: string;

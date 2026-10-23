@@ -91,15 +91,15 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
-  const setDefault = useMutation(trpc.bumpers.setDefault.mutationOptions());
-  const removeAsset = useMutation(trpc.bumpers.delete.mutationOptions());
-  const restoreAsset = useMutation(trpc.bumpers.restore.mutationOptions());
+  const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
+  const removeAsset = useMutation(trpc.library.remove.mutationOptions());
+  const restoreAsset = useMutation(trpc.library.restore.mutationOptions());
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
 
   // the library, fetched only while the palette is open
-  const libQ = useQuery({ ...trpc.bumpers.list.queryOptions(), enabled: open, staleTime: 30_000 });
+  const libQ = useQuery({ ...trpc.library.list.queryOptions(), enabled: open, staleTime: 30_000 });
   const library = libQ.data?.assets;
   const libFuse = useMemo(() => (library ? createFuzzy(library.map(searchable), SEARCH_KEYS) : null), [library]);
   const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
@@ -682,7 +682,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           const c = confirm!;
           removeAsset.mutateAsync({ id: c.id }).then(
             () => {
-              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
+              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.library.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
               refresh();
               toast(`Removed ${c.title}`, { duration: 8000, action: { label: "Undo", onClick: () => void restoreAsset.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
             },

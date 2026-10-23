@@ -124,7 +124,7 @@ when someone is waiting. Locked out: `docker compose exec app reelsaw make-admin
 Settings → *API keys and MCP* creates a key for Claude Code, Claude Desktop, Cursor or scripts;
 the page shows the exact client config. The MCP endpoint is `<APP_URL>/api/mcp`, so `APP_URL`
 must be the address agents can reach. Agents can also manage your intro/outro library and assign it to
-projects and clips (`list_bumpers`, `add_bumper`, `set_project_bumpers`, `set_clip_bumpers`, …).
+projects and clips (`search_assets`, `add_asset`, `set_project_bumpers`, `set_clip_bumpers`, …).
 
 A client that launches a command instead of calling a URL (Claude Desktop without `MCP_OAUTH`,
 Cursor's stdio entries) runs `reelsaw mcp` inside the app container; Settings shows the config:

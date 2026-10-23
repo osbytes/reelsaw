@@ -4,7 +4,7 @@
  * library is not drawn twice). One "Show more", one attribution footer.
  * `mode="library"` is the Library page body (filters live in the URL: ?kind=&source=&q=, #asset=<id>);
  * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button).
- * Server: `bumpers.list`, `catalog.providers / search / import`, `library.save` (same services as the MCP tools).
+ * Server: `library.list / search / providers / add / remove / restore` (same services as the MCP tools).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,8 +23,8 @@ import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
 import { Modal, Notice, Skeleton } from "./ui";
 
 type Out = inferRouterOutputs<AppRouter>;
-type RemoteItem = Out["catalog"]["search"]["items"][number];
-type Provider = Out["catalog"]["providers"][number];
+type RemoteItem = Out["library"]["search"]["items"][number];
+type Provider = Out["library"]["providers"][number];
 
 /** What a pick hands back: the fields the editor's layer helpers need. */
 export interface PickedAsset {
@@ -134,7 +134,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const own = useBumperActions();
   const actions = actionsProp ?? own;
   const list = useBumperLibrary();
-  const providers = useQuery(trpc.catalog.providers.queryOptions());
+  const providers = useQuery(trpc.library.providers.queryOptions());
   const defaults = useMe().data?.projectDefaults;
   const selected = useHashParams().get("asset");
   const [license, setLicense] = useState<"cc0" | "by">("cc0");
@@ -204,8 +204,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, rows.length]);
 
-  const importM = useMutation(trpc.catalog.import.mutationOptions());
-  const refreshList = () => void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+  const importM = useMutation(trpc.library.add.mutationOptions());
+  const refreshList = () => void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
 
   /** Runs `fn` with the tile marked pending; a failure is a toast and the tile goes back to idle. */
   const run = async (key: string, fn: () => Promise<void>) => {
@@ -467,8 +467,8 @@ function SourceTiles({
   const seen = useSeen(slot);
   const enabled = forced || seen;
   const search = useInfiniteQuery(
-    trpc.catalog.search.infiniteQueryOptions(
-      { ...(provider ? { provider } : {}), q, kind, limit: PAGE, ...(license ? { license } : {}) },
+    trpc.library.search.infiniteQueryOptions(
+      { ...(provider ? { source: provider } : {}), q, kind, limit: PAGE, ...(license ? { license } : {}) },
       { enabled, getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, staleTime: 60_000 },
     ),
   );

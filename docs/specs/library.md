@@ -20,7 +20,7 @@ without leaving the editor or finding files on my disk.
 | store | `bumper_assets`, now `assets` (`kind` video / image / audio, immutable, soft delete, sha256 dedupe, URL import with SSRF guard, 30-day purge) | right model, wrong name and too narrow: no SVG, GIF, WebP; no tags or provenance; "Used by" loads every project and clip of the user (scale.md #11, #12) |
 | clip refs | `clips.bumpers {intro, outro}`, `clips.overlays[]` (asset \| text), `clips.audio[]` | two lists with two id spaces, two lanes, two inspector cards, two MCP fields, two CLI commands, two copy/paste paths, for items that share id / start / end / level / fade |
 | render | `overlayChain` (images repeat, videos play once), `musicMix` (loop, duck, fade), bumper concat | fine; needs loop for stickers, raster step for SVG |
-| surfaces | `list_bumpers` … `set_clip_bumpers`, `update_clip { overlays, audio }`, `reelsaw bumpers`, `clip-overlays`, `clip-audio` | named after the first use case |
+| surfaces | `list_bumpers` … `set_clip_bumpers`, `update_clip { overlays, audio }`, `reelsaw bumpers`, `clip-overlays`, `clip-audio` | named after the first use case (consolidated: see Surfaces) |
 | ffmpeg in the image | Debian 12 build has `librsvg`, `gif`, `webp` decoders (checked with `-decoders` / `-buildconf`) | nothing to install |
 
 ## Decisions
@@ -55,9 +55,8 @@ without leaving the editor or finding files on my disk.
    Read path: `clipLayers(clip)` returns `layers` when set, otherwise `overlays` + `clipAudioList(audio)`
    mapped to the union (ids are already unique per list; prefix `a:` on audio ids when merging to keep
    them unique). Write path: `clips.update { layers }` writes `layers` and nulls the old columns in the
-   same statement. `update_clip { overlays }` / `{ audio }` and `reelsaw clip-overlays` / `clip-audio`
-   keep working for one release as aliases that read-modify-write `layers`, then are dropped with a
-   changeset note. Migration: schema only (new column, no backfill); a reconciler batch backfills idle
+   same statement. `update_clip { overlays }` / `{ audio }` and `reelsaw clip-overlays` / `clip-audio` were
+   aliases for one release and are dropped (changeset note); `publicClip` and `get_clip` return `layers` only. Migration: schema only (new column, no backfill); a reconciler batch backfills idle
    clips with cursors (scale.md #10 rule), and the read path makes the backfill optional.
 3. **One lane, "Layers".** Replaces the Overlays and Music lanes. Packed rows as today (cap three →
    four), packing visual items first so sounds sit on the bottom rows; audio blocks get the waveform
@@ -68,7 +67,7 @@ without leaving the editor or finding files on my disk.
 4. **Asset refs table, maintained in the write transaction.** `asset_refs (asset_id, project_id,
    clip_id null, role)` rows are rewritten whenever `clips.layers`, `clips.bumpers` or project
    `introAssetId` / `outroAssetId` change (same unit of work, [PRINCIPLES](../PRINCIPLES.md)
-   transactions rule). "Used by N", `bumper_usage`, the purge's "still referenced" test and the credits
+   transactions rule). "Used by N", `asset_usage`, the purge's "still referenced" test and the credits
    list become indexed lookups instead of jsonb `->>` scans over every clip. Backfilled once by the
    migration's follow-up job.
    Built (`library/refs.ts`): a clip row exists only for what the clip names itself (its own
@@ -190,7 +189,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
   in your library that are in use carry a small muted badge at the thumbnail's bottom-left ("2 clips" or
   "1 project"). There is no in-library badge: the only control is a small round "+" button on the
   thumbnail's top-right corner for a catalog / provider result that is not in your library (shown on
-  hover / focus on desktop, always on touch; "Adding..." becomes a spinner; `catalog.import`; an item
+  hover / focus on desktop, always on touch; "Adding..." becomes a spinner; `library.add`; an item
   already on the instance is only saved, nothing is downloaded again; the tile then becomes the
   in-library tile in place). Clicking an in-library tile opens the viewer, which keeps rename, tags,
   usage, remove / "Remove from your library" and "Used by N". Deep links: `#asset=<id>`,
@@ -210,14 +209,18 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 | action | tRPC | MCP | CLI |
 |---|---|---|---|
-| list / search own library | `library.list { kind?, q?, cursor }` | `list_assets` (alias `list_bumpers` for one release) | `reelsaw library list [--kind] [--q]` |
-| upload / import by URL | `library.create { uploadId \| url, name?, tags? }` | `add_asset` (alias `add_bumper`) | `reelsaw library add <file\|url>` |
-| rename, tag, remove, restore, usage | `library.update / delete / restore / usage` (`library` and `bumpers` are the same router) | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` (old `*_bumper` names stay as aliases) | `reelsaw library rename\|update\|remove\|restore\|usage` |
+| list own library | `library.list` | `search_assets { source: "library" }` (empty `q` = everything) | `reelsaw library list [--kind] [--q]` |
+| search library, catalog, providers | `library.search { q, source?: "library" \| "catalog" \| <providerId>, kind?, cursor?, limit?, license? }`, `library.providers` | `search_assets` | `reelsaw library search <q> [--source] [--kind] [--license]` |
+| add (upload, URL, catalog / provider hit) | `library.add { uploadId \| url \| provider + externalId, name?, tags?, imageSeconds?, setDefault?, color? }` (exactly one source) | `add_asset` | `reelsaw library add <file\|url\|provider:externalId>` |
+| rename, tag, remove, restore, usage | `library.update / remove / restore / usage` | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` | `reelsaw library rename\|update\|remove\|restore\|usage` |
+| default intro / outro | `library.setDefault` | `set_default_bumper` | `reelsaw library default <intro\|outro> <id\|none>` |
 | rebuild the refs table | none (reconciler backfill, bounded ticks) | none | `reelsaw library reindex` |
-| search catalog and providers | `library.search { provider, q, kind?, cursor? }` | `search_library { provider?, q, kind? }` | `reelsaw library search <q> [--provider] [--kind]` |
-| import a result | `library.import { provider, externalId, color? }` | `import_asset` | `reelsaw library import <provider> <id>` |
 | clip layers | `clips.update { layers }` | `update_clip { layers }`, `get_clip` | `reelsaw clip-layers <p> <c> --set '<json>' \| --add <assetId> … \| --add-text … \| --add-sound <assetId> … \| --remove <id> \| --clear [--rerender]` |
 | catalog ops | admin: `catalog.refresh`, `catalog.status` | `get_instance_settings` shows catalog version | `reelsaw catalog refresh\|status` |
+
+`library.remove` on a shared row only unsaves it and `library.restore` saves it again, so there is no
+separate save / unsave. "Bumper" stays the name of the intro / outro slot (`set_default_bumper`,
+`set_project_bumpers`, `set_clip_bumpers`, `project-bumpers`, `clip-bumpers`).
 
 All surfaces call `apps/server/src/library/service.ts` (renamed from `bumpers/service.ts`), per the
 surfaces rule.
@@ -235,8 +238,8 @@ surfaces rule.
 
 | phase | appetite | ships |
 |---|---|---|
-| 0. Widen the store | 1 day | table rename + `mime`, `tags`, `provenance`, `system`; svg / gif / webp accepted; svg raster cache; gif loop; `library.*` procedures with the old names as aliases; `list_assets` / `add_asset` MCP (+ aliases); `reelsaw library` |
-| 1. Layers | 3 days | `clipLayerSchema`, `clips.layers`, read-path merge, write-path null-out, `asset_refs` + backfill job, one lane, one inspector card, `+ Sound`, MCP / CLI aliases, spec update, eval fixture renders with a gif sticker, an svg logo and a sound effect |
+| 0. Widen the store | 1 day | table rename + `mime`, `tags`, `provenance`, `system`; svg / gif / webp accepted; svg raster cache; gif loop; `library.*` procedures; `search_assets` / `add_asset` MCP; `reelsaw library` |
+| 1. Layers | 3 days | `clipLayerSchema`, `clips.layers`, read-path merge, write-path null-out, `asset_refs` + backfill job, one lane, one inspector card, `+ Sound`, spec update, eval fixture renders with a gif sticker, an svg logo and a sound effect |
 | 2. Library page | 2 days | chips, search, license badges, credits in export and `get_project` |
 | 3. Catalog + providers | 3 days | provider interface, 24 h search cache, runtime key settings, Browse tab + dialog, Reelsaw manifest + `catalog:build` + starter pack in the image, Pexels, Freesound, Iconify; Openverse and Pixabay behind a flag until their limits are verified in practice |
 | 3b. GIF search | 1 day | Giphy and Klipy providers (bring your own key), sticker vs GIF import rule, attribution mark; a GIF layer previews with `<img>` (browsers loop GIFs natively) and renders through the looped overlay input |

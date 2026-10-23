@@ -16,7 +16,7 @@ import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
-import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./library/service.js";
+import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall, type AssetRef } from "./library/service.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
@@ -89,7 +89,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   /** Names and lengths of every library asset (removed ones too: clips that still use them keep rendering with them). */
   const assetsById = async () => {
-    const lib = await api.bumpers.list();
+    const lib = await api.library.list();
     return assetMap([...lib.assets, ...lib.deleted] as AssetRef[]);
   };
 
@@ -335,43 +335,18 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   // ── intro / outro library ────────────────────────────────────────────────
 
-  // the library tools and their old *_bumper names share one handler each
-  const listAssets = () => run(() => libraryView(svc, api, user.id, (p) => abs(p)!));
-  const addAsset = (input: { url?: string; uploadId?: string; name?: string; tags?: string[]; imageSeconds?: number; setDefault?: "intro" | "outro" }) =>
-    run(async () => {
-      requireOneSource(input);
-      if (input.uploadId && input.name) throw new Error("name can only be set together with url");
-      const uploadId = input.uploadId ?? (await downloadAsUpload(svc, user.id, input.url!, { name: input.name })).uploadId;
-      const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, tags: input.tags });
-      return { ...created, isDefault: input.setDefault ?? null };
-    });
-  const updateAsset = ({ assetId, ...patch }: { assetId: string; name?: string; tags?: string[]; imageSeconds?: number }) => run(() => api.bumpers.update({ id: assetId, ...patch }));
-  const removeAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.delete({ id: assetId }));
-  const restoreAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.restore({ id: assetId }));
-  const assetUsage = ({ assetId }: { assetId: string }) => run(() => api.bumpers.usage({ id: assetId }));
-
-  server.registerTool("list_assets", TOOLS.list_assets, listAssets);
-  server.registerTool("add_asset", TOOLS.add_asset, addAsset);
-  server.registerTool("update_asset", TOOLS.update_asset, updateAsset);
-  server.registerTool("remove_asset", TOOLS.remove_asset, removeAsset);
-  server.registerTool("restore_asset", TOOLS.restore_asset, restoreAsset);
-  server.registerTool("asset_usage", TOOLS.asset_usage, assetUsage);
-  server.registerTool("list_bumpers", TOOLS.list_bumpers, listAssets);
-  server.registerTool("add_bumper", TOOLS.add_bumper, addAsset);
-  server.registerTool("rename_bumper", TOOLS.rename_bumper, ({ assetId, name }) => updateAsset({ assetId, name }));
-
-  server.registerTool("search_library", TOOLS.search_library, (input) => run(() => api.catalog.search(input)));
-  server.registerTool("import_asset", TOOLS.import_asset, (input) => run(() => api.catalog.import(input)));
+  server.registerTool("search_assets", TOOLS.search_assets, (input) => run(() => api.library.search(input)));
+  server.registerTool("add_asset", TOOLS.add_asset, (input) => run(async () => ({ ...(await api.library.add(input)), isDefault: input.setDefault ?? null })));
+  server.registerTool("update_asset", TOOLS.update_asset, ({ assetId, ...patch }) => run(() => api.library.update({ id: assetId, ...patch })));
+  server.registerTool("remove_asset", TOOLS.remove_asset, ({ assetId }) => run(() => api.library.remove({ id: assetId })));
+  server.registerTool("restore_asset", TOOLS.restore_asset, ({ assetId }) => run(() => api.library.restore({ id: assetId })));
+  server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
 
   server.registerTool(
     "set_default_bumper",
     TOOLS.set_default_bumper,
-    ({ slot, assetId }) => run(() => api.bumpers.setDefault({ slot, assetId })),
+    ({ slot, assetId }) => run(() => api.library.setDefault({ slot, assetId })),
   );
-
-  server.registerTool("remove_bumper", TOOLS.remove_bumper, removeAsset);
-  server.registerTool("restore_bumper", TOOLS.restore_bumper, restoreAsset);
-  server.registerTool("bumper_usage", TOOLS.bumper_usage, assetUsage);
 
   server.registerTool(
     "set_project_bumpers",
