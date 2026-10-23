@@ -19,6 +19,7 @@ import { Logo, ThemeToggle } from "../App";
 import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
+import { useDocumentTitle } from "../lib/title";
 
 /** Where to go after the next sign-in (a plan picked on the website); kept a day, in localStorage so an email verification link in a new tab still finds it. */
 export const AFTER_SIGN_IN_KEY = "reelsaw.afterSignIn";
@@ -74,6 +75,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   // arriving from an OAuth authorize redirect (MCP connector): after sign-in, hand the signed query back
   const oauthQuery = /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
   const canResend = status.data?.emailEnabled !== false && shouldOfferResendVerification({ errorCode, expiredLink, afterSignUp });
+  useDocumentTitle(expiredLink ? "This link expired · Reelsaw" : mode === "signup" ? "Create account · Reelsaw" : "Sign in · Reelsaw");
 
   if (data && !oauthQuery) return <Navigate to="/" replace />;
 

@@ -46,7 +46,7 @@ stay the same animation.
   - `app/(guides)/[slug]/opengraph-image.tsx` — one card per guide
   Twitter large-image cards reuse the same files. `/pipeline-film` is `noindex` and inherits the
   fallback. Page metadata uses `lib/social-meta.ts` so the Twitter `card` type is never dropped.
-- `app/robots.ts`, `app/sitemap.ts`, `app/manifest.ts`, `app/icon.svg`, `app/apple-icon.png`.
+- `app/robots.ts`, `app/sitemap.ts`, `app/manifest.ts`, `app/icon.svg`, `app/favicon.ico`, `app/apple-icon.png` (the same files as `apps/web/public`).
 - `app/page.tsx` carries JSON-LD (`SoftwareApplication`, `SoftwareSourceCode`, `WebSite`), one `h1`,
   section landmarks with headings, descriptive alt text, and `next/image` for the screenshots.
 

@@ -1,0 +1,10 @@
+{
+  "name": "Reelsaw",
+  "short_name": "Reelsaw",
+  "description": "Turn long videos into vertical 9:16 clips. Reelsaw transcribes, picks the moments, reframes speakers and burns in captions.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#131314",
+  "theme_color": "#8460d2",
+  "icons": [{ "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}

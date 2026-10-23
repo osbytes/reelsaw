@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router";
 import { Logo, ThemeToggle } from "../App";
 import { authClient, useSession } from "../lib/auth";
 import { ScrollArea } from "../components/scroll-area";
+import { useDocumentTitle } from "../lib/title";
 
 type Client = { client_id: string; name?: string; uri?: string; icon?: string };
 
@@ -17,6 +18,7 @@ export function ConsentPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useDocumentTitle("Authorize · Reelsaw");
 
   useEffect(() => {
     if (!clientId) return;
