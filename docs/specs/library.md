@@ -163,7 +163,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 | **Pexels** | photos, **portrait videos** (b-roll) | free, `PEXELS_API_KEY` | 200 req/h, 20k/month; more on request | Pexels License: free commercial use; show a Pexels link; no standalone redistribution, no competing service | `videos/search?orientation=portrait&size=medium` fits 9:16; store photographer + photo url |
 | **Pixabay** | photos, illustrations, **vectors**, videos | free, `PIXABAY_API_KEY` | 100 req/min; search results must be cached 24 h | Pixabay Content License: no attribution needed, show source in results; must download, never hotlink | API has no music / sfx; full-resolution URLs need approval, the standard `largeImageURL` / video sizes are enough |
 | **Freesound** | sound effects, loops | free, `FREESOUND_API_KEY` | per-app quota | per-sound CC0 / CC-BY / CC-BY-NC; filter CC0 by default, allow CC-BY with attribution, never NC | original downloads need per-user OAuth2; import the HQ preview (`previews.preview-hq-mp3`, 128 kbps), fine under speech |
-| **Iconify** | 200k+ icons, search, SVG with colour / size | none (public api.iconify.design) or self-hosted | public API fair use; self-host when it matters | per icon set; allowlist permissive sets (lucide, tabler, mdi, ph, heroicons…) | fetch `…/icon.svg?color=%23ffffff&width=512`; a colour picker in the import dialog |
+| **Iconify** | 200k+ icons, search, SVG with colour / size | none (public api.iconify.design) or self-hosted | public API fair use; self-host when it matters | per icon set; allowlist permissive sets (lucide, tabler, mdi, ph, heroicons…) | fetch `…/icon.svg?color=%23ffffff&width=512`; imported as it comes (white by default); colour is a use-side concern (a tint on the layer, later), not a library setting |
 | **Openverse** | CC images and audio (Freesound, Jamendo, Wikimedia) | none for low rates; free registered key raises limits (figures unverified; sources conflict) | see docs before shipping | CC with license fields per result | the keyless fallback for images and sound; audio URLs may point at originals that need auth, so test per source before enabling |
 | **Giphy** | GIF search, stickers (transparent), mp4 renditions | per instance, `GIPHY_API_KEY` | beta key: 100 calls/h, enough for a self-hosted install; production needs an application and a pricing talk | Giphy terms: show a "Powered by GIPHY" mark in the Browse panel; content is Giphy's to license, store the source url | import the `original.mp4` rendition for opaque GIFs (smaller, same loop), the `.gif` for stickers so the alpha survives; phase 3b, behind its key |
 | **Klipy** | GIF search, Tenor-compatible API | per instance, `KLIPY_API_KEY` | free, ad-supported tier (terms, attribution and ad obligations unverified) | unverified | Tenor's successor for most apps after Tenor's API shut down 30 June 2026; verify the developer terms before enabling; phase 3b |
@@ -185,8 +185,12 @@ a 429 hides the provider for the reset window with a sentence in the panel.
   back empty; one "Show more" loads the next page of the first source that has one. Attribution lines
   (Pexels, Pixabay, Giphy) are one muted footer under the grid. A tile shows the thumbnail or preview,
   a one-line name and one muted meta line `kind · length or size · source · license` (source is
-  Yours, Catalog or the provider). There is no in-library badge: the only control is a small ghost
-  "+ Add" on a catalog / provider result that is not in your library (`catalog.import`; an item
+  Yours, Catalog or the provider; audio and video show their length, an image shows its pixel size and
+  never a length, since an image's stored duration is only how long it shows as an intro / outro). Items
+  in your library that are in use carry a small muted badge at the thumbnail's bottom-left ("2 clips" or
+  "1 project"). There is no in-library badge: the only control is a small round "+" button on the
+  thumbnail's top-right corner for a catalog / provider result that is not in your library (shown on
+  hover / focus on desktop, always on touch; "Adding..." becomes a spinner; `catalog.import`; an item
   already on the instance is only saved, nothing is downloaded again; the tile then becomes the
   in-library tile in place). Clicking an in-library tile opens the viewer, which keeps rename, tags,
   usage, remove / "Remove from your library" and "Used by N". Deep links: `#asset=<id>`,
@@ -194,7 +198,9 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 - **Editor**: the Layers lane; `+` -> Image or video... / Text / Sound.... Image or video ("Add to
   clip") and Sound ("Add a sound") open the same single-grid finder in a dialog
   (`AssetFinderDialog`, kinds preset, kind chips hidden when limited to one kind, no Upload button).
-  Every tile has one primary "Add to clip" button (clicking the thumbnail does the same): on a
+  When limited to kinds, the source chips list only providers that serve those kinds (no Iconify in
+  the sound dialog) and results of other kinds are dropped. Every tile has one primary "Add to clip"
+  button on the thumbnail's top-right corner (clicking the thumbnail does the same): on a
   library tile it adds the layer at the playhead the dialog was opened at; on a catalog / provider
   result it imports it into the library first ("Adding..." on the tile), then adds the layer. Overlay
   stacking rules in [UI.md](../UI.md).

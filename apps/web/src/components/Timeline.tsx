@@ -245,6 +245,8 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   }
 
   function onWheel(e: React.WheelEvent) {
+    // React bubbles events from portals (the intro / outro popover) up the component tree; only our own DOM pans
+    if (!e.currentTarget.contains(e.target as Node)) return;
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, tAt(e.clientX));
@@ -259,7 +261,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   useEffect(() => {
     const el = lanesRef.current?.parentElement;
     if (!el) return;
-    const block = (e: WheelEvent) => (e.ctrlKey || e.metaKey) && e.preventDefault();
+    const block = (e: WheelEvent) => el.contains(e.target as Node) && (e.ctrlKey || e.metaKey) && e.preventDefault();
     el.addEventListener("wheel", block, { passive: false });
     return () => el.removeEventListener("wheel", block);
   }, []);

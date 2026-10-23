@@ -53,7 +53,7 @@ function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
       <Badge>{formatTag(a.mime) ?? a.kind}</Badge>
-      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
+      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : a.kind === "image" ? `shows ${durationText(a.durationSec)} · ${a.width}×${a.height}` : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
       {isDefault && <Badge tone="acc">default {slot}</Badge>}
       {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
     </span>
@@ -131,6 +131,8 @@ export function BumperCombobox({
           align="start"
           sideOffset={6}
           collisionPadding={12}
+          // React bubbles events through the portal to the opener's ancestors (the timeline pans on wheel)
+          onWheel={(e) => e.stopPropagation()}
           // above the dialogs and popovers it lives in
           className="z-[80] w-[max(var(--radix-popover-trigger-width),18rem)] max-w-[calc(100vw-24px)] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop"
         >

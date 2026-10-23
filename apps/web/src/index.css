@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* `touch:` = devices with no hover (phones, tablets): controls that appear on hover must be shown outright there. */
+@custom-variant touch (@media (hover: none));
+
 /* Design tokens. Light by default, dark under [data-theme=dark] (set before first paint in index.html). */
 :root {
   --bg: #f5f5f4;

@@ -1,8 +1,9 @@
 /**
  * One tile for every asset the finder lists: your own upload, a shared row you saved, a catalog result, a provider result.
  * Same box for all of them (fixed thumbnail, one-line name, fixed-height rows) so nothing shifts while data arrives.
- * No in-library badge: the tile is simply there. The only control is one footer CTA ("+ Add" in the library for
- * a result that is not saved yet, "Add to clip" in the picker); the footer row keeps its height without one.
+ * No in-library badge: the tile is simply there. The only control is one CTA ("+ Add" in the library for
+ * a result that is not saved yet, "Add to clip" in the picker): a round button on the thumbnail corner, shown on
+ * hover / focus on desktop and always on touch.
  */
 import { useEffect, useRef, useState } from "react";
 import { AudioLines, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from "lucide-react";
@@ -30,6 +31,8 @@ export interface TileModel {
   row?: LibraryAsset;
   /** a shared row that exists on the instance but is not in this library yet (needs `library.save`) */
   unsavedShared?: boolean;
+  /** "2 clips" / "1 project" for a library item that is in use */
+  usage?: string;
 }
 
 /** only one preview plays at a time across tiles */
@@ -99,10 +102,13 @@ export function AssetTile({
   const thumb = !failed && (t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined));
   const playable = t.kind !== "image" && !!t.previewUrl;
   const chip = "inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white";
+  // an image's stored duration is only how long it shows as an intro / outro, never a media length
   const size = t.kind === "image" ? (t.width && t.height ? `${t.width}×${t.height}` : "") : t.durationSec ? lengthText({ durationSec: t.durationSec }) : "";
+  const showAdd = picker || !inLibrary;
+  const addLabel = picker ? `${pickLabel}: ${t.name}` : `Add ${t.name} to your library`;
   const meta = [t.kind, size, t.source, t.license].filter(Boolean).join(" · ");
   return (
-    <li id={row ? `asset-${row.id}` : undefined} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
+    <li id={row ? `asset-${row.id}` : undefined} className={`group flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[10px] border border-line bg-sunk min-[480px]:aspect-[3/4]">
         {t.kind === "video" && playing && t.previewUrl ? (
           <video ref={video} src={t.previewUrl} poster={t.thumbUrl} muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />
@@ -125,7 +131,24 @@ export function AssetTile({
             {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="translate-x-px" />}
           </button>
         )}
-        {t.durationSec ? <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white">{lengthText({ durationSec: t.durationSec })}</span> : null}
+        {t.usage ? (
+          <span className={`pointer-events-none absolute bottom-1.5 left-1.5 ${chip}`}>{t.usage}</span>
+        ) : t.kind !== "image" && t.durationSec ? (
+          <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white">{lengthText({ durationSec: t.durationSec })}</span>
+        ) : null}
+        {showAdd && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={picker ? onPick : onAdd}
+            aria-label={pending ? "Adding…" : addLabel}
+            title={picker ? pickLabel : "Add to library"}
+            className="absolute right-1.5 top-1.5 inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
+          >
+            {pending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}
+            {picker && !pending && <span>Add</span>}
+          </button>
+        )}
       </div>
       <div className="min-w-0 text-xs">
         {onSelect ? (
@@ -141,19 +164,6 @@ export function AssetTile({
           {meta}
         </div>
       </div>
-      <div className="flex h-7 items-center">
-        {picker ? (
-          <button type="button" className="btn-ink h-7 w-full justify-center px-2 py-1 text-xs" disabled={pending} onClick={onPick}>
-            {pending ? <Loader2 size={14} className="animate-spin" /> : null}
-            {pending ? "Adding…" : pickLabel}
-          </button>
-        ) : !inLibrary ? (
-          <button type="button" className="btn-ghost h-7 w-full justify-center px-2 py-1 text-xs" disabled={pending} onClick={onAdd} aria-label={`Add ${t.name} to your library`}>
-            {pending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            {pending ? "Adding…" : "Add"}
-          </button>
-        ) : null}
-      </div>
     </li>
   );
 }
@@ -164,7 +174,6 @@ export function AssetTileSkeleton({ i = 0, liRef }: { i?: number; liRef?: React.
       <div className="aspect-[4/3] w-full animate-pulse rounded-[10px] bg-sunk min-[480px]:aspect-[3/4]" />
       <div className={`h-3 animate-pulse rounded bg-sunk ${["w-3/4", "w-1/2", "w-2/3"][i % 3]}`} />
       <div className="h-4" />
-      <div className="h-7" />
     </li>
   );
 }

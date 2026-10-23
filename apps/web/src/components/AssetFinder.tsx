@@ -137,7 +137,6 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const providers = useQuery(trpc.catalog.providers.queryOptions());
   const defaults = useMe().data?.projectDefaults;
   const selected = useHashParams().get("asset");
-  const [color, setColor] = useState("#ffffff");
   const [license, setLicense] = useState<"cc0" | "by">("cc0");
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<LibraryAsset | null>(null);
@@ -179,8 +178,13 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const kindChips = allowed?.length === 1 ? [] : KIND_FILTERS.filter((k) => !allowed || allowed.includes(k.id));
   // a single allowed kind is the filter; otherwise the chip decides
   const searchKind = kind || (allowed?.length === 1 ? allowed[0] : undefined);
-  const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw");
-  const providerFits = (p: Provider) => !searchKind || (p.kinds as readonly string[]).includes(searchKind);
+  // a kind-limited finder only lists providers that can serve one of the allowed kinds (and the chosen kind chip)
+  const providerFits = (p: Provider) => {
+    const has = (k: string) => (p.kinds as readonly string[]).includes(k);
+    return (!allowed || allowed.some(has)) && (!searchKind || has(searchKind));
+  };
+  const providerServes = (p: Provider) => !allowed || allowed.some((k) => (p.kinds as readonly string[]).includes(k));
+  const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw" && providerServes(p));
   const kindOk = (k: string) => !allowed || (allowed as readonly string[]).includes(k);
   const providerLabel = (id: string) => (id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1)));
 
@@ -215,7 +219,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     }
   };
   const importItem = async (i: RemoteItem): Promise<PickedAsset> => {
-    const a = await importM.mutateAsync({ provider: i.provider, externalId: i.externalId, ...(i.provider === "iconify" ? { color } : {}) });
+    const a = await importM.mutateAsync({ provider: i.provider, externalId: i.externalId });
     toast(a.duplicate ? `${a.name} is already in your library${a.restored ? " (restored)" : ""}.` : `Added ${a.name} to your library.`);
     if (source !== "library") setStay((s) => new Set(s).add(rowKey(i.provider, i.externalId)));
     refreshList();
@@ -231,6 +235,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const select = (a: LibraryAsset) => nav({ pathname: loc.pathname, search: loc.search, hash: selected === a.id ? "" : `#asset=${a.id}` }, { replace: true });
   const viewing = list.data?.assets.find((a) => a.id === viewingId) ?? null;
 
+  const usageText = (r: LibraryAsset) => (r.usedByClips > 0 ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}` : r.usedBy > 0 ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}` : undefined);
   const libTile = (r: LibraryAsset): TileModel => ({
     key: `lib:${r.id}`,
     kind: r.kind,
@@ -244,6 +249,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     thumbUrl: r.kind === "audio" ? undefined : r.thumbnailUrl,
     previewUrl: r.kind === "image" ? undefined : `/media/bumpers/${r.id}`,
     row: r,
+    usage: usageText(r),
   });
   const remoteTile = (i: RemoteItem): TileModel => ({
     key: `remote:${rowKey(i.provider, i.externalId)}`,
@@ -378,12 +384,6 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
                 CC0 + BY
               </Chip>
             </div>
-          )}
-          {source === "iconify" && (
-            <label className="flex items-center gap-1.5 text-xs text-ink2">
-              Color
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-7 cursor-pointer rounded border border-line bg-panel p-0.5" aria-label="Icon color" />
-            </label>
           )}
         </div>
         {mode === "library" && (actions.jobs.length > 0 || !!actions.error) && <UploadJobs jobs={actions.jobs} error={actions.error} onDismiss={actions.dismiss} />}
