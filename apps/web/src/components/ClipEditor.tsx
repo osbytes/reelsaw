@@ -12,7 +12,7 @@ import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type LayerBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
-import { BrowseLibraryDialog } from "./BrowseLibrary";
+import { AssetFinderDialog } from "./AssetFinder";
 import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
 import { loadTextFonts } from "../lib/fonts";
 import { z } from "zod";
@@ -115,12 +115,12 @@ const PANE_NAME = ["Top", "Bottom"] as const;
 const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
 /** shortest a layer may be: pictures and text 0.1 s, sounds 0.5 s */
 const layerMin = (l: Pick<ClipLayer, "kind">) => (l.kind === "audio" ? 0.5 : 0.1);
-/** a library row as the editor reads it: the list also carries the mime type and category */
+/** a library row as the editor reads it: the list also carries the mime type */
 type LayerAsset = LibraryAsset;
 /** GIF / animated WebP / video: a picture that moves, so it can repeat inside its window */
 const isAnimatedAsset = (a: LayerAsset | undefined) => !!a && (a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp");
 /** a short or sfx-tagged sound gets the one-shot treatment */
-const isSoundEffect = (a: LayerAsset | undefined) => !!a && audioLayerDefaultsFor({ durationSec: a.durationSec, category: a.category }) === SFX_AUDIO_DEFAULTS;
+const isSoundEffect = (a: LayerAsset | undefined) => !!a && audioLayerDefaultsFor({ durationSec: a.durationSec }) === SFX_AUDIO_DEFAULTS;
 type LayerPatch = Partial<Omit<AssetLayer, "kind"> & Omit<TextLayer, "kind"> & Omit<AudioLayer, "kind">>;
 /** Layers clamped to the clip; one that no longer fits is dropped (a retrim past it). */
 const clampLayers = (list: ClipLayer[], r: [number, number]): ClipLayer[] => list.map((l) => ({ ...l, start: Math.max(r[0], l.start), end: Math.min(r[1], l.end) })).filter((l) => l.end - l.start >= layerMin(l));
@@ -480,8 +480,6 @@ export function ClipEditor(props: Props) {
   }, [selectedLayer]);
   /** the asset or sound picker: what is being added and where the playhead was when it was asked for */
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
-  /** the Browse dialog (catalog + providers), remembering the playhead it was opened at so an import lands there */
-  const [browseAt, setBrowseAt] = useState<number | null>(null);
   const library = useBumperLibrary();
   const libraryAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
   const assetById = (id: string | null | undefined): LibraryAsset | undefined => (id ? libraryAssets.find((a) => a.id === id) : undefined);
@@ -803,7 +801,7 @@ export function ClipEditor(props: Props) {
     if (tab !== "layers" && tab !== "transcript") setTab("layers");
     toast(note);
   };
-  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec" | "category">;
+  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec">;
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const video = asset.kind === "video";
     const [start, end] = layerWindow(t, video ? Math.max(1, Math.min(asset.durationSec, range[1] - t)) : 4);
@@ -814,7 +812,7 @@ export function ClipEditor(props: Props) {
     pushLayer({ id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color }, "Text added · type it in the Layers tab, drag it on the preview");
   };
   const addSoundLayer = (asset: NewLayerAsset, t: number) => {
-    const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec, category: asset.category });
+    const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec });
     const oneShot = defaults === SFX_AUDIO_DEFAULTS;
     // a one-shot sound lasts as long as the file; music starts at the playhead and runs to the end of the clip
     const [start, end] = oneShot ? layerWindow(t, Math.max(0.5, asset.durationSec)) : layerWindow(t, range[1] - t);
@@ -914,7 +912,6 @@ export function ClipEditor(props: Props) {
     return true;
   };
   /** "Browse library…" in the + menu: the catalog and providers in a dialog; an imported item lands on the lane at the playhead */
-  const browseLibrary = () => setBrowseAt(current);
 
   // ----- intro / outro as blocks on the timeline -----
   const bumperBlock = (slot: BumperSlot): BumperBlock | null => {
@@ -1796,7 +1793,6 @@ export function ClipEditor(props: Props) {
         else setPicker({ kind, t });
       }}
       onLayerRemove={removeLayer}
-      onLayerBrowse={browseLibrary}
       renderClipEditor={clipRangeEditor}
       bumpers={bumperBlocks}
       selectedBumper={selectedBumper}
@@ -1929,59 +1925,26 @@ export function ClipEditor(props: Props) {
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
 
-      <BrowseLibraryDialog
-        open={browseAt !== null}
-        onOpenChange={(o) => !o && setBrowseAt(null)}
-        onImported={(asset) => {
-          const t = browseAt ?? current;
-          setBrowseAt(null);
-          // the import result is a plain row; the lane helpers want the library's kind union
-          const a = { ...asset, kind: asset.kind === "audio" ? ("audio" as const) : asset.kind === "video" ? ("video" as const) : ("image" as const), category: (asset.category ?? null) as LibraryAsset["category"] };
-          if (a.kind === "audio") addSoundLayer(a, t);
-          else addAssetLayer(a, t);
+      <AssetFinderDialog
+        open={picker?.kind === "asset"}
+        onOpenChange={(o) => !o && setPicker(null)}
+        title="Add an image or video"
+        kinds={["video", "image"]}
+        onPick={(a) => {
+          const t = picker?.t ?? current;
+          addAssetLayer(a, t);
         }}
       />
-      <Modal open={picker?.kind === "asset"} onOpenChange={(o) => !o && setPicker(null)} title="Add an image or video">
-        <p className="text-sm leading-relaxed text-ink2">
-          A library image, GIF or video, shown from <span className="font-mono">{fmtPrecise(Math.max(0, (picker?.t ?? current) - range[0]))}</span>. New files are added on the Library page.
-        </p>
-        <BumperCombobox
-          slot="overlay"
-          label="Image or video"
-          value=""
-          fixed={[]}
-          assets={(library.data?.assets ?? []).filter((a) => a.kind !== "audio")}
-          loading={library.isPending}
-          onChange={(id) => {
-            const a = assetById(id);
-            const t = picker?.t ?? current;
-            setPicker(null);
-            if (a) addAssetLayer(a, t);
-          }}
-        />
-        {!library.isPending && !(library.data?.assets ?? []).some((a) => a.kind !== "audio") && <p className="text-xs text-ink3">No images or videos in your library yet.</p>}
-      </Modal>
-
-      <Modal open={picker?.kind === "audio"} onOpenChange={(o) => !o && setPicker(null)} title="Add a sound">
-        <p className="text-sm leading-relaxed text-ink2">
-          Music or a sound effect from your library, starting at <span className="font-mono">{fmtPrecise(Math.max(0, (picker?.t ?? current) - range[0]))}</span>. Music runs to the end of the clip and is lowered while someone speaks; a short sound plays once at full level. The same file can be added more than once. Add MP3, M4A, WAV, OGG or FLAC files on the Library page.
-        </p>
-        <BumperCombobox
-          slot="sound"
-          label="Sound"
-          value=""
-          fixed={[]}
-          assets={(library.data?.assets ?? []).filter((a) => a.kind === "audio")}
-          loading={library.isPending}
-          onChange={(id) => {
-            const a = assetById(id);
-            const t = picker?.t ?? current;
-            setPicker(null);
-            if (a) addSoundLayer(a, t);
-          }}
-        />
-        {!library.isPending && !(library.data?.assets ?? []).some((a) => a.kind === "audio") && <p className="text-xs text-ink3">No audio files in your library yet.</p>}
-      </Modal>
+      <AssetFinderDialog
+        open={picker?.kind === "audio"}
+        onOpenChange={(o) => !o && setPicker(null)}
+        title="Add a sound"
+        kind="audio"
+        onPick={(a) => {
+          const t = picker?.t ?? current;
+          addSoundLayer(a, t);
+        }}
+      />
       {audioLayers.map((m) => (
         <audio
           key={m.id}

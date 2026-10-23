@@ -163,19 +163,25 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 ## What the user sees
 
-- **Library page** (`/library`): one grid, chips All / Video / Image / Audio and category chips
-  (Intros & outros, Logos, Stickers & icons, B-roll, Music, Sounds), a search box (name, tags), the
-  upload drop zone (every accepted type) and "Add from URL". Cards show kind, length / size, the
-  license badge for imported items (`CC0 · Freesound · author`), "Used by N" from `asset_refs`, rename,
-  remove / restore. A **Browse** tab holds the catalog and the enabled providers with the attribution
-  footer; "Add to library" imports with progress, duplicates resolve to the existing row.
-- **Editor**: the Layers lane; `+` → Image or video / Text / Sound / Browse…; the picker is the same
-  combobox as today filtered by kind and category, with a Browse row at the bottom that opens the same
-  Browse panel in a dialog (overlay stacking rules in [UI.md](../UI.md)); an imported item lands on the
-  lane at the playhead.
+- **Library page** (`/library`): the upload drop zone on top, then **the finder** (`AssetFinder`): one
+  search box ("Search your library, the catalog and providers…"), kind chips (All / Video / Image /
+  Audio) and source chips (All / Your library / Catalog / one per enabled provider). There are no
+  categories: kind is the only classification. Below, sections with a header and count: **Your
+  library** (own uploads and saved shared items, fuzzy search over name, tags and source), **Catalog**
+  (lists everything on an empty search), then one section per provider (only with a query; each runs
+  when it scrolls into view or its chip is selected, with the provider's attribution line under it).
+  A source chip shows only that section and paginates ("Show more"). Every tile (`AssetTile`) says
+  whether the item is in your library: a check badge "In your library", or a "+ Add" button for a
+  catalog / provider result (`catalog.import`) or a shared item you have not saved (`library.save`).
+  Tiles show kind, format, license badge for imported items and "Used by N"; own items keep rename,
+  tags, remove and usage in the viewer, saved shared items get "Remove from your library". Deep links:
+  `#asset=<id>`, `?kind=&source=&q=`.
+- **Editor**: the Layers lane; `+` → Image or video… / Text / Sound…. Image or video and Sound open
+  the same finder in a dialog (`AssetFinderDialog`, kinds filtered): "Add to clip" on an in-library
+  tile adds the layer at the playhead the dialog was opened at; on a catalog / provider result it
+  imports (saving it to the library) with a pending state on the tile, then adds the layer. Overlay
+  stacking rules in [UI.md](../UI.md).
 - **Project settings**: intro / outro pickers unchanged, filtered to video / image.
-- **Credits**: `get_project` / project export include a credits list built from `provenance` for
-  every CC-BY item used by its clips; the export dialog offers "Copy credits".
 
 ## Surfaces
 

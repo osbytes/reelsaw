@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, Library as LibraryIcon } from "lucide-react";
+import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music } from "lucide-react";
 import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -127,8 +127,6 @@ interface Props {
   onLayerChange?: (id: string, range: [number, number], key?: string) => void;
   onLayerAdd?: (t: number, kind: LayerAddKind) => void;
   onLayerRemove?: (id: string) => void;
-  /** "Browse library…" in the + menu */
-  onLayerBrowse?: () => void;
   /** the in/out editor (fields and nudges), shown in a popover from the clip block's length label */
   renderClipEditor?: () => ReactNode;
   /** the intro and outro the clip renders with, drawn as blocks around the clip range */
@@ -156,7 +154,7 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerRemove, onLayerBrowse, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const lyRows = useMemo(() => packLayerRows(layers), [layers]);
@@ -484,15 +482,6 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
                     <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "audio")}>
                       <Music className="h-3.5 w-3.5" /> Sound…
                     </DropdownMenu.Item>
-                    {onLayerBrowse && (
-                      <>
-                        <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-                        {/* TODO(library): the Browse dialog (catalog + providers, docs/specs/library.md phase 3) plugs in here; for now this opens the Library page */}
-                        <DropdownMenu.Item className="menu-item" onSelect={onLayerBrowse}>
-                          <LibraryIcon className="h-3.5 w-3.5" /> Browse library…
-                        </DropdownMenu.Item>
-                      </>
-                    )}
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
