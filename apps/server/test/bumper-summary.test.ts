@@ -1,7 +1,7 @@
 /** Run: node --import tsx --test test/bumper-summary.test.ts */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { bumperCoverage, countBumperUsage, describeCoverage } from "../src/bumpers/summary.js";
+import { bumperCoverage, countBumperUsage, describeCoverage } from "../src/library/summary.js";
 
 const clip = (b?: { intro?: string | null; outro?: string | null }) => ({ bumpers: b ?? null });
 const many = (n: number, b?: { intro?: string | null; outro?: string | null }) => Array.from({ length: n }, () => clip(b));

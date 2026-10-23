@@ -243,10 +243,16 @@ export const keys = {
   // one file per render generation: a stale render can never overwrite a newer one's output
   clip: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.mp4`,
   thumb: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.jpg`,
-  /** a user's intro/outro as uploaded; assets are immutable, so the key never changes */
+  /** a library asset as uploaded; assets are immutable, so the key never changes. Rows made before the library held more than intros/outros live under `bumpers/<id>/…` (their `source_key` says so) */
+  asset: (id: string, ext: string) => `assets/${id}/source${ext}`,
+  /** @deprecated new rows use `asset`; kept for tests and old fixtures */
   bumper: (id: string, ext: string) => `bumpers/${id}/source${ext}`,
-  bumperThumb: (id: string) => `bumpers/${id}/thumb.jpg`,
-  /** derived cache: the bumper normalised to the render canvas (`variant` names canvas + encode version) */
-  bumperNorm: (id: string, variant: string) => `bumpers/${id}/norm.${variant}.mp4`,
+  /** the folder an asset's derived files share with its source (`bumpers/<id>` or `assets/<id>`) */
+  assetDir: (sourceKey: string) => sourceKey.slice(0, sourceKey.lastIndexOf("/")),
+  assetThumb: (sourceKey: string) => `${keys.assetDir(sourceKey)}/thumb.jpg`,
+  /** derived cache: the asset normalised to the render canvas (`variant` names canvas + encode version) */
+  assetNorm: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/norm.${variant}.mp4`,
+  /** derived cache: an SVG rasterised once at the render width */
+  assetRaster: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/raster.${variant}.png`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };

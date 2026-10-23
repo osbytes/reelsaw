@@ -101,8 +101,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           same tools as /api/mcp, forwarded to REELSAW_URL with
  *                                           REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts)
  */
-import { projectBumperSummaries } from "./bumpers/service.js";
-import { describeCoverage } from "./bumpers/summary.js";
+import { projectBumperSummaries } from "./library/service.js";
+import { describeCoverage } from "./library/summary.js";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
@@ -134,7 +134,7 @@ import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-le
 import { formatTime, clipOverlaySchema, clipAudioSchema, clipAudioList, CLIP_AUDIO_DEFAULTS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipAudio } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
-import { clipBumpersCall, libraryView, projectBumpersCall } from "./bumpers/service.js";
+import { clipBumpersCall, libraryView, projectBumpersCall } from "./library/service.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";

@@ -267,7 +267,7 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
   if (!ids.length) return [];
   // null = all time
   const since = days == null ? sql`'-infinity'::timestamptz` : sql`now() - make_interval(days => ${days}::int)`;
-  const { projects: P, clips: C, uploads: U, llmUsage: L, sttUsage: S, bumperAssets: B } = schema;
+  const { projects: P, clips: C, uploads: U, llmUsage: L, sttUsage: S, libraryAssets: B } = schema;
   const [proj, clip, up, llm, stt, rendered, bump] = await Promise.all([
     db
       .select({

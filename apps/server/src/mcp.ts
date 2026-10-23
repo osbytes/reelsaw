@@ -16,7 +16,7 @@ import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
-import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./bumpers/service.js";
+import { assetMap, clipBumpersCall, downloadAsUpload, effectiveBumpers, libraryView, projectBumpersCall, requireOneSource, type AssetRef } from "./library/service.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";

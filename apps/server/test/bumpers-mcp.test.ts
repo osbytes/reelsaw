@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/bumpers/service.js";
+import { addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/library/service.js";
 import type { Services } from "../src/services.js";
 
 const clipIn = z.object(setClipBumpersInput);

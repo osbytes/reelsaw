@@ -274,6 +274,13 @@
       "when": 1792594549136,
       "tag": "0038_clip_audio_captions",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792765637800,
+      "tag": "0039_library_assets",
+      "breakpoints": true
     }
   ]
 }

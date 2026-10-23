@@ -26,7 +26,7 @@ export async function resolveProjectSettings(db: Db, userId: string, input: Part
       delete merged[k === "introAssetId" ? "introSec" : "outroSec"];
       continue;
     }
-    const row = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, id), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)), columns: { id: true } });
+    const row = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, id), eq(schema.libraryAssets.userId, userId), isNull(schema.libraryAssets.deletedAt)), columns: { id: true } });
     if (row) continue;
     // an id the caller named that is not theirs is an error; a stale saved default is just dropped, with its seconds
     if (given[k] === id) throw new TRPCError({ code: "NOT_FOUND", message: `That ${k === "introAssetId" ? "intro" : "outro"} is not in your library` });

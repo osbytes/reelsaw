@@ -21,7 +21,7 @@ import { lockProjectClips, requestPrepare, requestRender, requestRenders, Render
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../bumpers/service.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../library/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
@@ -237,7 +237,7 @@ async function setBumperDefault(db: Db, userId: string, slot: "intro" | "outro",
     await db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${userId}`);
     return;
   }
-  const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, assetId), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
+  const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, assetId), eq(schema.libraryAssets.userId, userId), isNull(schema.libraryAssets.deletedAt)));
   if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
   const patch = { [key]: assetId };
   await db
@@ -257,7 +257,7 @@ async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, wh
 async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
-  const rows = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(inArray(schema.bumperAssets.id, want), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
+  const rows = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(inArray(schema.libraryAssets.id, want), eq(schema.libraryAssets.userId, userId), isNull(schema.libraryAssets.deletedAt)));
   if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
 }
 
@@ -462,7 +462,7 @@ export const appRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
-      const rows = await db.select().from(schema.bumperAssets).where(eq(schema.bumperAssets.userId, ctx.user.id)).orderBy(desc(schema.bumperAssets.createdAt));
+      const rows = await db.select().from(schema.libraryAssets).where(eq(schema.libraryAssets.userId, ctx.user.id)).orderBy(desc(schema.libraryAssets.createdAt));
       const usage = await bumperUsageCounts(db, ctx.user.id);
       // audio has no thumbnail: the pickers draw a music glyph instead
       const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
@@ -479,7 +479,7 @@ export const appRouter = router({
      */
     usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
-      const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)));
+      const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id)));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
       const slots = ["intro", "outro"] as const;
       const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
@@ -560,15 +560,15 @@ export const appRouter = router({
           if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.` });
           const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
           if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
-          const sourceKey = keys.bumper(id, ext);
+          const sourceKey = keys.asset(id, ext);
           const contentHash = await sha256File(local);
           const row = await svc.tx(async (u) => {
             // one upload of a given file at a time per user, so two racing copies cannot both insert
             await takeTxLock(u.db, txLock.bumper(ctx.user.id, contentHash));
-            const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
+            const [same] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.userId, ctx.user.id), eq(schema.libraryAssets.contentHash, contentHash))).orderBy(sql`(${schema.libraryAssets.deletedAt} is not null)`).limit(1);
             if (same) {
               const wasRemoved = !!same.deletedAt;
-              if (wasRemoved) await u.db.update(schema.bumperAssets).set({ deletedAt: null }).where(eq(schema.bumperAssets.id, same.id));
+              if (wasRemoved) await u.db.update(schema.libraryAssets).set({ deletedAt: null }).where(eq(schema.libraryAssets.id, same.id));
               if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, same.id);
               return { asset: same, duplicate: true as const, restored: wasRemoved };
             }
@@ -576,7 +576,7 @@ export const appRouter = router({
             const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, ctx.user.id)));
             if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
             const [asset] = await u.db
-              .insert(schema.bumperAssets)
+              .insert(schema.libraryAssets)
               .values({
                 id,
                 userId: ctx.user.id,
@@ -599,7 +599,7 @@ export const appRouter = router({
                 await svc.storage.putFile(sourceKey, local);
                 // the picker thumbnail (none for audio); if this fails the media route makes it on first request
                 const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
-                if (thumbKey) await svc.database.db.update(schema.bumperAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.bumperAssets.id, id)).catch(() => {});
+                if (thumbKey) await svc.database.db.update(schema.libraryAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.libraryAssets.id, id)).catch(() => {});
               } finally {
                 await fs.rm(local, { force: true }).catch(() => {});
               }
@@ -624,10 +624,10 @@ export const appRouter = router({
     delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         const gone = await u.db
-          .update(schema.bumperAssets)
+          .update(schema.libraryAssets)
           .set({ deletedAt: new Date() })
-          .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt)))
-          .returning({ id: schema.bumperAssets.id });
+          .where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id), isNull(schema.libraryAssets.deletedAt)))
+          .returning({ id: schema.libraryAssets.id });
         if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
         for (const key of ["introAssetId", "outroAssetId"]) {
           await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
@@ -637,10 +637,10 @@ export const appRouter = router({
     }),
     restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       const r = await ctx.svc.database.db
-        .update(schema.bumperAssets)
+        .update(schema.libraryAssets)
         .set({ deletedAt: null })
-        .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)))
-        .returning({ id: schema.bumperAssets.id });
+        .where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id)))
+        .returning({ id: schema.libraryAssets.id });
       if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
       return { ok: true };
     }),
@@ -1153,7 +1153,7 @@ export const appRouter = router({
               if (mine[key]) patch[key] = mine[key]!;
             } else {
               // a library asset of this user; the one the project already uses stays valid even if it was since removed
-              const [asset] = await u.db.select({ id: schema.bumperAssets.id, deletedAt: schema.bumperAssets.deletedAt }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, choice), eq(schema.bumperAssets.userId, ctx.user.id)));
+              const [asset] = await u.db.select({ id: schema.libraryAssets.id, deletedAt: schema.libraryAssets.deletedAt }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, choice), eq(schema.libraryAssets.userId, ctx.user.id)));
               if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
               patch[key] = choice;
             }

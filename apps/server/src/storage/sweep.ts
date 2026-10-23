@@ -346,14 +346,14 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       continue;
     }
     const gone = await svc.tx(async (u) => {
-      const [a] = await u.db.select({ id: schema.bumperAssets.id, deletedAt: schema.bumperAssets.deletedAt }).from(schema.bumperAssets).where(eq(schema.bumperAssets.id, id)).for("update");
+      const [a] = await u.db.select({ id: schema.libraryAssets.id, deletedAt: schema.libraryAssets.deletedAt }).from(schema.libraryAssets).where(eq(schema.libraryAssets.id, id)).for("update");
       if (!a) return false;
       const ref = await u.db.execute(sql`
         select exists (select 1 from projects where settings ->> 'introAssetId' = ${id} or settings ->> 'outroAssetId' = ${id})
             or exists (select 1 from clips where bumpers ->> 'intro' = ${id} or bumpers ->> 'outro' = ${id}) as used`);
       const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
       if (!bumperPurgeable(a, used, now)) return false;
-      await u.db.delete(schema.bumperAssets).where(eq(schema.bumperAssets.id, id));
+      await u.db.delete(schema.libraryAssets).where(eq(schema.libraryAssets.id, id));
       u.afterCommit(async () => {
         try {
           await svc.storage.deletePrefix(`bumpers/${id}`);

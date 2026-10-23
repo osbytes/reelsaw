@@ -162,7 +162,7 @@ export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFi
   const local = path.join(dir, `norm.${variant}.mp4`);
   if (await nonEmpty(local)) return local;
   await fs.mkdir(dir, { recursive: true });
-  const normKey = keys.bumperNorm(asset.id, variant);
+  const normKey = keys.assetNorm(asset.sourceKey, variant);
   if (await deps.storage.exists(normKey)) return deps.storage.ensureLocal(normKey, local);
   const source = await deps.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
   const tmp = `${local}.${randomUUID()}.tmp.mp4`;
@@ -218,7 +218,7 @@ export function ensureBumperThumb(deps: { ffmpeg: NormaliseDeps["ffmpeg"]; stora
   if (running) return running;
   const run = (async () => {
     if (asset.kind === "audio") throw new Error("audio has no thumbnail");
-    const key = keys.bumperThumb(asset.id);
+    const key = keys.assetThumb(asset.sourceKey);
     if (await deps.storage.exists(key)) return key;
     const dir = path.join(deps.dir, `bumper-thumb-${asset.id}`);
     await fs.mkdir(dir, { recursive: true });

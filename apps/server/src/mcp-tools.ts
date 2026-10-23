@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO } from "@reelsaw/shared";
-import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./bumpers/service.js";
+import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).

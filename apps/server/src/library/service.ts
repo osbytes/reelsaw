@@ -86,14 +86,14 @@ export const bumperNameSchema = z.string().trim().min(1).max(120);
 export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number }) {
   if (patch.name === undefined && patch.imageSeconds === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name or imageSeconds" });
   return svc.tx(async (u) => {
-    const [a] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, id), eq(schema.bumperAssets.userId, userId))).for("update");
+    const [a] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, id), eq(schema.libraryAssets.userId, userId))).for("update");
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
     if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
     const name = patch.name?.trim();
     await u.db
-      .update(schema.bumperAssets)
+      .update(schema.libraryAssets)
       .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}) })
-      .where(eq(schema.bumperAssets.id, a.id));
+      .where(eq(schema.libraryAssets.id, a.id));
     return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, previousName: a.name };
   });
 }
@@ -274,7 +274,7 @@ export async function projectBumperSummaries(
   const ids = new Set<string>();
   for (const c of coverage.values()) for (const s of [c.intro, c.outro]) if (s) for (const a of s.assets) ids.add(a.assetId);
   const assets = ids.size
-    ? await db.select({ id: schema.bumperAssets.id, name: schema.bumperAssets.name, kind: schema.bumperAssets.kind }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, userId), inArray(schema.bumperAssets.id, [...ids])))
+    ? await db.select({ id: schema.libraryAssets.id, name: schema.libraryAssets.name, kind: schema.libraryAssets.kind }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.userId, userId), inArray(schema.libraryAssets.id, [...ids])))
     : [];
   const byId = new Map(assets.map((a) => [a.id, a]));
   const slot = (s: SlotCoverage | null): SlotSummary | null => {

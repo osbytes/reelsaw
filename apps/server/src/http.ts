@@ -246,7 +246,7 @@ export function createApp(svc: Services) {
   app.get("/media/bumpers/:id", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), eq(schema.libraryAssets.userId, session.user.id)) });
     if (!asset) return c.text("not found", 404);
     const loc = await storage.resolve(asset.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
@@ -257,13 +257,13 @@ export function createApp(svc: Services) {
   app.get("/media/bumpers/:id/thumb.jpg", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), eq(schema.libraryAssets.userId, session.user.id)) });
     if (!asset) return c.text("not found", 404);
-    let key = asset.thumbnailKey ?? keys.bumperThumb(asset.id);
+    let key = asset.thumbnailKey ?? keys.assetThumb(asset.sourceKey);
     if (!asset.thumbnailKey || !(await storage.exists(key))) {
       try {
         key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage, dir: paths.tmp }, asset, undefined);
-        await db.update(schema.bumperAssets).set({ thumbnailKey: key }).where(eq(schema.bumperAssets.id, asset.id));
+        await db.update(schema.libraryAssets).set({ thumbnailKey: key }).where(eq(schema.libraryAssets.id, asset.id));
       } catch (err) {
         c.get("log").warn({ err, bumperId: asset.id }, "bumper thumbnail failed");
         return c.text("no thumbnail", 404);
