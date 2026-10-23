@@ -1,9 +1,15 @@
 /**
- * SVG rasterising with resvg (a Rust renderer shipped as prebuilt binaries), so an SVG logo works
- * the same on a dev Mac and in the Docker image, whatever librsvg the local ffmpeg was built with.
- * ffprobe cannot size an SVG reliably, so the size comes from here too.
+ * SVG rasterising with resvg compiled to WebAssembly, so an SVG logo works the same on a dev Mac and
+ * in the Docker image on either architecture (the native build ships one binary per platform, and a
+ * multi-arch image built on one host only gets that host's). ffprobe cannot size an SVG reliably, so
+ * the size comes from here too. The module initialises the wasm once at import (top-level await), so
+ * every function below stays synchronous.
  */
-import { Resvg } from "@resvg/resvg-js";
+import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
+import { Resvg, initWasm } from "@resvg/resvg-wasm";
+
+await initWasm(await readFile(createRequire(import.meta.url).resolve("@resvg/resvg-wasm/index_bg.wasm")));
 
 /** Used when an SVG declares no size and has nothing drawable to measure. */
 export const SVG_FALLBACK_PX = 1024;
