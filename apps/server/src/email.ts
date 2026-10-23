@@ -208,11 +208,11 @@ export const templates = {
   verifyEmail: (url: string) =>
     message({
       subject: "Confirm your email for Reelsaw",
-      preheader: "Confirm this address to finish signing up.",
+      preheader: "Confirm this address to finish signing up. The link works for 24 hours.",
       title: "Confirm your email",
-      text: `Confirm this address to finish signing up:\n\n${url}\n`,
+      text: `Confirm this address to finish signing up. The link works for 24 hours:\n\n${url}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">Confirm this address to finish signing up for Reelsaw.</p>` +
+        `<p style="margin:0 0 12px">Confirm this address to finish signing up for Reelsaw. The link works for 24 hours.</p>` +
         ctaButton(url, "Confirm email") +
         linkFallback(url),
     }),

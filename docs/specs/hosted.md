@@ -32,7 +32,8 @@ must not get a single extra click.
 Decisions, in order of how hard they are to reverse:
 
 1. **One repository, one image, no fork.** The hosted service runs the same `ghcr.io/osbytes/reelsaw`
-   image as everyone else with different environment: `SIGNUP_MODE=approval`, `STORAGE_DRIVER=s3`,
+   image as everyone else with different environment: `SIGNUP_MODE=open` (email confirmation, captcha
+   and quotas are the abuse gates; `approval` is the extra human wait for a private box), `STORAGE_DRIVER=s3`,
    extra `worker` replicas, cloud models. A long-lived "hosted" branch or a second repo that copies
    code would diverge within weeks and double every fix. This is how Plausible, Umami, Postiz and
    n8n run their cloud.

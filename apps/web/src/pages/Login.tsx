@@ -1,7 +1,19 @@
 import { useCallback, useState } from "react";
 import { useNavigate, Navigate, useLocation } from "react-router";
-import { signupCreatedNotice, billingPlanPath, INTERVAL_PARAM, PLAN_PARAM, REPO_URL } from "@reelsaw/shared";
-import { authClient, signIn, signUp, useSession } from "../lib/auth";
+import {
+  CONFIRM_EMAIL_THEN_SIGN_IN,
+  signupCreatedNotice,
+  billingPlanPath,
+  INTERVAL_PARAM,
+  PLAN_PARAM,
+  REPO_URL,
+  VERIFY_EMAIL_CALLBACK_PATH,
+  VERIFY_EMAIL_EXPIRED_NOTICE,
+  VERIFY_EMAIL_SENT_NOTICE,
+  shouldOfferResendVerification,
+  verifyEmailErrorFromSearch,
+} from "@reelsaw/shared";
+import { authClient, sendVerificationEmail, signIn, signUp, useSession } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
 import { Logo, ThemeToggle } from "../App";
 import { useSystemStatus } from "../lib/account";
@@ -42,13 +54,17 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     rememberAfterSignIn(billingPlanPath(plan, interval));
     return plan;
   });
-  const [email, setEmail] = useState("");
+  const fromLink = verifyEmailErrorFromSearch(window.location.search);
+  const [email, setEmail] = useState(fromLink.email ?? "");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const location = useLocation();
   const routedNotice = location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string" ? location.state.notice : null;
-  const [notice, setNotice] = useState<string | null>(routedNotice);
+  const [expiredLink, setExpiredLink] = useState(fromLink.expired);
+  const [afterSignUp, setAfterSignUp] = useState(() => typeof routedNotice === "string" && routedNotice.includes(CONFIRM_EMAIL_THEN_SIGN_IN));
+  const [notice, setNotice] = useState<string | null>(fromLink.expired ? VERIFY_EMAIL_EXPIRED_NOTICE : routedNotice);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const status = useSystemStatus();
   const signupMode = status.data?.signupMode ?? "open";
@@ -57,21 +73,43 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const onToken = useCallback((t: string | null) => setCaptchaToken(t), []);
   // arriving from an OAuth authorize redirect (MCP connector): after sign-in, hand the signed query back
   const oauthQuery = /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
+  const canResend = status.data?.emailEnabled !== false && shouldOfferResendVerification({ errorCode, expiredLink, afterSignUp });
 
   if (data && !oauthQuery) return <Navigate to="/" replace />;
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function resend(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!email.trim()) return setError("Enter the email you signed up with.");
     setBusy(true);
     setError(null);
+    setErrorCode(null);
+    const r = await sendVerificationEmail({ email: email.trim(), callbackURL: VERIFY_EMAIL_CALLBACK_PATH });
+    setBusy(false);
+    if (r.error) {
+      setError(r.error.message ?? "Could not send a new link");
+      return;
+    }
+    setExpiredLink(false);
+    setNotice(VERIFY_EMAIL_SENT_NOTICE);
+    setMode("login");
+    if (window.location.search) nav("/login", { replace: true, state: { notice: VERIFY_EMAIL_SENT_NOTICE } });
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (expiredLink) return resend(e);
+    setBusy(true);
+    setError(null);
+    setErrorCode(null);
     const fetchOptions = captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined;
     const res =
       mode === "login"
         ? await signIn.email({ email, password, fetchOptions })
-        : await signUp.email({ email, password, name: name || email.split("@")[0]!, fetchOptions });
+        : await signUp.email({ email, password, name: name || email.split("@")[0]!, callbackURL: VERIFY_EMAIL_CALLBACK_PATH, fetchOptions });
     if (res.error) {
       setBusy(false);
       setCaptchaToken(null);
+      setErrorCode(res.error.code ?? null);
       return setError(res.error.message ?? "Something went wrong");
     }
     // Verification is required, so the account exists and there is no session. Stay here and switch
@@ -82,6 +120,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       setBusy(false);
       setCaptchaToken(null);
       setNotice(text);
+      setAfterSignUp(true);
       setMode("login");
       if (window.location.pathname !== "/login") nav("/login", { replace: true, state: { notice: text } });
       return;
@@ -104,7 +143,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       <form onSubmit={submit} className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
         <Logo />
         <div>
-          <h1 className="text-[26px] font-bold tracking-tight">{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <h1 className="text-[26px] font-bold tracking-tight">{expiredLink ? "This link expired" : mode === "login" ? "Sign in" : "Create account"}</h1>
           <p className="mt-1 text-sm text-ink2">Running on <span className="font-mono text-[13px]">{window.location.host}</span></p>
         </div>
         {mode === "signup" && (
@@ -117,20 +156,22 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           <label className="label">Email</label>
           <input className="input" name="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <div>
-          <label className="label">Password</label>
-          <input
-            key={mode}
-            className="input"
-            name="password"
-            type="password"
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </div>
+        {!expiredLink && (
+          <div>
+            <label className="label">Password</label>
+            <input
+              key={mode}
+              className="input"
+              name="password"
+              type="password"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+        )}
         {mode === "signup" && plan && <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>}
         {mode === "signup" && signupMode === "approval" && <p className="text-xs leading-relaxed text-ink2">New accounts wait for an admin to approve them before they can start projects.</p>}
         {mode === "signup" && (status.data?.termsUrl || status.data?.privacyUrl) && (
@@ -142,14 +183,20 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           </p>
         )}
         {oauthQuery && <p className="text-xs leading-relaxed text-ink2">An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</p>}
-        {captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
-        {notice && <p className="rounded-[10px] bg-warn-soft px-3 py-2 text-sm leading-relaxed text-ink">{notice}</p>}
-        {error && <p className="rounded-[10px] bg-err-soft px-3 py-2 text-sm text-ink">{error}</p>}
-        <button className="btn-primary w-full py-2.5 text-sm" disabled={busy || (!!captcha && !captchaToken)}>
-          {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
+        {!expiredLink && captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
+        {(error || notice) && (
+          <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
+        )}
+        <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!expiredLink && !!captcha && !captchaToken)}>
+          {busy ? "…" : expiredLink ? "Send me a new link" : mode === "login" ? "Sign in" : "Create account"}
         </button>
+        {canResend && !expiredLink && (
+          <button type="button" className="w-full min-w-[12rem] text-center text-xs text-ink3 hover:text-ink" onClick={() => void resend()} disabled={busy || !email.trim()}>
+            Send a new confirmation
+          </button>
+        )}
         {signupMode !== "closed" ? (
-          <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+          <button type="button" className="w-full text-center text-xs text-ink3 hover:text-ink" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setExpiredLink(false); }}>
             {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
           </button>
         ) : (

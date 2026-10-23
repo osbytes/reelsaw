@@ -21,6 +21,7 @@ import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
+import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
@@ -109,12 +110,22 @@ export function createApp(svc: Services) {
     return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
   });
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+    if (c.req.method === "GET" && c.req.path === "/api/auth/verify-email") {
+      const gate = await gateEmailVerification(db, c.req.query("token") ?? "");
+      if (!gate.ok) {
+        const to = new URL("/login", config.APP_URL);
+        to.searchParams.set("error", gate.error);
+        if (gate.email) to.searchParams.set("email", gate.email);
+        c.get("log").info({ error: gate.error }, "verify-email refused");
+        return c.redirect(`${to.pathname}${to.search}`);
+      }
+    }
     const res = await auth.handler(c.req.raw);
     logAuth(c, res.status);
     return res;
   });
   /** sign-in, sign-up and API key actions: who did what, and why a sign-in failed (never the password) */
-  const AUTH_ACTIONS: Record<string, string> = { "/sign-in/email": "sign-in", "/sign-up/email": "sign-up", "/sign-out": "sign-out", "/request-password-reset": "password reset requested", "/reset-password": "password reset", "/api-key/create": "api key created", "/api-key/delete": "api key revoked", "/api-key/update": "api key updated" };
+  const AUTH_ACTIONS: Record<string, string> = { "/sign-in/email": "sign-in", "/sign-up/email": "sign-up", "/sign-out": "sign-out", "/request-password-reset": "password reset requested", "/reset-password": "password reset", "/send-verification-email": "verification email requested", "/api-key/create": "api key created", "/api-key/delete": "api key revoked", "/api-key/update": "api key updated" };
   const logAuth = (c: Context<AppEnv>, status: number) => {
     const action = AUTH_ACTIONS[c.req.path.replace(/^\/api\/auth/, "")];
     if (!action || c.req.method !== "POST") return;

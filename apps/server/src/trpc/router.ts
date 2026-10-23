@@ -384,6 +384,7 @@ export const appRouter = router({
         version: ctx.svc.config.REELSAW_VERSION,
         signupMode: s.SIGNUP_MODE,
         emailEnabled: ctx.svc.email.enabled,
+        emailVerification: s.REQUIRE_EMAIL_VERIFICATION && ctx.svc.email.enabled,
         termsUrl: s.TERMS_URL ?? null,
         privacyUrl: s.PRIVACY_URL ?? null,
         maxUploadMb: s.MAX_UPLOAD_MB,

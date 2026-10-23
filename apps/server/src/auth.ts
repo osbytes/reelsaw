@@ -17,6 +17,7 @@ import type { InstanceSettings } from "./instance-settings.js";
 import { clientIp, signupGuard, SignupRefused } from "./abuse.js";
 import type { Telemetry } from "./telemetry.js";
 import { FIRST_ADMIN_LOCK } from "./locks.js";
+import { EMAIL_VERIFY_EXPIRES_IN_SEC, rememberEmailVerifyToken, withLoginCallback } from "./email-verify.js";
 
 /** The MCP endpoint as OAuth clients see it (token audience). */
 export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_URL).toString();
@@ -40,7 +41,11 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
     ? {
         sendOnSignUp: settings.get().REQUIRE_EMAIL_VERIFICATION,
         autoSignInAfterVerification: true,
-        sendVerificationEmail: async ({ user, url }: { user: { email: string }; url: string }) => email.send({ to: user.email, ...templates.verifyEmail(url) }),
+        expiresIn: EMAIL_VERIFY_EXPIRES_IN_SEC,
+        sendVerificationEmail: async ({ user, url, token }: { user: { email: string }; url: string; token: string }) => {
+          await rememberEmailVerifyToken(db, user.email, token);
+          await email.send({ to: user.email, ...templates.verifyEmail(withLoginCallback(url)) });
+        },
       }
     : undefined;
   settings.subscribe((s) => {

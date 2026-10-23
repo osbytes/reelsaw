@@ -9,6 +9,39 @@ export const PENDING_APPROVAL_MESSAGE = "Your account is waiting for an admin to
 /** Shown when a sign-up created the account but did not start a session (email confirmation is required). */
 export const CONFIRM_EMAIL_THEN_SIGN_IN = "Confirm the link we sent to your email, then sign in.";
 
+/** Where a confirmation link sends the browser after Better Auth accepts or refuses the JWT. */
+export const VERIFY_EMAIL_CALLBACK_PATH = "/login";
+
+/** Better Auth puts this on callbackURL when the confirmation JWT is expired or invalid. */
+export const VERIFY_EMAIL_ERROR_CODES = ["TOKEN_EXPIRED", "INVALID_TOKEN", "USER_NOT_FOUND"] as const;
+
+/** Expired or superseded confirmation link: the recovery page, not an error. */
+export const VERIFY_EMAIL_EXPIRED_NOTICE = "This confirmation link has expired. Send a new one and we will email it. It works for 24 hours.";
+
+/** After /send-verification-email. Same sentence whether the address exists, so we do not leak accounts. */
+export const VERIFY_EMAIL_SENT_NOTICE = "If this address still needs confirming, we sent a new link. It works for 24 hours.";
+
+/** Sign-in codes that mean the password matched but the mailbox is not confirmed yet. */
+export const UNVERIFIED_SIGN_IN_CODES = ["EMAIL_NOT_VERIFIED", "ACCOUNT_PENDING"] as const;
+
+export function verifyLinkFailed(code: string | null | undefined): boolean {
+  return !!code && (VERIFY_EMAIL_ERROR_CODES as readonly string[]).includes(code);
+}
+
+export function shouldOfferResendVerification(opts: { errorCode: string | null; expiredLink: boolean; afterSignUp: boolean }): boolean {
+  if (opts.expiredLink || opts.afterSignUp) return true;
+  return !!opts.errorCode && (UNVERIFIED_SIGN_IN_CODES as readonly string[]).includes(opts.errorCode);
+}
+
+/** Query string from an expired confirmation redirect (`/login?error=TOKEN_EXPIRED&email=`). */
+export function verifyEmailErrorFromSearch(search: string): { expired: boolean; email: string | null } {
+  const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const expired = verifyLinkFailed(q.get("error"));
+  const raw = (q.get("email") ?? "").trim().toLowerCase();
+  const email = raw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw) ? raw : null;
+  return { expired, email };
+}
+
 /**
  * A later sign-up does not write a new password, and a sign-in that a password manager filled with
  * a newly generated one is a different password. The first sign-up is the one on the account.
