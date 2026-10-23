@@ -1,60 +1,58 @@
-# Dependabot: version updates, weekly, grouped so a week's bumps arrive as one PR per ecosystem
-# (security updates still come on their own, as soon as an advisory lands). Every PR runs CI; the
-# dependabot-changeset workflow adds the patch changeset CI requires when the app is touched.
+# Dependabot, security first. Version bumps of npm packages are off: the app pins what it needs and
+# bumps on purpose (pnpm update, a changeset, an eval run). Security updates stay on and arrive as
+# one PR per manifest instead of one per advisory. The dependabot-changeset workflow adds the
+# changeset CI requires. Actions and base-image digests still get a monthly, grouped bump, because
+# SHA pins and digests go stale and carry no behavioural risk.
 version: 2
 updates:
-  # the pnpm workspace: apps/server, apps/web, packages/shared share one lockfile at the root
+  # the pnpm workspace (apps/server, apps/web, packages/shared share the root lockfile):
+  # open-pull-requests-limit: 0 switches version updates off while keeping this entry's
+  # settings in force for security updates
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-      day: monday
+    open-pull-requests-limit: 0
     groups:
-      app:
+      security:
+        applies-to: security-updates
         patterns: ["*"]
-        update-types: [minor, patch]
-    open-pull-requests-limit: 5
     ignore:
       # OpenTelemetry ships SDK majors and the 0.x experimental packages as one coordinated set
-      # (3.0 pairs with 0.300 and removes sdk-trace-node). One PR per package cannot work; the
-      # whole set moves in one deliberate PR with a telemetry smoke test.
+      # (3.0 pairs with 0.300 and removes sdk-trace-node); the set moves in one deliberate PR
       - dependency-name: "@opentelemetry/*"
         update-types: ["version-update:semver-major"]
-      # @types/node tracks the Node line the image runs (Dockerfile), not the newest Node
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
 
-  # reelsaw.com has its own lockfile, outside the workspace
+  # reelsaw.com, own lockfile outside the workspace: same policy
   - package-ecosystem: npm
     directory: /website
     schedule:
       interval: weekly
-      day: monday
+    open-pull-requests-limit: 0
     groups:
-      website:
+      security:
+        applies-to: security-updates
         patterns: ["*"]
-        update-types: [minor, patch]
-    open-pull-requests-limit: 3
 
-  # actions are pinned by commit SHA with a version comment; Dependabot keeps both in step
+  # actions are pinned by commit SHA with a version comment; one grouped PR a month keeps them current
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # a new major of an action renames inputs (changesets/action v2 did); bump by hand
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
-  # base image digests in the Dockerfile (the compose files pull by tag on purpose: operators get
-  # Postgres and Speaches patch releases without waiting for a Reelsaw release)
+  # base image digests in the Dockerfile; never the major (Node and Alpine lines are chosen by hand).
+  # The compose files pull by tag on purpose so operators get Postgres and Speaches patches directly.
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     ignore:
-      # digests and patch tags only: a new Node or Alpine major is a deliberate change (native
-      # modules, onnxruntime-node) and gets its own PR and release note
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
