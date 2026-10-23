@@ -11,6 +11,7 @@
   <a href="https://www.osbytes.io" target="_blank" rel="noopener noreferrer" title="osbytes — open source bytes"><img src="https://www.osbytes.io/badge.svg" alt="osbytes — open source bytes" width="24" height="24"></a>
   <a href="https://github.com/osbytes/reelsaw/releases"><img src="https://img.shields.io/github/v/release/osbytes/reelsaw?label=release" alt="Latest release"></a>
   <a href="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml"><img src="https://github.com/osbytes/reelsaw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/osbytes/reelsaw"><img src="https://api.scorecard.dev/projects/github.com/osbytes/reelsaw/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://github.com/osbytes/reelsaw/pkgs/container/reelsaw"><img src="https://img.shields.io/badge/ghcr.io-osbytes%2Freelsaw-2496ED?logo=docker&logoColor=white" alt="Docker image on GHCR"></a>
   <a href="https://glama.ai/mcp/servers/osbytes/reelsaw"><img src="https://glama.ai/mcp/servers/osbytes/reelsaw/badges/score.svg" alt="Glama MCP server score"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/osbytes/reelsaw" alt="License: AGPL-3.0"></a>
@@ -580,6 +581,14 @@ pnpm --filter @reelsaw/server test
 ```
 
 ## Releases and distribution
+
+Every image is built by the release workflow with an SBOM and SLSA provenance attached, and a
+GitHub artifact attestation for its digest. Verify what you are about to run:
+
+```bash
+gh attestation verify oci://ghcr.io/osbytes/reelsaw:latest --owner osbytes
+docker buildx imagetools inspect ghcr.io/osbytes/reelsaw:latest --format '{{ json .SBOM }}' | head -c 400
+```
 
 Users install from a published image. The runtime image contains only
 the minified server bundle (`apps/server/scripts/bundle.mjs`), the web build and production
