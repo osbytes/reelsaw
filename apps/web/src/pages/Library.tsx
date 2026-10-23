@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, FolderOpen, ScrollText, Search, X } from "lucide-react";
-import { ASSET_CATEGORIES, type AssetCategory } from "@reelsaw/shared";
 import { useLocation, useNavigate } from "react-router";
 import { useMe } from "../lib/account";
 import { useHashParams } from "../lib/hash";
 import { createFuzzy } from "../lib/fuzzy";
-import { categoryLabel, KIND_FILTERS, matchesCategory, SEARCH_KEYS, searchable, UNCATEGORISED, type LibraryKind } from "../lib/library";
+import { KIND_FILTERS, SEARCH_KEYS, searchable, type LibraryKind } from "../lib/library";
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { Skeleton, SkeletonRegion } from "../components/ui";
@@ -14,7 +13,7 @@ import { AssetCard, AssetCardSkeleton, AssetLightbox, copyCredits, RemoveDialog,
 
 /**
  * Your asset library: videos, images and audio. Deep links: `#asset=<id>` highlights a card, `?upload=1` opens the file picker,
- * `?kind=audio&category=sfx&q=boom` filters.
+ * `?kind=audio&q=boom` filters.
  */
 /** A filter pill with its count; the count has its own tabular slot so toggling never reflows the row. */
 function Chip({ on, count, onClick, children }: { on: boolean; count: number; onClick: () => void; children: React.ReactNode }) {
@@ -47,7 +46,6 @@ export function LibraryPage() {
   const params = new URLSearchParams(loc.search);
   const kindParam = params.get("kind");
   const kind: LibraryKind | "" = kindParam === "video" || kindParam === "image" || kindParam === "audio" ? kindParam : "";
-  const category = params.get("category") ?? "";
   const q = params.get("q") ?? "";
   /** `?view=browse` shows the catalog and providers instead of the user's own items */
   const view: "mine" | "browse" = params.get("view") === "browse" ? "browse" : "mine";
@@ -61,17 +59,12 @@ export function LibraryPage() {
   const fuse = useMemo(() => createFuzzy(all.map(searchable), SEARCH_KEYS), [all]);
   const searched = useMemo(() => (q.trim() ? new Set(fuse.filter(q).map((a) => a.id)) : null), [fuse, q]);
   const inSearch = (a: LibraryAsset) => !searched || searched.has(a.id);
-  const kindCount = (k: LibraryKind | "") => all.filter((a) => inSearch(a) && matchesCategory(a, category) && (!k || a.kind === k)).length;
-  const catCount = (c: string) => all.filter((a) => inSearch(a) && (!kind || a.kind === kind) && matchesCategory(a, c)).length;
-  const categoryChips = [
-    ...ASSET_CATEGORIES.filter((c) => all.some((a) => a.category === c.id) || category === c.id).map((c) => ({ id: c.id as string, label: c.label as string })),
-    ...(all.some((a) => !a.category) || category === UNCATEGORISED ? [{ id: UNCATEGORISED, label: "Uncategorised" }] : []),
-  ];
+  const kindCount = (k: LibraryKind | "") => all.filter((a) => inSearch(a) && (!k || a.kind === k)).length;
   const assets = useMemo(() => {
     const ranked = q.trim() ? fuse.filter(q).map((a) => all.find((x) => x.id === a.id)!) : all;
-    return ranked.filter((a) => (!kind || a.kind === kind) && matchesCategory(a, category));
-  }, [all, fuse, q, kind, category]);
-  const filtered = !!(kind || category || q.trim());
+    return ranked.filter((a) => (!kind || a.kind === kind));
+  }, [all, fuse, q, kind]);
+  const filtered = !!(kind || q.trim());
   // images whose length was just changed: their cards say "re-render to apply"
   const [applied, setApplied] = useState<Set<string>>(new Set());
 
@@ -140,7 +133,7 @@ export function LibraryPage() {
         <div className="flex flex-col gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
-            <input className="input h-[38px] w-full pl-9 pr-9" type="text" value={q} placeholder="Search names, tags, categories and credits…" aria-label="Search the library" onChange={(e) => setFilter({ q: e.target.value })} />
+            <input className="input h-[38px] w-full pl-9 pr-9" type="text" value={q} placeholder="Search names, tags and credits…" aria-label="Search the library" onChange={(e) => setFilter({ q: e.target.value })} />
             {q && (
               <button type="button" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink" aria-label="Clear search" onClick={() => setFilter({ q: "" })}>
                 <X className="h-3.5 w-3.5" />
@@ -159,17 +152,6 @@ export function LibraryPage() {
               ))
             )}
           </div>
-          <div className="flex h-8 items-center gap-1.5 overflow-x-auto" role="group" aria-label="Filter by category">
-            {list.isPending ? (
-              <Skeleton className="h-7 w-80 rounded-full" />
-            ) : (
-              categoryChips.map((c) => (
-                <Chip key={c.id} on={category === c.id} count={catCount(c.id)} onClick={() => setFilter({ category: category === c.id ? "" : c.id })}>
-                  {c.label}
-                </Chip>
-              ))
-            )}
-          </div>
         </div>
         {list.isPending ? (
           <SkeletonRegion label="Loading library…" className="grid grid-cols-2 content-start gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -184,7 +166,7 @@ export function LibraryPage() {
               {filtered ? (
                 <span className="flex flex-col items-center gap-3">
                   Nothing matches these filters.
-                  <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => setFilter({ kind: "", category: "", q: "" })}>
+                  <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => setFilter({ kind: "", q: "" })}>
                     Clear filters
                   </button>
                 </span>
@@ -209,7 +191,6 @@ export function LibraryPage() {
               onUse={(slot) => actions.setDefault(slot, a, slot === "intro" ? defaults?.introAssetId : defaults?.outroAssetId)}
               onRemove={() => remove(a)}
               onRename={(name) => void actions.rename(a, name)}
-              onCategory={(c) => void actions.setCategory(a, c)}
             />
           ))}
         </div>
@@ -227,7 +208,6 @@ export function LibraryPage() {
             remove(viewing);
           }}
           onRename={(name) => viewing && void actions.rename(viewing, name)}
-          onCategory={(c) => viewing && void actions.setCategory(viewing, c)}
           onTags={(tags) => viewing && void actions.setTags(viewing, tags)}
         />
         <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={fadeOut} />

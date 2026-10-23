@@ -14,7 +14,7 @@
     {
       "type": "svg",
       "kind": "image",
-      "category": "sticker",
+      "tag": "sticker",
       "idPrefix": "lucide-",
       "license": { "id": "isc", "name": "ISC", "url": "https://github.com/lucide-icons/lucide/blob/main/LICENSE" },
       "attribution": "Lucide icons (ISC)",
@@ -68,7 +68,7 @@
     {
       "type": "svg",
       "kind": "image",
-      "category": "sticker",
+      "tag": "sticker",
       "idPrefix": "emoji-",
       "license": { "id": "apache-2.0", "name": "Apache 2.0", "url": "https://github.com/googlefonts/noto-emoji/blob/main/LICENSE" },
       "attribution": "Noto Emoji by Google (Apache 2.0)",
@@ -96,7 +96,7 @@
     {
       "type": "audio",
       "kind": "audio",
-      "category": "sfx",
+      "tag": "sfx",
       "idPrefix": "sfx-",
       "license": { "id": "cc0", "name": "CC0 1.0", "url": "https://creativecommons.org/publicdomain/zero/1.0/" },
       "attribution": "Sound by Kenney (CC0)",

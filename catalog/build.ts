@@ -27,7 +27,8 @@ interface Item { file: string; name: string; tags: string[]; archive?: string; p
 interface Group {
   type: "svg" | "audio";
   kind: "image" | "audio";
-  category: string;
+  /** an extra search tag for every item of the group (there are no categories) */
+  tag: string;
   idPrefix: string;
   license: { id: string; name: string; url: string };
   attribution: string;
@@ -125,8 +126,7 @@ async function main() {
           kind: g.kind,
           mime: ext === "svg" ? "image/svg+xml" : "audio/mpeg",
           name: it.name,
-          tags: it.tags,
-          category: g.category,
+          tags: [...new Set([...it.tags, g.tag])],
           ...extra,
           bytes: data.length,
           sha256: sha256(data),

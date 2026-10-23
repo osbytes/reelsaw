@@ -4,18 +4,19 @@
  * (created on first use; settings are read at the point of use, so an admin's key change applies at once).
  * An import resolves the item, brings the file in as an upload (download through the SSRF-guarded
  * `downloadAsUpload`, or copy for files bundled with the install), verifies the catalog's sha256 and creates the
- * library row through `bumpers.create`, so limits, dedupe and probing are the ones every upload gets.
+ * library row through `createAsset`, so limits, dedupe and probing are the ones every upload gets. The row is
+ * instance-shared (`user_id` null), one per (provider, externalId, colour); the importing account gets a `library_saves` row.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import type { AssetCategory, AssetKind } from "@reelsaw/shared";
+import type { AssetKind } from "@reelsaw/shared";
 import type { Services } from "../services.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { sha256File } from "../pipeline/bumpers.js";
-import { downloadAsUpload, type FetchDeps } from "./service.js";
+import { createAsset, downloadAsUpload, sharedSourceWhere, type FetchDeps } from "./service.js";
 import { createCatalog, type Catalog } from "./catalog.js";
 import { createProviderHttp, createProviderRegistry, ProviderError, ProviderUnavailable, type CatalogSearchResult, type ProviderRegistry } from "./providers/index.js";
 
@@ -67,7 +68,6 @@ export interface ImportInput {
   provider: string;
   externalId: string;
   color?: string;
-  category?: AssetCategory;
   tags?: string[];
 }
 export interface ImportedAsset {
@@ -75,13 +75,11 @@ export interface ImportedAsset {
   name: string;
   kind: string;
   mime?: string | null;
-  category?: string | null;
   durationSec: number;
+  /** the shared row already existed (another import, possibly by another account): this call only saved it */
   duplicate: boolean;
   restored: boolean;
 }
-/** The `bumpers.create` call, from whoever holds the tRPC caller (router, MCP, CLI). */
-export type CreateAsset = (input: { uploadId: string; name?: string; category?: AssetCategory; tags?: string[]; provenance?: import("@reelsaw/shared").AssetProvenance; system?: boolean }) => Promise<ImportedAsset>;
 
 /** Copy a file bundled with the install into the uploads table, as `downloadAsUpload` does for a link. */
 async function localAsUpload(svc: Services, userId: string, file: string, name: string, ext: string) {
@@ -93,9 +91,32 @@ async function localAsUpload(svc: Services, userId: string, file: string, name: 
   return { uploadId: id, filename, sizeBytes: size };
 }
 
-export async function importAsset(svc: Services, userId: string, input: ImportInput, create: CreateAsset, deps: FetchDeps = {}): Promise<ImportedAsset> {
+type SharedKey = { provider: string; externalId: string; variant: string };
+/** The shared row for a source item, if it exists: saved into the account's library in the same transaction. */
+async function saveExistingShared(svc: Services, userId: string, key: SharedKey): Promise<ImportedAsset | null> {
+  return svc.tx(async (u) => {
+    const [row] = await u.db.select().from(schema.libraryAssets).where(sharedSourceWhere(key)).limit(1);
+    if (!row) return null;
+    await u.db.insert(schema.librarySaves).values({ userId, assetId: row.id }).onConflictDoNothing();
+    return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, duplicate: true, restored: false };
+  });
+}
+
+/** `shared` replaces the database-backed steps (tests); the defaults are the real ones. */
+export interface ImportDeps extends FetchDeps {
+  shared?: { saveExisting: typeof saveExistingShared; create: typeof createAsset };
+}
+
+export async function importAsset(svc: Services, userId: string, input: ImportInput, deps: ImportDeps = {}): Promise<ImportedAsset> {
+  const shared = deps.shared ?? { saveExisting: saveExistingShared, create: createAsset };
   try {
     const r = await libraryProviders(svc).registry.resolve(input.provider, input.externalId, { color: input.color });
+    const variant = r.provenance.variant ?? "";
+    const provenance = { ...r.provenance, variant };
+    const key = { provider: provenance.provider, externalId: provenance.externalId ?? input.externalId, variant };
+    // already on the instance: nothing to download, the account just saves it
+    const existing = await shared.saveExisting(svc, userId, key);
+    if (existing) return existing;
     let upload: { uploadId: string; filename: string };
     if (r.localPath) {
       if (r.sha256 && (await sha256File(r.localPath)) !== r.sha256) throw new ProviderError("The bundled file does not match the catalog (corrupted install?).");
@@ -117,7 +138,7 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
       }
     }
     const tags = [...new Set([...(r.tags ?? []), ...(input.tags ?? [])].map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 30);
-    return await create({ uploadId: upload.uploadId, name: r.name.slice(0, 120), category: input.category ?? r.category, tags, provenance: r.provenance, system: input.provider === "reelsaw" });
+    return await shared.create(svc, { userId: null, actorId: userId, uploadId: upload.uploadId, name: r.name.slice(0, 120), tags, provenance, system: input.provider === "reelsaw", saveFor: userId });
   } catch (err) {
     return asTrpc(err);
   }

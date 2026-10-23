@@ -163,15 +163,15 @@ describe("mcp", () => {
     assert.equal((await call("rename_bumper", { assetId: randomUUID(), name: "x" })).isError, true);
   });
 
-  it("update_asset sets category and tags; asset_usage reads asset_refs", async () => {
+  it("update_asset replaces tags; asset_usage reads asset_refs", async () => {
     const asset = randomUUID();
     await pool.query(`insert into bumper_assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Logo', 3, 1080, 1920, false, 'assets/x/source.png', 10)`, [asset, owner.userId]);
-    const r = await call<{ category: string; tags: string[] }>("update_asset", { assetId: asset, category: "logo", tags: ["Brand", "brand", "blue"] });
+    const r = await call<{ tags: string[] }>("update_asset", { assetId: asset, tags: ["Brand", "brand", "blue"] });
     assert.equal(r.isError, false, r.text);
-    assert.deepEqual([r.data.category, r.data.tags], ["logo", ["brand", "blue"]]);
+    assert.deepEqual(r.data.tags, ["brand", "blue"]);
     const u = await call<{ projects: unknown[] }>("asset_usage", { assetId: asset });
     assert.deepEqual(u.data.projects, []);
-    assert.equal((await call("update_asset", { assetId: asset, category: "nonsense" })).isError, true);
+    assert.equal((await call("update_asset", { assetId: asset, tags: Array(50).fill("t") })).isError, true);
   });
 
   it("authenticates tRPC and media routes with the key", async () => {

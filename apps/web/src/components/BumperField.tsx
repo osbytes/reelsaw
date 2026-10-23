@@ -4,8 +4,7 @@ import { Link } from "react-router";
 import { AudioLines, Ban, Equal, Film, Image as ImageIcon, Loader2, Pause, Pencil, Play, Plus, ScrollText, Star, Trash2, Upload, X } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
-import { ASSET_CATEGORIES, type AssetCategory } from "@reelsaw/shared";
-import { categoriesFor, categoryLabel, creditsText, formatTag, licenseText } from "../lib/library";
+import { creditsText, formatTag, licenseText } from "../lib/library";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
@@ -25,7 +24,7 @@ const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|we
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
-/** One `bumpers.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
+/** One `bumpers.list` row: kind, facts, usage, plus tags, provenance and whether it is a catalog item. */
 export type LibraryAsset = inferRouterOutputs<AppRouter>["bumpers"]["list"]["assets"][number];
 
 /** The user's library (live assets and recently removed ones). */
@@ -67,13 +66,9 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const qc = useQueryClient();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [error, setError] = useState("");
-  const queue = useRef<Array<{ key: string; file: File; category: AssetCategory | "" }>>([]);
+  const queue = useRef<Array<{ key: string; file: File }>>([]);
   const running = useRef(0);
   const finished = useRef({ ok: 0, failed: 0 });
-  // the category picked on the upload card applies to everything added from now on
-  const [uploadCategory, setUploadCategory] = useState<AssetCategory | "">("");
-  const categoryRef = useRef<AssetCategory | "">("");
-  categoryRef.current = uploadCategory;
   const dupRef = useRef(onDuplicate);
   dupRef.current = onDuplicate;
   const create = useMutation(trpc.bumpers.create.mutationOptions());
@@ -94,12 +89,12 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     running.current++;
     for (let next = queue.current.shift(); next; next = queue.current.shift()) {
       toast.loading(`Adding ${queue.current.length + 1} file${queue.current.length ? "s" : ""} to your library…`, { id: "bumper-batch" });
-      const { key, file, category: fileCategory } = next;
+      const { key, file } = next;
       try {
         patch(key, { state: "uploading" });
         const uploadId = await uploadFile(file, (pct) => patch(key, { pct }));
         patch(key, { state: "saving", pct: 1 });
-        const r = await create.mutateAsync({ uploadId, ...(fileCategory ? { category: fileCategory } : {}) });
+        const r = await create.mutateAsync({ uploadId });
         if (r.duplicate) {
           // nothing new was stored: say so, and point at the card that already has it
           patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
@@ -137,7 +132,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
         continue;
       }
       fresh.push({ key, name: file.name, pct: 0, state: "queued" });
-      queue.current.push({ key, file, category: categoryRef.current });
+      queue.current.push({ key, file });
     }
     setJobs((js) => [...js, ...fresh]);
     // each worker takes its first file synchronously, so this starts at most two and never an idle one
@@ -175,18 +170,13 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       (e) => (fail(e), toast.error((e as Error).message), false),
     );
   };
-  /** Category and tags change in place; the list refetches and keeps showing the old rows meanwhile. */
-  const setCategory = (a: Pick<LibraryAsset, "id" | "name">, category: AssetCategory | null) =>
-    updateM.mutateAsync({ id: a.id, category }).then(
-      () => (refresh(), toast(category ? `${a.name} is now in ${categoryLabel(category)}` : `${a.name} is uncategorised`), true),
-      (e) => (fail(e), toast.error((e as Error).message), false),
-    );
+  /** Tags change in place; the list refetches and keeps showing the old rows meanwhile. */
   const setTags = (a: Pick<LibraryAsset, "id" | "name">, tags: string[]) =>
     updateM.mutateAsync({ id: a.id, tags }).then(
       () => (refresh(), true),
       (e) => (fail(e), toast.error((e as Error).message), false),
     );
-  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setCategory, setTags, uploadCategory, setUploadCategory };
+  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
 }
 
 /** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
@@ -299,14 +289,6 @@ export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HT
             Videos, images and audio, for intros, outros, layers and sounds. MP4, MOV or WebM up to 10 s and 50 MB; PNG, JPG, WebP, GIF or SVG up to 20 MB (an image intro shows for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card); MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB.
           </p>
         </div>
-        <label className="hidden shrink-0 flex-col gap-1 text-xs text-ink2 sm:flex">
-          Category for this batch
-          <Select size="sm" className="w-44" ariaLabel="Category for the files you add" value={actions.uploadCategory} onValueChange={(v) => actions.setUploadCategory(v as AssetCategory | "")} options={[{ value: "", label: "Uncategorised" }, ...ASSET_CATEGORIES.map((c) => ({ value: c.id as string, label: c.label as string }))]} />
-        </label>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-ink2 sm:hidden">
-        <span className="shrink-0">Category for this batch</span>
-        <Select size="sm" className="min-w-0 flex-1" ariaLabel="Category for the files you add" value={actions.uploadCategory} onValueChange={(v) => actions.setUploadCategory(v as AssetCategory | "")} options={[{ value: "", label: "Uncategorised" }, ...ASSET_CATEGORIES.map((c) => ({ value: c.id as string, label: c.label as string }))]} />
       </div>
       <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
       <div className="min-h-4 text-xs text-err" role="status">
@@ -435,14 +417,6 @@ export function SlotRow({
       </div>
     </>
   );
-}
-
-const CATEGORY_NONE = "";
-/** the category as a small control you can change in place (Select, so it paints above a dialog too) */
-export function CategorySelect({ asset: a, busy, onCategory, className = "" }: { asset: Pick<LibraryAsset, "name" | "kind" | "category">; busy: boolean; onCategory: (c: AssetCategory | null) => void; className?: string }) {
-  const options = [{ value: CATEGORY_NONE, label: "Uncategorised" }, ...categoriesFor(a.kind).map((c) => ({ value: c.id as string, label: c.label as string }))];
-  if (a.category && !options.some((o) => o.value === a.category)) options.push({ value: a.category, label: categoryLabel(a.category) });
-  return <Select size="sm" className={className || "w-full"} ariaLabel={`Category of ${a.name}`} disabled={busy} value={a.category ?? CATEGORY_NONE} onValueChange={(v) => onCategory(v === CATEGORY_NONE ? null : (v as AssetCategory))} options={options} />;
 }
 
 const KindGlyph = ({ kind }: { kind: LibraryAsset["kind"] }) => (kind === "audio" ? <AudioLines className="h-3 w-3" aria-hidden /> : kind === "video" ? <Film className="h-3 w-3" aria-hidden /> : <ImageIcon className="h-3 w-3" aria-hidden />);
@@ -578,7 +552,7 @@ function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; bus
 }
 
 /** One library card: fixed-size thumbnail, one-line name and facts, an always-present status line, and equal-width actions. */
-export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds, onRename, onCategory }: { onCategory: (c: AssetCategory | null) => void; asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void; onRename: (name: string) => void }) {
+export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds, onRename }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void; onRename: (name: string) => void }) {
   return (
     <div id={`asset-${a.id}`} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <div className="relative">
@@ -607,7 +581,6 @@ export function AssetCard({ asset: a, introId, outroId, busy, highlighted, appli
         </div>
       </div>
       <div className="flex h-6 items-center">
-        <CategorySelect asset={a} busy={busy} onCategory={onCategory} />
       </div>
       <div className="flex h-4 items-center overflow-hidden">
         <LicenseBadge provenance={a.provenance} className="min-w-0" />
@@ -675,7 +648,7 @@ function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAss
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename, onCategory, onTags }: { onCategory: (c: AssetCategory | null) => void; onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -710,7 +683,6 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
               <div className="flex items-center gap-2">
-                <CategorySelect asset={a} busy={busy} onCategory={onCategory} className="w-44 shrink-0" />
                 {a.system && <span className="rounded-full bg-sunk px-2 py-0.5 text-[11px] font-semibold text-ink2">Catalog</span>}
               </div>
               <TagEditor asset={a} busy={busy} onTags={onTags} />

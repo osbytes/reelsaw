@@ -20,7 +20,7 @@ const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex")
 const PACK = path.resolve(import.meta.dirname, "../assets/catalog");
 
 const item = (id: string, name: string, over: Record<string, unknown> = {}) => ({
-  id, kind: "audio", mime: "audio/mpeg", name, tags: [name.toLowerCase()], category: "sfx", bytes: 3, sha256: sha("abc"), url: `files/${id}.mp3`,
+  id, kind: "audio", mime: "audio/mpeg", name, tags: [name.toLowerCase()], bytes: 3, sha256: sha("abc"), url: `files/${id}.mp3`,
   license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" }, source: { url: "https://example.com/" }, ...over,
 });
 const manifest = (version: number, items: unknown[]): Manifest => manifestSchema.parse({ version, generatedAt: "2026-10-01T00:00:00Z", items });
@@ -95,8 +95,8 @@ describe("catalog manifest", () => {
     assert.match(r.status.lastError!, /https/);
   });
 
-  it("searches name, tags and category with Fuse, filters by kind and pages", async () => {
-    const items = [item("sfx-whoosh", "Whoosh in", { tags: ["swoosh", "transition"] }), item("sfx-ding", "Ding", { tags: ["bell"] }), item("icon-star", "Star", { kind: "image", mime: "image/svg+xml", category: "sticker", url: "files/icon-star.svg", tags: ["favorite"] })];
+  it("searches name and tags with Fuse, filters by kind and pages", async () => {
+    const items = [item("sfx-whoosh", "Whoosh in", { tags: ["swoosh", "transition"] }), item("sfx-ding", "Ding", { tags: ["bell"] }), item("icon-star", "Star", { kind: "image", mime: "image/svg+xml", url: "files/icon-star.svg", tags: ["favorite"] })];
     const c = store(await bundle(manifest(1, items)));
     assert.equal((await c.search("swoosh", { limit: 5 })).items[0]!.externalId, "sfx-whoosh", "found by tag");
     assert.equal((await c.search("wosh", { limit: 5 })).items[0]!.externalId, "sfx-whoosh", "fuzzy");
@@ -155,14 +155,36 @@ function fakeSvc(opts: { fetch?: typeof fetch; bundledDir: string }) {
 }
 
 describe("importing from the catalog", () => {
+  // an in-memory stand-in for the shared rows: one per (provider, externalId, variant), like the unique index
   const created: Array<Record<string, any>> = [];
-  const create = async (i: Record<string, any>) => (created.push(i), { id: "asset-1", name: i.name, kind: "audio", category: i.category, durationSec: 1, duplicate: false, restored: false });
-  beforeEach(() => void (created.length = 0));
+  const saves: Array<[string, string]> = [];
+  const rows = new Map<string, { id: string; name: string; kind: string; mime: string; durationSec: number; duplicate: boolean; restored: boolean }>();
+  const shared = {
+    saveExisting: async (_svc: unknown, userId: string, k: { provider: string; externalId: string; variant: string }) => {
+      const row = rows.get(`${k.provider}|${k.externalId}|${k.variant}`);
+      if (!row) return null;
+      saves.push([userId, row.id]);
+      return { ...row, duplicate: true };
+    },
+    create: async (_svc: unknown, i: Record<string, any>) => {
+      created.push(i);
+      const p = i.provenance;
+      const row = { id: `asset-${rows.size + 1}`, name: i.name, kind: "audio", mime: "audio/mpeg", durationSec: 1, duplicate: false, restored: false };
+      rows.set(`${p.provider}|${p.externalId}|${p.variant ?? ""}`, row);
+      saves.push([i.saveFor, row.id]);
+      return row;
+    },
+  } as never;
+  beforeEach(() => {
+    created.length = 0;
+    saves.length = 0;
+    rows.clear();
+  });
 
   it("copies a bundled file, verifies it and creates a system asset with provenance", async () => {
     const b = await bundle(manifest(1, [item("sfx-pop", "Pop", { sha256: sha("abc"), tags: ["bubble"] })]), { "sfx-pop.mp3": "abc" });
     const { svc, objects, uploads } = fakeSvc({ bundledDir: b });
-    const r = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop", tags: ["Extra"] }, create as never);
+    const r = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop", tags: ["Extra"] }, { shared });
     assert.equal(r.id, "asset-1");
     assert.equal(uploads.length, 1);
     assert.equal(uploads[0]!.userId, "u1");
@@ -170,15 +192,31 @@ describe("importing from the catalog", () => {
     assert.equal(objects.get(String(uploads[0]!.storageKey))!.toString(), "abc");
     const c = created[0]!;
     assert.equal(c.system, true);
-    assert.equal(c.category, "sfx");
+    assert.equal(c.userId, null, "an import is an instance-shared row");
+    assert.equal(c.actorId, "u1");
+    assert.equal(c.saveFor, "u1", "and is saved into the importing account's library");
+    assert.equal("category" in c, false);
     assert.deepEqual(c.tags, ["bubble", "extra"]);
-    assert.deepEqual(c.provenance, { provider: "reelsaw", externalId: "sfx-pop", url: "https://example.com/", license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" } });
+    assert.deepEqual(c.provenance, { provider: "reelsaw", externalId: "sfx-pop", url: "https://example.com/", license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" }, variant: "" });
+  });
+
+  it("a second account importing the same item reuses the shared row and only saves it", async () => {
+    const b = await bundle(manifest(1, [item("sfx-pop", "Pop", { sha256: sha("abc") })]), { "sfx-pop.mp3": "abc" });
+    const { svc, uploads } = fakeSvc({ bundledDir: b });
+    const first = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop" }, { shared });
+    const second = await importAsset(svc, "u2", { provider: "reelsaw", externalId: "sfx-pop" }, { shared });
+    assert.equal(first.duplicate, false);
+    assert.equal(second.duplicate, true);
+    assert.equal(second.id, first.id);
+    assert.equal(created.length, 1, "one row for the whole instance");
+    assert.equal(uploads.length, 1, "nothing is copied or downloaded the second time");
+    assert.deepEqual(saves, [["u1", first.id], ["u2", first.id]]);
   });
 
   it("refuses a bundled file that no longer matches the manifest", async () => {
     const b = await bundle(manifest(1, [item("sfx-pop", "Pop")]), { "sfx-pop.mp3": "tampered" });
     const { svc, uploads } = fakeSvc({ bundledDir: b });
-    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop" }, create as never), /does not match/);
+    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop" }, { shared }), /does not match/);
     assert.equal(uploads.length, 0);
     assert.equal(created.length, 0);
   });
@@ -198,19 +236,20 @@ describe("importing from the catalog", () => {
     assert.equal(found?.fileUrl, "https://reelsaw.test/catalog/v1/files/sfx-new.mp3");
     assert.equal(found?.localPath, undefined, "an online item is downloaded, not read from disk");
     const lookup = async () => ["93.184.216.34"];
-    const ok = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-new" }, create as never, { fetch: f, lookup });
+    const ok = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-new" }, { shared, fetch: f, lookup });
     assert.equal(ok.id, "asset-1");
     assert.equal(created.at(-1)!.system, true);
     assert.equal([...objects.values()].some((b) => b.toString() === "abc"), true);
     body = "evil";
     objects.clear();
-    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-new" }, create as never, { fetch: f, lookup }), /checksum/);
+    rows.clear(); // not yet on the instance, so it is fetched again
+    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-new" }, { shared, fetch: f, lookup }), /checksum/);
     assert.equal(objects.size, 0, "the mismatching upload is removed");
   });
 
   it("explains an unknown catalog id and an unlisted provider", async () => {
     const { svc } = fakeSvc({ bundledDir: await bundle(manifest(1, [])) });
-    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "nope" }, create as never), /not in the Reelsaw catalog/);
-    await assert.rejects(importAsset(svc, "u1", { provider: "pexels", externalId: "photo:1" }, create as never), /Unknown or disabled provider/);
+    await assert.rejects(importAsset(svc, "u1", { provider: "reelsaw", externalId: "nope" }, { shared }), /not in the Reelsaw catalog/);
+    await assert.rejects(importAsset(svc, "u1", { provider: "pexels", externalId: "photo:1" }, { shared }), /Unknown or disabled provider/);
   });
 });

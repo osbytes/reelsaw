@@ -74,12 +74,12 @@ export function pixabay({ settings, http }: ProviderDeps): Provider {
       if (type === "video") {
         const file = bestVideo(obj(hit.videos));
         if (!file) throw new ProviderError("Pixabay returned no file for that video.");
-        return { url: file.url, ext: "mp4", name: clip(tags.slice(0, 3).join(", ") || `Pixabay video ${id}`, 120), kind: "video", category: "broll", tags, provenance: { provider: "pixabay", externalId, url: page, license: LICENSE, attribution: clip(who ? `Video by ${who} on Pixabay` : "Video from Pixabay", 300) } };
+        return { url: file.url, ext: "mp4", name: clip(tags.slice(0, 3).join(", ") || `Pixabay video ${id}`, 120), kind: "video", tags, provenance: { provider: "pixabay", externalId, url: page, license: LICENSE, attribution: clip(who ? `Video by ${who} on Pixabay` : "Video from Pixabay", 300) } };
       }
       // largeImageURL is the standard size every key gets; vectorURL needs approved full access
       const file = (type === "vector" ? httpsUrl(hit.vectorURL) : undefined) ?? httpsUrl(hit.largeImageURL) ?? httpsUrl(hit.webformatURL);
       if (!file) throw new ProviderError("Pixabay returned no file for that image.");
-      return { url: file, ext: extOf(file, "jpg"), name: clip(tags.slice(0, 3).join(", ") || `Pixabay image ${id}`, 120), kind: "image", category: type === "vector" ? "sticker" : "broll", tags, provenance: { provider: "pixabay", externalId, url: page, license: LICENSE, attribution: clip(who ? `Image by ${who} on Pixabay` : "Image from Pixabay", 300) } };
+      return { url: file, ext: extOf(file, "jpg"), name: clip(tags.slice(0, 3).join(", ") || `Pixabay image ${id}`, 120), kind: "image", tags, provenance: { provider: "pixabay", externalId, url: page, license: LICENSE, attribution: clip(who ? `Image by ${who} on Pixabay` : "Image from Pixabay", 300) } };
     },
   };
 }

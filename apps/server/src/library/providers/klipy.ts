@@ -67,7 +67,7 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       const f = g ? formats(g) : undefined;
       const file = f?.mp4 ?? f?.gif;
       if (!g || !f || !file) throw new ProviderError("Klipy no longer returns that item; search for it again.");
-      return { url: file, ext: f.mp4 ? "mp4" : "gif", name: clip(str(g.title) ?? `Klipy ${externalId}`, 120), kind: "video", category: "sticker", tags: [], provenance: { provider: "klipy", externalId, url: httpsUrl(g.itemurl) ?? httpsUrl(g.url), license: LICENSE, attribution: "GIF via Klipy" } };
+      return { url: file, ext: f.mp4 ? "mp4" : "gif", name: clip(str(g.title) ?? `Klipy ${externalId}`, 120), kind: "video", tags: [], provenance: { provider: "klipy", externalId, url: httpsUrl(g.itemurl) ?? httpsUrl(g.url), license: LICENSE, attribution: "GIF via Klipy" } };
     },
   };
 }

@@ -5,7 +5,7 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, clipLayerSchema, assetCategorySchema, assetTagsSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO, MAX_CLIP_LAYERS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO, MAX_CLIP_LAYERS } from "@reelsaw/shared";
 import { addAssetInput, addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
@@ -258,12 +258,12 @@ export const TOOLS = {
 
   list_assets: {
     title: "List library assets",
-    description: "Your library: intro/outro videos and images, logos, stickers, GIFs, SVGs, b-roll, music and sound effects. Returns { assets: [{ id, name, kind, mime, category, tags, provenance, system, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] } (removed items stay restorable for 30 days; url is the file itself). Use the ids in update_clip layers, set_project_bumpers, set_clip_bumpers or set_default_bumper.",
+    description: "Your library: videos, images (GIF, SVG), music and sounds. Returns { assets: [{ id, name, kind, mime, owner, saved, tags, provenance, durationSec, isDefaultIntro, isDefaultOutro, usedBy, thumbnailUrl, url }], removed }. owner \"shared\" = a catalog or provider import every account uses (remove_asset only unsaves it; it cannot be renamed). Use the ids in update_clip layers, set_project_bumpers or set_default_bumper.",
     annotations: { readOnlyHint: true },
   },
   add_asset: {
     title: "Add library asset",
-    description: "Add a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC) to your library from a public url or an uploadId, with an optional category and tags. Returns { id, name, kind, mime, category, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default intro/outro for NEW projects only.",
+    description: "Add a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC) to your library from a public url or an uploadId, with optional tags. Returns { id, name, kind, mime, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default intro/outro for NEW projects only.",
     inputSchema: addAssetInput,
   },
   search_library: {
@@ -283,22 +283,20 @@ export const TOOLS = {
   import_asset: {
     title: "Import from catalog or provider",
     description:
-      "Add one search_library result to your library: downloaded server-side (max 50 MB), catalog checksum verified, license and attribution recorded. Returns { id, name, kind, mime, category, durationSec, duplicate, restored } (the same file twice returns the existing item); use the id in update_clip layers.",
+      "Save one search_library result into your library: downloaded server-side (max 50 MB), catalog checksum verified, license and attribution recorded. The item is one shared copy per instance, so if it was imported before (by anyone) nothing is downloaded and duplicate is true. Returns { id, name, kind, mime, durationSec, duplicate, restored }; use the id in update_clip layers.",
     inputSchema: {
       provider: z.string().min(1).max(40).describe("The result's provider (search_library)"),
       externalId: z.string().min(1).max(200).describe("The result's externalId (search_library)"),
       color: z.string().max(9).optional().describe("iconify only: icon color as hex, e.g. #ffffff (default white)"),
-      category: z.enum(["intro", "logo", "sticker", "broll", "music", "sfx"]).optional().describe("Library category; default: what the source implies (sounds up to 8 s are sfx)"),
       tags: z.array(z.string().trim().min(1).max(40)).max(30).optional().describe("Extra search tags for the library item"),
     },
   },
   update_asset: {
     title: "Update library asset",
-    description: "Rename a library item, set its category, replace its tags, or change how long a still image shows (removed items too). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, category, tags, durationSec, previousName }.",
+    description: "Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, tags, durationSec, previousName }.",
     inputSchema: {
       assetId: assetIdInput(),
       name: bumperNameSchema.optional().describe("New name (1-120 chars)"),
-      category: assetCategorySchema.nullable().optional().describe("intro, outro, logo, sticker, icon, broll, music or sfx; null clears it"),
       tags: assetTagsSchema.optional().describe("Replaces the tags (lowercase words; max 20); [] clears them"),
       imageSeconds: z.number().min(1).max(10).optional().describe("Seconds a still image shows as an intro/outro (1-10); images only"),
     },
@@ -306,7 +304,7 @@ export const TOOLS = {
   },
   remove_asset: {
     title: "Remove library asset",
-    description: "Remove an item from your library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
+    description: "Remove an item from your library and from your defaults (a shared catalog or provider item is only unsaved). Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { destructiveHint: true },
   },
@@ -334,12 +332,12 @@ export const TOOLS = {
   // old names, kept for one release: same handlers as the *_asset tools
   list_bumpers: {
     title: "List library assets (alias)",
-    description: "(alias of list_assets) Your library: intros, outros, overlays, music and sounds. Returns { assets: [{ id, name, kind, mime, category, tags, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] }.",
+    description: "(alias of list_assets) Your library: intros, outros, overlays, music and sounds. Returns { assets: [{ id, name, kind, mime, tags, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] }.",
     annotations: { readOnlyHint: true },
   },
   add_bumper: {
     title: "Add library asset (alias)",
-    description: "(alias of add_asset) Add a video, image or sound to your library from a public url or an uploadId. Returns { id, name, kind, mime, category, durationSec, duplicate, restored }. setDefault makes it your default for NEW projects only.",
+    description: "(alias of add_asset) Add a video, image or sound to your library from a public url or an uploadId. Returns { id, name, kind, mime, durationSec, duplicate, restored }. setDefault makes it your default for NEW projects only.",
     inputSchema: addBumperInput,
   },
   rename_bumper: {

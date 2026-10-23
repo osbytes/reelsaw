@@ -1,4 +1,4 @@
-import { ASSET_CATEGORIES, type AssetCategory, type AssetProvenance } from "@reelsaw/shared";
+import { type AssetProvenance } from "@reelsaw/shared";
 
 export type LibraryKind = "video" | "image" | "audio";
 export const KIND_FILTERS: Array<{ id: LibraryKind; label: string }> = [
@@ -6,11 +6,6 @@ export const KIND_FILTERS: Array<{ id: LibraryKind; label: string }> = [
   { id: "image", label: "Image" },
   { id: "audio", label: "Audio" },
 ];
-export const UNCATEGORISED = "none";
-
-export const categoryLabel = (id: AssetCategory | null | undefined) => (id ? (ASSET_CATEGORIES.find((c) => c.id === id)?.label ?? id) : "Uncategorised");
-/** categories a file of this kind can sit in */
-export const categoriesFor = (kind: LibraryKind) => ASSET_CATEGORIES.filter((c) => (c.kinds as readonly string[]).includes(kind));
 
 const FORMATS: Record<string, string> = {
   "image/gif": "GIF",
@@ -44,19 +39,15 @@ export function formatTag(mime: string | null | undefined): string | null {
 export interface FilterableAsset {
   kind: LibraryKind;
   name: string;
-  category: AssetCategory | null;
   tags: string[];
   provenance: AssetProvenance | null;
 }
 
-export const matchesCategory = (a: Pick<FilterableAsset, "category">, category: string) => !category || (category === UNCATEGORISED ? !a.category : a.category === category);
-
 /** the flat fields Fuse searches (arrays and nested provenance are joined) */
-export const searchable = <T extends FilterableAsset>(a: T) => ({ ...a, tagText: a.tags.join(" "), categoryText: categoryLabel(a.category), attributionText: a.provenance?.attribution ?? "" });
+export const searchable = <T extends FilterableAsset>(a: T) => ({ ...a, tagText: a.tags.join(" "), attributionText: a.provenance?.attribution ?? "" });
 export const SEARCH_KEYS = [
   { name: "name", weight: 2 },
   { name: "tagText", weight: 1.5 },
-  { name: "categoryText", weight: 1 },
   { name: "attributionText", weight: 0.5 },
 ];
 

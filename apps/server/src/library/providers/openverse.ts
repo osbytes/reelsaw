@@ -64,7 +64,6 @@ export function openverse({ http }: ProviderDeps): Provider {
         ext: extOf(file, type === "audio" ? "mp3" : "jpg"),
         name: clip(str(r.title) ?? `Openverse ${type} ${id.slice(0, 8)}`, 120),
         kind: type,
-        category: type === "audio" ? ((num(r.duration) ?? 0) <= 8000 ? "sfx" : "music") : "broll",
         tags,
         provenance: { provider: "openverse", externalId, url: httpsUrl(r.foreign_landing_url), license, attribution: license.id === "cc0" ? undefined : clip(str(r.attribution) ?? `${str(r.title) ?? "Untitled"} by ${str(r.creator) ?? "unknown"}, ${license.name}`, 300) },
       };

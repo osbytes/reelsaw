@@ -2,9 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Check, ChevronsUpDown, Music } from "lucide-react";
-import type { AssetCategory } from "@reelsaw/shared";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
-import { categoryLabel, formatTag } from "../lib/library";
+import { formatTag } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { Skeleton } from "./ui";
 
@@ -21,7 +20,6 @@ export interface PickerAsset {
   usedBy: number;
   thumbnailUrl?: string;
   mime?: string | null;
-  category?: AssetCategory | null;
 }
 
 /** A choice that is not an asset: "Project default (name)", "None", "Leave as it is". */
@@ -55,7 +53,6 @@ function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
       <Badge>{formatTag(a.mime) ?? a.kind}</Badge>
-      {a.category && <Badge>{categoryLabel(a.category)}</Badge>}
       <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
       {isDefault && <Badge tone="acc">default {slot}</Badge>}
       {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
@@ -79,10 +76,7 @@ export function BumperCombobox({
   label,
   className = "",
   loading = false,
-  categories,
 }: {
-  /** only list assets in these categories (uncategorised ones are always listed); omit for all */
-  categories?: readonly AssetCategory[];
   loading?: boolean;
   value: string;
   onChange: (v: string) => void;
@@ -98,8 +92,7 @@ export function BumperCombobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const catKey = categories?.join(",");
-  const assets = useMemo(() => (categories ? allAssets.filter((a) => !a.category || categories.includes(a.category)) : allAssets), [allAssets, catKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const assets = allAssets;
   const fuzzy = useMemo(
     () => ({
       assets: createFuzzy(assets, [{ name: "name", weight: 2 }, { name: "kind", weight: 0.5 }, { name: "mime", weight: 0.3 }]),

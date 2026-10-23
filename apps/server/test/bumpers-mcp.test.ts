@@ -47,9 +47,9 @@ describe("tool input schemas", () => {
 
 describe("add_asset input", () => {
   const assetIn = z.object(addAssetInput);
-  it("takes a category from the fixed list and tidy tags", () => {
-    assert.ok(assetIn.safeParse({ url: "https://x.test/a.gif", category: "sticker", tags: ["fun", "party"] }).success);
-    assert.ok(!assetIn.safeParse({ url: "https://x.test/a.gif", category: "meme" }).success);
+  it("takes tidy tags and has no category input", () => {
+    assert.ok(assetIn.safeParse({ url: "https://x.test/a.gif", tags: ["fun", "party"] }).success);
+    assert.equal("category" in addAssetInput, false);
     assert.ok(!assetIn.safeParse({ url: "https://x.test/a.gif", tags: Array(50).fill("t") }).success);
   });
 });

@@ -4,7 +4,7 @@
  *   - the starter pack bundled in the image (`assets/catalog/index.json` + `files/`), so an offline install has something;
  *   - the online manifest (`CATALOG_URL`), fetched with ETag / If-None-Match, 10 s timeout, cached at
  *     `<DATA_DIR>/catalog/index.json`, refreshed hourly by the reconciler or `reelsaw catalog refresh`.
- * A failed fetch is a debug line, never an error. Search is Fuse over name / tags / category. Importing goes
+ * A failed fetch is a debug line, never an error. Search is Fuse over name / tags. Importing goes
  * through the same path as every provider (library/import.ts): download (or copy, for bundled files), verify the
  * sha256, `bumpers.create` with `system: true`.
  */
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import Fuse from "fuse.js";
 import { z } from "zod";
-import { ASSET_KINDS, assetCategorySchema, type AssetKind } from "@reelsaw/shared";
+import { ASSET_KINDS, type AssetKind } from "@reelsaw/shared";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ItemLicense, ProviderItem } from "./providers/types.js";
@@ -25,7 +25,6 @@ export const catalogItemSchema = z.object({
   mime: z.string().max(100),
   name: z.string().min(1).max(120),
   tags: z.array(z.string().max(40)).max(30).default([]),
-  category: assetCategorySchema.optional(),
   durationSec: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
@@ -205,7 +204,7 @@ export function createCatalog(deps: CatalogDeps): Catalog {
     async search(q, { kind, cursor, limit }) {
       const { manifest, source } = await load();
       if (fuse?.manifest !== manifest) {
-        fuse = { manifest, index: new Fuse(manifest.items, { keys: [{ name: "name", weight: 2 }, { name: "tags", weight: 1.5 }, { name: "category", weight: 0.5 }], threshold: 0.35, ignoreLocation: true }) };
+        fuse = { manifest, index: new Fuse(manifest.items, { keys: [{ name: "name", weight: 2 }, { name: "tags", weight: 1.5 }], threshold: 0.35, ignoreLocation: true }) };
       }
       const query = q.trim();
       const all = query ? fuse.index.search(query).map((r) => r.item) : manifest.items;

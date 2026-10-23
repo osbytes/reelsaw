@@ -13,7 +13,7 @@ import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { extractUrls, isOnlyUrls, linkKey, youtubeId } from "../lib/links";
 import { ago } from "../lib/time";
-import { categoryLabel, formatTag, searchable, SEARCH_KEYS } from "../lib/library";
+import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { formatTime } from "@reelsaw/shared";
@@ -63,9 +63,9 @@ interface Item {
 
 
 /** kind, length, size and badges of a library item on one line */
-function assetHint(a: { kind: string; mime?: string | null; category?: Parameters<typeof categoryLabel>[0]; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
+function assetHint(a: { kind: string; mime?: string | null; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
   const badges = [defaults?.introAssetId === a.id ? "default intro" : "", defaults?.outroAssetId === a.id ? "default outro" : "", a.usedBy ? `used by ${a.usedBy}` : ""].filter(Boolean);
-  return [formatTag(a.mime) ?? a.kind, a.category ? categoryLabel(a.category) : "", `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].filter(Boolean).join(" · ");
+  return [formatTag(a.mime) ?? a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].filter(Boolean).join(" · ");
 }
 
 function download(href: string) {

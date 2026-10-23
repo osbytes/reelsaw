@@ -16,13 +16,16 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import { assetCategorySchema, assetTagsSchema, bumperSecondsSchema, clipLayers, type AssetCategory } from "@reelsaw/shared";
+import { assetTagsSchema, bumperSecondsSchema, clipLayers, type AssetProvenance } from "@reelsaw/shared";
 import type { Services } from "../services.js";
 import type { appRouter } from "../trpc/router.js";
 import { userDefaults } from "../pipeline/settings.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
-import { ASSET_MIME, BUMPER_MAX_BYTES, BUMPER_IMAGE_SEC, resolveClipBumpers } from "../pipeline/bumpers.js";
+import { ASSET_MIME, BUMPER_MAX_BYTES, BUMPER_IMAGE_SEC, resolveClipBumpers, bumperKind, assetKind, assetMime, bumperProblem, ensureBumperThumb, sha256File } from "../pipeline/bumpers.js";
+import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
+import { takeTxLock, txLock } from "../locks.js";
+import { assetVisibleTo } from "./visible.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
@@ -56,12 +59,11 @@ export const setClipBumpersInput = {
   outroSec: bumperSecondsSchema.optional().describe("Seconds an outro image shows on these clips (1-10)"),
   rerender: z.boolean().describe("true = re-render only these clips now; false = apply on their next render"),
 };
-/** add_asset: add_bumper plus a category and tags; the url takes every format the library stores. */
+/** add_asset: add_bumper plus tags (there are no categories); the url takes every format the library stores. */
 export const addAssetInput = {
   url: z.url().optional().describe("http(s) link to a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC); the server downloads it (max 50 MB, 60 s)"),
   uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
   name: z.string().min(1).max(120).optional().describe("Library name (url only; default: the file name). update_asset changes it later"),
-  category: assetCategorySchema.optional().describe("What it is for: intro, outro, logo, sticker, icon, broll, music or sfx (default: sfx / music by length for audio)"),
   tags: assetTagsSchema.optional().describe("Search tags (lowercase words; max 20)"),
   imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional().describe("How long a still image shows as an intro/outro (1-10 s)"),
   setDefault: z.enum(["intro", "outro"]).optional().describe("Also make it your default intro or outro for new projects"),
@@ -93,21 +95,173 @@ export const bumperNameSchema = z.string().trim().min(1).max(120);
  * Assets are otherwise immutable; the normalised file is named by its seconds, so projects pick up a new length on
  * their next render. A name is only a label: nothing re-renders.
  */
-export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number; category?: AssetCategory | null; tags?: string[] }) {
-  if (patch.name === undefined && patch.imageSeconds === undefined && patch.category === undefined && patch.tags === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds, category or tags" });
+export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number; tags?: string[] }) {
+  if (patch.name === undefined && patch.imageSeconds === undefined && patch.tags === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds or tags" });
   return svc.tx(async (u) => {
-    const [a] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, id), eq(schema.libraryAssets.userId, userId))).for("update");
+    const [a] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, id), assetVisibleTo(userId))).for("update");
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    if (!a.userId) throw new TRPCError({ code: "FORBIDDEN", message: "Shared items keep the name they came with." });
     if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
     const name = patch.name?.trim();
     // tags are lowercase words, each once; the same list is stored and returned
     const tags = patch.tags === undefined ? undefined : [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))];
     await u.db
       .update(schema.libraryAssets)
-      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(patch.category !== undefined ? { category: patch.category } : {}), ...(tags !== undefined ? { tags } : {}) })
+      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(tags !== undefined ? { tags } : {}) })
       .where(eq(schema.libraryAssets.id, a.id));
-    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, category: patch.category !== undefined ? patch.category : a.category, tags: tags ?? a.tags, previousName: a.name };
+    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, tags: tags ?? a.tags, previousName: a.name };
   });
+}
+
+/** Set (or clear) the user's default intro/outro: one atomic JSON merge, visibility and liveness checked in the same unit of work. */
+export async function setBumperDefault(db: Db, userId: string, slot: "intro" | "outro", assetId: string | null) {
+  const key = slot === "intro" ? "introAssetId" : "outroAssetId";
+  if (!assetId) {
+    await db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${userId}`);
+    return;
+  }
+  const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, assetId), assetVisibleTo(userId), isNull(schema.libraryAssets.deletedAt)));
+  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+  const patch = { [key]: assetId };
+  await db
+    .insert(schema.userSettings)
+    .values({ userId, projectDefaults: patch })
+    .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: sql`${schema.userSettings.projectDefaults} || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() } });
+}
+
+export interface CreateAssetInput {
+  /** the owner of the new row; null = an instance-shared row, only the catalog / provider import passes it (never the web or MCP) */
+  userId: string | null;
+  /** the account whose upload holds the bytes (and who is importing, for a shared row) */
+  actorId: string;
+  uploadId: string;
+  imageSeconds?: number;
+  setDefault?: "intro" | "outro";
+  name?: string;
+  tags?: string[];
+  provenance?: AssetProvenance;
+  system?: boolean;
+  /** shared rows: also add the row to this account's library, in the same transaction */
+  saveFor?: string;
+}
+export interface CreatedAsset {
+  id: string;
+  name: string;
+  kind: string;
+  mime: string | null;
+  durationSec: number;
+  duplicate: boolean;
+  restored: boolean;
+}
+
+/** The key of a shared row: one per (provider, externalId, variant) on the whole instance. */
+export function sharedSourceKey(p: Pick<AssetProvenance, "provider" | "externalId" | "variant"> | null | undefined) {
+  return p?.provider && p.externalId ? { provider: p.provider, externalId: p.externalId, variant: p.variant ?? "" } : null;
+}
+export const sharedSourceWhere = (k: { provider: string; externalId: string; variant: string }) =>
+  sql`${schema.libraryAssets.userId} is null and ${schema.libraryAssets.deletedAt} is null and ${schema.libraryAssets.provenance}->>'provider' = ${k.provider} and ${schema.libraryAssets.provenance}->>'externalId' = ${k.externalId} and coalesce(${schema.libraryAssets.provenance}->>'variant', '') = ${k.variant}`;
+
+/**
+ * Validate an uploaded file with ffprobe and add it to the library: the one path behind `bumpers.create` (an account's
+ * own row) and the catalog / provider import (an instance-shared row, `userId: null`). The content-hash dedupe is
+ * scoped to the same owner (null = shared); a shared row is also unique per source item (the lock and the partial
+ * unique index), so two accounts importing the same item at once converge on one row.
+ */
+export async function createAsset(svc: Services, input: CreateAssetInput): Promise<CreatedAsset> {
+  const { userId, actorId } = input;
+  const shared = userId === null;
+  const sourceKey = shared ? sharedSourceKey(input.provenance) : null;
+  if (shared && !sourceKey) throw new TRPCError({ code: "BAD_REQUEST", message: "A shared item needs its source" });
+  const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, actorId)) });
+  if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+  const ext = path.extname(up.filename).toLowerCase();
+  // the extension's guess; a GIF or WebP is re-decided from the probe below (animated = video)
+  let kind = bumperKind(ext) ?? "video";
+  const id = randomUUID();
+  const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
+  const ownerIs = (col: typeof schema.libraryAssets.userId) => (userId === null ? isNull(col) : eq(col, userId));
+  try {
+    // cheap checks first so a huge file is not pulled out of storage just to be refused
+    const early = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, { durationSec: 1, width: 1000, height: 1000 });
+    if (early) throw new TRPCError({ code: "BAD_REQUEST", message: early });
+    await fs.mkdir(svc.paths.tmp, { recursive: true });
+    await svc.storage.ensureLocal(up.storageKey, local);
+    // ffprobe cannot size an SVG reliably (and not every ffmpeg build reads one): resvg gives its size
+    const svgText = ext === ".svg" ? await fs.readFile(local) : null;
+    if (svgText && svgHasExternalRefs(svgText)) throw new TRPCError({ code: "BAD_REQUEST", message: "This SVG links to other files. Embed its images, or export it as a PNG." });
+    const svgDims = svgText ? svgSize(svgText) : null;
+    const probe = ext === ".svg" ? (svgDims ? { durationSec: 0, width: svgDims.width, height: svgDims.height, hasAudio: false } : null) : await svc.media.ffprobe(local).catch(() => null);
+    if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.` });
+    kind = assetKind(ext, probe) ?? kind;
+    const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
+    if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+    const storageKey = keys.asset(id, ext);
+    const contentHash = await sha256File(local);
+    const row = await svc.tx(async (u) => {
+      const keep = async (asset: typeof schema.libraryAssets.$inferSelect, restored: boolean) => {
+        if (input.saveFor && !asset.userId) await u.db.insert(schema.librarySaves).values({ userId: input.saveFor, assetId: asset.id }).onConflictDoNothing();
+        if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, asset.id);
+        return { asset, duplicate: true as const, restored };
+      };
+      if (sourceKey) {
+        await takeTxLock(u.db, txLock.sharedAsset(sourceKey.provider, sourceKey.externalId, sourceKey.variant));
+        const [existing] = await u.db.select().from(schema.libraryAssets).where(sharedSourceWhere(sourceKey)).limit(1);
+        if (existing) return keep(existing, false);
+      }
+      // one upload of a given file at a time per owner (all shared rows count as one owner), so two racing copies cannot both insert
+      await takeTxLock(u.db, txLock.bumper(userId ?? "shared", contentHash));
+      const [same] = await u.db.select().from(schema.libraryAssets).where(and(ownerIs(schema.libraryAssets.userId), eq(schema.libraryAssets.contentHash, contentHash))).orderBy(sql`(${schema.libraryAssets.deletedAt} is not null)`).limit(1);
+      if (same) {
+        const wasRemoved = !!same.deletedAt;
+        if (wasRemoved) await u.db.update(schema.libraryAssets).set({ deletedAt: null }).where(eq(schema.libraryAssets.id, same.id));
+        return keep(same, wasRemoved);
+      }
+      // ownership is re-checked in the unit of work that writes
+      const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, actorId)));
+      if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
+      const [asset] = await u.db
+        .insert(schema.libraryAssets)
+        .values({
+          id,
+          userId,
+          kind,
+          mime: assetMime(ext),
+          tags: input.tags ?? [],
+          ...(input.provenance ? { provenance: { ...input.provenance, ...(sourceKey ? { variant: sourceKey.variant } : {}), importedAt: new Date().toISOString() } } : {}),
+          system: input.system ?? false,
+          name: input.name?.trim() || up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
+          durationSec: kind === "image" ? (input.imageSeconds ?? BUMPER_IMAGE_SEC.default) : probe.durationSec,
+          // audio has no picture: bumperProblem already refused images/videos without dimensions
+          width: probe.width ?? 0,
+          height: probe.height ?? 0,
+          hasAudio: kind === "audio" || (kind === "video" && probe.hasAudio),
+          sourceKey: storageKey,
+          sizeBytes: up.sizeBytes,
+          contentHash,
+        })
+        .returning();
+      if (input.saveFor && shared) await u.db.insert(schema.librarySaves).values({ userId: input.saveFor, assetId: id }).onConflictDoNothing();
+      if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, id);
+      // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
+      u.afterCommit(async () => {
+        try {
+          await svc.storage.putFile(storageKey, local);
+          // the picker thumbnail (none for audio); if this fails the media route makes it on first request
+          const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
+          if (thumbKey) await svc.database.db.update(schema.libraryAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.libraryAssets.id, id)).catch(() => {});
+        } finally {
+          await fs.rm(local, { force: true }).catch(() => {});
+        }
+      });
+      return { asset: asset!, duplicate: false as const, restored: false };
+    });
+    if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
+    const a = row.asset;
+    return { id: a.id, name: a.name, kind: a.kind, mime: a.mime, durationSec: a.durationSec, duplicate: row.duplicate, restored: row.restored };
+  } catch (err) {
+    await fs.rm(local, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 export function requireOneSource(i: { url?: string; uploadId?: string }) {
@@ -268,7 +422,8 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     isDefaultIntro: defaults.introAssetId === a.id,
     isDefaultOutro: defaults.outroAssetId === a.id,
     mime: a.mime,
-    category: a.category,
+    owner: a.owner,
+    saved: a.saved,
     tags: a.tags,
     provenance: a.provenance,
     system: a.system,
@@ -310,7 +465,7 @@ export async function projectBumperSummaries(
   const ids = new Set<string>();
   for (const c of coverage.values()) for (const s of [c.intro, c.outro]) if (s) for (const a of s.assets) ids.add(a.assetId);
   const assets = ids.size
-    ? await db.select({ id: schema.libraryAssets.id, name: schema.libraryAssets.name, kind: schema.libraryAssets.kind }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.userId, userId), inArray(schema.libraryAssets.id, [...ids])))
+    ? await db.select({ id: schema.libraryAssets.id, name: schema.libraryAssets.name, kind: schema.libraryAssets.kind }).from(schema.libraryAssets).where(and(assetVisibleTo(userId), inArray(schema.libraryAssets.id, [...ids])))
     : [];
   const byId = new Map(assets.map((a) => [a.id, a]));
   const slot = (s: SlotCoverage | null): SlotSummary | null => {

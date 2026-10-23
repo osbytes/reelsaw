@@ -28,6 +28,7 @@ import { createReportZip, reportCapabilities, reportPreview } from "./report/bun
 import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
@@ -262,7 +263,7 @@ export function createApp(svc: Services) {
   app.get("/media/bumpers/:id", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), eq(schema.libraryAssets.userId, session.user.id)) });
+    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
     const loc = await storage.resolve(asset.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
@@ -276,7 +277,7 @@ export function createApp(svc: Services) {
   app.get("/media/bumpers/:id/thumb.jpg", async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), eq(schema.libraryAssets.userId, session.user.id)) });
+    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
     let key = asset.thumbnailKey ?? keys.assetThumb(asset.sourceKey);
     if (!asset.thumbnailKey || !(await storage.exists(key))) {

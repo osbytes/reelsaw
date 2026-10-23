@@ -19,6 +19,8 @@ export const txLock = {
   billing: (userId: string) => `billing:${userId}`,
   /** one upload of the same bytes at a time into a user's intro/outro library (router.ts) */
   bumper: (userId: string, contentHash: string) => `bumper:${userId}:${contentHash}`,
+  /** one import of the same catalog / provider item at a time, instance-wide, so two accounts converge on one shared row (library/service.ts createAsset) */
+  sharedAsset: (provider: string, externalId: string, variant: string) => `shared-asset:${provider}:${externalId}:${variant}`,
 } as const;
 
 /** The one lock with no subject: "which sign-up becomes the first admin" (auth.ts). Arbitrary constant. */

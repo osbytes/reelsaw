@@ -115,12 +115,12 @@ const PANE_NAME = ["Top", "Bottom"] as const;
 const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
 /** shortest a layer may be: pictures and text 0.1 s, sounds 0.5 s */
 const layerMin = (l: Pick<ClipLayer, "kind">) => (l.kind === "audio" ? 0.5 : 0.1);
-/** a library row as the editor reads it: the list also carries the mime type and category */
+/** a library row as the editor reads it: the list also carries the mime type */
 type LayerAsset = LibraryAsset;
 /** GIF / animated WebP / video: a picture that moves, so it can repeat inside its window */
 const isAnimatedAsset = (a: LayerAsset | undefined) => !!a && (a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp");
 /** a short or sfx-tagged sound gets the one-shot treatment */
-const isSoundEffect = (a: LayerAsset | undefined) => !!a && audioLayerDefaultsFor({ durationSec: a.durationSec, category: a.category }) === SFX_AUDIO_DEFAULTS;
+const isSoundEffect = (a: LayerAsset | undefined) => !!a && audioLayerDefaultsFor({ durationSec: a.durationSec }) === SFX_AUDIO_DEFAULTS;
 type LayerPatch = Partial<Omit<AssetLayer, "kind"> & Omit<TextLayer, "kind"> & Omit<AudioLayer, "kind">>;
 /** Layers clamped to the clip; one that no longer fits is dropped (a retrim past it). */
 const clampLayers = (list: ClipLayer[], r: [number, number]): ClipLayer[] => list.map((l) => ({ ...l, start: Math.max(r[0], l.start), end: Math.min(r[1], l.end) })).filter((l) => l.end - l.start >= layerMin(l));
@@ -803,7 +803,7 @@ export function ClipEditor(props: Props) {
     if (tab !== "layers" && tab !== "transcript") setTab("layers");
     toast(note);
   };
-  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec" | "category">;
+  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec">;
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const video = asset.kind === "video";
     const [start, end] = layerWindow(t, video ? Math.max(1, Math.min(asset.durationSec, range[1] - t)) : 4);
@@ -814,7 +814,7 @@ export function ClipEditor(props: Props) {
     pushLayer({ id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color }, "Text added · type it in the Layers tab, drag it on the preview");
   };
   const addSoundLayer = (asset: NewLayerAsset, t: number) => {
-    const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec, category: asset.category });
+    const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec });
     const oneShot = defaults === SFX_AUDIO_DEFAULTS;
     // a one-shot sound lasts as long as the file; music starts at the playhead and runs to the end of the clip
     const [start, end] = oneShot ? layerWindow(t, Math.max(0.5, asset.durationSec)) : layerWindow(t, range[1] - t);
@@ -1936,7 +1936,7 @@ export function ClipEditor(props: Props) {
           const t = browseAt ?? current;
           setBrowseAt(null);
           // the import result is a plain row; the lane helpers want the library's kind union
-          const a = { ...asset, kind: asset.kind === "audio" ? ("audio" as const) : asset.kind === "video" ? ("video" as const) : ("image" as const), category: (asset.category ?? null) as LibraryAsset["category"] };
+          const a = { ...asset, kind: asset.kind === "audio" ? ("audio" as const) : asset.kind === "video" ? ("video" as const) : ("image" as const) };
           if (a.kind === "audio") addSoundLayer(a, t);
           else addAssetLayer(a, t);
         }}
