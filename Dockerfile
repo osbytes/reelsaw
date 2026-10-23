@@ -97,7 +97,10 @@ ENV NODE_ENV=production \
     REELSAW_BUILT_AT=${REELSAW_BUILT_AT}
 LABEL org.opencontainers.image.title="Reelsaw" \
       org.opencontainers.image.version="${REELSAW_VERSION}" \
-      org.opencontainers.image.revision="${REELSAW_COMMIT}"
+      org.opencontainers.image.revision="${REELSAW_COMMIT}" \
+      org.opencontainers.image.source="https://github.com/osbytes/reelsaw" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      io.modelcontextprotocol.server.name="io.github.osbytes/reelsaw"
 WORKDIR /app
 # --chown on the copy (not a recursive chown afterwards) so the app layer is not stored twice
 COPY --from=server --chown=node:node /out/server /app/server
