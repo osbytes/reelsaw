@@ -37,9 +37,9 @@ jobs:
       - name: Release PR or tag
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          title: "Release"
-          commit: "Release"
-          version: pnpm release:version
-          publish: pnpm release:tag
+          pr-title: "Release"
+          commit-message: "Release"
+          version-script: pnpm release:version
+          publish-script: pnpm release:tag
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
