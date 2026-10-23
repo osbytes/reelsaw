@@ -265,8 +265,8 @@ projects and settings only. `SIGNUP_MODE` decides who gets in:
 
 | `SIGNUP_MODE` | Behaviour |
 | --- | --- |
-| `open` (default) | Anyone can sign up and use the app at once. Right for a single-user box. |
-| `approval` | New accounts wait on a "Waiting for approval" page until an admin approves them (Users page, or `reelsaw approve <email>`). Admins get an email when `EMAIL_DRIVER` is set. |
+| `open` (default) | Anyone can sign up and use the app at once. Right for a single-user box and for a public instance that already confirms email. |
+| `approval` | New accounts wait on a "Waiting for approval" page until an admin approves them (Users page, or `reelsaw approve <email>`). Admins get an email when `EMAIL_DRIVER` is set. Right for a private box, not a public product. |
 | `closed` | No sign-ups. (The older `ALLOW_SIGNUP=false` is still read as `closed`; use `SIGNUP_MODE`.) |
 
 Every user has **Settings → Project defaults** (vocabulary, instructions, language, clip length,
@@ -281,7 +281,8 @@ make-admin you@example.com` promotes an account from the shell.
 
 Email (`EMAIL_DRIVER=smtp|resend`, `EMAIL_FROM`, `SMTP_URL` or `RESEND_API_KEY`) turns on approval
 notices, password reset and, with `REQUIRE_EMAIL_VERIFICATION=true`, verification before the
-first sign-in. Without it everything else works; approvals are handled on the Users page.
+first sign-in. Confirmation links work for 24 hours and only once; an expired link lands on a page
+that sends a new one. Without email everything else works; approvals are handled on the Users page.
 
 ## Hosting for many people
 

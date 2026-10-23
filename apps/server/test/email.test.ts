@@ -10,6 +10,8 @@ describe("email templates", () => {
     assert.match(mail.text, /Confirm this address/);
     assert.match(mail.text, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(mail.html, /Confirm email/);
+    assert.match(mail.html, /24 hours/);
+    assert.match(mail.text, /24 hours/);
     assert.match(mail.html, /href="https:\/\/app\.example\.com\/api\/auth\/verify-email\?token=abc"/);
     assert.match(mail.html, /reel<span[^>]*>\/<\/span>saw/);
   });

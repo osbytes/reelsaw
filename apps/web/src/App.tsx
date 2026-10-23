@@ -229,7 +229,10 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   const { data, isPending } = useSession();
   const me = useMe(!!data);
   if (isPending || (data && me.isPending)) return <AppSkeleton />;
-  if (!data) return <Navigate to="/login" replace />;
+  if (!data) {
+    const error = new URLSearchParams(window.location.search).get("error");
+    return <Navigate to={error ? `/login${window.location.search}` : "/login"} replace />;
+  }
   // waiting for approval or suspended: one page, nothing else (the server refuses everything anyway)
   if (me.data?.blocked) return <PendingPage />;
   if (admin && me.data?.role !== "admin") return <Navigate to="/" replace />;

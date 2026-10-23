@@ -47,8 +47,8 @@ const url = z.string().trim().url().max(500).or(z.literal(""));
 const days = (what: string) => `${what} 0 = keep forever.`;
 
 export const RUNTIME_SETTINGS = {
-  SIGNUP_MODE: def("access", z.enum(["open", "approval", "closed"]), "Who may sign up: open (anyone), approval (new accounts wait for an admin) or closed (nobody). The first account is always the admin."),
-  REQUIRE_EMAIL_VERIFICATION: def("access", z.boolean(), "New users must click the verification link before they can sign in. Needs an email driver in .env."),
+  SIGNUP_MODE: def("access", z.enum(["open", "approval", "closed"]), "Who may sign up: open (anyone, right for a public instance with email confirmation), approval (new accounts wait for an admin; a private box) or closed (nobody). The first account is always the admin."),
+  REQUIRE_EMAIL_VERIFICATION: def("access", z.boolean(), "New users must click the verification link before they can sign in. The link works for 24 hours and is single-use; an expired one offers a new send. Needs an email driver in .env."),
   CAPTCHA_PROVIDER: def("access", z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).or(z.literal("")), "Bot protection on sign-up, sign-in and password reset: cloudflare-turnstile, google-recaptcha or hcaptcha; empty = off. Needs both keys.", { optional: true }),
   CAPTCHA_SITE_KEY: def("access", z.string().trim().max(200), "Public captcha key the browser widget uses; empty = unset.", { optional: true }),
   CAPTCHA_SECRET_KEY: def("access", z.string().trim().max(200), "Secret captcha key the server verifies with; stored encrypted, never shown again; empty = unset.", { optional: true, secret: true }),

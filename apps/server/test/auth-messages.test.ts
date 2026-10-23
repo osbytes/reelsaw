@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import {
   ACCOUNT_EXISTS_MESSAGE,
   CONFIRM_EMAIL_THEN_SIGN_IN,
+  looksLikeEmail,
   PENDING_APPROVAL_MESSAGE,
   REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD,
   repeatSignUpMessage,
+  shouldOfferResendVerification,
   signupCreatedNotice,
   unverifiedSignInMessage,
+  verifyEmailErrorFromSearch,
+  verifyLinkFailed,
 } from "@reelsaw/shared";
 
 const pending = { kind: "pending" as const, reason: PENDING_APPROVAL_MESSAGE };
@@ -42,5 +46,29 @@ describe("sign-up that created an account and no session", () => {
     assert.equal(signupCreatedNotice("approval").includes("first sign-up"), true);
     assert.equal(signupCreatedNotice("open").includes(PENDING_APPROVAL_MESSAGE), false);
     assert.equal(signupCreatedNotice("open").includes(CONFIRM_EMAIL_THEN_SIGN_IN), true);
+  });
+});
+
+describe("expired confirmation link", () => {
+  it("reads the error and email Better Auth puts on /login", () => {
+    assert.deepEqual(verifyEmailErrorFromSearch("?error=TOKEN_EXPIRED&email=Ada%40Example.com"), { expired: true, email: "ada@example.com" });
+    assert.deepEqual(verifyEmailErrorFromSearch("?error=INVALID_TOKEN"), { expired: true, email: null });
+    assert.equal(verifyLinkFailed("TOKEN_EXPIRED"), true);
+    assert.equal(verifyLinkFailed("INVALID_EMAIL_OR_PASSWORD"), false);
+  });
+
+  it("pre-fills only a short address with one @ and a dotted domain", () => {
+    assert.equal(looksLikeEmail("ada@example.com"), true);
+    assert.equal(looksLikeEmail("not-an-email"), false);
+    assert.equal(looksLikeEmail("a@b"), false);
+    assert.equal(looksLikeEmail(`!@${"!.".repeat(200)}`), false);
+  });
+
+  it("offers a resend after sign-up, an expired link, or an unverified sign-in", () => {
+    assert.equal(shouldOfferResendVerification({ errorCode: null, expiredLink: true, afterSignUp: false }), true);
+    assert.equal(shouldOfferResendVerification({ errorCode: null, expiredLink: false, afterSignUp: true }), true);
+    assert.equal(shouldOfferResendVerification({ errorCode: "EMAIL_NOT_VERIFIED", expiredLink: false, afterSignUp: false }), true);
+    assert.equal(shouldOfferResendVerification({ errorCode: "ACCOUNT_PENDING", expiredLink: false, afterSignUp: false }), true);
+    assert.equal(shouldOfferResendVerification({ errorCode: "INVALID_EMAIL_OR_PASSWORD", expiredLink: false, afterSignUp: false }), false);
   });
 });
