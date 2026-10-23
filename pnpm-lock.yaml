@@ -143,6 +143,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1)
+      fuse.js:
+        specifier: 7.1.0
+        version: 7.1.0
       hono:
         specifier: ^4.13.13
         version: 4.13.13

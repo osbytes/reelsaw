@@ -361,6 +361,9 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("add_bumper", TOOLS.add_bumper, addAsset);
   server.registerTool("rename_bumper", TOOLS.rename_bumper, ({ assetId, name }) => updateAsset({ assetId, name }));
 
+  server.registerTool("search_library", TOOLS.search_library, (input) => run(() => api.catalog.search(input)));
+  server.registerTool("import_asset", TOOLS.import_asset, (input) => run(() => api.catalog.import(input)));
+
   server.registerTool(
     "set_default_bumper",
     TOOLS.set_default_bumper,

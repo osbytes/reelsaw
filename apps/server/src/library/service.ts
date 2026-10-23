@@ -147,7 +147,7 @@ async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["looku
  * Download `url` into the uploads table exactly as POST /api/upload would (same storage key, same row), so
  * `bumpers.create` takes it from there with its own type, size and ffprobe checks. Max 50 MB, 60 s, 3 redirects.
  */
-export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
+export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string; ext?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
   const doFetch = deps.fetch ?? fetch;
   const lookup = deps.lookup ?? (async (h: string) => (await dnsLookup(h, { all: true })).map((a) => a.address));
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
@@ -167,7 +167,9 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   if (declared > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(declared / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
   const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   const urlExt = path.extname(target.pathname).toLowerCase();
-  const ext = ALLOWED_EXTS.includes(urlExt) ? urlExt : TYPE_EXT[type];
+  // an import that knows what it is fetching (a provider's resolve) can force the extension
+  const forced = deps.ext ? (deps.ext.startsWith(".") ? deps.ext : `.${deps.ext}`).toLowerCase() : undefined;
+  const ext = forced ?? (ALLOWED_EXTS.includes(urlExt) ? urlExt : TYPE_EXT[type]);
   if (!ext) throw new Error("Use a video (MP4, MOV, WebM), an image (PNG, JPG, WebP, GIF, SVG) or a sound (MP3, M4A, AAC, WAV, OGG, FLAC).");
   const id = randomUUID();
   const dest = path.join(svc.paths.uploads, `${id}${ext}`);

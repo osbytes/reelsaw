@@ -266,6 +266,32 @@ export const TOOLS = {
     description: "Add a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC) to your library from a public url or an uploadId, with an optional category and tags. Returns { id, name, kind, mime, category, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default intro/outro for NEW projects only.",
     inputSchema: addAssetInput,
   },
+  search_library: {
+    title: "Search catalog and providers",
+    description:
+      "Find sounds, icons, stickers, photos, videos and GIFs to add to your library. provider omitted = the Reelsaw catalog (CC0 / permissive; works offline); others (pexels, pixabay, freesound, iconify, openverse, giphy, klipy) appear when an admin enabled them. Returns { provider, items: [{ provider, externalId, name, kind, license, attribution, previewUrl, durationSec }], nextCursor, unavailable }. Nothing is added: pass provider + externalId to import_asset.",
+    inputSchema: {
+      q: z.string().max(200).describe("What to look for, e.g. \"whoosh\", \"arrow\", \"city at night\"; empty lists the catalog"),
+      provider: z.string().min(1).max(40).optional().describe("reelsaw (default), pexels, pixabay, freesound, iconify, openverse, giphy or klipy"),
+      kind: z.enum(["video", "image", "audio"]).optional().describe("Only this kind of result"),
+      cursor: z.string().max(200).optional().describe("nextCursor from the previous page; omit for the first page"),
+      limit: z.number().int().min(1).max(60).default(24).describe("Results per page (1-60, default 24)"),
+      license: z.enum(["cc0", "by"]).optional().describe("freesound only: cc0 (default) or by (CC0 and CC-BY, attribution is stored)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  import_asset: {
+    title: "Import from catalog or provider",
+    description:
+      "Add one search_library result to your library: downloaded server-side (max 50 MB), catalog checksum verified, license and attribution recorded. Returns { id, name, kind, mime, category, durationSec, duplicate, restored } (the same file twice returns the existing item); use the id in update_clip layers.",
+    inputSchema: {
+      provider: z.string().min(1).max(40).describe("The result's provider (search_library)"),
+      externalId: z.string().min(1).max(200).describe("The result's externalId (search_library)"),
+      color: z.string().max(9).optional().describe("iconify only: icon color as hex, e.g. #ffffff (default white)"),
+      category: z.enum(["intro", "logo", "sticker", "broll", "music", "sfx"]).optional().describe("Library category; default: what the source implies (sounds up to 8 s are sfx)"),
+      tags: z.array(z.string().trim().min(1).max(40)).max(30).optional().describe("Extra search tags for the library item"),
+    },
+  },
   update_asset: {
     title: "Update library asset",
     description: "Rename a library item, set its category, replace its tags, or change how long a still image shows (removed items too). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, category, tags, durationSec, previousName }.",

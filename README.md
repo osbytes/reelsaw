@@ -394,8 +394,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `import_transcript` | Use an SRT or WebVTT file as the project's transcript instead of transcribing: right after create_project (only the video is fetched) or on a done or failed project (it then re-cleans the transcript and picks clips again). |
 | `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
 | `get_project_events` | The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. |
-| `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. |
-| `update_clip` | Edit one clip: only the fields you pass change; style, layoutSections and overlays replace the whole value (null = project's / none). |
+| `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, layers (overlays, text, sounds), render diagnostics, video/thumbnail/editor links. |
+| `update_clip` | Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). |
 | `create_clip` | Add a clip from a time range of the source (needs a transcript). |
 | `delete_clip` | Delete one clip of your project; a render in progress stops. |
 | `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
@@ -404,13 +404,21 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
-| `list_bumpers` | Your library: intros/outros (video, image), overlays and music (audio). |
-| `add_bumper` | Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. |
-| `rename_bumper` | Rename one of your library items (removed ones too). |
+| `list_assets` | Your library: intro/outro videos and images, logos, stickers, GIFs, SVGs, b-roll, music and sound effects. |
+| `add_asset` | Add a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC) to your library from a public url or an uploadId, with an optional category and tags. |
+| `search_library` | Find sounds, icons, stickers, photos, videos and GIFs to add to your library. |
+| `import_asset` | Add one search_library result to your library: downloaded server-side (max 50 MB), catalog checksum verified, license and attribution recorded. |
+| `update_asset` | Rename a library item, set its category, replace its tags, or change how long a still image shows (removed items too). |
+| `remove_asset` | Remove an item from your library and from your defaults. |
+| `restore_asset` | Bring one of your removed library items back (list_assets shows them under removed); restoring an item that is not removed changes nothing. |
+| `asset_usage` | The projects and clips that use a library item, as intro, outro, overlay or music (clips a re-analyze replaced are left out). |
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
-| `remove_bumper` | Remove an item from your library and from your defaults. |
-| `restore_bumper` | Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. |
-| `bumper_usage` | The projects and clips that use a library item, as intro, outro, overlay or music. |
+| `list_bumpers` | (alias of list_assets) Your library: intros, outros, overlays, music and sounds. |
+| `add_bumper` | (alias of add_asset) Add a video, image or sound to your library from a public url or an uploadId. |
+| `rename_bumper` | (alias of update_asset) Rename one of your library items (removed ones too). |
+| `remove_bumper` | (alias of remove_asset) Remove an item from your library and from your defaults; projects and clips using it keep rendering. |
+| `restore_bumper` | (alias of restore_asset) Bring one of your removed library items back. |
+| `bumper_usage` | (alias of asset_usage) The projects and clips that use a library item, as intro, outro, overlay or music. |
 | `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
 | `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
@@ -481,9 +489,14 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
-| `reelsaw bumpers list\|usage <id>\|default <intro\|outro> <id\|none>\|remove <id>\|restore <id>\|rename <id> <name…> [--user <email>]` | the intro/outro library. The user is --user, else the only account on this install; otherwise pass --user |
+| `reelsaw library list [--kind video\|image\|audio] [--category c] [--q text] \| add <file-or-url> [--name n] [--category c] [--tags a,b]` | \| rename <id> <name…> \| update <id> [--category c\|none] [--tags a,b] \| remove <id> \| restore <id> \| usage <id> \| default <intro\|outro> <id\|none> \| reindex            [--user <email>] the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and sound effects (`bumpers …` is the old name). The user is --user, else the only account on this install; otherwise pass --user. `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion |
+| `reelsaw bumpers …` | the old name of `library` (same subcommands) |
+| `reelsaw library search <q…> [--provider p] [--kind video\|image\|audio] [--license cc0\|by] [--user <email>]` | search the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy) |
+| `reelsaw library import <provider> <externalId> [--color #hex] [--user <email>]` | add a search result to the library (license and credit are recorded) |
+| `reelsaw catalog status\|refresh` | the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
+| `reelsaw clip-layers <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop\|--no-loop] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] \| --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck\|--no-duck] [--loop\|--no-loop] \| --remove <layerId> \| --clear] [--rerender]` | everything laid over or played under a clip, one list (source seconds, x/y/w/size as fractions of the 9:16 frame); a sound of 8 s or less, or category sfx, is a one-shot at full level, anything else music (ducked, faded, looped); with no change flag it lists them |
 | `reelsaw clip-audio <projectId> <clipId> [--add <assetId> [--from <sec>] [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--no-duck] [--no-loop] \| --track <trackId> [same options, --duck] \| --remove <trackId> \| --clear] [--rerender]` | background music tracks under parts of a clip from library audio items (source seconds; the same item may repeat); ducked under speech unless --no-duck; with no flag it lists them |
 | `reelsaw clip-overlays <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] \| --remove <overlayId> \| --clear] [--rerender]` | library images/videos or lines of text laid over part of a clip (source seconds, x/y/w/size as fractions of the 9:16 frame); with no change flag it lists them |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |

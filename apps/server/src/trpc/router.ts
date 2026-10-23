@@ -24,6 +24,7 @@ import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset } from "../library/service.js";
 import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
+import { asTrpc, catalogSearch, importAsset, libraryProviders, type CreateAsset, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
@@ -654,6 +655,38 @@ const bumpersRouter = router({
 });
 
 const restRouter = router({
+  /** The Browse panel's backend: the Reelsaw catalog and the remote providers an admin switched on (library/import.ts). */
+  catalog: router({
+    providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
+    search: protectedProcedure
+      .input(
+        z.object({
+          provider: z.string().min(1).max(40).optional().describe("omitted = the Reelsaw catalog"),
+          q: z.string().max(200).default(""),
+          kind: z.enum(["video", "image", "audio"]).optional(),
+          cursor: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(60).default(24),
+          license: z.enum(["cc0", "by"]).optional(),
+        }),
+      )
+      .query(({ ctx, input }) => catalogSearch(ctx.svc, input)),
+    import: protectedProcedure
+      .input(z.object({ provider: z.string().min(1).max(40), externalId: z.string().min(1).max(200), color: z.string().max(9).optional(), category: assetCategorySchema.optional(), tags: assetTagsSchema.optional() }))
+      .mutation(async ({ ctx, input }): Promise<ImportedAsset> => {
+        // through the same caller as every other path, so limits, dedupe and probing apply
+        const api = appRouter.createCaller(ctx) as unknown as { bumpers: { create: CreateAsset } };
+        return importAsset(ctx.svc, ctx.user.id, input, (i) => api.bumpers.create(i));
+      }),
+    status: adminProcedure.query(async ({ ctx }) => ({ ...(await libraryProviders(ctx.svc).catalog.status()), providers: libraryProviders(ctx.svc).registry.list() })),
+    refresh: adminProcedure.mutation(async ({ ctx }) => {
+      try {
+        return (await libraryProviders(ctx.svc).catalog.refresh({ force: true })).status;
+      } catch (err) {
+        return asTrpc(err);
+      }
+    }),
+  }),
+
   admin: router({
     /** Machine-level configuration and live resources. Read from the environment; admins only. */
     system: adminProcedure.query(async ({ ctx }) => ({

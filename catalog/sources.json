@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "archives": {
+    "kenney-interface-sounds": {
+      "page": "https://kenney.nl/assets/interface-sounds",
+      "url": "https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip"
+    },
+    "kenney-ui-audio": {
+      "page": "https://kenney.nl/assets/ui-audio",
+      "url": "https://kenney.nl/media/pages/assets/ui-audio/490d233f68-1677590494/kenney_ui-audio.zip"
+    }
+  },
+  "groups": [
+    {
+      "type": "svg",
+      "kind": "image",
+      "category": "sticker",
+      "idPrefix": "lucide-",
+      "license": { "id": "isc", "name": "ISC", "url": "https://github.com/lucide-icons/lucide/blob/main/LICENSE" },
+      "attribution": "Lucide icons (ISC)",
+      "urlTemplate": "https://raw.githubusercontent.com/lucide-icons/lucide/0.544.0/icons/{file}.svg",
+      "sourceTemplate": "https://lucide.dev/icons/{file}",
+      "tint": "#ffffff",
+      "items": [
+        { "file": "star", "name": "Star", "tags": ["icon", "favorite", "rating"] },
+        { "file": "heart", "name": "Heart", "tags": ["icon", "love", "like"] },
+        { "file": "thumbs-up", "name": "Thumbs up", "tags": ["icon", "like", "yes", "approve"] },
+        { "file": "thumbs-down", "name": "Thumbs down", "tags": ["icon", "dislike", "no"] },
+        { "file": "check", "name": "Check", "tags": ["icon", "tick", "done", "yes"] },
+        { "file": "x", "name": "Cross", "tags": ["icon", "close", "no", "wrong"] },
+        { "file": "arrow-right", "name": "Arrow right", "tags": ["icon", "arrow", "next", "pointer"] },
+        { "file": "arrow-left", "name": "Arrow left", "tags": ["icon", "arrow", "back", "pointer"] },
+        { "file": "arrow-up", "name": "Arrow up", "tags": ["icon", "arrow", "up", "pointer"] },
+        { "file": "arrow-down", "name": "Arrow down", "tags": ["icon", "arrow", "down", "pointer"] },
+        { "file": "play", "name": "Play", "tags": ["icon", "video", "start"] },
+        { "file": "pause", "name": "Pause", "tags": ["icon", "video", "stop"] },
+        { "file": "volume-2", "name": "Speaker", "tags": ["icon", "sound", "audio", "volume"] },
+        { "file": "mic", "name": "Microphone", "tags": ["icon", "voice", "podcast", "record"] },
+        { "file": "camera", "name": "Camera", "tags": ["icon", "photo"] },
+        { "file": "video", "name": "Video camera", "tags": ["icon", "film", "record"] },
+        { "file": "music", "name": "Music note", "tags": ["icon", "song", "audio"] },
+        { "file": "bell", "name": "Bell", "tags": ["icon", "notification", "alert", "subscribe"] },
+        { "file": "flame", "name": "Flame", "tags": ["icon", "fire", "hot", "trending"] },
+        { "file": "zap", "name": "Lightning bolt", "tags": ["icon", "energy", "fast", "power"] },
+        { "file": "sparkles", "name": "Sparkles", "tags": ["icon", "magic", "new", "shine"] },
+        { "file": "smile", "name": "Smile", "tags": ["icon", "happy", "face"] },
+        { "file": "laugh", "name": "Laugh", "tags": ["icon", "funny", "face", "lol"] },
+        { "file": "party-popper", "name": "Party popper", "tags": ["icon", "celebrate", "confetti", "congrats"] },
+        { "file": "trophy", "name": "Trophy", "tags": ["icon", "win", "award", "first"] },
+        { "file": "crown", "name": "Crown", "tags": ["icon", "king", "best", "premium"] },
+        { "file": "gift", "name": "Gift", "tags": ["icon", "present", "giveaway"] },
+        { "file": "lightbulb", "name": "Light bulb", "tags": ["icon", "idea", "tip"] },
+        { "file": "eye", "name": "Eye", "tags": ["icon", "look", "watch", "views"] },
+        { "file": "message-circle", "name": "Comment bubble", "tags": ["icon", "chat", "comment", "reply"] },
+        { "file": "share-2", "name": "Share", "tags": ["icon", "send", "social"] },
+        { "file": "bookmark", "name": "Bookmark", "tags": ["icon", "save"] },
+        { "file": "rocket", "name": "Rocket", "tags": ["icon", "launch", "growth", "fast"] },
+        { "file": "megaphone", "name": "Megaphone", "tags": ["icon", "announce", "promo", "shout"] },
+        { "file": "triangle-alert", "name": "Warning", "tags": ["icon", "alert", "caution", "danger"] },
+        { "file": "info", "name": "Info", "tags": ["icon", "information", "note"] },
+        { "file": "circle-question-mark", "name": "Question mark", "tags": ["icon", "help", "why", "question"] },
+        { "file": "map-pin", "name": "Location pin", "tags": ["icon", "place", "map", "where"] },
+        { "file": "clock", "name": "Clock", "tags": ["icon", "time", "wait", "timer"] },
+        { "file": "dollar-sign", "name": "Dollar sign", "tags": ["icon", "money", "price", "cash"] },
+        { "file": "at-sign", "name": "At sign", "tags": ["icon", "mention", "handle", "email"] }
+      ]
+    },
+    {
+      "type": "svg",
+      "kind": "image",
+      "category": "sticker",
+      "idPrefix": "emoji-",
+      "license": { "id": "apache-2.0", "name": "Apache 2.0", "url": "https://github.com/googlefonts/noto-emoji/blob/main/LICENSE" },
+      "attribution": "Noto Emoji by Google (Apache 2.0)",
+      "urlTemplate": "https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.047/svg/emoji_u{file}.svg",
+      "sourceTemplate": "https://github.com/googlefonts/noto-emoji/blob/v2.047/svg/emoji_u{file}.svg",
+      "items": [
+        { "file": "1f602", "name": "Laughing tears emoji", "tags": ["emoji", "lol", "funny", "laugh", "face"] },
+        { "file": "1f525", "name": "Fire emoji", "tags": ["emoji", "hot", "lit", "trending"] },
+        { "file": "1f44d", "name": "Thumbs up emoji", "tags": ["emoji", "like", "yes", "approve"] },
+        { "file": "1f389", "name": "Party popper emoji", "tags": ["emoji", "celebrate", "confetti", "congrats"] },
+        { "file": "1f62e", "name": "Surprised emoji", "tags": ["emoji", "wow", "shock", "face"] },
+        { "file": "1f4af", "name": "Hundred points emoji", "tags": ["emoji", "100", "perfect", "score"] },
+        { "file": "1f64c", "name": "Raised hands emoji", "tags": ["emoji", "praise", "hooray", "yay"] },
+        { "file": "1f60d", "name": "Heart eyes emoji", "tags": ["emoji", "love", "face", "crush"] },
+        { "file": "1f92f", "name": "Mind blown emoji", "tags": ["emoji", "shock", "wow", "explode"] },
+        { "file": "1f440", "name": "Eyes emoji", "tags": ["emoji", "look", "watch", "side eye"] },
+        { "file": "2728", "name": "Sparkles emoji", "tags": ["emoji", "magic", "new", "shine"] },
+        { "file": "1f680", "name": "Rocket emoji", "tags": ["emoji", "launch", "growth", "fast"] },
+        { "file": "1f480", "name": "Skull emoji", "tags": ["emoji", "dead", "dying", "funny"] },
+        { "file": "1f914", "name": "Thinking emoji", "tags": ["emoji", "hmm", "question", "face"] },
+        { "file": "1f44f", "name": "Clapping hands emoji", "tags": ["emoji", "applause", "bravo", "clap"] },
+        { "file": "1f622", "name": "Crying emoji", "tags": ["emoji", "sad", "tears", "face"] }
+      ]
+    },
+    {
+      "type": "audio",
+      "kind": "audio",
+      "category": "sfx",
+      "idPrefix": "sfx-",
+      "license": { "id": "cc0", "name": "CC0 1.0", "url": "https://creativecommons.org/publicdomain/zero/1.0/" },
+      "attribution": "Sound by Kenney (CC0)",
+      "items": [
+        { "file": "pop", "name": "Pop", "archive": "kenney-interface-sounds", "path": "Audio/drop_001.ogg", "tags": ["sound", "pop", "bubble", "appear", "cartoon"] },
+        { "file": "ding", "name": "Ding", "archive": "kenney-interface-sounds", "path": "Audio/confirmation_001.ogg", "tags": ["sound", "ding", "bell", "notification", "correct"] },
+        { "file": "success", "name": "Success", "archive": "kenney-interface-sounds", "path": "Audio/confirmation_002.ogg", "tags": ["sound", "success", "win", "done", "level up"] },
+        { "file": "chime", "name": "Chime", "archive": "kenney-interface-sounds", "path": "Audio/confirmation_004.ogg", "tags": ["sound", "chime", "notification", "message"] },
+        { "file": "error", "name": "Error buzz", "archive": "kenney-interface-sounds", "path": "Audio/error_001.ogg", "tags": ["sound", "error", "wrong", "buzzer", "fail", "nope"] },
+        { "file": "click", "name": "Click", "archive": "kenney-interface-sounds", "path": "Audio/click_001.ogg", "tags": ["sound", "click", "tap", "button"] },
+        { "file": "mouse-click", "name": "Mouse click", "archive": "kenney-ui-audio", "path": "Audio/mouseclick1.ogg", "tags": ["sound", "click", "mouse", "press"] },
+        { "file": "whoosh-in", "name": "Whoosh in", "archive": "kenney-interface-sounds", "path": "Audio/maximize_004.ogg", "tags": ["sound", "whoosh", "swoosh", "transition", "swipe"] },
+        { "file": "whoosh-out", "name": "Whoosh out", "archive": "kenney-interface-sounds", "path": "Audio/minimize_004.ogg", "tags": ["sound", "whoosh", "swoosh", "transition", "swipe"] },
+        { "file": "bong", "name": "Bong", "archive": "kenney-interface-sounds", "path": "Audio/bong_001.ogg", "tags": ["sound", "bong", "gong", "boom", "dramatic"] },
+        { "file": "pluck", "name": "Pluck", "archive": "kenney-interface-sounds", "path": "Audio/pluck_001.ogg", "tags": ["sound", "pluck", "boing", "cartoon"] },
+        { "file": "glass-ting", "name": "Glass ting", "archive": "kenney-interface-sounds", "path": "Audio/glass_001.ogg", "tags": ["sound", "glass", "ting", "sparkle", "clink"] },
+        { "file": "glitch", "name": "Glitch", "archive": "kenney-interface-sounds", "path": "Audio/glitch_001.ogg", "tags": ["sound", "glitch", "digital", "static", "tech"] },
+        { "file": "record-scratch", "name": "Record scratch", "archive": "kenney-interface-sounds", "path": "Audio/scratch_001.ogg", "tags": ["sound", "scratch", "record", "freeze frame", "wait what"] },
+        { "file": "question", "name": "Question blip", "archive": "kenney-interface-sounds", "path": "Audio/question_001.ogg", "tags": ["sound", "question", "hmm", "confused"] },
+        { "file": "tick", "name": "Tick", "archive": "kenney-interface-sounds", "path": "Audio/tick_001.ogg", "tags": ["sound", "tick", "clock", "timer", "countdown"] }
+      ]
+    }
+  ]
+}
