@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, isVisualLayer, assetCategorySchema, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -20,7 +20,7 @@ import type { UnitOfWork } from "../uow.js";
 import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
-import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../library/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -70,8 +70,10 @@ function publicClip(c: schema.Clip) {
     layoutSegments: c.layoutSegments ?? [],
     style: c.style ?? null,
     bumpers: c.bumpers ?? null,
-    overlays: c.overlays ?? [],
-    audio: clipAudioList(c.audio),
+    /** everything laid over or played under the clip; `overlays` / `audio` are the same list split the old way */
+    layers: clipLayers(c),
+    overlays: layersToLegacy(clipLayers(c)).overlays,
+    audio: layersToLegacy(clipLayers(c)).audio,
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -281,6 +283,33 @@ function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: { startSec:
   return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
 }
 
+/**
+ * Layers as stored: asset and text layers cleaned like overlays (plus `loop`), audio layers like music tracks,
+ * one id space, ordered by start; null when empty.
+ */
+function cleanLayers(list: ClipLayer[] | null | undefined, clip: { startSec: number; endSec: number }): ClipLayer[] | null {
+  if (!list?.length) return null;
+  if (list.length > MAX_CLIP_LAYERS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can have at most ${MAX_CLIP_LAYERS} layers` });
+  const ids = new Set<string>();
+  for (const l of list) {
+    if (ids.has(l.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Layer id “${l.id}” is used twice` });
+    ids.add(l.id);
+  }
+  const { overlays, audio } = layersToLegacy(list);
+  const loops = new Map(list.flatMap((l) => (l.kind === "asset" && l.loop !== undefined ? [[l.id, l.loop] as const] : [])));
+  const visual: ClipLayer[] = (cleanOverlays(overlays, clip) ?? []).map((o) => {
+    if (overlayKind(o) === "text") {
+      const { assetId: _a, w: _w, kind: _k, ...rest } = o;
+      return { ...rest, kind: "text" as const, text: o.text! };
+    }
+    const { text: _t, size: _s, color: _c, box: _b, font: _f, kind: _k, ...rest } = o;
+    const loop = loops.get(o.id);
+    return { ...rest, kind: "asset" as const, assetId: o.assetId!, ...(loop !== undefined ? { loop } : {}) };
+  });
+  const sounds: ClipLayer[] = (cleanAudio(audio, clip) ?? []).map((a) => ({ ...a, kind: "audio" as const }));
+  return [...visual, ...sounds].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
+}
+
 /** Music tracks as stored: ordered by start, ids unique, clamped to the clip, defaults left out, numbers rounded; null when empty. */
 function cleanAudio(list: ClipAudio[] | null | undefined, clip: { startSec: number; endSec: number }): ClipAudio[] | null {
   if (!list?.length) return null;
@@ -465,7 +494,7 @@ export const appRouter = router({
       const rows = await db.select().from(schema.libraryAssets).where(eq(schema.libraryAssets.userId, ctx.user.id)).orderBy(desc(schema.libraryAssets.createdAt));
       const usage = await bumperUsageCounts(db, ctx.user.id);
       // audio has no thumbnail: the pickers draw a music glyph instead
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
+      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0, mime: r.mime, category: r.category, tags: r.tags, provenance: r.provenance, system: r.system });
       // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
       const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
       return {
@@ -537,11 +566,23 @@ export const appRouter = router({
     }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
     update: protectedProcedure
-      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional() }))
-      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds })),
+      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional(), category: assetCategorySchema.nullable().optional(), tags: assetTagsSchema.optional() }))
+      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, category: input.category, tags: input.tags })),
     /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. */
     create: protectedProcedure
-      .input(z.object({ uploadId: z.string().min(1).max(100), imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(), setDefault: z.enum(["intro", "outro"]).optional() }))
+      .input(
+        z.object({
+          uploadId: z.string().min(1).max(100),
+          imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(),
+          setDefault: z.enum(["intro", "outro"]).optional(),
+          name: bumperNameSchema.optional(),
+          category: assetCategorySchema.optional(),
+          tags: assetTagsSchema.optional(),
+          /** set by the server-side import path (catalog, providers); the web never sends it */
+          provenance: assetProvenanceSchema.optional(),
+          system: z.boolean().optional(),
+        }),
+      )
       .mutation(async ({ ctx, input }) => {
         const { svc } = ctx;
         const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
@@ -581,7 +622,13 @@ export const appRouter = router({
                 id,
                 userId: ctx.user.id,
                 kind,
-                name: up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
+                mime: assetMime(ext),
+                // a short sound is an effect, a long one is music; a caller that knows better says so
+                category: input.category ?? (kind === "audio" ? (probe.durationSec <= SFX_MAX_SEC ? "sfx" : "music") : input.setDefault ? "intro" : null),
+                tags: input.tags ?? [],
+                ...(input.provenance ? { provenance: { ...input.provenance, importedAt: new Date().toISOString() } } : {}),
+                system: input.system ?? false,
+                name: input.name?.trim() || up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
                 durationSec: kind === "image" ? (input.imageSeconds ?? BUMPER_IMAGE_SEC.default) : probe.durationSec,
                 // audio has no picture: bumperProblem already refused images/videos without dimensions
                 width: probe.width ?? 0,
@@ -607,7 +654,7 @@ export const appRouter = router({
             return { asset: asset!, duplicate: false as const, restored: false };
           });
           if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
-          return { id: row.asset.id, name: row.asset.name, kind: row.asset.kind, durationSec: row.asset.durationSec, duplicate: row.duplicate, restored: row.restored };
+          return { id: row.asset.id, name: row.asset.name, kind: row.asset.kind, mime: row.asset.mime, category: row.asset.category, durationSec: row.asset.durationSec, duplicate: row.duplicate, restored: row.restored };
         } catch (err) {
           await fs.rm(local, { force: true }).catch(() => {});
           throw err;
@@ -1382,6 +1429,8 @@ export const appRouter = router({
           overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional(),
           /** Background music tracks under the clip (library audio assets), replacing the whole list; null or [] = none. */
           audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional(),
+          /** Everything laid over or played under the clip (assets, text, sounds), replacing the whole list; null or [] = none. Supersedes overlays + audio, which now edit their half of this list. */
+          layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
           rerender: z.boolean().optional(),
@@ -1406,16 +1455,22 @@ export const appRouter = router({
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
         const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
-        const cleanedOverlays = input.overlays !== undefined ? cleanOverlays(input.overlays, { startSec, endSec }) : undefined;
-        const overlaysChanged = cleanedOverlays !== undefined && JSON.stringify(cleanedOverlays) !== JSON.stringify(c.overlays?.length ? c.overlays : null);
-        const cleanedAudio = input.audio !== undefined ? cleanAudio(input.audio, { startSec, endSec }) : undefined;
-        const audioChanged = cleanedAudio !== undefined && JSON.stringify(cleanedAudio) !== JSON.stringify(clipAudioList(c.audio).length ? clipAudioList(c.audio) : null);
-        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || overlaysChanged || audioChanged; // these are burned into the video
+        // layers replace the whole list; the older overlays / audio inputs each replace their half of it (legacy MCP clients, CLI)
+        const currentLayers = clipLayers(c);
+        let nextLayers: ClipLayer[] | undefined;
+        if (input.layers !== undefined) nextLayers = input.layers ?? [];
+        else if (input.overlays !== undefined || input.audio !== undefined) {
+          const visual = input.overlays !== undefined ? clipLayers({ overlays: input.overlays ?? [] }) : currentLayers.filter(isVisualLayer);
+          const sounds = input.audio !== undefined ? (input.audio ?? []).map((a) => ({ ...a, kind: "audio" as const })) : currentLayers.filter((l) => l.kind === "audio");
+          nextLayers = [...visual, ...sounds];
+        }
+        const cleanedLayers = nextLayers !== undefined ? cleanLayers(nextLayers, { startSec, endSec }) : undefined;
+        const layersChanged = cleanedLayers !== undefined && JSON.stringify(cleanedLayers) !== JSON.stringify(currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
+        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || layersChanged; // these are burned into the video
         const cur = c;
         // ownership of the chosen assets is checked in the unit of work that writes
         if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
-        if (overlaysChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedOverlays ?? []).map((o) => o.assetId), (cur.overlays ?? []).map((o) => o.assetId), "overlay");
-        if (audioChanged && cleanedAudio) await assertOwnedBumpers(u.db, ctx.user.id, cleanedAudio.map((t) => t.assetId), clipAudioList(cur.audio).map((t) => t.assetId), "music");
+        if (layersChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedLayers ?? []).flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), currentLayers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), "library item");
         const [row] = await u.db
           .update(schema.clips)
           .set({
@@ -1428,8 +1483,8 @@ export const appRouter = router({
             ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
             ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
-            ...(cleanedOverlays !== undefined ? { overlays: cleanedOverlays } : {}),
-            ...(cleanedAudio !== undefined ? { audio: cleanedAudio } : {}),
+            // a clip saved with layers no longer carries the two old lists (clipLayers reads either)
+            ...(cleanedLayers !== undefined ? { layers: cleanedLayers, overlays: null, audio: null } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
             editedAt: new Date(), // a clip the user touched survives a re-analyze

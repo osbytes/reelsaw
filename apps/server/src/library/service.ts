@@ -16,7 +16,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import { bumperSecondsSchema } from "@reelsaw/shared";
+import { bumperSecondsSchema, type AssetCategory } from "@reelsaw/shared";
 import type { Services } from "../services.js";
 import type { appRouter } from "../trpc/router.js";
 import { userDefaults } from "../pipeline/settings.js";
@@ -83,8 +83,8 @@ export const bumperNameSchema = z.string().trim().min(1).max(120);
  * Assets are otherwise immutable; the normalised file is named by its seconds, so projects pick up a new length on
  * their next render. A name is only a label: nothing re-renders.
  */
-export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number }) {
-  if (patch.name === undefined && patch.imageSeconds === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name or imageSeconds" });
+export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number; category?: AssetCategory | null; tags?: string[] }) {
+  if (patch.name === undefined && patch.imageSeconds === undefined && patch.category === undefined && patch.tags === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds, category or tags" });
   return svc.tx(async (u) => {
     const [a] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, id), eq(schema.libraryAssets.userId, userId))).for("update");
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
@@ -92,9 +92,9 @@ export async function updateBumperAsset(svc: Services, userId: string, id: strin
     const name = patch.name?.trim();
     await u.db
       .update(schema.libraryAssets)
-      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}) })
+      .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(patch.category !== undefined ? { category: patch.category } : {}), ...(patch.tags !== undefined ? { tags: [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))] } : {}) })
       .where(eq(schema.libraryAssets.id, a.id));
-    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, previousName: a.name };
+    return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, category: patch.category !== undefined ? patch.category : a.category, tags: patch.tags ?? a.tags, previousName: a.name };
   });
 }
 

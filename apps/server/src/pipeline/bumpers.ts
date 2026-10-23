@@ -26,6 +26,9 @@ export const BUMPER_AUDIO_MAX_BYTES = 30 * 1024 * 1024;
 export const BUMPER_AUDIO_MAX_SEC = 15 * 60;
 export const bumperKind = (ext: string): "video" | "image" | "audio" | null =>
   (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext) ? "audio" : null;
+/** The exact format stored on a library row, by file extension (checked by ffprobe before it is trusted). */
+export const ASSET_MIME: Record<string, string> = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac" };
+export const assetMime = (ext: string): string | null => ASSET_MIME[ext.toLowerCase()] ?? null;
 export const BUMPER_FPS = 30;
 /** Seconds of the body's audio faded out when an outro follows. */
 export const OUTRO_FADE_SEC = 0.2;
