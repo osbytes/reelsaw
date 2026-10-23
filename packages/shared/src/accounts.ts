@@ -33,13 +33,23 @@ export function shouldOfferResendVerification(opts: { errorCode: string | null; 
   return !!opts.errorCode && (UNVERIFIED_SIGN_IN_CODES as readonly string[]).includes(opts.errorCode);
 }
 
+/** Prefill-only: one `@`, a dot in the domain, no spaces. Linear so a long query string cannot stall the login page. */
+export function looksLikeEmail(s: string): boolean {
+  if (s.length < 3 || s.length > 254) return false;
+  const at = s.indexOf("@");
+  if (at < 1 || at !== s.lastIndexOf("@")) return false;
+  if (s.includes(" ")) return false;
+  const domain = s.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+}
+
 /** Query string from an expired confirmation redirect (`/login?error=TOKEN_EXPIRED&email=`). */
 export function verifyEmailErrorFromSearch(search: string): { expired: boolean; email: string | null } {
   const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const expired = verifyLinkFailed(q.get("error"));
   const raw = (q.get("email") ?? "").trim().toLowerCase();
-  const email = raw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw) ? raw : null;
-  return { expired, email };
+  return { expired, email: looksLikeEmail(raw) ? raw : null };
 }
 
 /**

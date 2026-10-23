@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ACCOUNT_EXISTS_MESSAGE,
   CONFIRM_EMAIL_THEN_SIGN_IN,
+  looksLikeEmail,
   PENDING_APPROVAL_MESSAGE,
   REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD,
   repeatSignUpMessage,
@@ -54,6 +55,13 @@ describe("expired confirmation link", () => {
     assert.deepEqual(verifyEmailErrorFromSearch("?error=INVALID_TOKEN"), { expired: true, email: null });
     assert.equal(verifyLinkFailed("TOKEN_EXPIRED"), true);
     assert.equal(verifyLinkFailed("INVALID_EMAIL_OR_PASSWORD"), false);
+  });
+
+  it("pre-fills only a short address with one @ and a dotted domain", () => {
+    assert.equal(looksLikeEmail("ada@example.com"), true);
+    assert.equal(looksLikeEmail("not-an-email"), false);
+    assert.equal(looksLikeEmail("a@b"), false);
+    assert.equal(looksLikeEmail(`!@${"!.".repeat(200)}`), false);
   });
 
   it("offers a resend after sign-up, an expired link, or an unverified sign-in", () => {

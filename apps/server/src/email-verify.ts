@@ -6,7 +6,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, gt } from "drizzle-orm";
-import { VERIFY_EMAIL_CALLBACK_PATH } from "@reelsaw/shared";
+import { looksLikeEmail, VERIFY_EMAIL_CALLBACK_PATH } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 
 /** Better Auth `emailVerification.expiresIn` (seconds). 24 hours is the usual mailbox delay. */
@@ -31,7 +31,7 @@ export function readVerifyJwt(token: string): VerifyJwt {
     if (parts.length < 2 || !parts[1]) return { email: null, expired: true };
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString()) as { email?: unknown; exp?: unknown };
     const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : null;
-    const looks = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+    const looks = email && looksLikeEmail(email) ? email : null;
     const expired = typeof payload.exp === "number" && payload.exp * 1000 < Date.now();
     return { email: looks, expired };
   } catch {
