@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music } from "lucide-react";
+import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, Library as LibraryIcon } from "lucide-react";
 import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -11,15 +11,16 @@ export const SPLIT_SHORTCUT = `${MOD}B`;
 /** A framing section as edited: the stored shape (mode + per-pane adjustments), absolute source seconds. */
 export type EditorSection = LayoutSection;
 
-/** A library overlay as the timeline draws it. */
-export interface OverlayBlock {
+/** A layer as the timeline draws it: an image or video, a line of text, or a sound. */
+export interface LayerBlock {
   id: string;
   start: number;
   end: number;
   name: string;
-  kind: "video" | "image" | "text";
+  kind: "video" | "image" | "text" | "audio";
   thumbnailUrl?: string;
 }
+export type LayerAddKind = "asset" | "text" | "audio";
 /** The intro or outro a clip will render with, as a block on the clip lane. */
 export interface BumperBlock {
   name: string;
@@ -30,16 +31,21 @@ export interface BumperBlock {
   source: "clip" | "project";
 }
 export type BumperSlot = "intro" | "outro";
-const MIN_OVERLAY = 0.3;
+/** shortest a layer can be dragged to: pictures and text 0.1 s, sounds 0.5 s */
+const minLayer = (kind: LayerBlock["kind"]) => (kind === "audio" ? 0.5 : 0.1);
 const OV_ROW = 24;
-const MAX_OV_ROWS = 3;
+const MAX_OV_ROWS = 4;
 const BUMPER_SEC = { min: 1, max: 10 };
 
-/** Pack overlapping overlays into rows (first free row wins), capped: the lane never grows past MAX_OV_ROWS. */
-export function packOverlayRows(blocks: OverlayBlock[]): Map<string, number> {
+/**
+ * Pack overlapping layers into rows (first free row wins), capped: the lane never grows past MAX_OV_ROWS.
+ * Visual layers are placed first so sounds settle on the bottom rows.
+ */
+export function packLayerRows(blocks: LayerBlock[]): Map<string, number> {
   const rows: number[] = []; // end time of the last block per row
   const out = new Map<string, number>();
-  for (const b of [...blocks].sort((p, q) => p.start - q.start || p.id.localeCompare(q.id))) {
+  const audio = (b: LayerBlock) => (b.kind === "audio" ? 1 : 0);
+  for (const b of [...blocks].sort((p, q) => audio(p) - audio(q) || p.start - q.start || p.id.localeCompare(q.id))) {
     let r = rows.findIndex((end) => end <= b.start + 0.001);
     if (r < 0) {
       if (rows.length < MAX_OV_ROWS) {
@@ -114,22 +120,17 @@ interface Props {
   onSnap?: (v: boolean) => void;
   /** hide the hint line on short screens */
   compactHints?: boolean;
-  /** library overlays on their own lane (drag to move, edges to trim, double-click the lane to add) */
-  overlays?: OverlayBlock[];
-  selectedOverlay?: string | null;
-  onOverlaySelect?: (id: string | null) => void;
-  onOverlayChange?: (id: string, range: [number, number], key?: string) => void;
-  onOverlayAdd?: (t: number, kind: "asset" | "text") => void;
-  onOverlayRemove?: (id: string) => void;
+  /** the Layers lane: images, video, text and sounds in packed rows (drag to move, edges to trim, double-click to add) */
+  layers?: LayerBlock[];
+  selectedLayer?: string | null;
+  onLayerSelect?: (id: string | null) => void;
+  onLayerChange?: (id: string, range: [number, number], key?: string) => void;
+  onLayerAdd?: (t: number, kind: LayerAddKind) => void;
+  onLayerRemove?: (id: string) => void;
+  /** "Browse library…" in the + menu */
+  onLayerBrowse?: () => void;
   /** the in/out editor (fields and nudges), shown in a popover from the clip block's length label */
   renderClipEditor?: () => ReactNode;
-  /** background music tracks on their own lane (packed rows; drag to move, edges to trim), + to add one */
-  music?: Array<{ id: string; start: number; end: number; name: string }>;
-  selectedMusic?: string | null;
-  onMusicSelect?: (id: string | null) => void;
-  onMusicChange?: (id: string, range: [number, number], key?: string) => void;
-  onMusicAdd?: () => void;
-  onMusicRemove?: (id: string) => void;
   /** the intro and outro the clip renders with, drawn as blocks around the clip range */
   bumpers?: { intro: BumperBlock | null; outro: BumperBlock | null };
   selectedBumper?: BumperSlot | null;
@@ -146,10 +147,8 @@ type DragState =
   | { kind: "move"; grabT: number; orig: [number, number] }
   | { kind: "boundary"; index: number }
   | { kind: "pan"; grabX: number; orig: [number, number] }
-  | { kind: "ov-move"; id: string; grabT: number; orig: [number, number] }
-  | { kind: "ov-start" | "ov-end"; id: string }
-  | { kind: "mu-move"; id: string; grabT: number; orig: [number, number] }
-  | { kind: "mu-start" | "mu-end"; id: string }
+  | { kind: "ly-move"; id: string; grabT: number; orig: [number, number] }
+  | { kind: "ly-start" | "ly-end"; id: string }
   | { kind: "bumper"; slot: BumperSlot };
 
 /**
@@ -157,15 +156,12 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, overlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, onOverlayAdd, onOverlayRemove, renderClipEditor, music = [], selectedMusic = null, onMusicSelect, onMusicChange, onMusicAdd, onMusicRemove, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerRemove, onLayerBrowse, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
-  const muRows = useMemo(() => packOverlayRows(music.map((m) => ({ ...m, kind: "image" as const }))), [music]);
-  const muRowCount = Math.max(1, Math.min(MAX_OV_ROWS, music.length ? Math.max(...[...muRows.values()]) + 1 : 1));
-  const muLaneH = muRowCount * OV_ROW - 2;
-  const ovRows = useMemo(() => packOverlayRows(overlays), [overlays]);
-  const ovRowCount = Math.max(1, Math.min(MAX_OV_ROWS, overlays.length ? Math.max(...[...ovRows.values()]) + 1 : 1));
-  const ovLaneH = ovRowCount * OV_ROW - 2;
+  const lyRows = useMemo(() => packLayerRows(layers), [layers]);
+  const lyRowCount = Math.max(1, Math.min(MAX_OV_ROWS, layers.length ? Math.max(...[...lyRows.values()]) + 1 : 1));
+  const lyLaneH = lyRowCount * OV_ROW - 2;
   const [w, setW] = useState(600);
   const fitView = useCallback((): [number, number] => {
     const len = range[1] - range[0];
@@ -178,7 +174,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const [hoverLane, setHoverLane] = useState<string | null>(null);
   const gesture = useRef<string | undefined>(undefined);
   /** where the context menu was opened: time + lane + section under the cursor */
-  const [menuAt, setMenuAt] = useState<{ t: number; lane: string; section: number; overlay: string | null; music: string | null } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ t: number; lane: string; section: number; layer: string | null } | null>(null);
 
   useEffect(() => {
     const el = lanesRef.current;
@@ -312,28 +308,18 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
       const d = ((drag.grabX - e.clientX) / w) * span;
       const s = Math.max(0, drag.orig[0] + d);
       setView([s, s + span]);
-    } else if (drag.kind === "ov-move") {
+    } else if (drag.kind === "ly-move") {
       const len = drag.orig[1] - drag.orig[0];
       let s = drag.orig[0] + (t - drag.grabT);
       s = Math.max(range[0], Math.min(range[1] - len, s));
       const snapped = Math.max(range[0], Math.min(range[1] - len, snapT(s, "start", alt)));
-      onOverlayChange?.(drag.id, [snapped, Number((snapped + len).toFixed(2))], gesture.current);
-    } else if (drag.kind === "ov-start" || drag.kind === "ov-end") {
-      const o = overlays.find((b) => b.id === drag.id);
+      onLayerChange?.(drag.id, [snapped, Number((snapped + len).toFixed(2))], gesture.current);
+    } else if (drag.kind === "ly-start" || drag.kind === "ly-end") {
+      const o = layers.find((b) => b.id === drag.id);
       if (!o) return;
-      if (drag.kind === "ov-start") onOverlayChange?.(drag.id, [Math.max(range[0], Math.min(o.end - MIN_OVERLAY, snapT(t, "start", alt))), o.end], gesture.current);
-      else onOverlayChange?.(drag.id, [o.start, Math.min(range[1], Math.max(o.start + MIN_OVERLAY, snapT(t, "end", alt)))], gesture.current);
-    } else if (drag.kind === "mu-move") {
-      const len = drag.orig[1] - drag.orig[0];
-      let s = drag.orig[0] + (t - drag.grabT);
-      s = Math.max(range[0], Math.min(range[1] - len, s));
-      const snapped = Math.max(range[0], Math.min(range[1] - len, snapT(s, "start", alt)));
-      onMusicChange?.(drag.id, [snapped, Number((snapped + len).toFixed(2))], gesture.current);
-    } else if (drag.kind === "mu-start" || drag.kind === "mu-end") {
-      const mu = music.find((m) => m.id === drag.id);
-      if (!mu) return;
-      if (drag.kind === "mu-start") onMusicChange?.(drag.id, [Math.max(range[0], Math.min(mu.end - 0.5, snapT(t, "start", alt))), mu.end], gesture.current);
-      else onMusicChange?.(drag.id, [mu.start, Math.min(range[1], Math.max(mu.start + 0.5, snapT(t, "end", alt)))], gesture.current);
+      const min = minLayer(o.kind);
+      if (drag.kind === "ly-start") onLayerChange?.(drag.id, [Math.max(range[0], Math.min(o.end - min, snapT(t, "start", alt))), o.end], gesture.current);
+      else onLayerChange?.(drag.id, [o.start, Math.min(range[1], Math.max(o.start + min, snapT(t, "end", alt)))], gesture.current);
     } else if (drag.kind === "bumper") {
       // the outer edge of an image intro/outro sets how long it shows
       const raw = drag.slot === "intro" ? range[0] - t : t - range[1];
@@ -353,14 +339,12 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   function onContext(e: React.MouseEvent) {
     const el = e.target as HTMLElement;
     const lane = el.closest<HTMLElement>("[data-lane]")?.dataset.lane ?? "ruler";
-    const overlay = el.closest<HTMLElement>("[data-ov]")?.dataset.ov ?? null;
-    const musicId = el.closest<HTMLElement>("[data-music]")?.dataset.music ?? null;
+    const layer = el.closest<HTMLElement>("[data-ly]")?.dataset.ly ?? null;
     const t = Number(tAt(e.clientX).toFixed(2));
     const section = sectionAt(Math.max(range[0], Math.min(range[1] - 0.01, t)));
-    setMenuAt({ t, lane, section, overlay, music: musicId });
+    setMenuAt({ t, lane, section, layer });
     if (lane === "layout" && section >= 0) onSelect(section);
-    if (overlay) onOverlaySelect?.(overlay);
-    if (musicId) onMusicSelect?.(musicId);
+    if (layer) onLayerSelect?.(layer);
   }
   const inClip = (t: number) => t >= range[0] && t <= range[1];
   const bumperBlock = (slot: BumperSlot) => {
@@ -480,23 +464,35 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         <div className="shrink-0" style={{ width: LABEL_W }}>
           <div className="h-6" />
           <div className={`${label} h-[26px]`}>Words</div>
-          <div className={`${label} mt-1.5 justify-between pr-2`} style={{ height: ovLaneH }}>
-            Overlays
-            {onOverlayAdd && (
+          <div className={`${label} mt-1.5 justify-between pr-2`} style={{ height: lyLaneH }}>
+            Layers
+            {onLayerAdd && (
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
-                  <button type="button" className="grid h-5 w-5 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" aria-label="Add an overlay at the playhead" title="Add an overlay at the playhead">
+                  <button type="button" className="grid h-5 w-5 shrink-0 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" aria-label="Add a layer at the playhead" title="Add a layer at the playhead">
                     <Plus className="h-3 w-3" />
                   </button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
-                  <DropdownMenu.Content side="top" align="start" sideOffset={6} className="menu w-[200px]">
-                    <DropdownMenu.Item className="menu-item" onSelect={() => onOverlayAdd(inClip(current) ? current : range[0], "asset")}>
+                  <DropdownMenu.Content side="top" align="start" sideOffset={6} className="menu z-[80] w-[200px]">
+                    <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "asset")}>
                       <ImageIcon className="h-3.5 w-3.5" /> Image or video…
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item className="menu-item" onSelect={() => onOverlayAdd(inClip(current) ? current : range[0], "text")}>
+                    <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "text")}>
                       <Type className="h-3.5 w-3.5" /> Text
                     </DropdownMenu.Item>
+                    <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "audio")}>
+                      <Music className="h-3.5 w-3.5" /> Sound…
+                    </DropdownMenu.Item>
+                    {onLayerBrowse && (
+                      <>
+                        <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+                        {/* TODO(library): the Browse dialog (catalog + providers, docs/specs/library.md phase 3) plugs in here; for now this opens the Library page */}
+                        <DropdownMenu.Item className="menu-item" onSelect={onLayerBrowse}>
+                          <LibraryIcon className="h-3.5 w-3.5" /> Browse library…
+                        </DropdownMenu.Item>
+                      </>
+                    )}
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
@@ -504,14 +500,6 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
           </div>
           <div className={`${label} mt-1.5 h-[34px]`}>Clip</div>
           <div className={`${label} mt-1.5 h-[38px]`}>Framing</div>
-          {onMusicAdd && (
-            <div className={`${label} mt-1.5 justify-between pr-2`} style={{ height: muLaneH }}>
-              Music
-              <button type="button" className="grid h-5 w-5 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" onClick={onMusicAdd} aria-label="Add a music track under the clip" title="Add a music track under the clip">
-                <Plus className="h-3 w-3" />
-              </button>
-            </div>
-          )}
         </div>
 
         <ContextMenu.Root modal={false}>
@@ -546,49 +534,50 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             })}
           </div>
 
-          {/* overlays: packed rows; double-click adds one at that time */}
+          {/* layers: images, video, text and sounds in packed rows; double-click adds an image or video at that time */}
           <div
-            data-lane="overlays"
+            data-lane="layers"
             className={`${lane} mt-1.5 rounded-[8px] bg-sunk/60`}
-            style={{ height: ovLaneH }}
+            style={{ height: lyLaneH }}
             onPointerDown={(e) => {
-              if (e.button !== 0 || (e.target as HTMLElement).closest("[data-ov]")) return;
-              onOverlaySelect?.(null);
+              if (e.button !== 0 || (e.target as HTMLElement).closest("[data-ly]")) return;
+              onLayerSelect?.(null);
               begin(e, { kind: "pan", grabX: e.clientX, orig: view });
             }}
             onDoubleClick={(e) => {
-              if ((e.target as HTMLElement).closest("[data-ov]")) return;
+              if ((e.target as HTMLElement).closest("[data-ly]")) return;
               const t = tAt(e.clientX);
-              if (inClip(t)) onOverlayAdd?.(Number(t.toFixed(2)), "asset");
+              if (inClip(t)) onLayerAdd?.(Number(t.toFixed(2)), "asset");
             }}
-            title={onOverlayAdd ? "Double-click to add an image or video here; + for text" : undefined}
+            title={onLayerAdd ? "Double-click to add an image or video here; + for text or a sound" : undefined}
           >
-            {overlays.map((o) => {
+            {layers.map((o) => {
               const left = x(o.start);
               const width = Math.max(6, x(o.end) - left);
-              const row = ovRows.get(o.id) ?? 0;
-              const sel = o.id === selectedOverlay;
+              const row = lyRows.get(o.id) ?? 0;
+              const sel = o.id === selectedLayer;
+              const min = minLayer(o.kind);
               return (
                 <div
                   key={o.id}
-                  data-ov={o.id}
+                  data-ly={o.id}
                   className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${sel ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
                   style={{ left, width, top: row * OV_ROW }}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
-                    onOverlaySelect?.(o.id);
-                    begin(e, { kind: "ov-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
+                    onLayerSelect?.(o.id);
+                    begin(e, { kind: "ly-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
                   }}
-                  title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim`}
+                  title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim (min ${min} s)`}
                 >
-                  {o.kind === "text" ? <Type className="h-3 w-3 shrink-0 text-ink3" /> : o.thumbnailUrl ? <img src={o.thumbnailUrl} alt="" className="h-[16px] w-[10px] shrink-0 rounded-[2px] object-cover" /> : o.kind === "video" ? <Film className="h-3 w-3 shrink-0 text-ink3" /> : <ImageIcon className="h-3 w-3 shrink-0 text-ink3" />}
+                  {o.kind === "text" ? <Type className="h-3 w-3 shrink-0 text-ink3" /> : o.kind === "audio" ? <Music className="h-3 w-3 shrink-0 text-ink3" /> : o.thumbnailUrl ? <img src={o.thumbnailUrl} alt="" className="h-[16px] w-[10px] shrink-0 rounded-[2px] object-cover" /> : o.kind === "video" ? <Film className="h-3 w-3 shrink-0 text-ink3" /> : <ImageIcon className="h-3 w-3 shrink-0 text-ink3" />}
                   {width > 50 && <span className="truncate text-[10px] font-semibold leading-none">{o.name}</span>}
-                  {(["ov-start", "ov-end"] as const).map((k) => (
+                  {(["ly-start", "ly-end"] as const).map((k) => (
                     <div
                       key={k}
-                      className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ov-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
+                      className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ly-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
                       onPointerDown={(e) => {
-                        onOverlaySelect?.(o.id);
+                        onLayerSelect?.(o.id);
                         begin(e, { kind: k, id: o.id });
                       }}
                     />
@@ -695,57 +684,6 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             ))}
           </div>
 
-          {/* music: tracks under the clip, packed rows; double-click adds one */}
-          {onMusicAdd && (
-            <div
-              data-lane="music"
-              className={`${lane} mt-1.5 rounded-[8px] bg-sunk/60`}
-              style={{ height: muLaneH }}
-              onPointerDown={(e) => {
-                if (e.button !== 0 || (e.target as HTMLElement).closest("[data-music]")) return;
-                onMusicSelect?.(null);
-                begin(e, { kind: "pan", grabX: e.clientX, orig: view });
-              }}
-              onDoubleClick={(e) => {
-                if (!(e.target as HTMLElement).closest("[data-music]")) onMusicAdd();
-              }}
-              title="Double-click to add a music track"
-            >
-              {music.map((mu) => {
-                const sel = mu.id === selectedMusic;
-                const left = x(mu.start);
-                const width = Math.max(6, x(mu.end) - left);
-                return (
-                  <div
-                    key={mu.id}
-                    data-music={mu.id}
-                    className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${sel ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
-                    style={{ left, width, top: (muRows.get(mu.id) ?? 0) * OV_ROW }}
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      onMusicSelect?.(mu.id);
-                      begin(e, { kind: "mu-move", id: mu.id, grabT: tAt(e.clientX), orig: [mu.start, mu.end] });
-                    }}
-                    title={`${mu.name} ${formatTime(mu.start)}–${formatTime(mu.end)} · drag to move, edges to trim`}
-                  >
-                    <Music className="h-3 w-3 shrink-0 text-ink3" />
-                    {width > 50 && <span className="truncate text-[10px] font-semibold leading-none">{mu.name}</span>}
-                    {(["mu-start", "mu-end"] as const).map((k) => (
-                      <div
-                        key={k}
-                        className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "mu-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
-                        onPointerDown={(e) => {
-                          onMusicSelect?.(mu.id);
-                          begin(e, { kind: k, id: mu.id });
-                        }}
-                      />
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
           {/* scene changes */}
           {sceneCuts
             .filter((c) => c > view[0] && c < view[1])
@@ -782,11 +720,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             onRedo={onRedo}
             canUndo={canUndo}
             canRedo={canRedo}
-            overlay={menuAt?.overlay ? (overlays.find((o) => o.id === menuAt.overlay) ?? null) : null}
-            onOverlayAdd={onOverlayAdd && ((t, kind) => inClip(t) && onOverlayAdd(t, kind))}
-            onOverlayRemove={onOverlayRemove}
-            onMusicAdd={onMusicAdd}
-            onMusicRemove={onMusicRemove}
+            layer={menuAt?.layer ? (layers.find((o) => o.id === menuAt.layer) ?? null) : null}
+            onLayerAdd={onLayerAdd && ((t, kind) => inClip(t) && onLayerAdd(t, kind))}
+            onLayerRemove={onLayerRemove}
           />
         </ContextMenu.Portal>
         </ContextMenu.Root>
@@ -795,7 +731,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         <div className="flex flex-wrap gap-x-4 gap-y-1.5 pb-3 pr-4 text-[11px] text-ink3" style={{ paddingLeft: LABEL_W + 16 }}>
           <span>Drag the handles to trim; drag the clip to slide it · click the intro or outro to change it</span>
           <span>Snaps to words, scene changes and the playhead · hold Alt to drag freely</span>
-          <span>{MOD} + scroll zooms · right-click for framing and overlays</span>
+          <span>{MOD} + scroll zooms · right-click for framing and layers</span>
         </div>
       )}
     </div>
@@ -815,12 +751,10 @@ const MENU_MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "cen
 const item = "menu-item";
 
 function TimelineMenu(p: {
-  at: { t: number; lane: string; section: number; overlay: string | null; music: string | null } | null;
-  overlay: OverlayBlock | null;
-  onOverlayAdd?: (t: number, kind: "asset" | "text") => void;
-  onOverlayRemove?: (id: string) => void;
-  onMusicAdd?: () => void;
-  onMusicRemove?: (id: string) => void;
+  at: { t: number; lane: string; section: number; layer: string | null } | null;
+  layer: LayerBlock | null;
+  onLayerAdd?: (t: number, kind: LayerAddKind) => void;
+  onLayerRemove?: (id: string) => void;
   sections: EditorSection[];
   detected: DetectedSegment[];
   range: [number, number];
@@ -849,25 +783,20 @@ function TimelineMenu(p: {
       <ContextMenu.Item className={item} disabled={!p.canSplitAt(at.t)} onSelect={() => p.onSplit(at.t)}>
         <Scissors className="h-3.5 w-3.5" /> Split here <span className="kbd ml-auto">{SPLIT_SHORTCUT}</span>
       </ContextMenu.Item>
-      {at.music && p.onMusicRemove ? (
-        <ContextMenu.Item className={item} onSelect={() => p.onMusicRemove!(at.music!)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remove this track <span className="kbd ml-auto">⌫</span>
+      {p.layer && p.onLayerRemove ? (
+        <ContextMenu.Item className={item} onSelect={() => p.onLayerRemove!(p.layer!.id)}>
+          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ml-auto">⌫</span>
         </ContextMenu.Item>
-      ) : at.lane === "music" && p.onMusicAdd ? (
-        <ContextMenu.Item className={item} onSelect={() => p.onMusicAdd!()}>
-          <Music className="h-3.5 w-3.5" /> Add music…
-        </ContextMenu.Item>
-      ) : p.overlay && p.onOverlayRemove ? (
-        <ContextMenu.Item className={item} onSelect={() => p.onOverlayRemove!(p.overlay!.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remove overlay “{p.overlay.name}” <span className="kbd ml-auto">⌫</span>
-        </ContextMenu.Item>
-      ) : p.onOverlayAdd ? (
+      ) : p.onLayerAdd ? (
         <>
-          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onOverlayAdd!(at.t, "asset")}>
+          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "asset")}>
             <ImageIcon className="h-3.5 w-3.5" /> Add image or video here
           </ContextMenu.Item>
-          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onOverlayAdd!(at.t, "text")}>
+          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "text")}>
             <Type className="h-3.5 w-3.5" /> Add text here
+          </ContextMenu.Item>
+          <ContextMenu.Item className={item} disabled={at.t < p.range[0] || at.t > p.range[1]} onSelect={() => p.onLayerAdd!(at.t, "audio")}>
+            <Music className="h-3.5 w-3.5" /> Add sound here
           </ContextMenu.Item>
         </>
       ) : null}
