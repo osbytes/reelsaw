@@ -1,0 +1,29 @@
+{
+  "url": "https://youtube.com/shorts/z7URpe7QlCQ",
+  "capturedAt": "2026-10-23",
+  "title": "You Must Enjoy Your Life",
+  "channel": "Chris Williamson",
+  "uploadDate": "20261017",
+  "viewsAtCapture": 573470,
+  "likesAtCapture": 32328,
+  "duration": 109.12,
+  "width": 608,
+  "height": 1080,
+  "fps": "30/1",
+  "cuts": {
+    "count": 65,
+    "perMinute": 35.7,
+    "medianShotSeconds": 1.35,
+    "longestShotSeconds": 8.26
+  },
+  "audio": {
+    "integratedLufs": -15.1,
+    "loudnessRangeLu": 2.2,
+    "silences": {
+      "thresholdDb": -35,
+      "minSeconds": 0.4,
+      "count": 0,
+      "totalSeconds": 0
+    }
+  }
+}
