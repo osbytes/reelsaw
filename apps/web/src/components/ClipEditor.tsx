@@ -1928,7 +1928,7 @@ export function ClipEditor(props: Props) {
       <AssetFinderDialog
         open={picker?.kind === "asset"}
         onOpenChange={(o) => !o && setPicker(null)}
-        title="Add an image or video"
+        title="Add to clip"
         kinds={["video", "image"]}
         onPick={(a) => {
           const t = picker?.t ?? current;

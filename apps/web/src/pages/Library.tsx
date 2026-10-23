@@ -4,10 +4,10 @@ import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { Skeleton } from "../components/ui";
 import { AssetFinder } from "../components/AssetFinder";
-import { UploadCard, useBumperActions, useBumperLibrary } from "../components/BumperField";
+import { UploadInput, useBumperActions, useBumperLibrary } from "../components/BumperField";
 
 /**
- * Your library, the catalog and the providers behind one finder (components/AssetFinder.tsx), with the upload card above it.
+ * Your library, the catalog and the providers behind one finder (components/AssetFinder.tsx); Upload sits next to its search box.
  * Deep links: `#asset=<id>` highlights a tile, `?upload=1` opens the file picker, `?kind=audio&source=catalog&q=boom` filters.
  */
 export function LibraryPage() {
@@ -45,12 +45,12 @@ export function LibraryPage() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">
             <h1 className="text-[28px] font-bold tracking-tight">Library</h1>
-            <p className="mt-1 min-h-5 text-sm text-ink2">Videos, images and audio you can attach to clips: intros, outros, overlays and music</p>
+            <p className="mt-1 min-h-5 text-sm text-ink2">Intros, overlays, stickers, b-roll and sounds for your clips</p>
           </div>
           <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isPending ? <Skeleton className="ml-auto h-3.5 w-12" /> : `${count} item${count === 1 ? "" : "s"}`}</span>
         </div>
-        <UploadCard inputRef={input} actions={actions} />
-        <AssetFinder mode="library" actions={actions} />
+        <UploadInput inputRef={input} actions={actions} />
+        <AssetFinder mode="library" actions={actions} onUpload={() => input.current?.click()} />
       </main>
     </ScrollArea>
   );

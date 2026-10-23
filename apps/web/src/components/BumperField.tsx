@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { AudioLines, Ban, Equal, Film, Image as ImageIcon, Loader2, Pause, Pencil, Play, Plus, Star, Trash2, Upload, X } from "lucide-react";
+import { AudioLines, Ban, Equal, Film, Image as ImageIcon, Loader2, Pause, Pencil, Play, Plus, Star, Trash2, X } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@reelsaw/server";
 import { formatTag, licenseText } from "../lib/library";
@@ -14,7 +14,7 @@ import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
-import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
+import type { ClipBumpers } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -212,87 +212,65 @@ function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pi
   );
 }
 
-/** The dashed dropzone card: choose files, limits, and the batch progress in space that is always reserved. */
-export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
-  const { uploading } = actions;
+/** The hidden file input behind the Library page's Upload button (the page-wide drop overlay handles drops). */
+export function UploadInput({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
   return (
-    <section className="flex flex-col gap-3 rounded-[16px] border border-dashed border-line2 bg-panel p-4" aria-label="Add to your library">
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept={ACCEPT}
-        className="hidden"
-        onChange={(e) => {
-          const files = [...(e.target.files ?? [])];
-          e.target.value = "";
-          actions.uploadMany(files);
-        }}
-        aria-label="Choose files for your library"
-      />
-      <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sunk text-ink2">{uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}</span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">
-            Drop videos, images or music here, or{" "}
-            <button type="button" className="font-semibold text-acc-text underline-offset-2 hover:underline" onClick={() => inputRef.current?.click()}>
-              choose files
-            </button>
-          </p>
-          <p className="mt-0.5 text-xs text-ink3">
-            Videos, images and audio, for intros, outros, layers and sounds. MP4, MOV or WebM up to 10 s and 50 MB; PNG, JPG, WebP, GIF or SVG up to 20 MB (an image intro shows for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card); MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB.
-          </p>
-        </div>
-      </div>
-      <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
-      <div className="min-h-4 text-xs text-err" role="status">
-        {actions.error}
-      </div>
-    </section>
+    <input
+      ref={inputRef}
+      type="file"
+      multiple
+      accept={ACCEPT}
+      className="hidden"
+      onChange={(e) => {
+        const files = [...(e.target.files ?? [])];
+        e.target.value = "";
+        actions.uploadMany(files);
+      }}
+      aria-label="Choose files for your library"
+    />
   );
 }
 
-/** Per-file progress for the current batch; rows stay until dismissed. Fixed height, so the page below never jumps. */
-export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
+/** Per-file progress for the current batch as a compact row; render it only while there are jobs (or an error). */
+export function UploadJobs({ jobs, error, onDismiss }: { jobs: UploadJob[]; error?: string; onDismiss: (key?: string) => void }) {
   const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
   return (
-    <div className="flex h-[8.5rem] flex-col rounded-[10px] border border-line bg-sunk" aria-live="polite">
-      {jobs.length === 0 ? (
-        <p className="m-auto px-3 text-center text-xs text-ink3">Uploads show up here.</p>
-      ) : (
-        <>
-          <ScrollArea className="min-h-0 flex-1">
-            <ul className="flex flex-col gap-1.5 p-2 text-xs">
-              {jobs.map((j) => (
-                <li key={j.key} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
-                    <span className="min-w-0 flex-1 truncate">{j.name}</span>
-                    <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
-                    {(j.state === "done" || j.state === "failed") && (
-                      <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {j.state === "uploading" && (
-                    <div className="h-1 overflow-hidden rounded-full bg-line">
-                      <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
-                    </div>
-                  )}
-                  {j.error && <span className="text-err">{j.error}</span>}
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-          <div className="h-7 shrink-0 border-t border-line px-2 text-right">
-            {finished > 0 && (
-              <button type="button" className="h-full text-xs font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
-                Dismiss finished
-              </button>
-            )}
-          </div>
-        </>
+    <div className="rounded-[10px] border border-line bg-sunk" aria-live="polite">
+      {jobs.length > 0 && (
+        <ul className="flex max-h-28 flex-col gap-1.5 overflow-y-auto p-2 text-xs">
+          {jobs.map((j) => (
+            <li key={j.key} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
+                <span className="min-w-0 flex-1 truncate">{j.name}</span>
+                <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
+                {(j.state === "done" || j.state === "failed") && (
+                  <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {j.state === "uploading" && (
+                <div className="h-1 overflow-hidden rounded-full bg-line">
+                  <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
+                </div>
+              )}
+              {j.error && <span className="text-err">{j.error}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {(finished > 0 || error) && (
+        <div className="flex items-center gap-2 border-t border-line px-2 py-1 text-xs first:border-t-0">
+          <span className="min-w-0 flex-1 text-err" role="status">
+            {error}
+          </span>
+          {finished > 0 && (
+            <button type="button" className="shrink-0 font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
+              Dismiss finished
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

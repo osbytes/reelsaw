@@ -1,12 +1,13 @@
 /**
  * One tile for every asset the finder lists: your own upload, a shared row you saved, a catalog result, a provider result.
  * Same box for all of them (fixed thumbnail, one-line name, fixed-height rows) so nothing shifts while data arrives.
- * The in-library affordance is a check badge ("In your library") or a "+ Add" button.
+ * No in-library badge: the tile is simply there. The only control is one footer CTA ("+ Add" in the library for
+ * a result that is not saved yet, "Add to clip" in the picker); the footer row keeps its height without one.
  */
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Check, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from "lucide-react";
+import { AudioLines, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from "lucide-react";
 import { formatTag } from "../lib/library";
-import { LengthPopover, LicenseBadge, StatusLine, lengthText, type LibraryAsset } from "./BumperField";
+import { lengthText, type LibraryAsset } from "./BumperField";
 
 /** What a tile draws, whatever it came from. */
 export interface TileModel {
@@ -21,8 +22,10 @@ export interface TileModel {
   thumbUrl?: string;
   /** what plays in place (video / audio) */
   previewUrl?: string;
-  /** a provider result's license (library rows carry theirs in `row.provenance`) */
-  license?: { name: string; url?: string; attribution?: string };
+  /** "Yours", "Catalog" or the provider's label */
+  source: string;
+  /** license id (CC0, ISC, Pexels…) for the meta line */
+  license?: string;
   /** the library row behind it (own, saved shared, or the row a catalog / provider result was imported as) */
   row?: LibraryAsset;
   /** a shared row that exists on the instance but is not in this library yet (needs `library.save`) */
@@ -36,16 +39,11 @@ export function AssetTile({
   tile: t,
   pending,
   highlighted,
-  introId,
-  outroId,
-  applied,
   leaving,
-  busy,
   mode,
   onAdd,
   onOpen,
   onSelect,
-  onSeconds,
   onPick,
   pickLabel = "Add to clip",
 }: {
@@ -53,16 +51,11 @@ export function AssetTile({
   /** adding to the library (or picking) is in flight */
   pending: boolean;
   highlighted?: boolean;
-  introId?: string;
-  outroId?: string;
-  applied?: boolean;
   leaving?: boolean;
-  busy?: boolean;
   mode: "library" | "picker";
   onAdd: () => void;
   onOpen?: () => void;
   onSelect?: () => void;
-  onSeconds?: (sec: number) => void;
   onPick?: () => void;
   pickLabel?: string;
 }) {
@@ -101,11 +94,13 @@ export function AssetTile({
   };
   const row = t.row;
   const inLibrary = !!row && !t.unsavedShared;
+  const picker = mode === "picker";
   const fmt = formatTag(t.mime);
   const thumb = !failed && (t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined));
   const playable = t.kind !== "image" && !!t.previewUrl;
   const chip = "inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white";
-  const dims = [t.kind, t.width && t.height ? `${t.width}×${t.height}` : ""].filter(Boolean).join(" · ");
+  const size = t.kind === "image" ? (t.width && t.height ? `${t.width}×${t.height}` : "") : t.durationSec ? lengthText({ durationSec: t.durationSec }) : "";
+  const meta = [t.kind, size, t.source, t.license].filter(Boolean).join(" · ");
   return (
     <li id={row ? `asset-${row.id}` : undefined} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[10px] border border-line bg-sunk min-[480px]:aspect-[3/4]">
@@ -116,7 +111,11 @@ export function AssetTile({
         ) : t.kind === "audio" ? (
           <AudioLines className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 text-ink3" aria-hidden />
         ) : null}
-        {onOpen && <button type="button" className="absolute inset-0" aria-label={`View ${t.name}`} title="Details" onClick={onOpen} />}
+        {picker ? (
+          <button type="button" className="absolute inset-0" aria-label={`${pickLabel}: ${t.name}`} disabled={pending} onClick={onPick} />
+        ) : (
+          onOpen && <button type="button" className="absolute inset-0" aria-label={`View ${t.name}`} title="Details" onClick={onOpen} />
+        )}
         <span className={`pointer-events-none absolute left-1.5 top-1.5 ${chip}`}>
           {t.kind === "audio" ? <AudioLines className="h-3 w-3" aria-hidden /> : t.kind === "video" ? <Film className="h-3 w-3" aria-hidden /> : <ImageIcon className="h-3 w-3" aria-hidden />}
           {fmt && <span>{fmt}</span>}
@@ -138,57 +137,34 @@ export function AssetTile({
             {t.name}
           </div>
         )}
-        <div className="flex h-4 items-center gap-1 overflow-hidden whitespace-nowrap font-mono text-ink3">
-          {inLibrary && row.kind === "image" && row.owner === "me" && onSeconds ? (
-            <>
-              <span className="shrink-0">image ·</span>
-              <LengthPopover asset={row} busy={!!busy} onSeconds={onSeconds} />
-            </>
-          ) : (
-            <span className="truncate">{dims}</span>
-          )}
+        <div className="h-4 truncate whitespace-nowrap text-ink3" title={meta}>
+          {meta}
         </div>
       </div>
-      <div className="flex h-5 items-center gap-1 overflow-hidden">
-        {row?.provenance ? (
-          <LicenseBadge provenance={row.provenance} className="min-w-0" />
-        ) : t.license ? (
-          <a href={t.license.url} target="_blank" rel="noreferrer noopener" className="min-w-0 truncate rounded-[5px] bg-sunk px-1 py-px text-[10px] font-semibold text-ink2 hover:text-ink" title={t.license.attribution ?? t.license.name}>
-            {t.license.name}
-          </a>
-        ) : null}
-      </div>
-      {inLibrary ? <StatusLine asset={row} isIntro={introId === row.id} isOutro={outroId === row.id} applied={!!applied} /> : <div className="h-5" />}
-      <div className="flex flex-col gap-1">
-        {inLibrary ? (
-          <span className="inline-flex h-7 items-center justify-center gap-1 rounded-[8px] bg-ok-soft text-xs font-semibold text-ink">
-            <Check size={14} aria-hidden /> In your library
-          </span>
-        ) : (
-          <button type="button" className="btn-ghost h-7 justify-center px-2 py-1 text-xs" disabled={pending} onClick={onAdd} aria-label={`Add ${t.name} to your library`}>
+      <div className="flex h-7 items-center">
+        {picker ? (
+          <button type="button" className="btn-ink h-7 w-full justify-center px-2 py-1 text-xs" disabled={pending} onClick={onPick}>
+            {pending ? <Loader2 size={14} className="animate-spin" /> : null}
+            {pending ? "Adding…" : pickLabel}
+          </button>
+        ) : !inLibrary ? (
+          <button type="button" className="btn-ghost h-7 w-full justify-center px-2 py-1 text-xs" disabled={pending} onClick={onAdd} aria-label={`Add ${t.name} to your library`}>
             {pending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             {pending ? "Adding…" : "Add"}
           </button>
-        )}
-        {mode === "picker" && (
-          <button type="button" className="btn-ink h-7 justify-center px-2 py-1 text-xs" disabled={pending} onClick={onPick}>
-            {pickLabel}
-          </button>
-        )}
+        ) : null}
       </div>
     </li>
   );
 }
 
-export function AssetTileSkeleton({ i = 0 }: { i?: number }) {
+export function AssetTileSkeleton({ i = 0, liRef }: { i?: number; liRef?: React.Ref<HTMLLIElement> }) {
   return (
-    <li className="flex min-w-0 flex-col gap-2 rounded-[14px] border border-line bg-panel p-2" aria-hidden>
+    <li ref={liRef} className="flex min-w-0 flex-col gap-2 rounded-[14px] border border-line bg-panel p-2" aria-hidden>
       <div className="aspect-[4/3] w-full animate-pulse rounded-[10px] bg-sunk min-[480px]:aspect-[3/4]" />
       <div className={`h-3 animate-pulse rounded bg-sunk ${["w-3/4", "w-1/2", "w-2/3"][i % 3]}`} />
       <div className="h-4" />
-      <div className="h-5" />
-      <div className="h-5" />
-      <div className="h-7 animate-pulse rounded-[8px] bg-sunk" />
+      <div className="h-7" />
     </li>
   );
 }

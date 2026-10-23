@@ -172,23 +172,31 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 ## What the user sees
 
-- **Library page** (`/library`): the upload drop zone on top, then **the finder** (`AssetFinder`): one
-  search box ("Search your library, the catalog and providers…"), kind chips (All / Video / Image /
-  Audio) and source chips (All / Your library / Catalog / one per enabled provider). There are no
-  categories: kind is the only classification. Below, sections with a header and count: **Your
-  library** (own uploads and saved shared items, fuzzy search over name, tags and source), **Catalog**
-  (lists everything on an empty search), then one section per provider (only with a query; each runs
-  when it scrolls into view or its chip is selected, with the provider's attribution line under it).
-  A source chip shows only that section and paginates ("Show more"). Every tile (`AssetTile`) says
-  whether the item is in your library: a check badge "In your library", or a "+ Add" button for a
-  catalog / provider result (`catalog.import`; an item already on the instance is only saved, nothing is downloaded again) or a shared item you have not saved (`library.save`).
-  Tiles show kind, format, license badge for imported items and "Used by N"; own items keep rename,
-  tags, remove and usage in the viewer, saved shared items get "Remove from your library". Deep links:
-  `#asset=<id>`, `?kind=&source=&q=`.
-- **Editor**: the Layers lane; `+` → Image or video… / Text / Sound…. Image or video and Sound open
-  the same finder in a dialog (`AssetFinderDialog`, kinds filtered): "Add to clip" on an in-library
-  tile adds the layer at the playhead the dialog was opened at; on a catalog / provider result it
-  imports (saving it to the library) with a pending state on the tile, then adds the layer. Overlay
+- **Library page** (`/library`): the title with the item count and one short line. Row 1 is the search
+  box ("Search your library, the catalog and providers…") and an **Upload** button (files can also be
+  dropped anywhere on the page); row 2 is kind chips (All / Video / Image / Audio), a thin divider and
+  source chips (All / Yours / Catalog / one per enabled provider). Upload progress is a compact row
+  under the chips, only while there are jobs. Below is **one grid** of identical tiles (`AssetTile`),
+  no section headers: in-library items first (own uploads and saved shared items, fuzzy search over
+  name, tags and source), then catalog results (everything on an empty search), then provider results
+  (only with a query; each provider's query starts when its first slot scrolls into view or its chip
+  is selected). A catalog / provider result that is already in your library is not drawn twice. Skeleton
+  tiles trail the grid while a source loads; "Nothing matches" shows only once every active source came
+  back empty; one "Show more" loads the next page of the first source that has one. Attribution lines
+  (Pexels, Pixabay, Giphy) are one muted footer under the grid. A tile shows the thumbnail or preview,
+  a one-line name and one muted meta line `kind · length or size · source · license` (source is
+  Yours, Catalog or the provider). There is no in-library badge: the only control is a small ghost
+  "+ Add" on a catalog / provider result that is not in your library (`catalog.import`; an item
+  already on the instance is only saved, nothing is downloaded again; the tile then becomes the
+  in-library tile in place). Clicking an in-library tile opens the viewer, which keeps rename, tags,
+  usage, remove / "Remove from your library" and "Used by N". Deep links: `#asset=<id>`,
+  `?kind=&source=&q=`.
+- **Editor**: the Layers lane; `+` -> Image or video... / Text / Sound.... Image or video ("Add to
+  clip") and Sound ("Add a sound") open the same single-grid finder in a dialog
+  (`AssetFinderDialog`, kinds preset, kind chips hidden when limited to one kind, no Upload button).
+  Every tile has one primary "Add to clip" button (clicking the thumbnail does the same): on a
+  library tile it adds the layer at the playhead the dialog was opened at; on a catalog / provider
+  result it imports it into the library first ("Adding..." on the tile), then adds the layer. Overlay
   stacking rules in [UI.md](../UI.md).
 - **Project settings**: intro / outro pickers unchanged, filtered to video / image.
 

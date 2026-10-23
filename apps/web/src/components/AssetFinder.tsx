@@ -1,13 +1,15 @@
 /**
- * The one finder: your library, the Reelsaw catalog and every enabled provider behind one search box.
+ * The one finder: your library, the Reelsaw catalog and every enabled provider behind one search box and ONE grid of
+ * identical tiles: in-library items first, then catalog results, then provider results (a result already in your
+ * library is not drawn twice). One "Show more", one attribution footer.
  * `mode="library"` is the Library page body (filters live in the URL: ?kind=&source=&q=, #asset=<id>);
- * `mode="picker"` is the editor's dialog (filters are local, each tile has a "use" button).
+ * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button).
  * Server: `bumpers.list`, `catalog.providers / search / import`, `library.save` (same services as the MCP tools).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
-import { Loader2, Search, X } from "lucide-react";
+import { Loader2, Search, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate } from "react-router";
 import type { AppRouter } from "@reelsaw/server";
@@ -16,7 +18,7 @@ import { useMe } from "../lib/account";
 import { useHashParams } from "../lib/hash";
 import { createFuzzy } from "../lib/fuzzy";
 import { KIND_FILTERS, SEARCH_KEYS, searchable, type LibraryKind } from "../lib/library";
-import { AssetLightbox, RemoveDialog, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
+import { AssetLightbox, RemoveDialog, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
 import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
 import { Modal, Notice, Skeleton } from "./ui";
 
@@ -33,8 +35,6 @@ export interface PickedAsset {
 }
 
 const PAGE = 24;
-/** in the All view a remote section shows this many tiles, then "See all" */
-const PEEK = 8;
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
@@ -45,7 +45,7 @@ function useDebounced<T>(value: T, ms = 300): T {
   return v;
 }
 
-/** true once the element has been on screen (stays true), so a section's query runs lazily */
+/** true once the element has been on screen (stays true), so a source's query runs lazily */
 function useSeen(ref: React.RefObject<Element | null>) {
   const [seen, setSeen] = useState(false);
   useEffect(() => {
@@ -59,11 +59,10 @@ function useSeen(ref: React.RefObject<Element | null>) {
   return seen;
 }
 
-function Chip({ on, count, onClick, children }: { on: boolean; count?: number; onClick: () => void; children: React.ReactNode }) {
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" aria-pressed={on} onClick={onClick} className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink2 hover:text-ink"}`}>
       {children}
-      {count !== undefined && <span className="min-w-[1.25ch] text-right font-mono text-[11px] font-normal tabular-nums opacity-75">{count}</span>}
     </button>
   );
 }
@@ -71,7 +70,7 @@ function Chip({ on, count, onClick, children }: { on: boolean; count?: number; o
 interface Filters {
   kind: LibraryKind | "";
   q: string;
-  /** "" = all sources, "library", "catalog" or a provider id */
+  /** "" = all sources, "library" (Yours), "catalog" or a provider id */
   source: string;
 }
 
@@ -95,31 +94,7 @@ function useFilters(mode: "library" | "picker"): [Filters, (patch: Partial<Filte
   ];
 }
 
-const Count = ({ children }: { children: React.ReactNode }) => <span className="inline-block min-w-[2.5ch] font-mono text-xs font-normal tabular-nums text-ink3">{children}</span>;
-
-function SectionHead({ title, count, children }: { title: string; count: React.ReactNode; children?: React.ReactNode }) {
-  return (
-    <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1">
-      <h2 className="text-sm font-bold">
-        {title} <Count>{count}</Count>
-      </h2>
-      {children}
-    </div>
-  );
-}
-
-const gridClass = (mode: "library" | "picker") => (mode === "picker" ? "grid grid-cols-1 content-start gap-3 min-[480px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4" : "grid grid-cols-1 content-start gap-4 min-[480px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5");
-
-function SkeletonGrid({ mode, n = 4, label }: { mode: "library" | "picker"; n?: number; label: string }) {
-  return (
-    <ul role="status" aria-busy="true" className={gridClass(mode)}>
-      <span className="sr-only">{label}</span>
-      {Array.from({ length: n }, (_, i) => (
-        <AssetTileSkeleton key={i} i={i} />
-      ))}
-    </ul>
-  );
-}
+const gridClass = (mode: "library" | "picker") => (mode === "picker" ? "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 md:grid-cols-4" : "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5");
 
 const rowKey = (provider: string, externalId: string) => `${provider}:${externalId}`;
 
@@ -133,11 +108,23 @@ export interface AssetFinderProps {
   onPick?: (asset: PickedAsset) => void | Promise<void>;
   /** library mode: the page's actions (uploads share them) */
   actions?: ReturnType<typeof useBumperActions>;
+  /** library mode: shows the Upload button next to the search box */
+  onUpload?: () => void;
   className?: string;
   pickLabel?: string;
 }
 
-export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library", onPick, actions: actionsProp, className = "", pickLabel }: AssetFinderProps) {
+/** What a source (catalog or one provider) tells the finder about itself. */
+interface SourceState {
+  pending: boolean;
+  count: number;
+  hasNext: boolean;
+  fetching: boolean;
+  notice: boolean;
+}
+const sameState = (a: SourceState | undefined, b: SourceState) => !!a && a.pending === b.pending && a.count === b.count && a.hasNext === b.hasNext && a.fetching === b.fetching && a.notice === b.notice;
+
+export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library", onPick, actions: actionsProp, onUpload, className = "", pickLabel }: AssetFinderProps) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -155,8 +142,24 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<LibraryAsset | null>(null);
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  const [applied, setApplied] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
+  /** results added to the library in this view keep their place in the grid until the filters change */
+  const [stay, setStay] = useState<Set<string>>(new Set());
+  const [states, setStates] = useState<Record<string, SourceState>>({});
+  const fetchers = useRef<Record<string, () => void>>({});
+  const register = useCallback((id: string, st: SourceState, fetchNext: () => void) => {
+    fetchers.current[id] = fetchNext;
+    setStates((p) => (sameState(p[id], st) ? p : { ...p, [id]: st }));
+  }, []);
+  const unregister = useCallback((id: string) => {
+    delete fetchers.current[id];
+    setStates((p) => {
+      if (!(id in p)) return p;
+      const rest = { ...p };
+      delete rest[id];
+      return rest;
+    });
+  }, []);
 
   const { kind, q, source } = filters;
   const dq = useDebounced(q.trim());
@@ -167,20 +170,21 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     return m;
   }, [list.data]);
 
-  // search first; the kind chips count what the search leaves (so a count is what the click would show)
   const fuse = useMemo(() => createFuzzy(all.map(searchable), SEARCH_KEYS), [all]);
-  const searched = useMemo(() => (q.trim() ? new Set(fuse.filter(q).map((a) => a.id)) : null), [fuse, q]);
-  const kindCount = (k: LibraryKind | "") => all.filter((a) => (!searched || searched.has(a.id)) && (!k || a.kind === k)).length;
   const rows = useMemo(() => {
     const ranked = q.trim() ? fuse.filter(q).map((a) => all.find((x) => x.id === a.id)!) : all;
-    return ranked.filter((a) => !kind || a.kind === kind);
-  }, [all, fuse, q, kind]);
-  const kindChips = KIND_FILTERS.filter((k) => !allowed || allowed.includes(k.id));
+    return ranked.filter((a) => (!kind || a.kind === kind) && !(a.provenance?.externalId && stay.has(rowKey(a.provenance.provider, a.provenance.externalId))));
+  }, [all, fuse, q, kind, stay]);
+  const renderedIds = useMemo(() => new Set(rows.map((a) => a.id)), [rows]);
+  const kindChips = allowed?.length === 1 ? [] : KIND_FILTERS.filter((k) => !allowed || allowed.includes(k.id));
   // a single allowed kind is the filter; otherwise the chip decides
   const searchKind = kind || (allowed?.length === 1 ? allowed[0] : undefined);
   const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw");
   const providerFits = (p: Provider) => !searchKind || (p.kinds as readonly string[]).includes(searchKind);
   const kindOk = (k: string) => !allowed || (allowed as readonly string[]).includes(k);
+  const providerLabel = (id: string) => (id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1)));
+
+  useEffect(() => setStay(new Set()), [dq, kind, source]);
 
   // an unknown / switched-off source falls back to All
   useEffect(() => {
@@ -197,7 +201,6 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   }, [selected, rows.length]);
 
   const importM = useMutation(trpc.catalog.import.mutationOptions());
-  const saveM = useMutation(trpc.library.save.mutationOptions());
   const refreshList = () => void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
 
   /** Runs `fn` with the tile marked pending; a failure is a toast and the tile goes back to idle. */
@@ -214,16 +217,11 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const importItem = async (i: RemoteItem): Promise<PickedAsset> => {
     const a = await importM.mutateAsync({ provider: i.provider, externalId: i.externalId, ...(i.provider === "iconify" ? { color } : {}) });
     toast(a.duplicate ? `${a.name} is already in your library${a.restored ? " (restored)" : ""}.` : `Added ${a.name} to your library.`);
+    if (source !== "library") setStay((s) => new Set(s).add(rowKey(i.provider, i.externalId)));
     refreshList();
     return { id: a.id, name: a.name, kind: a.kind as LibraryKind, durationSec: a.durationSec };
   };
   const pickedFromRow = (r: LibraryAsset): PickedAsset => ({ id: r.id, name: r.name, kind: r.kind, durationSec: r.durationSec });
-  const saveRow = async (r: LibraryAsset): Promise<PickedAsset> => {
-    await saveM.mutateAsync({ id: r.id });
-    toast(`Added ${r.name} to your library.`);
-    refreshList();
-    return pickedFromRow(r);
-  };
 
   const fadeOut = (a: LibraryAsset) => {
     setLeaving((s) => new Set(s).add(a.id));
@@ -241,6 +239,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     durationSec: r.durationSec,
     width: r.width,
     height: r.height,
+    source: r.provenance ? providerLabel(r.provenance.provider) : r.system ? "Catalog" : r.owner === "me" ? "Yours" : "Shared",
+    license: r.provenance?.license?.name,
     thumbUrl: r.kind === "audio" ? undefined : r.thumbnailUrl,
     previewUrl: r.kind === "image" ? undefined : `/media/bumpers/${r.id}`,
     row: r,
@@ -253,10 +253,10 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     durationSec: i.durationSec,
     width: i.width,
     height: i.height,
+    source: providerLabel(i.provider),
+    license: i.license.name,
     thumbUrl: i.thumbUrl ?? (i.kind === "image" ? i.previewUrl : undefined),
     previewUrl: i.previewUrl,
-    license: { name: i.license.name, url: i.license.url, attribution: i.attribution },
-    row: byRemote.get(rowKey(i.provider, i.externalId)),
   });
 
   const pick = (key: string, make: () => Promise<PickedAsset>) =>
@@ -265,150 +265,150 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
       await onPick?.(a);
     });
 
-  const showLibrary = !source || source === "library";
-  const showCatalog = !source || source === "catalog";
-  const empty = !q.trim();
-
-  const section = (props: { id?: string; title: string; attribution?: string; extra?: React.ReactNode }) => (
-    <RemoteSection
-      key={props.id ?? "catalog"}
-      provider={props.id}
-      title={props.title}
-      attribution={props.attribution}
-      extra={props.extra}
-      q={dq}
-      rawQ={q}
-      kind={searchKind}
-      license={props.id === "freesound" ? license : undefined}
-      forced={source === (props.id ?? "catalog")}
-      peek={!source}
+  const libraryTile = (a: LibraryAsset) => (
+    <AssetTile
+      key={`lib:${a.id}`}
+      tile={libTile(a)}
       mode={mode}
-      kindOk={kindOk}
-      tile={remoteTile}
-      pending={pending}
-      onSeeAll={() => setFilters({ source: props.id ?? "catalog" })}
-      onAdd={(i, t) => void run(t.key, async () => void (t.row && t.unsavedShared ? await saveRow(t.row) : await importItem(i)))}
-      onPick={(i, t) => pick(t.key, () => (t.row ? (t.unsavedShared ? saveRow(t.row) : Promise.resolve(pickedFromRow(t.row))) : importItem(i)))}
+      pending={pending.has(`lib:${a.id}`)}
+      highlighted={mode === "library" && selected === a.id}
+      leaving={leaving.has(a.id)}
+      onAdd={() => {}}
+      onOpen={mode === "library" ? () => setViewingId(a.id) : undefined}
+      onSelect={mode === "library" ? () => select(a) : undefined}
+      onPick={() => pick(`lib:${a.id}`, () => Promise.resolve(pickedFromRow(a)))}
       pickLabel={pickLabel}
     />
   );
+  /** a catalog / provider result: nothing when your library tile already stands for it, that tile when it matched a row the filters hid */
+  const remoteNode = (i: RemoteItem) => {
+    const row = byRemote.get(rowKey(i.provider, i.externalId));
+    if (row) return renderedIds.has(row.id) ? null : libraryTile(row);
+    const t = remoteTile(i);
+    return <AssetTile key={t.key} tile={t} mode={mode} pending={pending.has(t.key)} onAdd={() => void run(t.key, async () => void (await importItem(i)))} onPick={() => pick(t.key, () => importItem(i))} pickLabel={pickLabel} />;
+  };
+
+  const showLibrary = !source || source === "library";
+  const showCatalog = !source || source === "catalog";
+  const empty = !q.trim();
+  const typeToSearch = empty && !!source && source !== "library" && source !== "catalog";
+  const activeProviders = empty ? [] : remoteProviders.filter((p) => (source ? source === p.id : providerFits(p)));
+  const activeIds = [...(showCatalog ? ["catalog"] : []), ...activeProviders.map((p) => p.id)];
+  const libraryResolved = !showLibrary || (!list.isPending && rows.length === 0);
+  const allResolved = activeIds.every((id) => states[id] && !states[id].pending && states[id].count === 0 && !states[id].notice);
+  const nothing = libraryResolved && allResolved && !typeToSearch;
+  const nextId = activeIds.find((id) => states[id]?.hasNext);
+  const fetchingMore = activeIds.some((id) => states[id]?.fetching);
+  // one muted line: every provider that has tiles in the grid
+  const attribution = (() => {
+    const ids = new Set<string>();
+    if (showLibrary) for (const a of rows) if (a.provenance) ids.add(a.provenance.provider);
+    for (const id of activeIds) if (states[id]?.count) ids.add(id === "catalog" ? "reelsaw" : id);
+    const lines = (providers.data ?? []).filter((p) => ids.has(p.id) && p.attributionLine).map((p) => p.attributionLine as string);
+    return [...new Set(lines)].join(" · ");
+  })();
 
   return (
     <div className={`flex min-h-0 flex-col gap-4 ${className}`}>
       <div className="flex shrink-0 flex-col gap-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
-          <input className="input h-[38px] w-full pl-9 pr-9" type="search" value={q} placeholder="Search your library, the catalog and providers…" aria-label="Search your library, the catalog and providers" onChange={(e) => setFilters({ q: e.target.value })} />
-          {q && (
-            <button type="button" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink" aria-label="Clear search" onClick={() => setFilters({ q: "" })}>
-              <X className="h-3.5 w-3.5" />
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="relative min-w-0 flex-1 basis-full sm:basis-auto">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
+            <input className="input h-[38px] w-full pl-9 pr-9" type="search" value={q} placeholder="Search your library, the catalog and providers…" aria-label="Search your library, the catalog and providers" onChange={(e) => setFilters({ q: e.target.value })} />
+            {q && (
+              <button type="button" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink" aria-label="Clear search" onClick={() => setFilters({ q: "" })}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {mode === "library" && onUpload && (
+            <button
+              type="button"
+              className="btn-ghost h-[38px] shrink-0 max-sm:w-full max-sm:justify-center"
+              title="Videos: MP4, MOV or WebM up to 10 s and 50 MB. Images: PNG, JPG, WebP, GIF or SVG up to 20 MB. Audio: MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB. You can also drop files anywhere on the page."
+              onClick={onUpload}
+            >
+              {actions.uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              Upload
             </button>
           )}
         </div>
-        <div className="flex min-h-7 flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
-          {list.isPending ? (
-            <Skeleton className="h-7 w-64 rounded-full" />
-          ) : (
+        <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+          {kindChips.length > 0 && (
             <>
-              <Chip on={kind === ""} count={kindCount("")} onClick={() => setFilters({ kind: "" })}>
-                All
-              </Chip>
-              {kindChips.map((k) => (
-                <Chip key={k.id} on={kind === k.id} count={kindCount(k.id)} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
-                  {k.label}
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
+                <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
+                  All
                 </Chip>
-              ))}
+                {kindChips.map((k) => (
+                  <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
+                    {k.label}
+                  </Chip>
+                ))}
+              </div>
+              <span className="mx-1 h-4 w-px shrink-0 bg-line" aria-hidden />
             </>
           )}
-        </div>
-        <div className="flex min-h-7 flex-wrap items-center gap-1.5" role="group" aria-label="Filter by source">
-          {providers.isPending ? (
-            <Skeleton className="h-7 w-72 rounded-full" />
-          ) : (
-            <>
-              <Chip on={source === ""} onClick={() => setFilters({ source: "" })}>
-                All
-              </Chip>
-              <Chip on={source === "library"} onClick={() => setFilters({ source: "library" })}>
-                Your library
-              </Chip>
-              <Chip on={source === "catalog"} onClick={() => setFilters({ source: "catalog" })}>
-                Catalog
-              </Chip>
-              {remoteProviders.map((p) => (
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by source">
+            <Chip on={source === ""} onClick={() => setFilters({ source: "" })}>
+              All
+            </Chip>
+            <Chip on={source === "library"} onClick={() => setFilters({ source: "library" })}>
+              Yours
+            </Chip>
+            <Chip on={source === "catalog"} onClick={() => setFilters({ source: "catalog" })}>
+              Catalog
+            </Chip>
+            {providers.isPending ? (
+              <Skeleton className="h-7 w-40 rounded-full" />
+            ) : (
+              remoteProviders.map((p) => (
                 <button key={p.id} type="button" aria-pressed={source === p.id} title={p.available ? p.attributionLine : "Rate limited; try again in a minute"} onClick={() => setFilters({ source: p.id })} className={`inline-flex h-7 shrink-0 items-center rounded-full border px-3 text-xs font-semibold transition ${source === p.id ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink2 hover:text-ink"}`}>
-                  {p.label}
+                  {p.experimental ? `${p.label} (beta)` : p.label}
                 </button>
-              ))}
-            </>
+              ))
+            )}
+          </div>
+          {source === "freesound" && (
+            <div className="flex gap-1" role="group" aria-label="License">
+              <Chip on={license === "cc0"} onClick={() => setLicense("cc0")}>
+                CC0
+              </Chip>
+              <Chip on={license === "by"} onClick={() => setLicense("by")}>
+                CC0 + BY
+              </Chip>
+            </div>
+          )}
+          {source === "iconify" && (
+            <label className="flex items-center gap-1.5 text-xs text-ink2">
+              Color
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-7 cursor-pointer rounded border border-line bg-panel p-0.5" aria-label="Icon color" />
+            </label>
           )}
         </div>
+        {mode === "library" && (actions.jobs.length > 0 || !!actions.error) && <UploadJobs jobs={actions.jobs} error={actions.error} onDismiss={actions.dismiss} />}
       </div>
 
-      <div className={`flex min-w-0 flex-col gap-6 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}`}>
-        {showLibrary && (
-          <section aria-label="Your library" className="flex flex-col gap-2">
-            <SectionHead title="Your library" count={list.isPending ? "" : rows.length} />
-            {list.isPending ? (
-              <SkeletonGrid mode={mode} label="Loading your library…" />
-            ) : rows.length === 0 ? (
-              <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() || kind ? "No matches in your library." : "Nothing here yet. Drop a file above, or add something from the catalog below."}</p>
-            ) : (
-              <ul className={`${gridClass(mode)} ${list.isFetching ? "" : ""}`}>
-                {rows.map((a) => (
-                  <AssetTile
-                    key={a.id}
-                    tile={libTile(a)}
-                    mode={mode}
-                    pending={pending.has(`lib:${a.id}`)}
-                    highlighted={mode === "library" && selected === a.id}
-                    introId={defaults?.introAssetId}
-                    outroId={defaults?.outroAssetId}
-                    applied={applied.has(a.id)}
-                    leaving={leaving.has(a.id)}
-                    busy={actions.busy}
-                    onAdd={() => {}}
-                    onOpen={mode === "library" ? () => setViewingId(a.id) : undefined}
-                    onSelect={mode === "library" ? () => select(a) : undefined}
-                    onSeconds={mode === "library" ? (sec) => void actions.setSeconds(a, sec).then((ok) => ok && setApplied((s) => new Set(s).add(a.id))) : undefined}
-                    onPick={() => pick(`lib:${a.id}`, () => Promise.resolve(pickedFromRow(a)))}
-                    pickLabel={pickLabel}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
+      <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}`}>
+        <ul className={gridClass(mode)} aria-label="Library, catalog and provider results">
+          {showLibrary && list.isPending && Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />)}
+          {showLibrary && rows.map(libraryTile)}
+          {showCatalog && <SourceTiles key="catalog" sid="catalog" q={dq} kind={searchKind} forced={source === "catalog"} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />}
+          {activeProviders.map((p) => (
+            <SourceTiles key={p.id} sid={p.id} provider={p.id} q={dq} kind={searchKind} license={p.id === "freesound" ? license : undefined} forced={source === p.id} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
+          ))}
+        </ul>
+        {typeToSearch && <p className="py-10 text-center text-sm text-ink3">Type to search {remoteProviders.find((p) => p.id === source)?.label ?? "this provider"}.</p>}
+        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `Nothing matches “${q.trim()}”.` : kind || source ? "Nothing matches these filters." : "Nothing here yet. Upload a file, or add something from the catalog."}</p>}
+        {nextId && (
+          <div className="flex justify-center py-1">
+            <button type="button" className="btn-ghost" disabled={fetchingMore} onClick={() => fetchers.current[nextId]?.()}>
+              {fetchingMore ? <Loader2 size={14} className="animate-spin" /> : null}
+              {fetchingMore ? "Loading…" : "Show more"}
+            </button>
+          </div>
         )}
-
-        {showCatalog && section({ title: "Catalog", attribution: providers.data?.find((p) => p.id === "reelsaw")?.attributionLine })}
-
-        {!empty &&
-          remoteProviders
-            .filter((p) => (source ? source === p.id : providerFits(p)))
-            .map((p) =>
-              section({
-                id: p.id,
-                title: p.experimental ? `${p.label} (beta)` : p.label,
-                attribution: p.attributionLine,
-                extra:
-                  p.id === "freesound" ? (
-                    <div className="flex gap-1" role="group" aria-label="License">
-                      <Chip on={license === "cc0"} onClick={() => setLicense("cc0")}>
-                        CC0
-                      </Chip>
-                      <Chip on={license === "by"} onClick={() => setLicense("by")}>
-                        CC0 + BY
-                      </Chip>
-                    </div>
-                  ) : p.id === "iconify" ? (
-                    <label className="flex items-center gap-1.5 text-xs text-ink2">
-                      Color
-                      <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-7 cursor-pointer rounded border border-line bg-panel p-0.5" aria-label="Icon color" />
-                    </label>
-                  ) : undefined,
-              }),
-            )}
-        {empty && source && source !== "library" && source !== "catalog" && <p className="py-10 text-center text-sm text-ink3">Type to search {remoteProviders.find((p) => p.id === source)?.label ?? "this provider"}.</p>}
+        {attribution && <p className="text-xs text-ink3">{attribution}</p>}
       </div>
 
       {mode === "library" && (
@@ -435,50 +435,36 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   );
 }
 
-/** The catalog (no provider) or one provider: lazy query, skeleton while pending, attribution under it. */
-function RemoteSection({
+/**
+ * The catalog (no provider) or one provider, drawn straight into the finder's grid (its tiles are this fragment).
+ * Its query starts when its first slot (one skeleton tile) scrolls into view, or at once when its chip is selected.
+ */
+function SourceTiles({
+  sid,
   provider,
-  title,
-  attribution,
-  extra,
   q,
-  rawQ,
   kind,
   license,
   forced,
-  peek,
-  mode,
   kindOk,
-  tile,
-  pending,
-  onSeeAll,
-  onAdd,
-  onPick,
-  pickLabel,
+  node,
+  register,
+  unregister,
 }: {
+  sid: string;
   provider?: string;
-  title: string;
-  attribution?: string;
-  extra?: React.ReactNode;
   q: string;
-  rawQ: string;
   kind?: LibraryKind;
   license?: "cc0" | "by";
   forced: boolean;
-  peek: boolean;
-  mode: "library" | "picker";
   kindOk: (k: string) => boolean;
-  tile: (i: RemoteItem) => TileModel;
-  pending: Set<string>;
-  onSeeAll: () => void;
-  onAdd: (i: RemoteItem, t: TileModel) => void;
-  onPick: (i: RemoteItem, t: TileModel) => void;
-  pickLabel?: string;
+  node: (i: RemoteItem) => React.ReactNode;
+  register: (id: string, st: SourceState, fetchNext: () => void) => void;
+  unregister: (id: string) => void;
 }) {
   const trpc = useTRPC();
-  const ref = useRef<HTMLElement>(null);
-  const seen = useSeen(ref);
-  // the catalog lists everything for an empty search; providers are only mounted with words
+  const slot = useRef<HTMLLIElement>(null);
+  const seen = useSeen(slot);
   const enabled = forced || seen;
   const search = useInfiniteQuery(
     trpc.catalog.search.infiniteQueryOptions(
@@ -486,51 +472,36 @@ function RemoteSection({
       { enabled, getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, staleTime: 60_000 },
     ),
   );
-  const items = useMemo(() => (search.data?.pages.flatMap((p) => p.items) ?? []).filter((i) => kindOk(i.kind)), [search.data, kindOk]);
+  const items = (search.data?.pages.flatMap((p) => p.items) ?? []).filter((i) => kindOk(i.kind));
   const unavailable = search.data?.pages.find((p) => p.unavailable)?.unavailable;
-  const isPending = !enabled || search.isPending;
-  const shown = peek ? items.slice(0, PEEK) : items;
+  const nodes = items.map((i) => node(i)).filter(Boolean);
+  const waiting = !enabled || (search.isPending && !search.isError);
+  const notice = !!unavailable || search.isError;
+  const { fetchNextPage } = search;
+  useEffect(() => {
+    register(sid, { pending: waiting, count: nodes.length, hasNext: !!search.hasNextPage, fetching: search.isFetchingNextPage, notice }, () => void fetchNextPage());
+  }, [register, sid, waiting, nodes.length, search.hasNextPage, search.isFetchingNextPage, notice, fetchNextPage]);
+  useEffect(() => () => unregister(sid), [unregister, sid]);
   return (
-    <section ref={ref} aria-label={title} className="flex flex-col gap-2">
-      <SectionHead title={title} count={isPending ? "" : `${items.length}${search.hasNextPage ? "+" : ""}`}>
-        {extra}
-        {peek && !isPending && items.length > PEEK && (
-          <button type="button" className="ml-auto text-xs font-semibold text-acc-text hover:underline" onClick={onSeeAll}>
-            See all
-          </button>
-        )}
-      </SectionHead>
-      {unavailable && <Notice tone="warn">{unavailable}</Notice>}
-      {search.isError && <Notice tone="err">{search.error.message}</Notice>}
-      {isPending && !search.isError ? (
-        <SkeletonGrid mode={mode} label={`Searching ${title}…`} />
-      ) : items.length === 0 && !unavailable && !search.isError ? (
-        <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{rawQ.trim() ? `No matches for “${rawQ.trim()}”.` : "Nothing here yet."}</p>
-      ) : (
-        <>
-          <ul className={`${gridClass(mode)} transition-opacity ${search.isPlaceholderData ? "opacity-60" : ""}`} aria-busy={search.isPlaceholderData}>
-            {shown.map((i) => {
-              const t = tile(i);
-              return <AssetTile key={t.key} tile={t} mode={mode} pending={pending.has(t.key)} busy={false} onAdd={() => onAdd(i, t)} onPick={() => onPick(i, t)} pickLabel={pickLabel} />;
-            })}
-          </ul>
-          {!peek && search.hasNextPage && (
-            <div className="flex justify-center py-1">
-              <button type="button" className="btn-ghost" disabled={search.isFetchingNextPage} onClick={() => void search.fetchNextPage()}>
-                {search.isFetchingNextPage ? <Loader2 size={14} className="animate-spin" /> : null}
-                {search.isFetchingNextPage ? "Loading…" : "Show more"}
-              </button>
-            </div>
-          )}
-        </>
+    <>
+      {unavailable && (
+        <li className="col-span-full">
+          <Notice tone="warn">{unavailable}</Notice>
+        </li>
       )}
-      {attribution && <p className="text-xs text-ink3">{attribution}</p>}
-    </section>
+      {search.isError && (
+        <li className="col-span-full">
+          <Notice tone="err">{search.error.message}</Notice>
+        </li>
+      )}
+      {nodes}
+      {!enabled ? <AssetTileSkeleton liRef={slot} /> : waiting ? Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />) : null}
+    </>
   );
 }
 
 /** The finder over the editor (or any page), in the repo's modal: menus portaled out of it are not dismissals (docs/UI.md). */
-export function AssetFinderDialog({ open, onOpenChange, kinds, kind, onPick, title = "Find media" }: { open: boolean; onOpenChange: (o: boolean) => void; kinds?: LibraryKind[]; kind?: LibraryKind; onPick: (asset: PickedAsset) => void | Promise<void>; title?: string }) {
+export function AssetFinderDialog({ open, onOpenChange, kinds, kind, onPick, title = "Add to clip" }: { open: boolean; onOpenChange: (o: boolean) => void; kinds?: LibraryKind[]; kind?: LibraryKind; onPick: (asset: PickedAsset) => void | Promise<void>; title?: string }) {
   return (
     <Modal open={open} onOpenChange={onOpenChange} title={title} width={960}>
       {open && (
