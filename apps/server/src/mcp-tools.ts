@@ -5,8 +5,8 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO } from "@reelsaw/shared";
-import { addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
+import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipOverlaySchema, clipAudioSchema, clipLayerSchema, assetCategorySchema, assetTagsSchema, MAX_CLIP_OVERLAYS, MAX_CLIP_AUDIO, MAX_CLIP_LAYERS } from "@reelsaw/shared";
+import { addAssetInput, addBumperInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
@@ -15,7 +15,7 @@ Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style, overlays), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
-Bumpers are short intro/outro videos or images (max 10 s) from your library (list_bumpers, add_bumper) that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items can be laid over part of a clip as overlays (a logo, a sticker, b-roll), and so can lines of text: update_clip { overlays: [{ id, assetId, start, end, x, y, w }, { id, kind: "text", text, start, end, x, y, size, color, box }] }.
+Your library (list_assets, add_asset, update_asset, remove_asset, asset_usage; the *_bumper tools are aliases) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
@@ -46,7 +46,7 @@ export function fail(message: string) {
 
 const projectId = (from = "list_projects, search_clips or create_project") => z.string().describe(`Project id (from ${from})`);
 const clipId = (what = "Clip id") => z.string().describe(`${what} (from get_project or search_clips)`);
-const assetIdInput = (from = "list_bumpers") => z.string().min(1).max(100).describe(`Library asset id (from ${from})`);
+const assetIdInput = (from = "list_assets") => z.string().min(1).max(100).describe(`Library asset id (from ${from})`);
 
 export const TOOLS = {
   list_projects: {
@@ -72,7 +72,7 @@ export const TOOLS = {
       sourceUrl: z.url().describe("http(s) URL of the video"),
       title: z.string().min(1).max(200).optional().describe("Project title (default: the video's own title)"),
       settings: settingsInput.optional(),
-      introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id (list_bumpers) for the intro of every clip; null = no intro; omitted = your default intro"),
+      introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id (list_assets) for the intro of every clip; null = no intro; omitted = your default intro"),
       outroAssetId: z.string().min(1).max(100).nullable().optional().describe("Same for the outro"),
       introSec: z.number().min(1).max(10).optional().describe("Seconds an intro image shows (1-10)"),
       outroSec: z.number().min(1).max(10).optional().describe("Seconds an outro image shows (1-10)"),
@@ -161,13 +161,13 @@ export const TOOLS = {
   },
   get_clip: {
     title: "Get clip",
-    description: "Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, render diagnostics, video/thumbnail/editor links. Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
+    description: "Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, layers (overlays, text, sounds), render diagnostics, video/thumbnail/editor links. Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
     inputSchema: { id: clipId() },
     annotations: { readOnlyHint: true },
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style, layoutSections and overlays replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and overlays are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x. Returns the clip summary; poll get_clip until done.",
+    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x. Returns the clip summary; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
@@ -180,8 +180,9 @@ export const TOOLS = {
       layoutSections: z.array(layoutSectionSchema).max(50).nullable().optional().describe("Framing per time range (max 50), source seconds; replaces all sections; null or [] = automatic"),
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
-      overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional().describe(`Things laid over the clip for a time range (max ${MAX_CLIP_OVERLAYS}): kind asset = a library image/video (list_bumpers; logos, stickers, b-roll), kind text = a line of text (size, color, box). Replaces the list; null or [] = none`),
-      audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional().describe(`Background music tracks under parts of the clip (max ${MAX_CLIP_AUDIO}; the same asset may repeat): library audio assets (list_bumpers, kind audio), each with a window in source seconds, volume, ducking under speech, fades. Replaces the list; null or [] = none`),
+      layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional().describe(`Everything laid over or played under the clip, one list (max ${MAX_CLIP_LAYERS}): kind asset = a library image/GIF/video (list_assets; logos, stickers, b-roll), kind text = a line of text, kind audio = music or a sound effect (a library audio asset with a window in source seconds, volume, ducking, fade, loop). Replaces the whole list; null or [] = none. get_clip returns it`),
+      overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional().describe(`Edits the asset and text half of layers (max ${MAX_CLIP_OVERLAYS}): kind asset = a library image/video (list_assets), kind text = a line of text (size, color, box). Replaces that half, keeps the sounds; null or [] = none`),
+      audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional().describe(`Edits the audio half of layers (max ${MAX_CLIP_AUDIO}; the same asset may repeat): library audio assets (list_assets, kind audio), each with a window in source seconds, volume, ducking under speech, fades. Replaces that half, keeps the visuals; null or [] = none`),
       rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
     },
   },
@@ -255,46 +256,87 @@ export const TOOLS = {
 
   // ── intro / outro library ────────────────────────────────────────────────
 
-  list_bumpers: {
-    title: "List intros and outros",
-    description: "Your library: intros/outros (video, image), overlays and music (audio). Returns { assets: [{ id, name, kind, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] } (removed items stay restorable for 30 days; usedBy counts intro, outro, overlay and music uses; url is the file itself). Use the ids with set_project_bumpers, set_clip_bumpers, set_default_bumper or update_clip overlays/audio.",
+  list_assets: {
+    title: "List library assets",
+    description: "Your library: intro/outro videos and images, logos, stickers, GIFs, SVGs, b-roll, music and sound effects. Returns { assets: [{ id, name, kind, mime, category, tags, provenance, system, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] } (removed items stay restorable for 30 days; url is the file itself). Use the ids in update_clip layers, set_project_bumpers, set_clip_bumpers or set_default_bumper.",
     annotations: { readOnlyHint: true },
   },
-  add_bumper: {
-    title: "Add intro/outro",
-    description: "Add a video (MP4/MOV/WebM, ≤10 s, ≤50 MB) or image (PNG/JPG, ≤20 MB) to your library from a public url or an uploadId. Returns { id, name, kind, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default for NEW projects only; existing ones change with set_project_bumpers.",
-    inputSchema: addBumperInput,
+  add_asset: {
+    title: "Add library asset",
+    description: "Add a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC) to your library from a public url or an uploadId, with an optional category and tags. Returns { id, name, kind, mime, category, durationSec, duplicate, restored } (the same file twice returns the existing item). setDefault makes it your default intro/outro for NEW projects only.",
+    inputSchema: addAssetInput,
   },
-  rename_bumper: {
-    title: "Rename intro/outro",
-    description: "Rename one of your library items (removed ones too). Only the label changes; nothing re-renders. Returns { id, name, previousName }.",
-    inputSchema: { assetId: assetIdInput(), name: bumperNameSchema.describe("New name (1-120 chars)") },
+  update_asset: {
+    title: "Update library asset",
+    description: "Rename a library item, set its category, replace its tags, or change how long a still image shows (removed items too). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, category, tags, durationSec, previousName }.",
+    inputSchema: {
+      assetId: assetIdInput(),
+      name: bumperNameSchema.optional().describe("New name (1-120 chars)"),
+      category: assetCategorySchema.nullable().optional().describe("intro, outro, logo, sticker, icon, broll, music or sfx; null clears it"),
+      tags: assetTagsSchema.optional().describe("Replaces the tags (lowercase words; max 20); [] clears them"),
+      imageSeconds: z.number().min(1).max(10).optional().describe("Seconds a still image shows as an intro/outro (1-10); images only"),
+    },
     annotations: { idempotentHint: true },
+  },
+  remove_asset: {
+    title: "Remove library asset",
+    description: "Remove an item from your library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput() },
+    annotations: { destructiveHint: true },
+  },
+  restore_asset: {
+    title: "Restore library asset",
+    description: "Bring one of your removed library items back (list_assets shows them under removed); restoring an item that is not removed changes nothing. It does not become a default again. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput("list_assets → removed") },
+    annotations: { idempotentHint: true },
+  },
+  asset_usage: {
+    title: "Where a library asset is used",
+    description: "The projects and clips that use a library item, as intro, outro, overlay or music (clips a re-analyze replaced are left out). Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }] }: slots are the roles on that clip, via says whether through the project or the clip. Check before removing one.",
+    inputSchema: { assetId: assetIdInput() },
+    annotations: { readOnlyHint: true },
   },
   set_default_bumper: {
     title: "Set default intro/outro",
     description: "Make a library item your default intro or outro for projects you create from now on (assetId null clears it). Existing projects keep theirs; to change one use set_project_bumpers. Returns { ok }.",
     inputSchema: {
       slot: z.enum(["intro", "outro"]).describe("Which default to set"),
-      assetId: z.string().min(1).max(100).nullable().describe("Library asset id (list_bumpers), or null for no default"),
+      assetId: z.string().min(1).max(100).nullable().describe("Library asset id (list_assets), or null for no default"),
     },
     annotations: { idempotentHint: true },
   },
+  // old names, kept for one release: same handlers as the *_asset tools
+  list_bumpers: {
+    title: "List library assets (alias)",
+    description: "(alias of list_assets) Your library: intros, outros, overlays, music and sounds. Returns { assets: [{ id, name, kind, mime, category, tags, durationSec, isDefaultIntro, isDefaultOutro, usedBy, usedByClips, thumbnailUrl, url }], removed: [...] }.",
+    annotations: { readOnlyHint: true },
+  },
+  add_bumper: {
+    title: "Add library asset (alias)",
+    description: "(alias of add_asset) Add a video, image or sound to your library from a public url or an uploadId. Returns { id, name, kind, mime, category, durationSec, duplicate, restored }. setDefault makes it your default for NEW projects only.",
+    inputSchema: addBumperInput,
+  },
+  rename_bumper: {
+    title: "Rename library asset (alias)",
+    description: "(alias of update_asset) Rename one of your library items (removed ones too). Only the label changes; nothing re-renders. Returns { id, name, previousName }.",
+    inputSchema: { assetId: assetIdInput(), name: bumperNameSchema.describe("New name (1-120 chars)") },
+    annotations: { idempotentHint: true },
+  },
   remove_bumper: {
-    title: "Remove intro/outro",
-    description: "Remove an item from your library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_bumper within 30 days; check bumper_usage first. Returns { ok }.",
+    title: "Remove library asset (alias)",
+    description: "(alias of remove_asset) Remove an item from your library and from your defaults; projects and clips using it keep rendering. Undo with restore_asset within 30 days. Returns { ok }.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { destructiveHint: true },
   },
   restore_bumper: {
-    title: "Restore intro/outro",
-    description: "Bring one of your removed library items back (list_bumpers shows them under removed); restoring an item that is not removed changes nothing. It does not become a default again. Returns { ok }.",
-    inputSchema: { assetId: assetIdInput("list_bumpers → removed") },
+    title: "Restore library asset (alias)",
+    description: "(alias of restore_asset) Bring one of your removed library items back. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput("list_assets → removed") },
     annotations: { idempotentHint: true },
   },
   bumper_usage: {
-    title: "Where a library item is used",
-    description: "The projects and clips that use a library item, as intro, outro, overlay or music. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }] }: slots are the roles on that clip, via says whether through the project or the clip, overlays/music count the uses. Check before removing one.",
+    title: "Where a library asset is used (alias)",
+    description: "(alias of asset_usage) The projects and clips that use a library item, as intro, outro, overlay or music. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }] }.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },

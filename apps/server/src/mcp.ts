@@ -10,6 +10,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
+import type { AssetCategory } from "@reelsaw/shared";
 import type { Services } from "./services.js";
 import type { AuthUser } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
@@ -335,30 +336,30 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   // ── intro / outro library ────────────────────────────────────────────────
 
-  server.registerTool(
-    "list_bumpers",
-    TOOLS.list_bumpers,
-    () => run(() => libraryView(svc, api, user.id, (p) => abs(p)!)),
-  );
+  // the library tools and their old *_bumper names share one handler each
+  const listAssets = () => run(() => libraryView(svc, api, user.id, (p) => abs(p)!));
+  const addAsset = (input: { url?: string; uploadId?: string; name?: string; category?: AssetCategory; tags?: string[]; imageSeconds?: number; setDefault?: "intro" | "outro" }) =>
+    run(async () => {
+      requireOneSource(input);
+      if (input.uploadId && input.name) throw new Error("name can only be set together with url");
+      const uploadId = input.uploadId ?? (await downloadAsUpload(svc, user.id, input.url!, { name: input.name })).uploadId;
+      const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, category: input.category, tags: input.tags });
+      return { ...created, isDefault: input.setDefault ?? null };
+    });
+  const updateAsset = ({ assetId, ...patch }: { assetId: string; name?: string; category?: AssetCategory | null; tags?: string[]; imageSeconds?: number }) => run(() => api.bumpers.update({ id: assetId, ...patch }));
+  const removeAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.delete({ id: assetId }));
+  const restoreAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.restore({ id: assetId }));
+  const assetUsage = ({ assetId }: { assetId: string }) => run(() => api.bumpers.usage({ id: assetId }));
 
-  server.registerTool(
-    "add_bumper",
-    TOOLS.add_bumper,
-    (input) =>
-      run(async () => {
-        requireOneSource(input);
-        if (input.uploadId && input.name) throw new Error("name can only be set together with url");
-        const uploadId = input.uploadId ?? (await downloadAsUpload(svc, user.id, input.url!, { name: input.name })).uploadId;
-        const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault });
-        return { ...created, isDefault: input.setDefault ?? null };
-      }),
-  );
-
-  server.registerTool(
-    "rename_bumper",
-    TOOLS.rename_bumper,
-    ({ assetId, name }) => run(() => api.bumpers.update({ id: assetId, name })),
-  );
+  server.registerTool("list_assets", TOOLS.list_assets, listAssets);
+  server.registerTool("add_asset", TOOLS.add_asset, addAsset);
+  server.registerTool("update_asset", TOOLS.update_asset, updateAsset);
+  server.registerTool("remove_asset", TOOLS.remove_asset, removeAsset);
+  server.registerTool("restore_asset", TOOLS.restore_asset, restoreAsset);
+  server.registerTool("asset_usage", TOOLS.asset_usage, assetUsage);
+  server.registerTool("list_bumpers", TOOLS.list_bumpers, listAssets);
+  server.registerTool("add_bumper", TOOLS.add_bumper, addAsset);
+  server.registerTool("rename_bumper", TOOLS.rename_bumper, ({ assetId, name }) => updateAsset({ assetId, name }));
 
   server.registerTool(
     "set_default_bumper",
@@ -366,23 +367,9 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     ({ slot, assetId }) => run(() => api.bumpers.setDefault({ slot, assetId })),
   );
 
-  server.registerTool(
-    "remove_bumper",
-    TOOLS.remove_bumper,
-    ({ assetId }) => run(() => api.bumpers.delete({ id: assetId })),
-  );
-
-  server.registerTool(
-    "restore_bumper",
-    TOOLS.restore_bumper,
-    ({ assetId }) => run(() => api.bumpers.restore({ id: assetId })),
-  );
-
-  server.registerTool(
-    "bumper_usage",
-    TOOLS.bumper_usage,
-    ({ assetId }) => run(() => api.bumpers.usage({ id: assetId })),
-  );
+  server.registerTool("remove_bumper", TOOLS.remove_bumper, removeAsset);
+  server.registerTool("restore_bumper", TOOLS.restore_bumper, restoreAsset);
+  server.registerTool("bumper_usage", TOOLS.bumper_usage, assetUsage);
 
   server.registerTool(
     "set_project_bumpers",

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
-import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
+import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
@@ -21,7 +21,8 @@ import { lockProjectClips, requestPrepare, requestRender, requestRenders, Render
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../library/service.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset } from "../library/service.js";
+import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
@@ -400,7 +401,9 @@ async function peekUrlMeta(url: string): Promise<{ title?: string; thumbnail?: s
   }
 }
 
-export const appRouter = router({
+// appRouter is three routers merged (head, bumpers, rest) so the library router can be mounted under two names
+// (`bumpers` and `library`) without moving its code.
+const headRouter = router({
   health: publicProcedure.query(() => ({ ok: true, time: new Date().toISOString() })),
 
   /** Public: what the sign-in page and the top bar need before/without an approved account. */
@@ -486,8 +489,10 @@ export const appRouter = router({
     /** The Stripe Billing Portal (invoices, card, cancel at period end). */
     portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
   }),
-  /** The user's library of intro/outro videos and images (docs/specs/bumpers.md). Files arrive through POST /api/upload first. */
-  bumpers: router({
+});
+
+/** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
+const bumpersRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
@@ -504,65 +509,13 @@ export const appRouter = router({
     }),
     /**
      * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
-     * choice. Two queries (projects whose settings name it, clips that name it or sit in such a project).
+     * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
      */
     usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
       const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id)));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-      const slots = ["intro", "outro"] as const;
-      const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
-      const projectRows = await db
-        .select({ id: schema.projects.id, title: schema.projects.title, settings: schema.projects.settings })
-        .from(schema.projects)
-        .where(and(eq(schema.projects.userId, ctx.user.id), or(sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`, sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`)))
-        .limit(500);
-      // overlays are a jsonb list; audio is a list too, except rows written before several tracks per clip (one object)
-      const ref = JSON.stringify([{ assetId: input.id }]);
-      const clipRows = await db
-        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, overlays: schema.clips.overlays, audio: schema.clips.audio, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
-        .from(schema.clips)
-        .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
-        .where(
-          and(
-            eq(schema.projects.userId, ctx.user.id),
-            or(
-              sql`${schema.clips.bumpers} ->> 'intro' = ${input.id}`,
-              sql`${schema.clips.bumpers} ->> 'outro' = ${input.id}`,
-              sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`,
-              sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`,
-              sql`${schema.clips.overlays} @> ${ref}::jsonb`,
-              sql`(jsonb_typeof(${schema.clips.audio}) = 'array' and ${schema.clips.audio} @> ${ref}::jsonb)`,
-              sql`(jsonb_typeof(${schema.clips.audio}) = 'object' and ${schema.clips.audio} ->> 'assetId' = ${input.id})`,
-            ),
-          ),
-        )
-        .orderBy(schema.clips.index)
-        .limit(2000);
-      type Role = "intro" | "outro" | "overlay" | "music";
-      type Clip = { id: string; index: number; title: string; slots: Role[]; via: "clip" | "project"; overlays: number; music: number };
-      const out = new Map<string, { id: string; title: string; slots: Array<"intro" | "outro">; via: "project"; clips: Clip[] }>();
-      for (const p of projectRows) out.set(p.id, { id: p.id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === input.id), clips: [] });
-      for (const c of clipRows) {
-        const own = c.bumpers ?? {};
-        const mine = slots.filter((s) => own[s] === input.id);
-        // a slot the clip leaves alone follows the project
-        const inherited = slots.filter((s) => own[s] === undefined && c.settings[key[s]] === input.id);
-        const overlays = (c.overlays ?? []).filter((o) => o.assetId === input.id).length;
-        const music = clipAudioList(c.audio).filter((m) => m.assetId === input.id).length;
-        if (!mine.length && !inherited.length && !overlays && !music) continue;
-        const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
-        out.set(p.id, p);
-        const roles: Role[] = [...slots.filter((s) => mine.includes(s) || inherited.includes(s)), ...(overlays ? (["overlay"] as const) : []), ...(music ? (["music"] as const) : [])];
-        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: roles, via: mine.length || overlays || music ? "clip" : "project", overlays, music });
-      }
-      // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
-      const bare = [...out.values()].filter((p) => !p.clips.length).map((p) => p.id);
-      if (bare.length) {
-        const withClips = new Set((await db.selectDistinct({ id: schema.clips.projectId }).from(schema.clips).where(inArray(schema.clips.projectId, bare))).map((r) => r.id));
-        for (const id of bare) if (withClips.has(id)) out.delete(id);
-      }
-      return { projects: [...out.values()] };
+      return bumperAssetUsage(db, ctx.user.id, input.id);
     }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
     update: protectedProcedure
@@ -691,8 +644,9 @@ export const appRouter = router({
       if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
       return { ok: true };
     }),
-  }),
+});
 
+const restRouter = router({
   admin: router({
     /** Machine-level configuration and live resources. Read from the environment; admins only. */
     system: adminProcedure.query(async ({ ctx }) => ({
@@ -1107,6 +1061,7 @@ export const appRouter = router({
           .insert(schema.projects)
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
           .returning();
+        await syncProjectRefs(u.db, row!); // the defaults' intro/outro
         await u.emit(id, "project.created", { title });
         await startRun(u, id, { reason: "created", status: "queued" });
         await u.enqueue(QUEUES.ingest, { projectId: id });
@@ -1207,7 +1162,8 @@ export const appRouter = router({
           }
           // clips first, the project row last (lock order clip → project)
           const n = input.rerender ? await rerenderClips(svc, u, p.id) : 0;
-          await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
+          await syncProjectRefs(u.db, after!);
           return n;
         });
         return { ok: true, rerendered };
@@ -1495,6 +1451,7 @@ export const appRouter = router({
         // the edit and its re-render (generation bump, job, project reopened) commit together
         if (needsRender && input.rerender) await requestRender(svc, u, p.id, c.id);
         const [fresh] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id));
+        if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, fresh ?? row!);
         return fresh ?? row!;
         });
         return publicClip(updated);
@@ -1523,6 +1480,7 @@ export const appRouter = router({
               .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
               .where(inArray(schema.clips.id, ids));
           }
+          await syncClipsRefs(u.db, p.id, await u.db.select({ id: schema.clips.id, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.id, ids)));
           let rerendered = 0;
           if (input.rerender) for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
           return { ok: true, updated: ids.length, rerendered };
@@ -1612,4 +1570,5 @@ export const appRouter = router({
   }),
 });
 
+export const appRouter = mergeRouters(headRouter, router({ bumpers: bumpersRouter, library: bumpersRouter }), restRouter);
 export type AppRouter = typeof appRouter;

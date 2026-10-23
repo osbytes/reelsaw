@@ -70,6 +70,14 @@ without leaving the editor or finding files on my disk.
    transactions rule). "Used by N", `bumper_usage`, the purge's "still referenced" test and the credits
    list become indexed lookups instead of jsonb `->>` scans over every clip. Backfilled once by the
    migration's follow-up job.
+   Built (`library/refs.ts`): a clip row exists only for what the clip names itself (its own
+   `bumpers.intro` / `outro` strings and every asset / audio layer, legacy overlays + audio read as
+   layers); a clip that inherits the project's intro has no row, the project row (`clip_id` null)
+   stands for it, so "used by N clips" counts clips that name the asset and the project count covers
+   inheritance. Clips a re-analyze replaced (`deleted_at`) keep their rows, so the purge never removes
+   an asset a restorable clip still uses; `usage` and the counts skip them. The backfill walks projects
+   by keyset (200 per batch, a time budget per tick, cursor in instance state) and the purge of removed
+   assets does nothing until it has finished; `reelsaw library reindex` runs it to the end.
 5. **Accepted types widen.** Images: png, jpg, **webp, gif, svg**. Video: mp4, mov, webm. Audio:
    mp3, m4a, aac, wav, ogg, flac. Probed by ffprobe, never by extension (as today).
    - **SVG**: rasterised once into `assets/<id>/norm.v1.png` at 1080 px wide (`ffmpeg -i x.svg`
@@ -159,7 +167,8 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 |---|---|---|---|
 | list / search own library | `library.list { kind?, category?, q?, cursor }` | `list_assets` (alias `list_bumpers` for one release) | `reelsaw library list [--kind] [--q]` |
 | upload / import by URL | `library.create { uploadId \| url, name?, category?, tags? }` | `add_asset` (alias `add_bumper`) | `reelsaw library add <file\|url>` |
-| rename, tag, remove, restore, usage | `library.update / delete / restore / usage` | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` | `reelsaw library rename\|remove\|restore\|usage` |
+| rename, tag, remove, restore, usage | `library.update / delete / restore / usage` (`library` and `bumpers` are the same router) | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` (old `*_bumper` names stay as aliases) | `reelsaw library rename\|update\|remove\|restore\|usage` |
+| rebuild the refs table | none (reconciler backfill, bounded ticks) | none | `reelsaw library reindex` |
 | search catalog and providers | `library.search { provider, q, kind?, cursor? }` | `search_library { provider?, q, kind? }` | `reelsaw library search <q> [--provider] [--kind]` |
 | import a result | `library.import { provider, externalId, color? }` | `import_asset` | `reelsaw library import <provider> <id>` |
 | clip layers | `clips.update { layers }` | `update_clip { layers }`, `get_clip` | `reelsaw clip-layers <p> <c> --set '<json>' \| --add <assetId> … \| --add-text … \| --add-sound <assetId> … \| --remove <id> \| --clear [--rerender]` |
