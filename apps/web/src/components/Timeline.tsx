@@ -161,11 +161,22 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const lyRowCount = Math.max(1, Math.min(MAX_OV_ROWS, layers.length ? Math.max(...[...lyRows.values()]) + 1 : 1));
   const lyLaneH = lyRowCount * OV_ROW - 2;
   const [w, setW] = useState(600);
+  /**
+   * The view may start before 0:00 by the room the intro block (or its "+ Intro" chip) needs to the left of
+   * the clip, so a clip that starts at the head of the video still shows it. Depends on the zoom (the chip
+   * is a fixed 76 px) and on the intro's seconds; computed from the current span by the callers.
+   */
+  const leadSec = (forSpan: number) => (76 / Math.max(1, w)) * forSpan + (bumpers?.intro?.sec ?? 0);
+  const minStart = (forSpan: number) => (range[0] <= 0.05 ? -leadSec(forSpan) : 0);
   const fitView = useCallback((): [number, number] => {
     const len = range[1] - range[0];
     const pad = Math.max(2, len * 0.25);
-    return [Math.max(0, range[0] - pad), Math.min(sourceDuration || range[1] + pad, range[1] + pad)];
-  }, [range, sourceDuration]);
+    const end = Math.min(sourceDuration || range[1] + pad, range[1] + pad);
+    const start = range[0] - pad;
+    // at the head of the video, leave the intro its room instead of clamping at 0
+    return [range[0] <= 0.05 ? Math.max(-(76 / Math.max(1, w)) * (end - start) - (bumpers?.intro?.sec ?? 0), start) : Math.max(0, start), end];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, sourceDuration, w, bumpers?.intro?.sec]);
   const [view, setView] = useState<[number, number]>(fitView);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [hoverT, setHoverT] = useState<number | null>(null);
@@ -194,7 +205,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   useEffect(() => {
     if (drag) return;
     if (current < view[0] || current > view[1]) {
-      const s = Math.max(0, current - span * 0.1);
+      const s = Math.max(minStart(span), current - span * 0.1);
       setView([s, s + span]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,7 +251,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   function setSpan(next: number, around = (view[0] + view[1]) / 2) {
     const newSpan = Math.max(MIN_SPAN, Math.min(Math.max(MIN_SPAN, Math.min(MAX_SPAN, sourceDuration || MAX_SPAN)), next));
     const frac = (around - view[0]) / span;
-    const s = Math.max(0, around - frac * newSpan);
+    const s = Math.max(minStart(newSpan), around - frac * newSpan);
     setView([s, s + newSpan]);
   }
 
@@ -253,7 +264,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
     } else {
       // plain scroll pans the timeline
       const d = ((Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / w) * span;
-      const s = Math.max(0, view[0] + d);
+      const s = Math.max(minStart(span), view[0] + d);
       setView([s, s + span]);
     }
   }
@@ -306,7 +317,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
       onSections(next, gesture.current);
     } else if (drag.kind === "pan") {
       const d = ((drag.grabX - e.clientX) / w) * span;
-      const s = Math.max(0, drag.orig[0] + d);
+      const s = Math.max(minStart(span), drag.orig[0] + d);
       setView([s, s + span]);
     } else if (drag.kind === "ly-move") {
       const len = drag.orig[1] - drag.orig[0];
@@ -413,7 +424,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
   const step = steps.find((st) => (st / span) * w >= 64) ?? 600;
   const ticks: number[] = [];
-  for (let t = Math.ceil(view[0] / step) * step; t <= view[1]; t += step) ticks.push(t);
+  for (let t = Math.max(0, Math.ceil(view[0] / step) * step); t <= view[1]; t += step) ticks.push(t);
 
   const playX = x(current);
   const lane = "relative";
