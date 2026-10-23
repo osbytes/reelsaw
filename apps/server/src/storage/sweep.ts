@@ -336,7 +336,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
     start: null,
     fetch: async (cur, size) => {
       const res = await svc.database.db.execute(sql`
-        select a.id as id, a.deleted_at::text as at from bumper_assets a
+        select a.id as id, a.deleted_at::text as at from assets a
         where a.deleted_at is not null and a.deleted_at < ${cutoff.toISOString()}::timestamptz
           ${cur ? sql`and (a.deleted_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           and not exists (select 1 from asset_refs r where r.asset_id = a.id)
@@ -355,11 +355,11 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
     start: null,
     fetch: async (cur, size) => {
       const res = await svc.database.db.execute(sql`
-        select a.id as id, a.created_at::text as at from bumper_assets a
+        select a.id as id, a.created_at::text as at from assets a
         where a.user_id is null and a.created_at < ${cutoff.toISOString()}::timestamptz
           ${cur ? sql`and (a.created_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           and not exists (select 1 from asset_refs r where r.asset_id = a.id)
-          and not exists (select 1 from library_saves s where s.asset_id = a.id)
+          and not exists (select 1 from asset_saves s where s.asset_id = a.id)
         order by a.created_at, a.id limit ${size}`);
       return res.rows as Array<{ id: string; at: string }>;
     },
@@ -378,16 +378,16 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       continue;
     }
     const gone = await svc.tx(async (u) => {
-      const [a] = await u.db.select({ id: schema.libraryAssets.id, userId: schema.libraryAssets.userId, createdAt: schema.libraryAssets.createdAt, deletedAt: schema.libraryAssets.deletedAt, sourceKey: schema.libraryAssets.sourceKey }).from(schema.libraryAssets).where(eq(schema.libraryAssets.id, id)).for("update");
+      const [a] = await u.db.select({ id: schema.assets.id, userId: schema.assets.userId, createdAt: schema.assets.createdAt, deletedAt: schema.assets.deletedAt, sourceKey: schema.assets.sourceKey }).from(schema.assets).where(eq(schema.assets.id, id)).for("update");
       if (!a) return false;
       // refs are written in the transaction that points at the asset (library/refs.ts), after taking the same row lock
       const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${id}) as used`);
       const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
-      // a save is written in the transaction that names the row; library_saves cascades with it
-      const sv = await u.db.execute(sql`select exists (select 1 from library_saves where asset_id = ${id}) as saved`);
+      // a save is written in the transaction that names the row; asset_saves cascades with it
+      const sv = await u.db.execute(sql`select exists (select 1 from asset_saves where asset_id = ${id}) as saved`);
       const saved = !!(sv.rows[0] as { saved: boolean } | undefined)?.saved;
       if (!bumperPurgeable(a, used, now, saved)) return false;
-      await u.db.delete(schema.libraryAssets).where(eq(schema.libraryAssets.id, id));
+      await u.db.delete(schema.assets).where(eq(schema.assets.id, id));
       u.afterCommit(async () => {
         try {
           // rows made before the rename keep their files under bumpers/<id>, newer ones under assets/<id>

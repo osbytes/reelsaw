@@ -1133,7 +1133,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       next = [...current, parsed.data];
     } else if (addSound !== undefined) {
       if (from === undefined) throw new Error(`--add-sound needs --from (and --to; a sound effect defaults to its own length)\n${usage}`);
-      const asset = await svc.database.db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, addSound), assetVisibleTo(user.id)), columns: { kind: true, durationSec: true } });
+      const asset = await svc.database.db.query.assets.findFirst({ where: and(eq(schema.assets.id, addSound), assetVisibleTo(user.id)), columns: { kind: true, durationSec: true } });
       if (!asset) throw new Error(`no library item ${addSound}`);
       if (asset.kind !== "audio") throw new Error(`${addSound} is a ${asset.kind}, not a sound: use --add`);
       // a short file is a one-shot at full level; anything else is music (ducked, faded, looped)

@@ -251,8 +251,6 @@ export const keys = {
   thumb: (projectId: string, clipId: string, gen = 0) => `projects/${projectId}/clips/${clipId}${gen ? `.${gen}` : ""}.jpg`,
   /** a library asset as uploaded; assets are immutable, so the key never changes. Rows made before the library held more than intros/outros live under `bumpers/<id>/…` (their `source_key` says so) */
   asset: (id: string, ext: string) => `assets/${id}/source${ext}`,
-  /** @deprecated new rows use `asset`; kept for tests and old fixtures */
-  bumper: (id: string, ext: string) => `bumpers/${id}/source${ext}`,
   /** the folder an asset's derived files share with its source (`bumpers/<id>` or `assets/<id>`) */
   assetDir: (sourceKey: string) => sourceKey.slice(0, sourceKey.lastIndexOf("/")),
   assetThumb: (sourceKey: string) => `${keys.assetDir(sourceKey)}/thumb.jpg`,

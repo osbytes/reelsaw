@@ -154,18 +154,18 @@ describe("mcp", () => {
 
   it("rename_bumper renames only the caller's library items", async () => {
     const asset = randomUUID();
-    await pool.query(`insert into bumper_assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Old', 3, 1080, 1920, false, 'bumpers/x.png', 10)`, [asset, owner.userId]);
+    await pool.query(`insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Old', 3, 1080, 1920, false, 'bumpers/x.png', 10)`, [asset, owner.userId]);
     const r = await call<{ name: string; previousName: string }>("rename_bumper", { assetId: asset, name: "  New name " });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual([r.data.previousName, r.data.name], ["Old", "New name"]);
-    assert.equal((await pool.query(`select name from bumper_assets where id = $1`, [asset])).rows[0]!.name, "New name");
+    assert.equal((await pool.query(`select name from assets where id = $1`, [asset])).rows[0]!.name, "New name");
     assert.equal((await call("rename_bumper", { assetId: asset, name: "   " })).isError, true);
     assert.equal((await call("rename_bumper", { assetId: randomUUID(), name: "x" })).isError, true);
   });
 
   it("update_asset replaces tags; asset_usage reads asset_refs", async () => {
     const asset = randomUUID();
-    await pool.query(`insert into bumper_assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Logo', 3, 1080, 1920, false, 'assets/x/source.png', 10)`, [asset, owner.userId]);
+    await pool.query(`insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Logo', 3, 1080, 1920, false, 'assets/x/source.png', 10)`, [asset, owner.userId]);
     const r = await call<{ tags: string[] }>("update_asset", { assetId: asset, tags: ["Brand", "brand", "blue"] });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual(r.data.tags, ["brand", "blue"]);

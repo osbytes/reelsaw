@@ -17,7 +17,7 @@ without leaving the editor or finding files on my disk.
 
 | piece | today | problem |
 |---|---|---|
-| store | `bumper_assets` (`kind` video / image / audio, immutable, soft delete, sha256 dedupe, URL import with SSRF guard, 30-day purge) | right model, wrong name and too narrow: no SVG, GIF, WebP; no tags or provenance; "Used by" loads every project and clip of the user (scale.md #11, #12) |
+| store | `bumper_assets`, now `assets` (`kind` video / image / audio, immutable, soft delete, sha256 dedupe, URL import with SSRF guard, 30-day purge) | right model, wrong name and too narrow: no SVG, GIF, WebP; no tags or provenance; "Used by" loads every project and clip of the user (scale.md #11, #12) |
 | clip refs | `clips.bumpers {intro, outro}`, `clips.overlays[]` (asset \| text), `clips.audio[]` | two lists with two id spaces, two lanes, two inspector cards, two MCP fields, two CLI commands, two copy/paste paths, for items that share id / start / end / level / fade |
 | render | `overlayChain` (images repeat, videos play once), `musicMix` (loop, duck, fade), bumper concat | fine; needs loop for stickers, raster step for SVG |
 | surfaces | `list_bumpers` … `set_clip_bumpers`, `update_clip { overlays, audio }`, `reelsaw bumpers`, `clip-overlays`, `clip-audio` | named after the first use case |
@@ -25,9 +25,9 @@ without leaving the editor or finding files on my disk.
 
 ## Decisions
 
-1. **One table, `libraryAssets`.** The Drizzle export and every identifier are renamed; the SQL table
-   keeps the name `bumper_assets` (drizzle-kit can only record a rename through a terminal prompt, and
-   nothing reads the name). Rows, ids and storage keys are kept (they are stored in full in
+1. **One table, `assets`.** `bumper_assets` is renamed (migration 0039, hand-written rename lines:
+   drizzle-kit can only record a rename through a terminal prompt); `asset_saves` and `asset_refs` sit
+   beside it. Rows, ids and storage keys are kept (they are stored in full in
    `source_key` / `thumbnail_key`, so old `bumpers/<id>/…` objects stay where they are and new rows
    write `assets/<id>/…`; derived caches use `keys.assetDir(source_key)`).
    Columns added: `mime` (exact type: `image/svg+xml`, `image/gif`, `image/webp`, `audio/mpeg`…),
@@ -106,7 +106,7 @@ without leaving the editor or finding files on my disk.
      is refused with "save it as a GIF or an MP4 instead"; a build that can decode it works unchanged.
 6. **Providers import, never hotlink.** A remote result becomes a normal immutable library row via
    the existing `downloadAsUpload` → `createAsset` path (SSRF guard, size and duration limits, sha256
-   dedupe), with `provenance` filled. **Imports are instance-shared rows**: one `bumper_assets` row with
+   dedupe), with `provenance` filled. **Imports are instance-shared rows**: one `assets` row with
    `user_id` null per `(provider, externalId, variant)` (variant = the Iconify colour; a unique partial
    index and a lock keyed on it make two accounts importing at once converge), plus a `library_saves` row
    for the importing account. Any signed-in account may use a shared row (media routes, project and clip

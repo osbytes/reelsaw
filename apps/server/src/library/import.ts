@@ -5,7 +5,7 @@
  * An import resolves the item, brings the file in as an upload (download through the SSRF-guarded
  * `downloadAsUpload`, or copy for files bundled with the install), verifies the catalog's sha256 and creates the
  * library row through `createAsset`, so limits, dedupe and probing are the ones every upload gets. The row is
- * instance-shared (`user_id` null), one per (provider, externalId, colour); the importing account gets a `library_saves` row.
+ * instance-shared (`user_id` null), one per (provider, externalId, colour); the importing account gets a `asset_saves` row.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -95,9 +95,9 @@ type SharedKey = { provider: string; externalId: string; variant: string };
 /** The shared row for a source item, if it exists: saved into the account's library in the same transaction. */
 async function saveExistingShared(svc: Services, userId: string, key: SharedKey): Promise<ImportedAsset | null> {
   return svc.tx(async (u) => {
-    const [row] = await u.db.select().from(schema.libraryAssets).where(sharedSourceWhere(key)).limit(1);
+    const [row] = await u.db.select().from(schema.assets).where(sharedSourceWhere(key)).limit(1);
     if (!row) return null;
-    await u.db.insert(schema.librarySaves).values({ userId, assetId: row.id }).onConflictDoNothing();
+    await u.db.insert(schema.assetSaves).values({ userId, assetId: row.id }).onConflictDoNothing();
     return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, duplicate: true, restored: false };
   });
 }

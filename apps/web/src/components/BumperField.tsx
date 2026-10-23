@@ -503,14 +503,14 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               {a.kind === "audio" ? (
                 <div className="flex flex-col items-center gap-4 rounded-[12px] bg-sunk px-4 py-8">
                   <AudioLines className="h-12 w-12 text-ink3" aria-hidden />
-                  <audio key={a.id} src={`/media/bumpers/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
+                  <audio key={a.id} src={`/media/assets/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
                 </div>
               ) : (
                 <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
                   {a.kind === "video" ? (
-                    <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                    <video key={a.id} src={`/media/assets/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
                   ) : (
-                    <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
+                    <img key={a.id} src={`/media/assets/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
                   )}
                 </div>
               )}

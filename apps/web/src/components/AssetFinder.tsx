@@ -247,7 +247,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     source: r.provenance ? providerLabel(r.provenance.provider) : r.system ? "Catalog" : r.owner === "me" ? "Yours" : "Shared",
     license: r.provenance?.license?.name,
     thumbUrl: r.kind === "audio" ? undefined : r.thumbnailUrl,
-    previewUrl: r.kind === "image" ? undefined : `/media/bumpers/${r.id}`,
+    previewUrl: r.kind === "image" ? undefined : `/media/assets/${r.id}`,
     row: r,
     usage: usageText(r),
   });

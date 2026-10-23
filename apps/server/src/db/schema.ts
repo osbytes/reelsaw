@@ -295,9 +295,8 @@ export const uploads = pgTable(
  * Storage keys are stored in full (`source_key`), so rows made before the rename keep their `bumpers/<id>/…`
  * objects and new rows write `assets/<id>/…`.
  */
-export const libraryAssets = pgTable(
-  // the table keeps its first name: drizzle-kit cannot rename one without a terminal prompt, and nothing reads the name
-  "bumper_assets",
+export const assets = pgTable(
+  "assets",
   {
     id: text("id").primaryKey(),
     /** the account that uploaded it; null = an instance-shared row (imported from the catalog or a provider, visible to every account) */
@@ -324,30 +323,32 @@ export const libraryAssets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash),
+  (t) => [index("assets_user_idx").on(t.userId), index("assets_hash_idx").on(t.userId, t.contentHash),
     // the hourly purge looks for removed assets across all users
-    index("bumper_assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
+    index("assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
     // one instance-shared row per catalog / provider item (and Iconify colour), however many accounts import it
-    uniqueIndex("bumper_assets_shared_source_idx")
+    uniqueIndex("assets_shared_source_idx")
       .on(sql`(${t.provenance}->>'provider')`, sql`(${t.provenance}->>'externalId')`, sql`coalesce(${t.provenance}->>'variant', '')`)
       .where(sql`${t.userId} is null and ${t.deletedAt} is null`),
   ],
 );
-export type LibraryAsset = typeof libraryAssets.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+/** @deprecated use Asset */
+export type LibraryAsset = Asset;
 
 /** An instance-shared asset a user keeps in their library ("Add" on a catalog or provider item); removing it unsaves. */
-export const librarySaves = pgTable(
-  "library_saves",
+export const assetSaves = pgTable(
+  "asset_saves",
   {
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     assetId: text("asset_id")
       .notNull()
-      .references(() => libraryAssets.id, { onDelete: "cascade" }),
+      .references(() => assets.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.assetId] }), index("library_saves_asset_idx").on(t.assetId)],
+  (t) => [primaryKey({ columns: [t.userId, t.assetId] }), index("asset_saves_asset_idx").on(t.assetId)],
 );
 
 /**

@@ -843,7 +843,7 @@ export function ClipEditor(props: Props) {
         const a = assetById(l.assetId);
         if (!a) return [];
         // an image, GIF or WebP is drawn as the file itself (browsers loop GIFs natively); a video shows its poster
-        return [{ kind: "asset", id: l.id, url: a.kind === "image" ? `/media/bumpers/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1 }];
+        return [{ kind: "asset", id: l.id, url: a.kind === "image" ? `/media/assets/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1 }];
       });
 
   // the audio layers play along in the preview: one <audio> element per layer following the clock inside its window (no ducking)
@@ -1952,7 +1952,7 @@ export function ClipEditor(props: Props) {
             if (el) audioEls.current.set(m.id, el);
             else audioEls.current.delete(m.id);
           }}
-          src={`/media/bumpers/${m.assetId}`}
+          src={`/media/assets/${m.assetId}`}
           preload="auto"
           className="hidden"
         />

@@ -23,7 +23,7 @@ describe("project intro/outro resolution", () => {
     me = await signUp();
     other = await signUp();
     const rows = [asset(me.userId), asset(me.userId), { ...asset(me.userId), deletedAt: new Date() }, asset(other.userId)];
-    await db.insert(schema.libraryAssets).values(rows);
+    await db.insert(schema.assets).values(rows);
     [dflt, picked, removed, foreign] = rows.map((r) => r.id) as [string, string, string, string];
     await db.insert(schema.userSettings).values({ userId: me.userId, projectDefaults: { introAssetId: dflt, outroAssetId: dflt } });
   });

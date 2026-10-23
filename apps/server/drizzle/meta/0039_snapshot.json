@@ -1215,8 +1215,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.bumper_assets": {
-      "name": "bumper_assets",
+    "public.assets": {
+      "name": "assets",
       "schema": "",
       "columns": {
         "id": {
@@ -1333,8 +1333,8 @@
         }
       },
       "indexes": {
-        "bumper_assets_user_idx": {
-          "name": "bumper_assets_user_idx",
+        "assets_user_idx": {
+          "name": "assets_user_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -1348,8 +1348,8 @@
           "method": "btree",
           "with": {}
         },
-        "bumper_assets_hash_idx": {
-          "name": "bumper_assets_hash_idx",
+        "assets_hash_idx": {
+          "name": "assets_hash_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -1369,8 +1369,8 @@
           "method": "btree",
           "with": {}
         },
-        "bumper_assets_deleted_idx": {
-          "name": "bumper_assets_deleted_idx",
+        "assets_deleted_idx": {
+          "name": "assets_deleted_idx",
           "columns": [
             {
               "expression": "deleted_at",
@@ -1380,13 +1380,13 @@
             }
           ],
           "isUnique": false,
-          "where": "\"bumper_assets\".\"deleted_at\" is not null",
+          "where": "\"assets\".\"deleted_at\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "bumper_assets_shared_source_idx": {
-          "name": "bumper_assets_shared_source_idx",
+        "assets_shared_source_idx": {
+          "name": "assets_shared_source_idx",
           "columns": [
             {
               "expression": "(\"provenance\"->>'provider')",
@@ -1408,16 +1408,16 @@
             }
           ],
           "isUnique": true,
-          "where": "\"bumper_assets\".\"user_id\" is null and \"bumper_assets\".\"deleted_at\" is null",
+          "where": "\"assets\".\"user_id\" is null and \"assets\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "bumper_assets_user_id_user_id_fk": {
-          "name": "bumper_assets_user_id_user_id_fk",
-          "tableFrom": "bumper_assets",
+        "assets_user_id_user_id_fk": {
+          "name": "assets_user_id_user_id_fk",
+          "tableFrom": "assets",
           "tableTo": "user",
           "columnsFrom": [
             "user_id"
@@ -1435,8 +1435,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.library_saves": {
-      "name": "library_saves",
+    "public.asset_saves": {
+      "name": "asset_saves",
       "schema": "",
       "columns": {
         "user_id": {
@@ -1460,8 +1460,8 @@
         }
       },
       "indexes": {
-        "library_saves_asset_idx": {
-          "name": "library_saves_asset_idx",
+        "asset_saves_asset_idx": {
+          "name": "asset_saves_asset_idx",
           "columns": [
             {
               "expression": "asset_id",
@@ -1477,9 +1477,9 @@
         }
       },
       "foreignKeys": {
-        "library_saves_user_id_user_id_fk": {
-          "name": "library_saves_user_id_user_id_fk",
-          "tableFrom": "library_saves",
+        "asset_saves_user_id_user_id_fk": {
+          "name": "asset_saves_user_id_user_id_fk",
+          "tableFrom": "asset_saves",
           "tableTo": "user",
           "columnsFrom": [
             "user_id"
@@ -1490,10 +1490,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "library_saves_asset_id_bumper_assets_id_fk": {
-          "name": "library_saves_asset_id_bumper_assets_id_fk",
-          "tableFrom": "library_saves",
-          "tableTo": "bumper_assets",
+        "asset_saves_asset_id_assets_id_fk": {
+          "name": "asset_saves_asset_id_assets_id_fk",
+          "tableFrom": "asset_saves",
+          "tableTo": "assets",
           "columnsFrom": [
             "asset_id"
           ],
@@ -1505,8 +1505,8 @@
         }
       },
       "compositePrimaryKeys": {
-        "library_saves_user_id_asset_id_pk": {
-          "name": "library_saves_user_id_asset_id_pk",
+        "asset_saves_user_id_asset_id_pk": {
+          "name": "asset_saves_user_id_asset_id_pk",
           "columns": [
             "user_id",
             "asset_id"

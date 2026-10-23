@@ -260,10 +260,11 @@ export function createApp(svc: Services) {
     return res;
   });
 
-  app.get("/media/bumpers/:id", async (c) => {
+  // `/media/bumpers/...` is the old spelling: rendered pages and MCP results carried it for a release
+  app.on("GET", ["/media/assets/:id", "/media/bumpers/:id"], async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
+    const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
     const loc = await storage.resolve(asset.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
@@ -274,16 +275,16 @@ export function createApp(svc: Services) {
   });
 
   // Picker thumbnail. Older assets get theirs on first request.
-  app.get("/media/bumpers/:id/thumb.jpg", async (c) => {
+  app.on("GET", ["/media/assets/:id/thumb.jpg", "/media/bumpers/:id/thumb.jpg"], async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
+    const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
     let key = asset.thumbnailKey ?? keys.assetThumb(asset.sourceKey);
     if (!asset.thumbnailKey || !(await storage.exists(key))) {
       try {
         key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage, dir: paths.tmp }, asset, undefined);
-        await db.update(schema.libraryAssets).set({ thumbnailKey: key }).where(eq(schema.libraryAssets.id, asset.id));
+        await db.update(schema.assets).set({ thumbnailKey: key }).where(eq(schema.assets.id, asset.id));
       } catch (err) {
         c.get("log").warn({ err, bumperId: asset.id }, "bumper thumbnail failed");
         return c.text("no thumbnail", 404);

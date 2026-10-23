@@ -98,7 +98,7 @@ export const bumperNameSchema = z.string().trim().min(1).max(120);
 export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number; tags?: string[] }) {
   if (patch.name === undefined && patch.imageSeconds === undefined && patch.tags === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds or tags" });
   return svc.tx(async (u) => {
-    const [a] = await u.db.select().from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, id), assetVisibleTo(userId))).for("update");
+    const [a] = await u.db.select().from(schema.assets).where(and(eq(schema.assets.id, id), assetVisibleTo(userId))).for("update");
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
     if (!a.userId) throw new TRPCError({ code: "FORBIDDEN", message: "Shared items keep the name they came with." });
     if (patch.imageSeconds !== undefined && a.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "Videos keep their own length" });
@@ -106,9 +106,9 @@ export async function updateBumperAsset(svc: Services, userId: string, id: strin
     // tags are lowercase words, each once; the same list is stored and returned
     const tags = patch.tags === undefined ? undefined : [...new Set(patch.tags.map((x) => x.trim().toLowerCase()).filter(Boolean))];
     await u.db
-      .update(schema.libraryAssets)
+      .update(schema.assets)
       .set({ ...(name ? { name } : {}), ...(patch.imageSeconds !== undefined ? { durationSec: patch.imageSeconds } : {}), ...(tags !== undefined ? { tags } : {}) })
-      .where(eq(schema.libraryAssets.id, a.id));
+      .where(eq(schema.assets.id, a.id));
     return { ok: true, id: a.id, name: name ?? a.name, durationSec: patch.imageSeconds ?? a.durationSec, tags: tags ?? a.tags, previousName: a.name };
   });
 }
@@ -120,7 +120,7 @@ export async function setBumperDefault(db: Db, userId: string, slot: "intro" | "
     await db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${userId}`);
     return;
   }
-  const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, assetId), assetVisibleTo(userId), isNull(schema.libraryAssets.deletedAt)));
+  const [asset] = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, assetId), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
   if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
   const patch = { [key]: assetId };
   await db
@@ -159,7 +159,7 @@ export function sharedSourceKey(p: Pick<AssetProvenance, "provider" | "externalI
   return p?.provider && p.externalId ? { provider: p.provider, externalId: p.externalId, variant: p.variant ?? "" } : null;
 }
 export const sharedSourceWhere = (k: { provider: string; externalId: string; variant: string }) =>
-  sql`${schema.libraryAssets.userId} is null and ${schema.libraryAssets.deletedAt} is null and ${schema.libraryAssets.provenance}->>'provider' = ${k.provider} and ${schema.libraryAssets.provenance}->>'externalId' = ${k.externalId} and coalesce(${schema.libraryAssets.provenance}->>'variant', '') = ${k.variant}`;
+  sql`${schema.assets.userId} is null and ${schema.assets.deletedAt} is null and ${schema.assets.provenance}->>'provider' = ${k.provider} and ${schema.assets.provenance}->>'externalId' = ${k.externalId} and coalesce(${schema.assets.provenance}->>'variant', '') = ${k.variant}`;
 
 /**
  * Validate an uploaded file with ffprobe and add it to the library: the one path behind `bumpers.create` (an account's
@@ -179,7 +179,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
   let kind = bumperKind(ext) ?? "video";
   const id = randomUUID();
   const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
-  const ownerIs = (col: typeof schema.libraryAssets.userId) => (userId === null ? isNull(col) : eq(col, userId));
+  const ownerIs = (col: typeof schema.assets.userId) => (userId === null ? isNull(col) : eq(col, userId));
   try {
     // cheap checks first so a huge file is not pulled out of storage just to be refused
     const early = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, { durationSec: 1, width: 1000, height: 1000 });
@@ -198,29 +198,29 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     const storageKey = keys.asset(id, ext);
     const contentHash = await sha256File(local);
     const row = await svc.tx(async (u) => {
-      const keep = async (asset: typeof schema.libraryAssets.$inferSelect, restored: boolean) => {
-        if (input.saveFor && !asset.userId) await u.db.insert(schema.librarySaves).values({ userId: input.saveFor, assetId: asset.id }).onConflictDoNothing();
+      const keep = async (asset: typeof schema.assets.$inferSelect, restored: boolean) => {
+        if (input.saveFor && !asset.userId) await u.db.insert(schema.assetSaves).values({ userId: input.saveFor, assetId: asset.id }).onConflictDoNothing();
         if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, asset.id);
         return { asset, duplicate: true as const, restored };
       };
       if (sourceKey) {
         await takeTxLock(u.db, txLock.sharedAsset(sourceKey.provider, sourceKey.externalId, sourceKey.variant));
-        const [existing] = await u.db.select().from(schema.libraryAssets).where(sharedSourceWhere(sourceKey)).limit(1);
+        const [existing] = await u.db.select().from(schema.assets).where(sharedSourceWhere(sourceKey)).limit(1);
         if (existing) return keep(existing, false);
       }
       // one upload of a given file at a time per owner (all shared rows count as one owner), so two racing copies cannot both insert
-      await takeTxLock(u.db, txLock.bumper(userId ?? "shared", contentHash));
-      const [same] = await u.db.select().from(schema.libraryAssets).where(and(ownerIs(schema.libraryAssets.userId), eq(schema.libraryAssets.contentHash, contentHash))).orderBy(sql`(${schema.libraryAssets.deletedAt} is not null)`).limit(1);
+      await takeTxLock(u.db, txLock.asset(userId ?? "shared", contentHash));
+      const [same] = await u.db.select().from(schema.assets).where(and(ownerIs(schema.assets.userId), eq(schema.assets.contentHash, contentHash))).orderBy(sql`(${schema.assets.deletedAt} is not null)`).limit(1);
       if (same) {
         const wasRemoved = !!same.deletedAt;
-        if (wasRemoved) await u.db.update(schema.libraryAssets).set({ deletedAt: null }).where(eq(schema.libraryAssets.id, same.id));
+        if (wasRemoved) await u.db.update(schema.assets).set({ deletedAt: null }).where(eq(schema.assets.id, same.id));
         return keep(same, wasRemoved);
       }
       // ownership is re-checked in the unit of work that writes
       const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, actorId)));
       if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
       const [asset] = await u.db
-        .insert(schema.libraryAssets)
+        .insert(schema.assets)
         .values({
           id,
           userId,
@@ -240,7 +240,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           contentHash,
         })
         .returning();
-      if (input.saveFor && shared) await u.db.insert(schema.librarySaves).values({ userId: input.saveFor, assetId: id }).onConflictDoNothing();
+      if (input.saveFor && shared) await u.db.insert(schema.assetSaves).values({ userId: input.saveFor, assetId: id }).onConflictDoNothing();
       if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, id);
       // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
       u.afterCommit(async () => {
@@ -248,7 +248,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           await svc.storage.putFile(storageKey, local);
           // the picker thumbnail (none for audio); if this fails the media route makes it on first request
           const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
-          if (thumbKey) await svc.database.db.update(schema.libraryAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.libraryAssets.id, id)).catch(() => {});
+          if (thumbKey) await svc.database.db.update(schema.assets).set({ thumbnailKey: thumbKey }).where(eq(schema.assets.id, id)).catch(() => {});
         } finally {
           await fs.rm(local, { force: true }).catch(() => {});
         }
@@ -431,7 +431,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     usedByClips: a.usedByClips,
     thumbnailUrl: abs(a.thumbnailUrl),
     /** the file itself (play the music, view the image or video); same auth as this server */
-    url: abs(`/media/bumpers/${a.id}`),
+    url: abs(`/media/assets/${a.id}`),
   });
   return { assets: lib.assets.map(row), removed: lib.deleted.map(row) };
 }
@@ -465,7 +465,7 @@ export async function projectBumperSummaries(
   const ids = new Set<string>();
   for (const c of coverage.values()) for (const s of [c.intro, c.outro]) if (s) for (const a of s.assets) ids.add(a.assetId);
   const assets = ids.size
-    ? await db.select({ id: schema.libraryAssets.id, name: schema.libraryAssets.name, kind: schema.libraryAssets.kind }).from(schema.libraryAssets).where(and(assetVisibleTo(userId), inArray(schema.libraryAssets.id, [...ids])))
+    ? await db.select({ id: schema.assets.id, name: schema.assets.name, kind: schema.assets.kind }).from(schema.assets).where(and(assetVisibleTo(userId), inArray(schema.assets.id, [...ids])))
     : [];
   const byId = new Map(assets.map((a) => [a.id, a]));
   const slot = (s: SlotCoverage | null): SlotSummary | null => {
@@ -473,9 +473,9 @@ export async function projectBumperSummaries(
     if (!s || !a) return null;
     const assets = s.assets.flatMap((x) => {
       const r = byId.get(x.assetId);
-      return r ? [{ assetId: r.id, name: r.name, kind: r.kind, thumbnailUrl: `/media/bumpers/${r.id}/thumb.jpg`, withCount: x.count }] : [];
+      return r ? [{ assetId: r.id, name: r.name, kind: r.kind, thumbnailUrl: `/media/assets/${r.id}/thumb.jpg`, withCount: x.count }] : [];
     });
-    return { assets, assetId: s.assetId, name: a.name, kind: a.kind, thumbnailUrl: `/media/bumpers/${a.id}/thumb.jpg`, withCount: s.withCount, total: s.total, otherCount: s.others.reduce((n, o) => n + o.count, 0), noneCount: s.noneCount };
+    return { assets, assetId: s.assetId, name: a.name, kind: a.kind, thumbnailUrl: `/media/assets/${a.id}/thumb.jpg`, withCount: s.withCount, total: s.total, otherCount: s.others.reduce((n, o) => n + o.count, 0), noneCount: s.noneCount };
   };
   return new Map([...coverage].map(([id, c]) => [id, { intro: slot(c.intro), outro: slot(c.outro) }]));
 }

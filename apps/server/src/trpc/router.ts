@@ -247,7 +247,7 @@ async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, wh
 async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
-  const rows = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(inArray(schema.libraryAssets.id, want), assetVisibleTo(userId), isNull(schema.libraryAssets.deletedAt)));
+  const rows = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
   if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
 }
 
@@ -484,12 +484,12 @@ const bumpersRouter = router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = ctx.svc.database.db;
       // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
-      const own = await db.select().from(schema.libraryAssets).where(eq(schema.libraryAssets.userId, ctx.user.id));
+      const own = await db.select().from(schema.assets).where(eq(schema.assets.userId, ctx.user.id));
       const savedRows = await db
-        .select({ asset: schema.libraryAssets, savedAt: schema.librarySaves.createdAt })
-        .from(schema.librarySaves)
-        .innerJoin(schema.libraryAssets, eq(schema.librarySaves.assetId, schema.libraryAssets.id))
-        .where(and(eq(schema.librarySaves.userId, ctx.user.id), isNull(schema.libraryAssets.userId)));
+        .select({ asset: schema.assets, savedAt: schema.assetSaves.createdAt })
+        .from(schema.assetSaves)
+        .innerJoin(schema.assets, eq(schema.assetSaves.assetId, schema.assets.id))
+        .where(and(eq(schema.assetSaves.userId, ctx.user.id), isNull(schema.assets.userId)));
       const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
       const usage = await bumperUsageCounts(db, ctx.user.id);
       // audio has no thumbnail: the pickers draw a music glyph instead
@@ -503,7 +503,7 @@ const bumpersRouter = router({
         hasAudio: r.hasAudio,
         sizeBytes: r.sizeBytes,
         createdAt: r.createdAt.toISOString(),
-        thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`,
+        thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
         usedBy: usage.get(r.id)?.projects ?? 0,
         usedByClips: usage.get(r.id)?.clips ?? 0,
         mime: r.mime,
@@ -528,22 +528,22 @@ const bumpersRouter = router({
     usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
       // an instance-shared row is readable by everyone; bumperAssetUsage only ever reports the caller's own projects
-      const [asset] = await db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), assetVisibleTo(ctx.user.id)));
+      const [asset] = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), assetVisibleTo(ctx.user.id)));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
       return bumperAssetUsage(db, ctx.user.id, input.id);
     }),
     /** Keep an instance-shared asset (catalog / provider import) in this user's library; an own upload is always there. */
     save: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
-        const [a] = await u.db.select({ id: schema.libraryAssets.id, userId: schema.libraryAssets.userId }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), isNull(schema.libraryAssets.deletedAt)));
+        const [a] = await u.db.select({ id: schema.assets.id, userId: schema.assets.userId }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.deletedAt)));
         if (!a || (a.userId && a.userId !== ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not available" });
-        if (!a.userId) await u.db.insert(schema.librarySaves).values({ userId: ctx.user.id, assetId: a.id }).onConflictDoNothing();
+        if (!a.userId) await u.db.insert(schema.assetSaves).values({ userId: ctx.user.id, assetId: a.id }).onConflictDoNothing();
         return { ok: true, saved: true };
       });
     }),
     /** Take an instance-shared asset out of this user's library (the file stays for everyone who still uses it). */
     unsave: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      await ctx.svc.database.db.delete(schema.librarySaves).where(and(eq(schema.librarySaves.userId, ctx.user.id), eq(schema.librarySaves.assetId, input.id)));
+      await ctx.svc.database.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id)));
       return { ok: true, saved: false };
     }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
@@ -573,16 +573,16 @@ const bumpersRouter = router({
     delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         // an instance-shared row is never removed by a user: this drops the user's save only (the sweep owns the row)
-        const [shared] = await u.db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), isNull(schema.libraryAssets.userId)));
+        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId)));
         if (shared) {
-          const dropped = await u.db.delete(schema.librarySaves).where(and(eq(schema.librarySaves.userId, ctx.user.id), eq(schema.librarySaves.assetId, input.id))).returning({ assetId: schema.librarySaves.assetId });
+          const dropped = await u.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id))).returning({ assetId: schema.assetSaves.assetId });
           if (!dropped.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
         } else {
           const gone = await u.db
-            .update(schema.libraryAssets)
+            .update(schema.assets)
             .set({ deletedAt: new Date() })
-            .where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id), isNull(schema.libraryAssets.deletedAt)))
-            .returning({ id: schema.libraryAssets.id });
+            .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
+            .returning({ id: schema.assets.id });
           if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
         }
         for (const key of ["introAssetId", "outroAssetId"]) {
@@ -594,16 +594,16 @@ const bumpersRouter = router({
     /** Undo a removal; for an instance-shared row this saves it again. */
     restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
-        const [shared] = await u.db.select({ id: schema.libraryAssets.id }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, input.id), isNull(schema.libraryAssets.userId), isNull(schema.libraryAssets.deletedAt)));
+        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId), isNull(schema.assets.deletedAt)));
         if (shared) {
-          await u.db.insert(schema.librarySaves).values({ userId: ctx.user.id, assetId: shared.id }).onConflictDoNothing();
+          await u.db.insert(schema.assetSaves).values({ userId: ctx.user.id, assetId: shared.id }).onConflictDoNothing();
           return { ok: true };
         }
         const r = await u.db
-          .update(schema.libraryAssets)
+          .update(schema.assets)
           .set({ deletedAt: null })
-          .where(and(eq(schema.libraryAssets.id, input.id), eq(schema.libraryAssets.userId, ctx.user.id)))
-          .returning({ id: schema.libraryAssets.id });
+          .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id)))
+          .returning({ id: schema.assets.id });
         if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
         return { ok: true };
       });
@@ -1148,7 +1148,7 @@ const restRouter = router({
               if (mine[key]) patch[key] = mine[key]!;
             } else {
               // a library asset of this user; the one the project already uses stays valid even if it was since removed
-              const [asset] = await u.db.select({ id: schema.libraryAssets.id, deletedAt: schema.libraryAssets.deletedAt }).from(schema.libraryAssets).where(and(eq(schema.libraryAssets.id, choice), assetVisibleTo(ctx.user.id)));
+              const [asset] = await u.db.select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt }).from(schema.assets).where(and(eq(schema.assets.id, choice), assetVisibleTo(ctx.user.id)));
               if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
               patch[key] = choice;
             }

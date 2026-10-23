@@ -56,7 +56,7 @@ mixed: the clip does not play under the outro, and its last 0.2 s fades out when
 Loudness is not changed; a bumper far louder than speech gets a plain warning in the preview.
 
 ## Data model
-New table `bumper_assets` in `db/schema.ts` (`npx drizzle-kit generate --name bumper_assets`):
+New table `bumper_assets` (renamed `assets` in Oct 2026, see library.md) in `db/schema.ts` (`npx drizzle-kit generate --name bumper_assets`):
 `id`, `user_id` (references user, cascade), `kind` (video|image), `name`, `duration_sec`, `width`,
 `height`, `has_audio`, `source_key` (`bumpers/{id}/source{ext}`), `size_bytes`, `created_at`,
 `deleted_at`.

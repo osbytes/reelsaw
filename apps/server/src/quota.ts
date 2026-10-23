@@ -192,7 +192,7 @@ export async function storedBytes(db: Db, userId: string): Promise<number> {
       coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
       + coalesce((select sum(size_bytes) from uploads where user_id = ${userId}), 0)
       + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
-      + coalesce((select sum(size_bytes) from bumper_assets where user_id = ${userId}), 0) as bytes`)
+      + coalesce((select sum(size_bytes) from assets where user_id = ${userId}), 0) as bytes`)
   ).rows;
   return Number(r?.bytes ?? 0);
 }
@@ -267,7 +267,7 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
   if (!ids.length) return [];
   // null = all time
   const since = days == null ? sql`'-infinity'::timestamptz` : sql`now() - make_interval(days => ${days}::int)`;
-  const { projects: P, clips: C, uploads: U, llmUsage: L, sttUsage: S, libraryAssets: B } = schema;
+  const { projects: P, clips: C, uploads: U, llmUsage: L, sttUsage: S, assets: B } = schema;
   const [proj, clip, up, llm, stt, rendered, bump] = await Promise.all([
     db
       .select({

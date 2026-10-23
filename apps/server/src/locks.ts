@@ -17,8 +17,8 @@ export const txLock = {
   jobs: (userId: string) => `jobs:${userId}`,
   /** the account's billing row: webhook sync, complimentary grants (ee/billing) */
   billing: (userId: string) => `billing:${userId}`,
-  /** one upload of the same bytes at a time into a user's intro/outro library (router.ts) */
-  bumper: (userId: string, contentHash: string) => `bumper:${userId}:${contentHash}`,
+  /** one upload of the same bytes at a time into a library (own or shared) (library/service.ts createAsset) */
+  asset: (owner: string, contentHash: string) => `asset:${owner}:${contentHash}`,
   /** one import of the same catalog / provider item at a time, instance-wide, so two accounts converge on one shared row (library/service.ts createAsset) */
   sharedAsset: (provider: string, externalId: string, variant: string) => `shared-asset:${provider}:${externalId}:${variant}`,
 } as const;
