@@ -1,4 +1,4 @@
-# Editor tracks: per-pane focus, overlays, intro/outro on the timeline
+# Editor tracks: per-pane focus, layers, intro/outro on the timeline
 
 Status: implemented (Oct 2026). What the competitor editors do, what we took from them, and how the
 three features are modelled. Framing internals stay in [LAYOUTS.md](../LAYOUTS.md).
@@ -64,44 +64,32 @@ Compatibility: an old split section with only `offsetX` now shifts the top pane 
 sections are rare (one offset for two panes was never a good edit) and the user sees the result in
 the preview before re-rendering.
 
-## 2. Overlays (own track)
+## 2. Layers lane
 
-An overlay is a library asset (image or video, the same library as intros and outros) composited
-over the clip for a time range. Stored on the clip as `clips.overlays` (`clipOverlaySchema[]`,
-max 20):
+Overlays and music used to be two lists, two lanes and two inspector cards. They are now one list,
+`clips.layers` (asset, text and audio layers, max 30), edited on one lane. The model, the read path
+over old `overlays` / `audio` rows, the render changes and the surfaces are in
+[library.md](library.md) (decision 2); this section is what the editor does.
 
-| field | meaning |
-|---|---|
-| `id` | short id, stable across edits (undo, MCP patches) |
-| `assetId` | library asset |
-| `start`, `end` | absolute source seconds, like sections (survive retrims; a cut inside the range just shortens it) |
-| `x`, `y` | centre, fractions of the output frame |
-| `w` | width, fraction of the output width (height follows the asset's aspect) |
-| `opacity` | 0.1–1, default 1 |
-
-Render: each overlay is an extra ffmpeg input after the source and before the intro/outro
-(`overlayInputs`, `render.ts`); the filter scales it to `w`, applies the opacity, and composites it
-over the body *before* the captions (`ass=`) so captions stay readable, with
-`enable='between(t,a,b)'` in post-cut body time (`plan.mapTime`). A video overlay plays from its
-own start (`setpts` shifted to `a`) and passes through after its end (`eof_action=pass`); an image
-repeats. A missing or unreadable asset is skipped with a `clip.overlay_skipped` event; if the
-render with overlays fails, the clip is rendered without them (same rule as bumpers), never failed.
-
-Editor: an "Overlays" lane above the clip lane. Blocks show the asset thumbnail and name; drag to
-move, drag an edge to trim (snaps), Delete removes the selected one, double-click the lane (or the
-"+ Overlay" button) adds one at that time. Overlapping blocks pack into rows (up to three). The
-selected overlay is drawn on the preview and can be dragged there to move it and resized from its
-corner handle. Overlays are part of the undoable document and need a re-render.
-
-**Text overlays** share the list and the lane (`kind: "text"`, with `text`, `size` as a fraction
-of the frame height, `color`, `box`, `opacity`; `x`/`y` are the centre). They are not an ffmpeg
-input: the renderer writes them into the caption file as `Dialogue` events on layer 1 (`Text` /
-`TextBox` styles in `captions.ts`, the caption font and plate), so they match the captions and the
-preview draws them with the same CSS as the caption line. On the preview the corner handle changes
-the size instead of the width.
-
-Surfaces: `clips.update { overlays }`, MCP `update_clip { overlays }` and `get_clip`, CLI
-`reelsaw clip-overlays <projectId> <clipId> --set '<json>' | --add <assetId> … | --add-text <text> … | --clear [--rerender]`.
+- **Lane.** One "Layers" lane above the clip lane (`data-lane="layers"`). Overlapping blocks pack
+  into rows (up to four), visual layers first so sounds settle on the bottom rows. An asset block
+  shows its thumbnail and name (the Film glyph for a GIF, WebP or video without one), text shows the
+  `T` glyph and the text, audio shows the music glyph and the name. Drag to move, drag an edge to trim
+  (snaps; at least 0.1 s for pictures and text, 0.5 s for sounds), Delete removes the selected block,
+  double-click the lane adds an image or video at that time, right-click offers Add image or video /
+  Add text / Add sound / Remove. The `+` on the lane label opens Image or video, Text, Sound and
+  Browse library… (which opens the Library page until the Browse dialog exists).
+- **Inspector.** One "Layers" tab with one card per layer; the card shows the fields of its kind:
+  asset (position, width, opacity, repeat for GIF / WebP / video), text (text, size, colour, plate,
+  font, opacity), audio (level, fade, ducking, repeat, offset into the track; "Sound effect" in the
+  header when the file is a one-shot, see `audioLayerDefaultsFor`), and the from / to / whole-clip time
+  fields every layer shares.
+- **Preview.** Visual layers are drawn on the frame and dragged there to move, with the corner
+  handle to resize (width for pictures, size for text). A GIF or animated WebP is an `<img>`, which
+  loops natively. Audio layers play along inside their windows, one `<audio>` per layer, no ducking.
+- **Editing.** Layers are part of the undoable document and need a re-render. A retrim clamps every
+  layer to the new range and drops one that is left under 0.1 s (pictures and text) or 0.5 s (sounds).
+  Ids are `ly-xxxx`.
 
 ## 3. Intro and outro on the timeline
 
@@ -117,17 +105,7 @@ The ruler stays in source seconds: the blocks sit outside the clip range on purp
 intro thumbnail at the head of OpusClip's video track. Nothing about the stored model changed
 (`clips.bumpers`, project settings); only where it is edited.
 
-## 2b. Music lane
-
-Background tracks per clip (`clips.audio`, a list of `clipAudioSchema`, max 10; rows written
-before the list existed hold one object and are read through `clipAudioList`): each a library audio
-asset (the library takes MP3 / M4A / AAC / WAV / OGG / FLAC up to 15 min and 30 MB; an audio item
-can never be an intro or outro; the same asset may repeat), with its own `id`, a window in source
-seconds, `offset` into the track, `volume` (default 0.6, on a track normalised to −20 LUFS), `duck` (default on), `fade` (default
-0.5 s) and `loop` (default on). The editor shows them on the "Music" lane under the framing lane
-(packed rows; drag, trim, `+` or double-click to add a track at the playhead, Delete to remove) with
-a card per track in the Overlays tab for level, fades, ducking, looping and the track offset; the
-preview plays the tracks along with the video inside their windows (no ducking in the preview).
+## 3b. Layer details
 
 **Text fonts.** A text overlay has a `font` from `TEXT_FONTS` (DejaVu Sans, Liberation Sans/Serif,
 Roboto, Open Sans, Lato, Inter, Bebas Neue, DejaVu Sans Mono): fonts installed in the image
@@ -136,21 +114,17 @@ fontconfig lookup (`GET /api/fonts/:family`, `lib/fonts.ts` registers them as `F
 preview draws the face libass will. A family the image lacks is refused by the route and the preview
 falls back to the caption font, like the render.
 
-**Copy / paste.** `⌘C` on a selected overlay or track stores it in the editor's own clipboard
+**Copy / paste.** `⌘C` on a selected layer stores it in the editor's own clipboard
 (`localStorage`, so it works across clips and tabs); `⌘V` pastes a copy at the playhead with a new
 id and the original length, clamped to the clip. Typing in a field keeps the browser clipboard.
 
-Render (`musicMix`, `render.ts`): the track is an extra ffmpeg input after the overlays and the
-logo (`-stream_loop -1` when looping), trimmed to the window, faded in and out, set to its level,
-delayed to its start and padded to the body; with ducking the body's speech keys a
-`sidechaincompress` on the music (about 6 dB down while someone talks, back within half a second), and
-`amix … normalize=0` keeps the speech at its own level. The mix replaces the body audio before the
-intro/outro are joined, so bumpers keep their own sound. An unusable track is skipped with a
-`clip.overlay_skipped` event, and the "render with overlays failed" retry drops the music together
-with the overlays.
-
-Surfaces: `clips.update { audio }`, MCP `update_clip { audio }` / `get_clip`, CLI
-`reelsaw clip-audio <projectId> <clipId> --track <assetId> [--from] [--to] [--volume] [--offset] [--fade] [--no-duck] [--no-loop] | --clear [--rerender]`.
+Render (`overlayChain`, `musicMix`, `render.ts`): each visual layer is an extra ffmpeg input,
+scaled to `w`, faded by `opacity` and composited over the body before the captions (`ass=`) with
+`enable='between(t,a,b)'` in post-cut time; text layers are `Dialogue` events in the caption file
+(layer 1, the caption font and plate). An audio layer is trimmed to its window, faded, set to its
+level, delayed to its start and mixed under the speech (with ducking the speech keys a
+`sidechaincompress`); the mix replaces the body audio before the intro/outro are joined. A layer that
+cannot be used is skipped with an event, and the "render with layers failed" retry drops them all.
 
 **Watermark.** The instance watermark reuses the overlay compositor: when a render carries it, the
 logo (`WATERMARK_LOGO_PATH`, `apps/server/assets/watermark.png`) is appended as the last overlay
@@ -167,10 +141,10 @@ the long forms.
 | place | what | why there |
 |---|---|---|
 | canvas header (above the preview) | framing mode of the section under the playhead (with what Auto chose), crop status + Reset, safe zones / platform / burned-in text | they describe or change the frame being looked at (OpusClip's `Layout: Fit · Tracker: OFF` strip) |
-| on the preview | drag a pane, drag / resize an overlay, drag the caption or hook | direct manipulation of what is drawn |
+| on the preview | drag a pane, drag / resize a layer, drag the caption or hook | direct manipulation of what is drawn |
 | timeline bar | Split (`⌘B`), Remove (`Delete`) on the left; transport, time, `[ In` / `Out ]` in the centre; snap toggle (`S`), zoom, Fit on the right | they act on the tracks or the playhead; nothing additive, nothing about the view |
-| on the lanes | `+` on the Overlays lane (image or video / text), double-click the lane, right-click; intro / outro blocks and ghost chips on the clip lane; the clip block's length label opens the in / out editor (fields, ±1 s, ±0.1 s) | things are added and edited where they will show |
-| inspector tabs | Captions, Framing (per section, per pane), Overlays (per item), Details (title, hook, post caption, hashtags), Cuts, Transcript | long forms, lists, explanations |
+| on the lanes | `+` on the Layers lane (image or video / text / sound / browse library), double-click the lane, right-click; intro / outro blocks and ghost chips on the clip lane; the clip block's length label opens the in / out editor (fields, ±1 s, ±0.1 s) | things are added and edited where they will show |
+| inspector tabs | Captions, Framing (per section, per pane), Layers (per item), Details (title, hook, post caption, hashtags), Cuts, Transcript | long forms, lists, explanations |
 | header | undo / redo, dirty state, layout toggle, copy link, shortcuts, theme, Save | document-level |
 
 The snap toggle is persisted per browser (`rs-editor-snap`). On narrow screens the bar and the
