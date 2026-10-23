@@ -1,6 +1,6 @@
 # Dependabot: version updates, weekly, grouped so a week's bumps arrive as one PR per ecosystem
-# (security updates still come on their own, as soon as an advisory lands). Every PR runs CI, and
-# the app's dependency bumps need a changeset like any other change (see .changeset/README.md).
+# (security updates still come on their own, as soon as an advisory lands). Every PR runs CI; the
+# dependabot-changeset workflow adds the patch changeset CI requires when the app is touched.
 version: 2
 updates:
   # the pnpm workspace: apps/server, apps/web, packages/shared share one lockfile at the root
