@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.17.2
+
+### Patch Changes
+
+- [#100](https://github.com/osbytes/reelsaw/pull/100) [`4f94838`](https://github.com/osbytes/reelsaw/commit/4f9483893ed58474de7a1a885035ba6b564e7923) Thanks [@dillonstreator](https://github.com/dillonstreator)! - On a phone, the selected-clips action bar stays on screen while the browser URL bar is showing. Full-height shells now follow the visible viewport (`100dvh`) instead of `100vh`, which is taller than the screen with chrome visible.
+
 ## 0.17.1
 
 ### Patch Changes
