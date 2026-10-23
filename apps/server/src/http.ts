@@ -266,7 +266,10 @@ export function createApp(svc: Services) {
     if (!asset) return c.text("not found", 404);
     const loc = await storage.resolve(asset.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
-    return sendFile(c.req.raw, loc.file);
+    const res = await sendFile(c.req.raw, loc.file);
+    // an uploaded SVG is a document: never let one run script or load anything in the app's origin
+    if (asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg")) res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    return res;
   });
 
   // Picker thumbnail. Older assets get theirs on first request.

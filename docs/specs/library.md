@@ -1,6 +1,6 @@
 # Library: one asset store, one layer list, a searchable catalog
 
-Status: proposal (Oct 2026). Consolidates `bumper_assets` + `clips.overlays` + `clips.audio` into one
+Status: implemented Oct 2026 on `feat/library` (phases 0 to 3b; the reelsaw.com catalog publish and the `suggest_layers` tool are still open). Consolidates `bumper_assets` + `clips.overlays` + `clips.audio` into one
 library and one per-clip layer list, and adds system assets (a curated Reelsaw catalog) plus remote
 providers (Pexels, Pixabay, Freesound, Iconify, Openverse) that import into the library.
 Builds on [bumpers.md](bumpers.md) and [editor-tracks.md](editor-tracks.md); nothing about the render
