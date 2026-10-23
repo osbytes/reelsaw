@@ -44,3 +44,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    ignore:
+      # digests and patch tags only: a new Node or Alpine major is a deliberate change (native
+      # modules, onnxruntime-node) and gets its own PR and release note
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
