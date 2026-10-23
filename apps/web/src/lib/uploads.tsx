@@ -52,7 +52,7 @@ export const onBumperFiles = (fn: () => void) => {
   window.addEventListener(BUMPER_EVENT, fn);
   return () => window.removeEventListener(BUMPER_EVENT, fn);
 };
-export const isBumperFile = (f: File) => isVideo(f) || f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+export const isBumperFile = (f: File) => isVideo(f) || f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name);
 
 interface Job {
   key: string;
@@ -171,7 +171,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed inset-0 z-[90] grid place-items-center bg-acc/15 p-6 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-2 rounded-[20px] border-2 border-dashed border-acc bg-panel px-10 py-8 text-center shadow-pop">
             <b className="text-lg">{inLibrary.current ? "Drop to add to the library" : "Drop videos to start projects"}</b>
-            <span className="text-sm text-ink2">{inLibrary.current ? "Videos up to 10 s and images become intros and outros." : "One video opens New project. Several start a project each with the default settings."}</span>
+            <span className="text-sm text-ink2">{inLibrary.current ? "Videos and images (PNG, JPG, WebP, GIF, SVG) are added to the library." : "One video opens New project. Several start a project each with the default settings."}</span>
           </div>
         </div>
       )}

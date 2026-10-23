@@ -36,7 +36,8 @@ another editor. Today branding is added by hand. Appetite: about 3 days for phas
 | Type | Accepted | Limits |
 |---|---|---|
 | Video | mp4, mov, webm | at most 10 s, at most 50 MB, any size/fps/codec ffmpeg reads |
-| Image | png, jpg | shown 1 to 10 s, default 3 s, user sets seconds |
+| Image | png, jpg, webp, gif, svg (still) | at most 20 MB and 8192 px a side, shown 1 to 10 s, default 3 s, user sets seconds; an SVG is rasterised at 1080 px by resvg first |
+| Animation | gif, animated webp | read as a silent video: at most 10 s and 50 MB, own length (animated WebP needs an ffmpeg that can decode it) |
 | Sound (phase 3) | mp3, m4a, wav | under an image, clipped to its length |
 
 Checked server-side with ffprobe, not by file name. Errors are sentences: "This video is 14 s long.
@@ -180,7 +181,7 @@ return the roles per clip (`slots`, with `overlays` and `music` counts). `bumper
 
 ## Edge cases
 - Source without audio: body gets generated silence, so concat always has audio.
-- VFR or rotated phone video: normalising forces 30 fps CFR and autorotates. GIF/WebP: rejected.
+- VFR or rotated phone video: normalising forces 30 fps CFR and autorotates. An animated GIF is a silent video; a still GIF/WebP and an SVG are images (SVG via its PNG).
 - Imported issue report: asset ids don't exist locally; the failure rule skips them.
 
 ## Plan

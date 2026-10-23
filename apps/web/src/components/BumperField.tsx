@@ -20,8 +20,8 @@ import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
-const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
+const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name);
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
@@ -296,7 +296,7 @@ export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HT
             </button>
           </p>
           <p className="mt-0.5 text-xs text-ink3">
-            Videos, images (including GIF, WebP and SVG) and audio, for intros, outros, overlays and music. MP4, MOV or WebM up to 10 s and 50 MB, PNG or JPG up to 20 MB (shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card), or MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB.
+            Videos, images and audio, for intros, outros, layers and sounds. MP4, MOV or WebM up to 10 s and 50 MB; PNG, JPG, WebP, GIF or SVG up to 20 MB (an image intro shows for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card); MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB.
           </p>
         </div>
         <label className="hidden shrink-0 flex-col gap-1 text-xs text-ink2 sm:flex">

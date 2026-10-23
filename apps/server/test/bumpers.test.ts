@@ -11,7 +11,8 @@ import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bumperConcat, bumperFrames, resolveClipBumpers, bumperKind, bumperProblem, ensureNormalised, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
+import { bumperConcat, bumperFrames, resolveClipBumpers, bumperKind, assetKind, assetMime, ASSET_MIME, bumperProblem, ensureNormalised, ensureRaster, isSvgAsset, BUMPER_FPS, type NormaliseDeps } from "../src/pipeline/bumpers.js";
+import { svgSize, svgHasExternalRefs, rasterizeSvg } from "../src/pipeline/raster.js";
 import { FIT_CHAIN } from "../src/pipeline/render.js";
 
 const run = promisify(execFile);
@@ -183,7 +184,39 @@ describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () =
     assert.match(bumperProblem(undefined, { ext: ".jpg", sizeBytes: 1e5 }, { durationSec: 0, width: 20, height: 800 })!, /at least 64 px/);
     assert.equal(bumperKind(".jpeg"), "image");
     assert.equal(bumperKind(".mov"), "video");
-    assert.equal(bumperKind(".gif"), null);
+    assert.equal(bumperKind(".bmp"), null);
+  });
+
+  it("decides GIF and WebP from the probe: animated is a silent video, a still is an image", () => {
+    assert.equal(assetKind(".gif", { durationSec: 1, frames: 10 }), "video");
+    assert.equal(assetKind(".gif", { durationSec: 0.1, frames: 1 }), "image");
+    assert.equal(assetKind(".gif", { durationSec: 0 }), "image");
+    assert.equal(assetKind(".GIF", { durationSec: 2 }), "video");
+    assert.equal(assetKind(".webp", { durationSec: 0, frames: 24 }), "video");
+    assert.equal(assetKind(".webp", { durationSec: 0, frames: 1 }), "image");
+    assert.equal(assetKind(".svg", { durationSec: 0 }), "image");
+    assert.equal(assetKind(".svg", { durationSec: 5, frames: 3 }), "image");
+    assert.equal(assetKind(".mp4", { durationSec: 0 }), "video");
+    assert.equal(assetKind(".mp3", { durationSec: 0 }), "audio");
+    assert.equal(assetKind(".bmp", { durationSec: 0 }), null);
+  });
+
+  it("accepts SVG, GIF and WebP with the limits of their kind", () => {
+    assert.equal(bumperProblem(undefined, { ext: ".svg", sizeBytes: 5e4 }, { durationSec: 0, width: 512, height: 512 }), null);
+    assert.equal(bumperProblem(undefined, { ext: ".webp", sizeBytes: 5e4 }, { durationSec: 0, width: 512, height: 512 }), null);
+    assert.equal(bumperProblem(undefined, { ext: ".gif", sizeBytes: 5e4 }, { durationSec: 0.1, frames: 1, width: 300, height: 300 }), null);
+    assert.equal(bumperProblem(undefined, { ext: ".gif", sizeBytes: 5e6 }, { durationSec: 2, frames: 40, width: 300, height: 300 }), null);
+    assert.match(bumperProblem(undefined, { ext: ".gif", sizeBytes: 5e6 }, { durationSec: 14, frames: 400, width: 300, height: 300 })!, /at most 10 s/);
+    assert.match(bumperProblem(undefined, { ext: ".svg", sizeBytes: 21 * 1024 * 1024 }, { durationSec: 0, width: 512, height: 512 })!, /at most 20 MB/);
+    assert.match(bumperProblem(undefined, { ext: ".webp", sizeBytes: 5e4 }, { durationSec: 0, width: 0, height: 0 })!, /animated/);
+  });
+
+  it("stores the exact format of each accepted type", () => {
+    assert.equal(ASSET_MIME[".svg"], "image/svg+xml");
+    assert.equal(ASSET_MIME[".gif"], "image/gif");
+    assert.equal(ASSET_MIME[".webp"], "image/webp");
+    assert.equal(assetMime(".SVG"), "image/svg+xml");
+    assert.equal(assetMime(".bmp"), null);
   });
 
   it("refuses unusable files with a sentence", () => {
@@ -191,7 +224,66 @@ describe("bumpers", { skip: !available && "ffmpeg/ffprobe not installed" }, () =
     assert.equal(bumperProblem("intro", { ext: ".mp4", sizeBytes: 1e6 }, ok), null);
     assert.equal(bumperProblem("intro", { ext: ".mp4", sizeBytes: 1e6 }, { ...ok, durationSec: 14 }), "This video is 14 s long. Intros can be at most 10 s.");
     assert.match(bumperProblem("outro", { ext: ".mp4", sizeBytes: 60 * 1024 * 1024 }, ok)!, /Outros can be at most 50 MB/);
-    assert.match(bumperProblem("intro", { ext: ".gif", sizeBytes: 1e5 }, ok)!, /MP4, MOV or WebM/);
+    assert.match(bumperProblem("intro", { ext: ".bmp", sizeBytes: 1e5 }, ok)!, /MP4, MOV or WebM video; a PNG, JPG, WebP, GIF or SVG image/);
     assert.match(bumperProblem("intro", { ext: ".mp4", sizeBytes: 1e5 }, { durationSec: 3 })!, /no video/);
+  });
+});
+
+describe("SVG assets (resvg)", () => {
+  const logo = path.join(import.meta.dirname, "fixtures", "logo.svg");
+
+  it("sizes an SVG from its viewBox, or its width and height", () => {
+    assert.deepEqual(svgSize('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>'), { width: 200, height: 100 });
+    assert.deepEqual(svgSize('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"/>'), { width: 40, height: 20 });
+    assert.deepEqual(svgSize('<svg xmlns="http://www.w3.org/2000/svg"/>'), { width: 100, height: 100 }, "resvg's own default for an empty drawing");
+    assert.equal(svgSize("not an svg"), null);
+  });
+
+  it("rasterises to a PNG of the requested width with the aspect kept", async () => {
+    const png = rasterizeSvg(await fs.readFile(logo), 1080);
+    assert.equal(png.subarray(1, 4).toString(), "PNG");
+    assert.equal(png.readUInt32BE(16), 1080, "width");
+    assert.equal(png.readUInt32BE(20), 540, "height");
+  });
+
+  it("refuses an SVG that links to other files, allows internal and embedded references", () => {
+    assert.equal(svgHasExternalRefs('<svg><image href="file:///etc/passwd"/></svg>'), true);
+    assert.equal(svgHasExternalRefs("<svg><use xlink:href='other.svg#a'/></svg>"), true);
+    assert.equal(svgHasExternalRefs('<svg><use href="#a"/><image href="data:image/png;base64,AAAA"/></svg>'), false);
+    assert.throws(() => rasterizeSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="/etc/hosts"/></svg>', 100), /links to other files/);
+  });
+
+  it("builds the raster once per width and reuses it", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "raster-"));
+    try {
+      const stored = new Map<string, string>();
+      let puts = 0;
+      const storage = {
+        exists: async (k: string) => stored.has(k),
+        ensureLocal: async (k: string, dest: string) => {
+          await fs.mkdir(path.dirname(dest), { recursive: true });
+          await fs.copyFile(stored.get(k) ?? logo, dest);
+          return dest;
+        },
+        putFile: async (k: string, f: string) => {
+          puts++;
+          const copy = path.join(dir, `stored-${puts}.bin`);
+          await fs.copyFile(f, copy);
+          stored.set(k, copy);
+        },
+      };
+      const asset = { id: "svg1", sourceKey: "assets/svg1/source.svg" };
+      const a = await ensureRaster({ storage, dir: path.join(dir, "cache") }, asset, 1080);
+      assert.ok(a.endsWith("raster.v1.1080.png"));
+      assert.equal(await ensureRaster({ storage, dir: path.join(dir, "cache") }, asset, 1080), a);
+      assert.equal(puts, 1, "stored once");
+      // a fresh machine takes it from storage instead of rendering again
+      const b = await ensureRaster({ storage, dir: path.join(dir, "cache2") }, asset, 1080);
+      assert.equal(puts, 1);
+      assert.equal((await fs.stat(b)).size, (await fs.stat(a)).size);
+      assert.ok(isSvgAsset({ mime: "image/svg+xml", sourceKey: "x" }) && isSvgAsset({ sourceKey: "a/source.svg" }) && !isSvgAsset({ mime: "image/png", sourceKey: "a/source.svg" }));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

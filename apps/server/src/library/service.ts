@@ -104,7 +104,7 @@ export function requireOneSource(i: { url?: string; uploadId?: string }) {
 
 // ── bounded download ───────────────────────────────────────────────────────
 
-const TYPE_EXT: Record<string, string> = { "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "image/png": ".png", "image/jpeg": ".jpg" };
+const TYPE_EXT: Record<string, string> = { "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg" };
 const ALLOWED_EXTS: readonly string[] = [...BUMPER_VIDEO_EXTS, ...BUMPER_IMAGE_EXTS];
 
 export function isPrivateAddress(ip: string): boolean {
@@ -157,7 +157,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   const urlExt = path.extname(target.pathname).toLowerCase();
   const ext = ALLOWED_EXTS.includes(urlExt) ? urlExt : TYPE_EXT[type];
-  if (!ext) throw new Error("Use an MP4, MOV or WebM video, or a PNG or JPG image.");
+  if (!ext) throw new Error("Use an MP4, MOV or WebM video, or a PNG, JPG, WebP, GIF or SVG image.");
   const id = randomUUID();
   const dest = path.join(svc.paths.uploads, `${id}${ext}`);
   try {
