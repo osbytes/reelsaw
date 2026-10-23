@@ -378,6 +378,14 @@ container) and `REELSAW_API_KEY`:
 { "mcpServers": { "reelsaw": { "command": "docker", "args": ["exec", "-i", "-e", "REELSAW_API_KEY=rs_…", "reelsaw-app-1", "reelsaw", "mcp"] } } }
 ```
 
+Reelsaw is listed on the [MCP registry](https://registry.modelcontextprotocol.io) as
+`io.github.osbytes/reelsaw` (`server.json`, published on every release), so registry-aware clients
+can install the bridge from the image without a running container to exec into:
+
+```json
+{ "mcpServers": { "reelsaw": { "command": "docker", "args": ["run", "-i", "--rm", "-e", "REELSAW_URL=https://your-host", "-e", "REELSAW_API_KEY=rs_…", "ghcr.io/osbytes/reelsaw", "reelsaw", "mcp"] } } }
+```
+
 The tools (generated from `apps/server/src/mcp-tools.ts`; each tool's full description and input
 schema say what it returns, whether it runs in the background and which neighbour to use instead):
 

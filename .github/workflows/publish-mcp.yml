@@ -1,0 +1,68 @@
+# Publish this release to the official MCP registry (registry.modelcontextprotocol.io) as
+# io.github.osbytes/reelsaw. Runs when the release workflow has published the GitHub release, so the
+# image the server.json points at (ghcr.io/osbytes/reelsaw:<version>) already exists; the registry
+# verifies it by the io.modelcontextprotocol.server.name label the Dockerfile sets.
+#
+# Authentication is GitHub OIDC (no secret): the registry grants the io.github.<owner> namespace to
+# workflows of that owner's repositories. Pre-releases are skipped.
+name: publish-mcp
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (an existing image tag, e.g. 0.18.1)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC login to the registry
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          v="${INPUT_VERSION:-${TAG#v}}"
+          # versions only: nothing else ever reaches the JSON
+          case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a version: $v"; exit 1 ;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Set the version and image tag in server.json
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.version = $v | .packages[0].identifier = ("ghcr.io/osbytes/reelsaw:" + $v)' server.json > server.tmp
+          mv server.tmp server.json
+          cat server.json
+
+      - name: The image exists and carries the registry label
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "ghcr.io/osbytes/reelsaw:$VERSION" --format '{{json .Image}}' \
+            | jq -e '[.. | objects | select(has("config")) | .config.Labels["io.modelcontextprotocol.server.name"]?] | any(. == "io.github.osbytes/reelsaw")' >/dev/null \
+            || { echo "ghcr.io/osbytes/reelsaw:$VERSION has no io.modelcontextprotocol.server.name label"; exit 1; }
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --help | head -1
+
+      - name: Log in with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish

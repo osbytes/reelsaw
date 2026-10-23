@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.osbytes/reelsaw",
+  "title": "Reelsaw",
+  "description": "Drive a self-hosted Reelsaw: turn long videos into vertical clips, edit, re-render and export them.",
+  "repository": {
+    "url": "https://github.com/osbytes/reelsaw",
+    "source": "github"
+  },
+  "websiteUrl": "https://reelsaw.com",
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/osbytes/reelsaw:0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "docker",
+      "runtimeArguments": [
+        { "type": "positional", "value": "-i", "valueHint": "-i", "description": "Keep stdin open: stdio is the protocol channel" },
+        { "type": "positional", "value": "--rm", "valueHint": "--rm", "description": "Remove the bridge container when the client exits" },
+        {
+          "type": "named",
+          "name": "-e",
+          "description": "The Reelsaw instance to drive (its public URL; the bridge calls /api/mcp on it)",
+          "value": "REELSAW_URL={url}",
+          "isRequired": true,
+          "variables": {
+            "url": { "description": "Base URL of your Reelsaw, e.g. https://reelsaw.example.com", "format": "string", "isRequired": true }
+          }
+        },
+        {
+          "type": "named",
+          "name": "-e",
+          "description": "An API key from Settings → API keys and MCP on that instance",
+          "value": "REELSAW_API_KEY={key}",
+          "isRequired": true,
+          "variables": {
+            "key": { "description": "API key (rs_…)", "format": "string", "isRequired": true, "isSecret": true }
+          }
+        }
+      ],
+      "packageArguments": [
+        { "type": "positional", "value": "reelsaw", "valueHint": "reelsaw", "description": "The operator CLI inside the image" },
+        { "type": "positional", "value": "mcp", "valueHint": "mcp", "description": "Run the MCP server over stdio, forwarding every tool call to REELSAW_URL" }
+      ]
+    }
+  ]
+}
