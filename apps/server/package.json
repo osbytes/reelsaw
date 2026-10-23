@@ -71,7 +71,7 @@
     "fuse.js": "7.1.0",
     "hono": "^4.13.13",
     "langfuse": "3.39.2",
-    "nodemailer": "^10.1.2",
+    "nodemailer": "^10.1.4",
     "onnxruntime-node": "^1.30.0",
     "pg": "^8.23.1",
     "pg-boss": "^12.38.0",
