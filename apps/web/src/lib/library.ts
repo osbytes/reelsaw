@@ -1,0 +1,81 @@
+import { ASSET_CATEGORIES, type AssetCategory, type AssetProvenance } from "@reelsaw/shared";
+
+export type LibraryKind = "video" | "image" | "audio";
+export const KIND_FILTERS: Array<{ id: LibraryKind; label: string }> = [
+  { id: "video", label: "Video" },
+  { id: "image", label: "Image" },
+  { id: "audio", label: "Audio" },
+];
+export const UNCATEGORISED = "none";
+
+export const categoryLabel = (id: AssetCategory | null | undefined) => (id ? (ASSET_CATEGORIES.find((c) => c.id === id)?.label ?? id) : "Uncategorised");
+/** categories a file of this kind can sit in */
+export const categoriesFor = (kind: LibraryKind) => ASSET_CATEGORIES.filter((c) => (c.kinds as readonly string[]).includes(kind));
+
+const FORMATS: Record<string, string> = {
+  "image/gif": "GIF",
+  "image/svg+xml": "SVG",
+  "image/webp": "WebP",
+  "image/png": "PNG",
+  "image/jpeg": "JPG",
+  "image/avif": "AVIF",
+  "video/mp4": "MP4",
+  "video/quicktime": "MOV",
+  "video/webm": "WebM",
+  "audio/mpeg": "MP3",
+  "audio/mp3": "MP3",
+  "audio/mp4": "M4A",
+  "audio/x-m4a": "M4A",
+  "audio/aac": "AAC",
+  "audio/wav": "WAV",
+  "audio/x-wav": "WAV",
+  "audio/wave": "WAV",
+  "audio/ogg": "OGG",
+  "audio/flac": "FLAC",
+  "audio/x-flac": "FLAC",
+};
+/** "GIF", "SVG", "MP4", "MP3"… from a mime type; null when unknown */
+export function formatTag(mime: string | null | undefined): string | null {
+  if (!mime) return null;
+  const m = mime.toLowerCase().split(";")[0]!.trim();
+  return FORMATS[m] ?? (m.split("/")[1]?.replace(/^x-/, "").slice(0, 5).toUpperCase() || null);
+}
+
+export interface FilterableAsset {
+  kind: LibraryKind;
+  name: string;
+  category: AssetCategory | null;
+  tags: string[];
+  provenance: AssetProvenance | null;
+}
+
+export const matchesCategory = (a: Pick<FilterableAsset, "category">, category: string) => !category || (category === UNCATEGORISED ? !a.category : a.category === category);
+
+/** the flat fields Fuse searches (arrays and nested provenance are joined) */
+export const searchable = <T extends FilterableAsset>(a: T) => ({ ...a, tagText: a.tags.join(" "), categoryText: categoryLabel(a.category), attributionText: a.provenance?.attribution ?? "" });
+export const SEARCH_KEYS = [
+  { name: "name", weight: 2 },
+  { name: "tagText", weight: 1.5 },
+  { name: "categoryText", weight: 1 },
+  { name: "attributionText", weight: 0.5 },
+];
+
+/** "CC0 · Freesound · author" */
+export function licenseText(p: AssetProvenance): string {
+  const provider = p.provider === "reelsaw" ? "Catalog" : p.provider.charAt(0).toUpperCase() + p.provider.slice(1);
+  return [p.license?.name, provider, p.attribution].filter(Boolean).join(" · ");
+}
+
+const isCc0 = (p: AssetProvenance) => /cc0|public domain/i.test(`${p.license?.id ?? ""} ${p.license?.name ?? ""}`);
+
+/** one line per asset that needs a credit: an attribution, or a license other than CC0 */
+export function creditsText(assets: Array<{ name: string; provenance: AssetProvenance | null }>): string {
+  return assets
+    .filter((a) => a.provenance && (a.provenance.attribution || (a.provenance.license && !isCc0(a.provenance))))
+    .map((a) => {
+      const p = a.provenance!;
+      const bits = [p.license?.name, p.url ?? p.license?.url].filter(Boolean).join(", ");
+      return `${a.name} — ${p.attribution ?? p.provider}${bits ? ` (${bits})` : ""}`;
+    })
+    .join("\n");
+}
