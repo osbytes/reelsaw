@@ -65,7 +65,7 @@
     "ai": "^7.0.150",
     "archiver": "^8.0.0",
     "better-auth": "^1.7.12",
-    "cockatiel": "^3.2.1",
+    "cockatiel": "^4.0.0",
     "disposable-email-domains": "1.0.62",
     "drizzle-orm": "^0.45.4",
     "fuse.js": "7.1.0",
