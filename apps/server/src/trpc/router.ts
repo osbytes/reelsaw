@@ -611,14 +611,16 @@ const libraryRouter = router({
           cursor: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(60).default(24),
           license: z.enum(["cc0", "by"]).optional(),
+          /** library only: the items removed in the last 30 days (restorable with `restore`) instead of the live ones */
+          removed: z.boolean().optional(),
         }),
       )
       .query(async ({ ctx, input }) => {
-        const { source, ...rest } = input;
+        const { source, removed: _removed, ...rest } = input;
         if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
         const q = input.q.trim().toLowerCase();
         const lib = await listLibrary(ctx.svc, ctx.user.id);
-        const hits = lib.assets.filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
+        const hits = (input.removed ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
         const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
         const page = hits.slice(from, from + input.limit);
         return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
@@ -639,14 +641,14 @@ const libraryRouter = router({
         const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId)));
         if (shared) {
           const dropped = await u.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id))).returning({ assetId: schema.assetSaves.assetId });
-          if (!dropped.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+          if (!dropped.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
         } else {
           const gone = await u.db
             .update(schema.assets)
             .set({ deletedAt: new Date() })
             .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
             .returning({ id: schema.assets.id });
-          if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+          if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
         }
         for (const key of ["introAssetId", "outroAssetId"]) {
           await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
