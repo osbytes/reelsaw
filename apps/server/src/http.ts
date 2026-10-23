@@ -13,6 +13,7 @@ import { Readable, Transform } from "node:stream";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Services } from "./services.js";
 import { injectOtelBoot } from "./otel-config.js";
+import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
@@ -469,11 +470,14 @@ export function createApp(svc: Services) {
     return sendFile(c.req.raw, loc.file);
   });
 
-  // Static SPA (production build of apps/web) with history fallback
+  // Static SPA (production build of apps/web) with history fallback.
+  // Client routes have no file extension (`/signup`). A missing `/favicon.ico` (or .png, .txt, …)
+  // must 404, not return this HTML: crawlers request /favicon.ico by convention, and serving the
+  // shell there is why app.reelsaw.com showed a generic globe in Google Search.
   if (config.WEB_DIST && fs.existsSync(config.WEB_DIST)) {
     const index = injectOtelBoot(fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8"), svc.otel.public);
     app.use("/*", serveStatic({ root: path.relative(process.cwd(), config.WEB_DIST) || "." }));
-    app.get("*", (c) => (c.req.path.startsWith("/api/") || c.req.path.startsWith("/media/") ? c.notFound() : c.html(index)));
+    app.get("*", (c) => (isSpaIndexPath(c.req.path) ? c.html(index) : c.notFound()));
   }
 
   return app;
