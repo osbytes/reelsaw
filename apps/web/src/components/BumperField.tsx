@@ -53,12 +53,12 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
-  const [error, setError] = useState("");
   const queue = useRef<Array<{ key: string; file: File }>>([]);
   const running = useRef(0);
   const finished = useRef({ ok: 0, failed: 0 });
   const dupRef = useRef(onDuplicate);
   dupRef.current = onDuplicate;
+  const fail = (e: unknown) => toast.error((e instanceof Error ? e.message : String(e)).slice(0, 200));
   const create = useMutation(trpc.library.add.mutationOptions());
   const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
   const removeM = useMutation(trpc.library.remove.mutationOptions());
@@ -70,7 +70,6 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
     void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
   };
-  const fail = (e: unknown) => setError((e as Error).message.slice(0, 200));
   const patch = (key: string, p: Partial<UploadJob>) => setJobs((js) => js.map((j) => (j.key === key ? { ...j, ...p } : j)));
 
   const work = async () => {
@@ -109,7 +108,6 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   /** Checks sizes, then uploads and adds each file to the library, two at a time. */
   const uploadMany = (files: File[]) => {
     if (!files.length) return;
-    setError("");
     const fresh: UploadJob[] = [];
     for (const file of files) {
       const key = `${file.name}:${file.size}:${Date.now()}:${Math.random()}`;
@@ -129,7 +127,6 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const dismiss = (key?: string) => setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
 
   const setDefault = (slot: "intro" | "outro", a: LibraryAsset, current: string | undefined) => {
-    setError("");
     setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
   };
   const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
@@ -155,16 +152,16 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     if (!next || next === a.name) return Promise.resolve(false);
     return updateM.mutateAsync({ id: a.id, name: next }).then(
       () => (refresh(), toast(`Renamed to ${next}`), true),
-      (e) => (fail(e), toast.error((e as Error).message), false),
+      (e) => (fail(e), false),
     );
   };
   /** Tags change in place; the list refetches and keeps showing the old rows meanwhile. */
   const setTags = (a: Pick<LibraryAsset, "id" | "name">, tags: string[]) =>
     updateM.mutateAsync({ id: a.id, tags }).then(
       () => (refresh(), true),
-      (e) => (fail(e), toast.error((e as Error).message), false),
+      (e) => (fail(e), false),
     );
-  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
+  return { jobs, uploading, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
 }
 
 /** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
@@ -230,8 +227,8 @@ export function UploadInput({ inputRef, actions }: { inputRef: React.RefObject<H
   );
 }
 
-/** Per-file progress for the current batch as a compact row; render it only while there are jobs (or an error). */
-export function UploadJobs({ jobs, error, onDismiss }: { jobs: UploadJob[]; error?: string; onDismiss: (key?: string) => void }) {
+/** Per-file progress for the current batch as a compact row; render it only while there are jobs. */
+export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
   const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
   return (
     <div className="rounded-[10px] border border-line bg-sunk" aria-live="polite">
@@ -259,16 +256,11 @@ export function UploadJobs({ jobs, error, onDismiss }: { jobs: UploadJob[]; erro
           ))}
         </ul>
       )}
-      {(finished > 0 || error) && (
-        <div className="flex items-center gap-2 border-t border-line px-2 py-1 text-xs first:border-t-0">
-          <span className="min-w-0 flex-1 text-err" role="status">
-            {error}
-          </span>
-          {finished > 0 && (
-            <button type="button" className="shrink-0 font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
-              Dismiss finished
-            </button>
-          )}
+      {finished > 0 && (
+        <div className="flex items-center justify-end gap-2 border-t border-line px-2 py-1 text-xs first:border-t-0">
+          <button type="button" className="shrink-0 font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
+            Dismiss finished
+          </button>
         </div>
       )}
     </div>

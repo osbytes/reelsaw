@@ -386,7 +386,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
             </div>
           )}
         </div>
-        {mode === "library" && (actions.jobs.length > 0 || !!actions.error) && <UploadJobs jobs={actions.jobs} error={actions.error} onDismiss={actions.dismiss} />}
+        {mode === "library" && actions.jobs.length > 0 && <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />}
       </div>
 
       <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}`}>

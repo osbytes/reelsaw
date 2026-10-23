@@ -7,7 +7,7 @@ import { SlotRow, useBumperLibrary } from "../components/BumperField";
 import type { FixedOption } from "../components/BumperCombobox";
 import { ScrollArea } from "../components/scroll-area";
 import { ProgressBar, Segmented, Skeleton } from "../components/ui";
-import { useTRPC } from "../lib/trpc";
+import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { track } from "../lib/telemetry";
 import { useMe, useSystemStatus } from "../lib/account";
 import { toast } from "sonner";
@@ -38,11 +38,18 @@ function useDebounced<T>(v: T, ms: number) {
 
 export function NewProjectPage() {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const nav = useNavigate();
   const qc = useQueryClient();
   const status = useSystemStatus();
   const me = useMe();
-  const create = useMutation(trpc.projects.create.mutationOptions());
+  const create = useMutation({
+    mutationFn: async (input: { title?: string; sourceUrl?: string; file?: File; settings: ProjectSettings }) => {
+      const uploadId = input.file ? await postUpload(input.file, setUploadPct) : undefined;
+      return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings });
+    },
+    onSettled: () => setUploadPct(null),
+  });
   const saveDefaults = useMutation({ ...trpc.me.updateProjectDefaults.mutationOptions(), onSuccess: () => void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }) });
 
   // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
@@ -80,7 +87,6 @@ export function NewProjectPage() {
   const library = useBumperLibrary();
   const [bump, setBump] = useState<{ intro: string; outro: string; introSec?: number; outroSec?: number }>(() => ({ intro: search.get("intro") || "default", outro: search.get("outro") || "default" }));
   const [uploadPct, setUploadPct] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [previewAs, setPreviewAs] = useState<PreviewLayout>("face");
   const [safe, setSafe] = useState(true);
   const [more, setMore] = useState(false);
@@ -139,24 +145,18 @@ export function NewProjectPage() {
     };
   }, [objectUrl]);
 
-  const uploadFile = (f: File) => postUpload(f, setUploadPct);
-
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    try {
-      let uploadId: string | undefined;
-      if (mode === "upload") {
-        if (!file) throw new Error("Pick a video file");
-        uploadId = await uploadFile(file);
-      }
-      const p = await create.mutateAsync({ title: title || undefined, sourceUrl: mode === "url" ? url : undefined, uploadId, settings: { ...s, ...bumperSettings } });
-      track("project_create_submitted", { source: mode, projectId: p.id });
-      nav(`/p/${p.id}`);
-    } catch (err) {
-      setError((err as Error).message);
-      setUploadPct(null);
-    }
+    if (mode === "upload" && !file) return;
+    create.mutate(
+      { title: title || undefined, sourceUrl: mode === "url" ? url : undefined, ...(mode === "upload" && file ? { file } : {}), settings: { ...s, ...bumperSettings } },
+      {
+        onSuccess: (p) => {
+          track("project_create_submitted", { source: mode, projectId: p.id });
+          nav(`/p/${p.id}`);
+        },
+      },
+    );
   }
 
   // only what differs from the user's default travels; "None" is an explicit null
@@ -177,7 +177,7 @@ export function NewProjectPage() {
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
   ];
 
-  const busy = create.isPending || uploadPct !== null;
+  const busy = create.isPending;
   const lengthId = LENGTHS.find((l) => l.min === s.minClipSeconds && l.max === s.maxClipSeconds)?.id ?? "custom";
   const source = mode === "upload" ? videoEl : imgEl;
 
@@ -477,7 +477,7 @@ export function NewProjectPage() {
 
       <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
-          <span className="min-w-0 flex-1 truncate text-[13px] text-ink2">{error ? <span className="text-err">{error}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : summary}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] text-ink2">{create.error ? <span className="text-err">{create.error.message}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : summary}</span>
           <button
             type="button"
             className="btn-quiet text-xs"

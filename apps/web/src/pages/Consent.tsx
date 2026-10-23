@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { Navigate, useLocation } from "react-router";
 import { Logo, ThemeToggle } from "../App";
@@ -15,15 +15,26 @@ export function ConsentPage() {
   const q = new URLSearchParams(loc.search);
   const clientId = q.get("client_id") ?? "";
   const scopes = (q.get("scope") ?? "").split(" ").filter(Boolean);
-  const [client, setClient] = useState<Client | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   useDocumentTitle("Authorize · Reelsaw");
 
-  useEffect(() => {
-    if (!clientId) return;
-    void authClient.$fetch<Client>("/oauth2/public-client", { query: { client_id: clientId } }).then((r) => setClient(r.data ?? { client_id: clientId }));
-  }, [clientId]);
+  const clientQ = useQuery({
+    queryKey: ["oauth-public-client", clientId],
+    queryFn: async () => {
+      const r = await authClient.$fetch<Client>("/oauth2/public-client", { query: { client_id: clientId } });
+      return r.data ?? { client_id: clientId };
+    },
+    enabled: !!clientId,
+  });
+  const client = clientQ.data;
+
+  const decide = useMutation({
+    mutationFn: async (accept: boolean) => {
+      const r = await authClient.$fetch<{ redirect_uri: string }>("/oauth2/consent", { method: "POST", body: { accept, oauth_query: loc.search.slice(1) } });
+      if (r.error || !r.data?.redirect_uri) throw new Error(r.error?.message ?? "Could not record the decision");
+      return r.data.redirect_uri;
+    },
+    onSuccess: (uri) => window.location.assign(uri),
+  });
 
   if (isPending)
     return (
@@ -35,15 +46,6 @@ export function ConsentPage() {
       </SkeletonRegion>
     );
   if (!data) return <Navigate to={`/login${loc.search}`} replace />;
-
-  const decide = async (accept: boolean) => {
-    setBusy(true);
-    setError(null);
-    const r = await authClient.$fetch<{ redirect_uri: string }>("/oauth2/consent", { method: "POST", body: { accept, oauth_query: loc.search.slice(1) } });
-    setBusy(false);
-    if (r.error || !r.data?.redirect_uri) return setError(r.error?.message ?? "Could not record the decision");
-    window.location.assign(r.data.redirect_uri);
-  };
 
   const what: Record<string, string> = { openid: "know who you are", profile: "see your name", email: "see your email address", offline_access: "stay connected without signing in again" };
   return (
@@ -64,12 +66,12 @@ export function ConsentPage() {
             ))}
           </ul>
         )}
-        <p className="min-h-5 text-sm text-err">{error ?? ""}</p>
+        <p className="min-h-5 text-sm text-err">{decide.error?.message ?? ""}</p>
         <div className="flex gap-2">
-          <button className="btn-primary min-w-[6rem]" disabled={busy || !clientId} onClick={() => void decide(true)}>
+          <button className="btn-primary min-w-[6rem]" disabled={decide.isPending || !clientId} onClick={() => decide.mutate(true)}>
             Allow
           </button>
-          <button className="btn-ghost" disabled={busy} onClick={() => void decide(false)}>
+          <button className="btn-ghost" disabled={decide.isPending} onClick={() => decide.mutate(false)}>
             Deny
           </button>
         </div>

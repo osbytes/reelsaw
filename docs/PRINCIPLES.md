@@ -278,6 +278,13 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   - Skeletons use the `Skeleton` primitive in `components/ui.tsx` (wrap a region in
     `SkeletonRegion` for the screen-reader "Loading…") and the same layout classes as the real rows,
     so the swap is a content change, not a layout change.
+- **Server state is TanStack Query.** Reads are `useQuery` / `useInfiniteQuery` (see "Loading is
+  not empty"). Writes are `useMutation`: tRPC via `trpc.x.y.mutationOptions()`, anything else
+  (better-auth, a one-shot `fetch`) via `mutationFn`. Pending, error and result come from the hook
+  (`isPending`, `error`, `data`). Do not keep a parallel `useState` for busy/error around the same
+  call. `onSuccess` invalidates the smallest query that changed (`pathKey()`). Extra local state is
+  only for what Query cannot express: form drafts, XHR upload progress, per-row concurrent pending,
+  blob-download side effects, SSE.
 - **Lists align.**
   - Rows of one list share one column grid (a `<table>` with fixed layout, or CSS grid with fixed
     tracks), never per-row flex that wraps differently. Every column has a fixed or minimum width
@@ -317,8 +324,8 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   instead. Check height the same way: a bottom action, toast or sticky footer has to stay on
   screen while the mobile URL bar is showing (`h-dvh`, not `h-screen`). Device-toolbar width is
   not a phone-height check.
-- **Live data comes from events.** Mutations invalidate queries, and the project event stream
-  drives refreshes and progress. Don't poll when an event exists.
+- **Live data comes from events.** After a mutation invalidates (see "Server state is TanStack
+  Query"), the project event stream drives refreshes and progress. Don't poll when an event exists.
 - **Keyboard first in editors.** Shortcuts are consistent across views and listed in the UI
   (`?`). Typing in an input never triggers a shortcut. A binding is one `useShortcut("mod+s", …)`
   call (`lib/shortcuts.ts`, react-hotkeys-hook underneath) next to a `useShortcuts()` entry that
