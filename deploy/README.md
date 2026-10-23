@@ -5,6 +5,9 @@ speakers and burns in captions. Runs on your machine with Docker.
 
 ## Install
 
+Listings for app stores (Unraid Community Applications, the Docker MCP Catalog) live in
+[`stores/`](stores/README.md); they mirror this folder's compose file and `.env.example`.
+
 Requires Docker with Compose (Docker Desktop on macOS/Windows) and ~10 GB disk. RAM depends on where the
 language model runs: 8 GB is enough with a hosted provider; the fully local stack also needs room for the
 Ollama model (the installer picks it by RAM, see below).

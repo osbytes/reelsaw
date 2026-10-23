@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>reelsaw</Name>
+  <Repository>ghcr.io/osbytes/reelsaw:latest</Repository>
+  <Registry>https://github.com/osbytes/reelsaw/pkgs/container/reelsaw</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/osbytes/reelsaw/issues</Support>
+  <Project>https://github.com/osbytes/reelsaw</Project>
+  <Overview>Self-hosted, AI-powered video clipper: paste a YouTube link or upload a video and Reelsaw transcribes it, asks a language model for the most clippable moments, reframes the speaker into vertical 9:16 with face tracking, cuts verified fillers and false starts, burns in word-highlight captions and renders the clips. Open source (AGPL-3.0). Every model is yours to choose: fully local with Ollama and a local Whisper, or OpenAI, Anthropic, Google, Groq, Deepgram, AssemblyAI. Also an MCP server, so agents can drive it.&#xD;
+&#xD;
+Needs a PostgreSQL 15+ database (any Postgres container on this server; set DATABASE_URL). For the language model, point AI_MODEL at an Ollama container on this server (compat:qwen2.5:14b with OPENAI_COMPATIBLE_BASE_URL=http://&lt;unraid-ip&gt;:11434/v1) or at a cloud provider with its key. For transcription use a cloud model (openai:whisper-1, deepgram:nova-3, groq:whisper-large-v3-turbo) or a Speaches container through OPENAI_BASE_URL. The first account to sign up becomes the admin; set SIGNUP_MODE to approval or closed afterwards. Full reference: https://github.com/osbytes/reelsaw/blob/main/docs/CONFIG.md</Overview>
+  <Category>MediaApp:Video Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:3000]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/stores/unraid/reelsaw.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/osbytes/reelsaw/main/website/public/icon-512.png</Icon>
+  <Requires>A PostgreSQL container (DATABASE_URL) and either an Ollama container or a cloud model key.</Requires>
+  <Config Name="WebUI port" Target="3000" Default="3100" Mode="tcp" Description="Container port 3000" Type="Port" Display="always" Required="true" Mask="false"/>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/reelsaw" Mode="rw" Description="Uploads, rendered clips, scratch files, logs" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="APP_URL" Target="APP_URL" Default="http://192.168.1.10:3100" Description="The URL you open in the browser (used for cookies, CORS and links in emails). Change the IP to this server's." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="DATABASE_URL" Target="DATABASE_URL" Default="postgres://reelsaw:reelsaw@192.168.1.10:5432/reelsaw" Description="PostgreSQL 15+ connection string: a database and user you created on a Postgres container on this server." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="BETTER_AUTH_SECRET" Target="BETTER_AUTH_SECRET" Default="" Description="32+ random characters (openssl rand -base64 32). Signs sessions and encrypts provider keys entered in Settings; do not change it later." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="AI_MODEL" Target="AI_MODEL" Default="compat:qwen2.5:14b" Description="Language model as provider:model. compat:&lt;model&gt; for Ollama (with OPENAI_COMPATIBLE_BASE_URL), or openai:gpt-4o-mini, anthropic:claude-sonnet-4-5, google:gemini-2.5-flash, groq:llama-3.3-70b-versatile with the matching key. Admins can change it later in Settings." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="OPENAI_COMPATIBLE_BASE_URL" Target="OPENAI_COMPATIBLE_BASE_URL" Default="http://192.168.1.10:11434/v1" Description="Your Ollama container's OpenAI-compatible endpoint (used by compat: models). Pull the model there first: ollama pull qwen2.5:14b" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="OPENAI_COMPATIBLE_API_KEY" Target="OPENAI_COMPATIBLE_API_KEY" Default="ollama" Description="Key for the compat: server. Ollama accepts any value." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="TRANSCRIPTION_MODEL" Target="TRANSCRIPTION_MODEL" Default="openai:whisper-1" Description="Speech-to-text as provider:model; it must return word timestamps: openai:whisper-1, deepgram:nova-3, assemblyai:best, groq:whisper-large-v3-turbo, or openai:Systran/faster-whisper-small with OPENAI_BASE_URL pointing at a Speaches container." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="OPENAI_BASE_URL" Target="OPENAI_BASE_URL" Default="" Description="Only for a local Speaches (faster-whisper) container, e.g. http://192.168.1.10:8000/v1. Leave empty for OpenAI's cloud." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="OPENAI_API_KEY" Target="OPENAI_API_KEY" Default="" Description="OpenAI key for openai: models (any value, e.g. local, when OPENAI_BASE_URL points at Speaches)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="ANTHROPIC_API_KEY" Target="ANTHROPIC_API_KEY" Default="" Description="For anthropic: models." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="GOOGLE_GENERATIVE_AI_API_KEY" Target="GOOGLE_GENERATIVE_AI_API_KEY" Default="" Description="For google: models." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="GROQ_API_KEY" Target="GROQ_API_KEY" Default="" Description="For groq: models." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="DEEPGRAM_API_KEY" Target="DEEPGRAM_API_KEY" Default="" Description="For deepgram: transcription." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="SIGNUP_MODE" Target="SIGNUP_MODE" Default="open|approval|closed" Description="open: anyone may sign up (do this first, the first account becomes the admin). approval: new accounts wait for an admin. closed: no sign-ups. Also changeable in Settings." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="MAX_UPLOAD_MB" Target="MAX_UPLOAD_MB" Default="4096" Description="Largest accepted upload in MB." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="TRUST_PROXY" Target="TRUST_PROXY" Default="false" Description="true only when a reverse proxy (Nginx Proxy Manager, SWAG) sits in front and sets X-Forwarded-For." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="DATA_DIR" Target="DATA_DIR" Default="/data" Description="Working directory inside the container (the Data path above)." Type="Variable" Display="advanced-hide" Required="true" Mask="false"/>
+  <Config Name="LOG_FILE" Target="LOG_FILE" Default="/data/logs/reelsaw.log" Description="JSON log files, daily, 7 kept; issue reports include them." Type="Variable" Display="advanced-hide" Required="false" Mask="false"/>
+</Container>
