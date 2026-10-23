@@ -7,6 +7,7 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 - Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md): the consistency, concurrency and UI rules every
   change follows. Agent instructions live in `AGENTS.md` (the only agent file; see the process principles).
 - Everyday commands (typecheck, build, deploy, evals, tests) are listed in `AGENTS.md`.
+- Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
 - Pipeline behaviour (selection, cuts, framing, transcription) changes only with an eval run
   (`docs/EVALS.md`). Add a fixture for the failure you are fixing.
 
