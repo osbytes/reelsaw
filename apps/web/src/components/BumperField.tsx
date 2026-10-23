@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { Ban, Equal, Loader2, Music, Pause, Pencil, Play, Star, Trash2, Upload, X } from "lucide-react";
+import { AudioLines, Ban, Equal, Film, Image as ImageIcon, Loader2, Pause, Pencil, Play, Plus, Star, Trash2, X } from "lucide-react";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@reelsaw/server";
+import { formatTag, licenseText } from "../lib/library";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { uploadFile } from "../lib/uploads";
@@ -11,52 +14,29 @@ import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
-import { DEFAULT_IMAGE_BUMPER_SEC, type ClipBumpers } from "@reelsaw/shared";
+import type { ClipBumpers } from "@reelsaw/shared";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
-const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(f.name);
+const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
+const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name);
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
-export interface LibraryAsset {
-  id: string;
-  kind: "video" | "image" | "audio";
-  name: string;
-  durationSec: number;
-  width: number;
-  height: number;
-  hasAudio: boolean;
-  sizeBytes: number;
-  usedBy: number;
-  usedByClips: number;
-  thumbnailUrl: string;
-}
+/** One `library.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
+export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["assets"][number];
 
 /** The user's library (live assets and recently removed ones). */
 export function useBumperLibrary() {
   const trpc = useTRPC();
-  return useQuery(trpc.bumpers.list.queryOptions());
-}
-
-/** The server-made thumbnail in a fixed 9:16 box (a placeholder shows until it loads, so nothing moves). Click opens the viewer. */
-function CardThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "id" | "kind" | "name" | "durationSec" | "thumbnailUrl">; onOpen: () => void }) {
-  const [failed, setFailed] = useState(false);
-  if (asset.kind === "audio") return <AudioThumb asset={asset} onOpen={onOpen} />;
-  return (
-    <button type="button" className="relative block aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk" aria-label={`View ${asset.name}`} title="View larger" onClick={onOpen}>
-      {!failed && <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
-      {asset.kind === "video" && <span className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
-    </button>
-  );
+  return useQuery(trpc.library.list.queryOptions());
 }
 
 export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);
-const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+export const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 /** "video · 4 s · 1080×1920", "audio · 2:31" (images are drawn separately: their length is a control). */
-const metaText = (a: LibraryAsset) => (a.kind === "audio" ? `audio · ${lengthText(a)}` : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`);
+export const metaText = (a: LibraryAsset) => (a.kind === "audio" ? `audio · ${lengthText(a)}` : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`);
 
 export interface UploadJob {
   key: string;
@@ -79,16 +59,16 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const finished = useRef({ ok: 0, failed: 0 });
   const dupRef = useRef(onDuplicate);
   dupRef.current = onDuplicate;
-  const create = useMutation(trpc.bumpers.create.mutationOptions());
-  const setDefaultM = useMutation(trpc.bumpers.setDefault.mutationOptions());
-  const removeM = useMutation(trpc.bumpers.delete.mutationOptions());
-  const restoreM = useMutation(trpc.bumpers.restore.mutationOptions());
-  const updateM = useMutation(trpc.bumpers.update.mutationOptions());
+  const create = useMutation(trpc.library.add.mutationOptions());
+  const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
+  const removeM = useMutation(trpc.library.remove.mutationOptions());
+  const restoreM = useMutation(trpc.library.restore.mutationOptions());
+  const updateM = useMutation(trpc.library.update.mutationOptions());
   const busy = setDefaultM.isPending || removeM.isPending || restoreM.isPending || updateM.isPending;
   const uploading = jobs.some((j) => j.state === "queued" || j.state === "uploading" || j.state === "saving");
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
-    void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+    void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
   };
   const fail = (e: unknown) => setError((e as Error).message.slice(0, 200));
   const patch = (key: string, p: Partial<UploadJob>) => setJobs((js) => js.map((j) => (j.key === key ? { ...j, ...p } : j)));
@@ -160,7 +140,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
   const remove = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(`Removed ${a.name}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
+      () => (refresh(), toast(a.owner === "me" ? `Removed ${a.name}` : `Removed ${a.name} from your library`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
       (e) => (fail(e), false),
     );
   /** Image length; resolves true when saved. */
@@ -178,51 +158,22 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       (e) => (fail(e), toast.error((e as Error).message), false),
     );
   };
-  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename };
+  /** Tags change in place; the list refetches and keeps showing the old rows meanwhile. */
+  const setTags = (a: Pick<LibraryAsset, "id" | "name">, tags: string[]) =>
+    updateM.mutateAsync({ id: a.id, tags }).then(
+      () => (refresh(), true),
+      (e) => (fail(e), toast.error((e as Error).message), false),
+    );
+  return { jobs, uploading, error, setError, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
 }
 
 /** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
 let playingAudio: HTMLAudioElement | null = null;
-const playOnly = (el: HTMLAudioElement) => {
+export const playOnly = (el: HTMLAudioElement) => {
   if (playingAudio && playingAudio !== el) playingAudio.pause();
   playingAudio = el;
   void el.play().catch(() => {});
 };
-
-/** The music glyph with a play / pause button and a thin progress line; the glyph itself opens the viewer. */
-function AudioThumb({ asset, onOpen }: { asset: Pick<LibraryAsset, "id" | "name" | "durationSec">; onOpen: () => void }) {
-  const ref = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [pct, setPct] = useState(0);
-  const toggle = () => {
-    const el = ref.current;
-    if (!el) return;
-    if (el.paused) playOnly(el);
-    else el.pause();
-  };
-  return (
-    <div className="relative aspect-[9/16] w-full overflow-hidden rounded-[10px] border border-line bg-sunk">
-      <audio
-        ref={ref}
-        src={`/media/bumpers/${asset.id}`}
-        preload="none"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPct(0)}
-        onTimeUpdate={(e) => setPct(e.currentTarget.duration ? e.currentTarget.currentTime / e.currentTarget.duration : 0)}
-      />
-      <button type="button" className="absolute inset-0 grid place-items-center text-ink3" aria-label={`View ${asset.name}`} title="Details" onClick={onOpen}>
-        <Music className="h-8 w-8" aria-hidden />
-      </button>
-      <button type="button" className="absolute bottom-1.5 right-1.5 grid h-7 w-7 place-items-center rounded-full bg-white/90 text-[#1c1c1e] hover:bg-white" aria-label={playing ? `Pause ${asset.name}` : `Play ${asset.name}`} aria-pressed={playing} title={playing ? "Pause" : "Play"} onClick={toggle}>
-        {playing ? <Pause className="h-3.5 w-3.5" fill="currentColor" /> : <Play className="h-3.5 w-3.5 translate-x-px" fill="currentColor" />}
-      </button>
-      <div className="absolute inset-x-0 bottom-0 h-1 bg-black/20" aria-hidden>
-        <div className="h-full bg-acc transition-[width] duration-200" style={{ width: `${pct * 100}%` }} />
-      </div>
-    </div>
-  );
-}
 
 /** A pencil that opens a small popover with the name field; Enter or Save renames. */
 function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pick<LibraryAsset, "name">; busy: boolean; onRename: (name: string) => void; className?: string }) {
@@ -260,87 +211,65 @@ function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pi
   );
 }
 
-/** The dashed dropzone card: choose files, limits, and the batch progress in space that is always reserved. */
-export function UploadCard({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
-  const { uploading } = actions;
+/** The hidden file input behind the Library page's Upload button (the page-wide drop overlay handles drops). */
+export function UploadInput({ inputRef, actions }: { inputRef: React.RefObject<HTMLInputElement | null>; actions: ReturnType<typeof useBumperActions> }) {
   return (
-    <section className="flex flex-col gap-3 rounded-[16px] border border-dashed border-line2 bg-panel p-4" aria-label="Add to your library">
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept={ACCEPT}
-        className="hidden"
-        onChange={(e) => {
-          const files = [...(e.target.files ?? [])];
-          e.target.value = "";
-          actions.uploadMany(files);
-        }}
-        aria-label="Choose intro or outro files"
-      />
-      <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sunk text-ink2">{uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}</span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">
-            Drop videos, images or music here, or{" "}
-            <button type="button" className="font-semibold text-acc-text underline-offset-2 hover:underline" onClick={() => inputRef.current?.click()}>
-              choose files
-            </button>
-          </p>
-          <p className="mt-0.5 text-xs text-ink3">
-            MP4, MOV or WebM up to 10 s and 50 MB, PNG or JPG up to 20 MB (shown for {DEFAULT_IMAGE_BUMPER_SEC} s; change that on the card), or MP3, M4A, WAV, OGG or FLAC up to 15 min and 30 MB for music under a clip.
-          </p>
-        </div>
-      </div>
-      <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />
-      <div className="min-h-4 text-xs text-err" role="status">
-        {actions.error}
-      </div>
-    </section>
+    <input
+      ref={inputRef}
+      type="file"
+      multiple
+      accept={ACCEPT}
+      className="hidden"
+      onChange={(e) => {
+        const files = [...(e.target.files ?? [])];
+        e.target.value = "";
+        actions.uploadMany(files);
+      }}
+      aria-label="Choose files for your library"
+    />
   );
 }
 
-/** Per-file progress for the current batch; rows stay until dismissed. Fixed height, so the page below never jumps. */
-export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: (key?: string) => void }) {
+/** Per-file progress for the current batch as a compact row; render it only while there are jobs (or an error). */
+export function UploadJobs({ jobs, error, onDismiss }: { jobs: UploadJob[]; error?: string; onDismiss: (key?: string) => void }) {
   const finished = jobs.filter((j) => j.state === "done" || j.state === "failed").length;
   return (
-    <div className="flex h-[8.5rem] flex-col rounded-[10px] border border-line bg-sunk" aria-live="polite">
-      {jobs.length === 0 ? (
-        <p className="m-auto px-3 text-center text-xs text-ink3">Uploads show up here.</p>
-      ) : (
-        <>
-          <ScrollArea className="min-h-0 flex-1">
-            <ul className="flex flex-col gap-1.5 p-2 text-xs">
-              {jobs.map((j) => (
-                <li key={j.key} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
-                    <span className="min-w-0 flex-1 truncate">{j.name}</span>
-                    <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
-                    {(j.state === "done" || j.state === "failed") && (
-                      <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {j.state === "uploading" && (
-                    <div className="h-1 overflow-hidden rounded-full bg-line">
-                      <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
-                    </div>
-                  )}
-                  {j.error && <span className="text-err">{j.error}</span>}
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-          <div className="h-7 shrink-0 border-t border-line px-2 text-right">
-            {finished > 0 && (
-              <button type="button" className="h-full text-xs font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
-                Dismiss finished
-              </button>
-            )}
-          </div>
-        </>
+    <div className="rounded-[10px] border border-line bg-sunk" aria-live="polite">
+      {jobs.length > 0 && (
+        <ul className="flex max-h-28 flex-col gap-1.5 overflow-y-auto p-2 text-xs">
+          {jobs.map((j) => (
+            <li key={j.key} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
+                <span className="min-w-0 flex-1 truncate">{j.name}</span>
+                <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
+                {(j.state === "done" || j.state === "failed") && (
+                  <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {j.state === "uploading" && (
+                <div className="h-1 overflow-hidden rounded-full bg-line">
+                  <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
+                </div>
+              )}
+              {j.error && <span className="text-err">{j.error}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {(finished > 0 || error) && (
+        <div className="flex items-center gap-2 border-t border-line px-2 py-1 text-xs first:border-t-0">
+          <span className="min-w-0 flex-1 text-err" role="status">
+            {error}
+          </span>
+          {finished > 0 && (
+            <button type="button" className="shrink-0 font-semibold text-ink2 hover:text-ink" onClick={() => onDismiss()}>
+              Dismiss finished
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -421,6 +350,53 @@ export function SlotRow({
   );
 }
 
+/** "CC0 · Freesound · author"; a link to the source page when there is one. Renders nothing for the user's own uploads. */
+export function LicenseBadge({ provenance: p, className = "", wrap = false }: { provenance: LibraryAsset["provenance"]; className?: string; wrap?: boolean }) {
+  if (!p) return null;
+  const text = licenseText(p);
+  const cls = `rounded-[5px] bg-sunk px-1 py-px text-[10px] font-semibold text-ink2 ${wrap ? "" : "block truncate"} ${className}`;
+  return p.url ? (
+    <a href={p.url} target="_blank" rel="noreferrer noopener" className={`${cls} hover:text-ink hover:underline`} title={`${text} (opens the source)`}>
+      {text}
+    </a>
+  ) : (
+    <span className={cls} title={text}>
+      {text}
+    </span>
+  );
+}
+
+/** Tags as removable chips with an add field (Enter or comma); each change saves right away. */
+function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name" | "tags">; busy: boolean; onTags: (tags: string[]) => void }) {
+  const [v, setV] = useState("");
+  const add = () => {
+    const next = v.split(",").map((t) => t.trim().toLowerCase().slice(0, 40)).filter((t) => t && !a.tags.includes(t));
+    setV("");
+    if (next.length) onTags([...a.tags, ...next].slice(0, 30));
+  };
+  return (
+    <div className="flex min-h-[3.25rem] flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1" aria-label="Tags">
+        {a.tags.map((t) => (
+          <span key={t} className="inline-flex items-center gap-0.5 rounded-full bg-sunk py-0.5 pl-2 pr-1 text-[11px] text-ink2">
+            {t}
+            <button type="button" className="grid h-4 w-4 place-items-center rounded-full hover:bg-line" disabled={busy} aria-label={`Remove tag ${t}`} onClick={() => onTags(a.tags.filter((x) => x !== t))}>
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        {a.tags.length === 0 && <span className="text-[11px] text-ink3">No tags yet</span>}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input className="input h-7 min-w-0 flex-1 px-2 py-0 text-xs" type="text" maxLength={40} value={v} disabled={busy} placeholder="Add a tag…" aria-label={`Add a tag to ${a.name}`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => (e.key === "Enter" || e.key === ",") && (e.preventDefault(), add())} />
+        <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={busy || !v.trim()} onClick={add} aria-label="Add tag">
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Intro / outro / remove, in the same order on the card and in the viewer. */
 function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
@@ -433,16 +409,16 @@ function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withL
     <div className="grid grid-cols-3 gap-1">
       {slotBtn("intro", introId === a.id)}
       {slotBtn("outro", outroId === a.id)}
-      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+      <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${withLabels && a.owner !== "me" ? "col-span-full" : ""}`} disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
         <Trash2 className="h-3.5 w-3.5" />
-        {withLabels && "Remove"}
+        {withLabels && (a.owner === "me" ? "Remove" : "Remove from your library")}
       </button>
     </div>
   );
 }
 
 /** "3 s" with a pencil for an image: a tiny popover with the seconds field. */
-function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; busy: boolean; onSeconds: (sec: number) => void }) {
+export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; busy: boolean; onSeconds: (sec: number) => void }) {
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(String(a.durationSec));
   const save = () => {
@@ -478,65 +454,8 @@ function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAsset; bus
   );
 }
 
-/** One library card: fixed-size thumbnail, one-line name and facts, an always-present status line, and equal-width actions. */
-export function AssetCard({ asset: a, introId, outroId, busy, highlighted, applied, leaving = false, onUse, onRemove, onSelect, onOpen, onSeconds, onRename }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; highlighted: boolean; applied: boolean; leaving?: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onSelect: () => void; onOpen: () => void; onSeconds: (sec: number) => void; onRename: (name: string) => void }) {
-  return (
-    <div id={`asset-${a.id}`} className={`flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
-      <CardThumb asset={a} onOpen={onOpen} />
-      <div className="min-w-0 text-xs">
-        <div className="flex items-center gap-1">
-          <button type="button" className="block min-w-0 flex-1 truncate text-left font-semibold text-ink" onClick={onSelect} title={`${a.name} (link to this item)`}>
-            {a.name}
-          </button>
-          <RenamePopover asset={a} busy={busy} onRename={onRename} />
-        </div>
-        <div className="flex h-4 items-center gap-1 overflow-hidden whitespace-nowrap font-mono text-ink3">
-          {a.kind === "image" ? (
-            <>
-              <span className="shrink-0">image ·</span>
-              <LengthPopover asset={a} busy={busy} onSeconds={onSeconds} />
-              <span className="truncate">
-                · {a.width}×{a.height}
-              </span>
-            </>
-          ) : (
-            <span className="truncate">{metaText(a)}</span>
-          )}
-        </div>
-      </div>
-      <StatusLine asset={a} isIntro={introId === a.id} isOutro={outroId === a.id} applied={applied} />
-      <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} />
-    </div>
-  );
-}
-
-/** Same box as AssetCard (thumb, name, meta, status, three buttons) for while the library loads. */
-export function AssetCardSkeleton({ i = 0 }: { i?: number }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-2 rounded-[14px] border border-line bg-panel p-2">
-      <Skeleton className="aspect-[9/16] w-full rounded-[10px]" />
-      <div className="min-w-0 text-xs">
-        <div className="flex h-4 items-center">
-          <Skeleton className={`h-3 ${["w-3/4", "w-1/2", "w-2/3"][i % 3]}`} />
-        </div>
-        <div className="flex h-4 items-center">
-          <Skeleton className="h-2.5 w-1/3" />
-        </div>
-      </div>
-      <div className="flex h-5 items-center">
-        <Skeleton className="h-2.5 w-2/5" />
-      </div>
-      <div className="grid grid-cols-3 gap-1">
-        <Skeleton className="h-7 rounded-[8px]" />
-        <Skeleton className="h-7 rounded-[8px]" />
-        <Skeleton className="h-7 rounded-[8px]" />
-      </div>
-    </div>
-  );
-}
-
 /** Always one line: default intro / outro, and where it is used (a popover with the projects), or "Empty". */
-function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
+export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
   const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
@@ -565,7 +484,7 @@ function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAss
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename }: { asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -575,33 +494,55 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
             <>
               <div className="flex items-center gap-2">
                 <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
-                <RenamePopover asset={a} busy={busy} onRename={onRename} />
+                {a.owner === "me" && <RenamePopover asset={a} busy={busy} onRename={onRename} />}
                 <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
                   <X className="h-4 w-4" />
                 </Dialog.Close>
               </div>
               {a.kind === "audio" ? (
                 <div className="flex flex-col items-center gap-4 rounded-[12px] bg-sunk px-4 py-8">
-                  <Music className="h-12 w-12 text-ink3" aria-hidden />
-                  <audio key={a.id} src={`/media/bumpers/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
+                  <AudioLines className="h-12 w-12 text-ink3" aria-hidden />
+                  <audio key={a.id} src={`/media/assets/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
                 </div>
               ) : (
                 <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
                   {a.kind === "video" ? (
-                    <video key={a.id} src={`/media/bumpers/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                    <video key={a.id} src={`/media/assets/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
                   ) : (
-                    <img key={a.id} src={`/media/bumpers/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
+                    <img key={a.id} src={`/media/assets/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
                   )}
                 </div>
               )}
               <p className="truncate font-mono text-xs text-ink3">
+                {formatTag(a.mime) ? `${formatTag(a.mime)} · ` : ""}
                 {a.kind === "audio" ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}` : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
+              <div className="flex items-center gap-2">
+                {a.system && <span className="rounded-full bg-sunk px-2 py-0.5 text-[11px] font-semibold text-ink2">Catalog</span>}
+              </div>
+              {a.owner === "me" ? (
+                <TagEditor asset={a} busy={busy} onTags={onTags} />
+              ) : (
+                a.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1" aria-label="Tags">
+                    {a.tags.map((t) => (
+                      <span key={t} className="rounded-full bg-sunk px-2 py-0.5 text-[11px] text-ink2">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )
+              )}
+              {a.provenance && (
+                <div className="flex items-center gap-2">
+                  <LicenseBadge provenance={a.provenance} wrap className="min-w-0 flex-1 whitespace-normal" />
+                </div>
+              )}
               {(a.usedBy > 0 || a.usedByClips > 0) && (
                 <div className="rounded-[12px] border border-line p-3">
                   <b className="text-xs">Where it’s used</b>
-                  <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
+                  {a.owner === "me" ? <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" /> : <p className="mt-1 text-xs text-ink2">Used by {a.usedBy} project{a.usedBy === 1 ? "" : "s"}{a.usedByClips ? ` · ${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""}</p>}
                 </div>
               )}
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
@@ -626,7 +567,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
 /** Projects that use an asset (default or override) with the clips under each, and where each use comes from. */
 export function UsageList({ id, className = "" }: { id: string; className?: string }) {
   const trpc = useTRPC();
-  const q = useQuery(trpc.bumpers.usage.queryOptions({ id }));
+  const q = useQuery(trpc.library.usage.queryOptions({ id }));
   const projects = q.data?.projects ?? [];
   return (
     <ScrollArea className={className}>
@@ -929,7 +870,7 @@ export function ProjectBumpersModal({
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-          void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() });
+          void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
           toast(r.rerendered ? `Saved · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : "Saved");
           setPick({});
           onOpenChange(false);

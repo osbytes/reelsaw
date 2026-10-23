@@ -3,12 +3,13 @@ import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Check, ChevronsUpDown, Music } from "lucide-react";
 import { createFuzzy, Highlight } from "../lib/fuzzy";
+import { formatTag } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { Skeleton } from "./ui";
 
 // Rich rows (thumbnails, badges) live here; for a plain list with typeahead use `Combobox` in ui.tsx.
 
-/** What the combobox needs to know about a library asset (a subset of the `bumpers.list` row). */
+/** What the combobox needs to know about a library asset (a subset of the `library.list` row). */
 export interface PickerAsset {
   id: string;
   kind: "video" | "image" | "audio";
@@ -18,6 +19,7 @@ export interface PickerAsset {
   height: number;
   usedBy: number;
   thumbnailUrl?: string;
+  mime?: string | null;
 }
 
 /** A choice that is not an asset: "Project default (name)", "None", "Leave as it is". */
@@ -50,8 +52,8 @@ const Badge = ({ children, tone = "plain" }: { children: ReactNode; tone?: "plai
 function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean; slot: string }) {
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
-      <Badge>{a.kind}</Badge>
-      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
+      <Badge>{formatTag(a.mime) ?? a.kind}</Badge>
+      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : a.kind === "image" ? `shows ${durationText(a.durationSec)} · ${a.width}×${a.height}` : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
       {isDefault && <Badge tone="acc">default {slot}</Badge>}
       {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
     </span>
@@ -92,7 +94,7 @@ export function BumperCombobox({
   const [q, setQ] = useState("");
   const fuzzy = useMemo(
     () => ({
-      assets: createFuzzy(assets, [{ name: "name", weight: 2 }, { name: "kind", weight: 0.5 }]),
+      assets: createFuzzy(assets, [{ name: "name", weight: 2 }, { name: "kind", weight: 0.5 }, { name: "mime", weight: 0.3 }]),
       fixed: createFuzzy(fixed, ["label", "hint"], { minMatchCharLength: 1 }),
     }),
     [assets, fixed],
@@ -129,6 +131,8 @@ export function BumperCombobox({
           align="start"
           sideOffset={6}
           collisionPadding={12}
+          // React bubbles events through the portal to the opener's ancestors (the timeline pans on wheel)
+          onWheel={(e) => e.stopPropagation()}
           // above the dialogs and popovers it lives in
           className="z-[80] w-[max(var(--radix-popover-trigger-width),18rem)] max-w-[calc(100vw-24px)] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop"
         >

@@ -27,6 +27,8 @@ export interface ProbeInfo {
   height?: number;
   hasAudio: boolean;
   fps?: number;
+  /** frames in the first video stream when the container says (an animated GIF or WebP has more than one) */
+  frames?: number;
 }
 
 export class CommandError extends Error {
@@ -227,7 +229,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const { stdout } = await run(config.FFPROBE_PATH, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file]);
       const json = JSON.parse(stdout) as {
         format?: { duration?: string };
-        streams?: Array<{ codec_type?: string; width?: number; height?: number; duration?: string; r_frame_rate?: string }>;
+        streams?: Array<{ codec_type?: string; width?: number; height?: number; duration?: string; r_frame_rate?: string; nb_frames?: string }>;
       };
       const video = json.streams?.find((s) => s.codec_type === "video");
       const audio = json.streams?.find((s) => s.codec_type === "audio");
@@ -237,7 +239,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
         const [n, d] = video.r_frame_rate.split("/").map(Number);
         if (n && d) fps = n / d;
       }
-      return { durationSec: duration, width: video?.width, height: video?.height, hasAudio: !!audio, fps };
+      return { durationSec: duration, width: video?.width, height: video?.height, hasAudio: !!audio, fps, ...(Number(video?.nb_frames) > 0 ? { frames: Number(video?.nb_frames) } : {}) };
     },
 
     async extractAudio(input, output, signal) {

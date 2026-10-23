@@ -4,10 +4,12 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare } from "../pipeline/lifecycle.js";
 import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
+import { backfillAssetRefs } from "../library/refs.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { flagAccounts, pruneRequestRate } from "../abuse.js";
+import { libraryProviders } from "../library/import.js";
 import { QUEUES, type QueueName } from "./boss.js";
 import { finalizeProjectIfDone } from "../pipeline/render.js";
 import { REFINE_QUEUE, finishIfComplete } from "../pipeline/refine.js";
@@ -90,6 +92,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
       .then(() => detectStalls(svc, svc.settings.get().STALL_MINUTES))
       .then(() => sweepRetention(svc))
       .then(() => pruneHistory(svc)) // daily per table, batched and resumable; a no-op between runs
+      .then(() => backfillAssetRefs(svc)) // one-time, resumable, bounded per tick; a no-op once done
       .then(async () => {
         // leftover files nothing points at: at most hourly (a safety net for crashes between commit and delete)
         if (Date.now() - lastSweep < 60 * 60_000) return;
@@ -99,6 +102,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
         await flagAccounts(svc); // abuse flags for the Users page (abuse.ts)
         await pruneRequestRate(svc.database.db);
+        await libraryProviders(svc).catalog.refresh(); // newer Reelsaw catalog manifest (ETag; a failure is a debug line)
       })
       .catch((err) => svc.log.error({ module: "reconcile", err }, "reconcile failed"));
   tick();

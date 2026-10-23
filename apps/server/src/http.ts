@@ -19,6 +19,7 @@ import { schema } from "./db/index.js";
 import { checkStorageQuota } from "./quota.js";
 import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
+import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
 import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
@@ -28,6 +29,7 @@ import { createReportZip, reportCapabilities, reportPreview } from "./report/bun
 import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
@@ -254,27 +256,46 @@ export function createApp(svc: Services) {
     }
   });
 
-  app.get("/media/bumpers/:id", async (c) => {
+  // The starter pack bundled with the install (assets/catalog/files): public, nothing user-specific, content-addressed by id.
+  app.get("/media/catalog/:file", async (c) => {
+    const name = c.req.param("file");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name)) return c.text("not found", 404);
+    const file = path.join(DEFAULT_BUNDLED_DIR, "files", name);
+    if (!(await fsp.stat(file).then((s) => s.isFile(), () => false))) return c.text("not found", 404);
+    const res = await sendFile(c.req.raw, file);
+    res.headers.set("Cache-Control", "public, max-age=86400");
+    // static pack files only; the extension decides the type (the shared map has no svg until the library widens it)
+    if (name.endsWith(".svg")) res.headers.set("Content-Type", "image/svg+xml");
+    // a bundled SVG is ours, but never let a catalog file run script in the app's origin
+    res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    return res;
+  });
+
+  // `/media/bumpers/...` is the old spelling: rendered pages and MCP results carried it for a release
+  app.on("GET", ["/media/assets/:id", "/media/bumpers/:id"], async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
     const loc = await storage.resolve(asset.sourceKey);
     if ("url" in loc) return c.redirect(loc.url, 302);
-    return sendFile(c.req.raw, loc.file);
+    const res = await sendFile(c.req.raw, loc.file);
+    // an uploaded SVG is a document: never let one run script or load anything in the app's origin
+    if (asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg")) res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    return res;
   });
 
   // Picker thumbnail. Older assets get theirs on first request.
-  app.get("/media/bumpers/:id/thumb.jpg", async (c) => {
+  app.on("GET", ["/media/assets/:id/thumb.jpg", "/media/bumpers/:id/thumb.jpg"], async (c) => {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
-    const asset = await db.query.bumperAssets.findFirst({ where: and(eq(schema.bumperAssets.id, c.req.param("id")), eq(schema.bumperAssets.userId, session.user.id)) });
+    const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
-    let key = asset.thumbnailKey ?? keys.bumperThumb(asset.id);
+    let key = asset.thumbnailKey ?? keys.assetThumb(asset.sourceKey);
     if (!asset.thumbnailKey || !(await storage.exists(key))) {
       try {
         key = await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage, dir: paths.tmp }, asset, undefined);
-        await db.update(schema.bumperAssets).set({ thumbnailKey: key }).where(eq(schema.bumperAssets.id, asset.id));
+        await db.update(schema.assets).set({ thumbnailKey: key }).where(eq(schema.assets.id, asset.id));
       } catch (err) {
         c.get("log").warn({ err, bumperId: asset.id }, "bumper thumbnail failed");
         return c.text("no thumbnail", 404);

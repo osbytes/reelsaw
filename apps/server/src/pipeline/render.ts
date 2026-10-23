@@ -24,11 +24,11 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import type { VideoEncoder } from "../media.js";
-import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, BUMPER_FPS } from "./bumpers.js";
+import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, ensureRaster, isSvgAsset, RASTER_WIDTH, BUMPER_FPS } from "./bumpers.js";
 
 const OUT_W = 1080;
 const OUT_H = 1920;
@@ -458,10 +458,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // the logo above the text: composited like an overlay for the whole body; a missing file leaves the text alone
   const logo: LoadedOverlay[] = watermark.on ? await watermarkLogo(svc.config.WATERMARK_LOGO_PATH, outDuration, log) : [];
   if (watermark.on) log.debug({ source: watermark.source, logo: logo.length > 0 }, "watermark on");
+  // the clip's layers whatever generation of row it is: text goes into the caption file, assets are composited, audio is mixed
+  const layers = clipLayers(clip);
+  const visualLayerCount = layers.filter((l) => l.kind !== "audio").length;
+  const audioLayerCount = layers.length - visualLayerCount;
   const assPath = path.join(clipsDir, `${clip.id}.ass`);
   await fs.writeFile(
     assPath,
-    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style: resolveStyle(settings, clip.style), hook: clip.hook, emphasis: clip.emphasis ?? [], texts: textOverlayEvents(clip.overlays ?? [], clip.startSec, duration, plan.mapTime), ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}) }),
+    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style: resolveStyle(settings, clip.style), hook: clip.hook, emphasis: clip.emphasis ?? [], texts: textOverlayEvents(layers.filter((l): l is TextLayer => l.kind === "text"), clip.startSec, duration, plan.mapTime), ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}) }),
     "utf8",
   );
 
@@ -471,9 +475,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const chosen = resolveClipBumpers(settings, clip);
   const bumpers = await loadBumpers(ctx, project.userId, { intro: chosen.introId, outro: chosen.outroId }, { intro: chosen.introSec, outro: chosen.outroSec }, clip.id, log);
   // overlays (logos, stickers, b-roll) from the library, in post-cut body time; an unusable one is skipped
-  const overlayItems = await loadOverlays(ctx, project.userId, clip.overlays ?? [], clip.startSec, duration, plan.mapTime, clip.id, log);
+  const overlayItems = await loadOverlays(ctx, project.userId, layers.filter((l): l is AssetLayer => l.kind === "asset"), clip.startSec, duration, plan.mapTime, clip.id, log);
   // background music from the library, mixed under the speech (ducked); an unusable track is skipped like an overlay
-  const music = await loadMusic(ctx, project.userId, clipAudioList(clip.audio), clip.startSec, duration, plan.mapTime, clip.id, log);
+  const music = await loadMusic(ctx, project.userId, layers.filter((l): l is AudioLayer => l.kind === "audio"), clip.startSec, duration, plan.mapTime, clip.id, log);
   const srcHasAudio = bumpers.intro || bumpers.outro || music.length ? (await svc.media.ffprobe(sourcePath)).hasAudio : true;
   // with cuts: trim the kept segments and concat them first, then layout + captions run on the result
   const buildGraph = (withBumpers: boolean, withOverlays: boolean): { graph: string; audioMap: string[] } => {
@@ -565,7 +569,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   await svc.media.ffmpeg(
     [
       "-ss", clip.startSec.toFixed(3), "-t", duration.toFixed(3), "-i", sourcePath,
-      ...[...(withOverlays ? overlayItems.items : []), ...logo].flatMap((o) => ["-i", o.path]),
+      ...[...(withOverlays ? overlayItems.items : []), ...logo].flatMap(overlayInputArgs),
       ...(withOverlays ? music.flatMap((m) => [...(m.loop ? ["-stream_loop", "-1"] : []), "-i", m.path]) : []),
       ...(withBumpers && bumpers.intro ? ["-i", bumpers.intro.path] : []),
       ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
@@ -637,13 +641,13 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   if (svc.storage.driver !== "local") await fs.rm(outPath, { force: true }).catch(() => {});
 
   log.debug({ intro: bumpers.intro?.id ?? null, outro: bumpers.outro?.id ?? null, used: usedBumpers, introSec: attached.introSec, outroSec: attached.outroSec, skipped: bumpers.skipped, fromClip: chosen.fromClip }, "bumpers");
-  if (clip.overlays?.length) log.debug({ requested: clip.overlays.length, used: usedOverlays ? overlayItems.items.length : 0, skipped: overlayItems.skipped, items: overlayItems.items.map((o) => ({ id: o.id, asset: o.assetId, kind: o.kind, from: o.start, to: o.end, x: o.x, y: o.y, w: o.w })) }, "overlays");
-  if (clip.audio) log.debug({ requested: clipAudioList(clip.audio).length, used: usedOverlays ? music.length : 0, tracks: music.map((m) => ({ id: m.id, asset: m.assetId, from: m.start, to: m.end, volume: m.volume, duck: m.duck, fade: m.fade, loop: m.loop })) }, "music");
+  if (visualLayerCount) log.debug({ requested: visualLayerCount, used: usedOverlays ? overlayItems.items.length : 0, skipped: overlayItems.skipped, items: overlayItems.items.map((o) => ({ id: o.id, asset: o.assetId, kind: o.kind, from: o.start, to: o.end, x: o.x, y: o.y, w: o.w })) }, "overlays");
+  if (audioLayerCount) log.debug({ requested: audioLayerCount, used: usedOverlays ? music.length : 0, tracks: music.map((m) => ({ id: m.id, asset: m.assetId, from: m.start, to: m.end, volume: m.volume, duck: m.duck, fade: m.fade, loop: m.loop })) }, "music");
   const diagnostics: ClipDiagnostics = capDiagnostics({
     renderedAt: new Date().toISOString(),
     ...(pauseInfo ? { pauses: pauseInfo } : {}),
     ...(captionTiming ? { captionTiming } : {}),
-    ...(clip.overlays?.length ? { overlays: { used: usedOverlays ? overlayItems.items.length : 0, ...(overlayItems.skipped.length ? { skipped: overlayItems.skipped } : {}) } } : {}),
+    ...(visualLayerCount ? { overlays: { used: usedOverlays ? overlayItems.items.length : 0, ...(overlayItems.skipped.length ? { skipped: overlayItems.skipped } : {}) } } : {}),
     layout: summary,
     cuts: {
       applied: cutResult.cuts.map((c) => ({ start: Number((c.start + clip.startSec).toFixed(3)), end: Number((c.end + clip.startSec).toFixed(3)), verified: c.verified, ...(c.reason ? { reason: c.reason.slice(0, 2000) } : {}), ...(c.manual ? { manual: true } : {}) })),
@@ -714,8 +718,8 @@ async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: stri
       log.warn({ slot, assetId: id, err: error }, "bumper skipped");
       await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
-    const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, id) });
-    if (!asset || asset.userId !== userId) {
+    const asset = await db.query.assets.findFirst({ where: eq(schema.assets.id, id) });
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip(`the ${slot} file is no longer available`);
       continue;
     }
@@ -743,6 +747,12 @@ export interface LoadedOverlay {
   assetId: string;
   path: string;
   kind: "video" | "image" | "audio";
+  /** repeat while the window is open (a GIF, an animated WebP, or a video the layer asked to loop); never set on a still */
+  loop: boolean;
+  /** the file is a GIF: ffmpeg must be told to honour its own loop flag */
+  gif?: boolean;
+  /** the file's own length, seconds (sizes a finite `-stream_loop`) */
+  durationSec?: number;
   /** body seconds (after cuts) */
   start: number;
   end: number;
@@ -757,11 +767,10 @@ export interface LoadedOverlay {
  * body's post-cut clock. A missing, foreign or unreadable asset, or a window the cuts removed, is
  * skipped with a plain-language event; the clip renders without it rather than failing.
  */
-async function loadOverlays(ctx: StageContext, userId: string, overlays: ClipOverlay[], clipStart: number, duration: number, mapTime: (t: number) => number, clipId: string, log: Logger): Promise<{ items: LoadedOverlay[]; skipped: string[] }> {
+async function loadOverlays(ctx: StageContext, userId: string, overlays: AssetLayer[], clipStart: number, duration: number, mapTime: (t: number) => number, clipId: string, log: Logger): Promise<{ items: LoadedOverlay[]; skipped: string[] }> {
   const { svc, projectId, db } = ctx;
   const out: { items: LoadedOverlay[]; skipped: string[] } = { items: [], skipped: [] };
   for (const o of overlays) {
-    if (overlayKind(o) !== "asset" || !o.assetId) continue; // text overlays go into the caption file
     const skip = async (reason: string, error?: unknown) => {
       out.skipped.push(`${o.id}: ${reason}`);
       log.warn({ overlayId: o.id, assetId: o.assetId, err: error }, "overlay skipped");
@@ -776,16 +785,24 @@ async function loadOverlays(ctx: StageContext, userId: string, overlays: ClipOve
       await skip("its whole time range was removed by cuts");
       continue;
     }
-    const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, o.assetId) });
-    if (!asset || asset.userId !== userId) {
+    const asset = await db.query.assets.findFirst({ where: eq(schema.assets.id, o.assetId) });
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip("the library file is no longer available");
+      continue;
+    }
+    if (asset.kind === "audio") {
+      await skip("that library item is an audio file, not a picture or video");
       continue;
     }
     try {
       const dir = path.join(svc.paths.root, "bumpers", asset.id);
       await fs.mkdir(dir, { recursive: true });
-      const file = await svc.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
-      out.items.push({ id: o.id, assetId: o.assetId, path: file, kind: asset.kind, start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), x: o.x, y: o.y, w: o.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: o.opacity ?? 1 });
+      // an SVG is composited from its PNG (resvg), rendered once at the output width and cached
+      const file = isSvgAsset(asset) ? await ensureRaster({ storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") }, asset, RASTER_WIDTH) : await svc.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
+      const gifOrWebp = asset.mime === "image/gif" || asset.mime === "image/webp";
+      // only something that moves can loop: a GIF / animated WebP by default, a video when the layer says so
+      const loop = asset.kind === "video" && (o.loop ?? gifOrWebp);
+      out.items.push({ id: o.id, assetId: o.assetId, path: file, kind: asset.kind, loop, ...(loop ? { gif: asset.mime === "image/gif", durationSec: asset.durationSec } : {}), start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), x: o.x, y: o.y, w: o.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: o.opacity ?? 1 });
     } catch (err) {
       if (ctx.signal.aborted) throw err;
       await skip("the library file could not be read", err);
@@ -806,7 +823,7 @@ export async function watermarkLogo(file: string, bodySec: number, log: Logger):
     log.warn({ err, file }, "watermark logo not readable; text watermark only");
     return [];
   }
-  return [{ id: "watermark", assetId: "", path: file, kind: "image", start: 0, end: Number((bodySec + 1).toFixed(3)), x: WATERMARK_LOGO.x, y: WATERMARK_LOGO.y, w: WATERMARK_LOGO.w, opacity: WATERMARK_LOGO.opacity }];
+  return [{ id: "watermark", assetId: "", path: file, kind: "image", loop: false, start: 0, end: Number((bodySec + 1).toFixed(3)), x: WATERMARK_LOGO.x, y: WATERMARK_LOGO.y, w: WATERMARK_LOGO.w, opacity: WATERMARK_LOGO.opacity }];
 }
 
 /** Background music ready for the graph: a local file and its window in post-cut body seconds. */
@@ -830,7 +847,7 @@ export interface LoadedMusic {
  * post-cut clock. Defaults from CLIP_AUDIO_DEFAULTS. A missing or foreign asset, or a window the cuts
  * removed, is skipped with a plain-language event; the clip renders without music rather than failing.
  */
-async function loadMusic(ctx: StageContext, userId: string, tracks: ClipAudio[], clipStart: number, duration: number, mapTime: (t: number) => number, clipId: string, log: Logger): Promise<LoadedMusic[]> {
+async function loadMusic(ctx: StageContext, userId: string, tracks: Array<ClipAudio>, clipStart: number, duration: number, mapTime: (t: number) => number, clipId: string, log: Logger): Promise<LoadedMusic[]> {
   const { svc, projectId, db } = ctx;
   const out: LoadedMusic[] = [];
   for (const audio of tracks) {
@@ -847,8 +864,8 @@ async function loadMusic(ctx: StageContext, userId: string, tracks: ClipAudio[],
       await skip("the music's whole time range was removed by cuts");
       continue;
     }
-    const asset = await db.query.bumperAssets.findFirst({ where: eq(schema.bumperAssets.id, audio.assetId) });
-    if (!asset || asset.userId !== userId) {
+    const asset = await db.query.assets.findFirst({ where: eq(schema.assets.id, audio.assetId) });
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip("the music file is no longer in the library");
       continue;
     }
@@ -917,7 +934,7 @@ export function musicMix(tracks: LoadedMusic[], firstInput: number, bodyAudio: s
 }
 
 /** The clip's text overlays as caption-file events, windows mapped from source seconds to the body's post-cut clock. */
-export function textOverlayEvents(overlays: ClipOverlay[], clipStart: number, duration: number, mapTime: (t: number) => number): TextOverlayEvent[] {
+export function textOverlayEvents(overlays: Array<ClipOverlay | TextLayer>, clipStart: number, duration: number, mapTime: (t: number) => number): TextOverlayEvent[] {
   const out: TextOverlayEvent[] = [];
   for (const o of overlays) {
     if (overlayKind(o) !== "text" || !o.text) continue;
@@ -930,6 +947,21 @@ export function textOverlayEvents(overlays: ClipOverlay[], clipStart: number, du
     out.push({ text: o.text, start, end, x: o.x, y: o.y, size: o.size ?? TEXT_OVERLAY_DEFAULTS.size, color: o.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!o.box, opacity: o.opacity ?? 1, ...(o.font ? { font: o.font } : {}) });
   }
   return out;
+}
+
+/** Most extra loops of a repeating input; the window is a clip, so this is never reached in practice. */
+const MAX_INPUT_LOOPS = 1000;
+
+/**
+ * ffmpeg input arguments for one overlay file. A looped input is always finite: `-stream_loop` gets the
+ * number of extra plays that cover the window (never -1, an endless input can keep the encode alive) and
+ * `-t` cuts it at the window's length. A GIF also gets `-ignore_loop 0` so its own loop flag is honoured.
+ */
+export function overlayInputArgs(o: Pick<LoadedOverlay, "path" | "loop" | "gif" | "durationSec" | "start" | "end">): string[] {
+  if (!o.loop) return ["-i", o.path];
+  const windowSec = Math.max(0.05, o.end - o.start);
+  const extra = o.durationSec && o.durationSec > 0 ? Math.min(MAX_INPUT_LOOPS, Math.ceil(windowSec / o.durationSec)) : 0;
+  return [...(o.gif ? ["-ignore_loop", "0"] : []), "-stream_loop", String(extra), "-t", windowSec.toFixed(3), "-i", o.path];
 }
 
 /**
@@ -945,10 +977,11 @@ export function overlayChain(items: LoadedOverlay[], firstInput: number, outW: n
   items.forEach((o, i) => {
     const input = firstInput + i;
     const w = Math.max(2, Math.round((o.w * outW) / 2) * 2);
-    const prep = [o.kind === "video" ? `setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB` : "", `scale=${w}:-2`, "format=rgba", o.opacity < 1 ? `colorchannelmixer=aa=${o.opacity.toFixed(3)}` : ""].filter(Boolean).join(",");
+    // a looped input is cut to its window first, so a repeating source cannot run on past the body
+    const prep = [o.kind === "video" && o.loop ? `trim=duration=${Math.max(0.05, o.end - o.start).toFixed(3)}` : "", o.kind === "video" ? `setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB` : "", `scale=${w}:-2`, "format=rgba", o.opacity < 1 ? `colorchannelmixer=aa=${o.opacity.toFixed(3)}` : ""].filter(Boolean).join(",");
     const x = `${Math.round(o.x * outW)}-w/2`;
     const y = `${Math.round(o.y * outH)}-h/2`;
-    const eof = o.kind === "video" ? "pass" : "repeat";
+    const eof = o.kind === "video" && !o.loop ? "pass" : "repeat";
     parts.push(`[${input}:v]${prep}[ov${i}]`);
     parts.push(`${prev}[ov${i}]overlay=x=${x}:y=${y}:eof_action=${eof}:enable='between(t,${o.start.toFixed(3)},${o.end.toFixed(3)})'[oc${i}]`);
     prev = `[oc${i}]`;

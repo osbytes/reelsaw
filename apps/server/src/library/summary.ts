@@ -3,7 +3,7 @@
  * resolution the renderer uses (`resolveClipBumpers`), so the list chips, `reelsaw status` and the
  * MCP tools all say the same thing. Pure: no database.
  */
-import { clipAudioList } from "@reelsaw/shared";
+import { clipLayers } from "@reelsaw/shared";
 import { resolveClipBumpers } from "../pipeline/bumpers.js";
 
 export interface SlotCoverage {
@@ -27,16 +27,16 @@ export interface BumperCoverage {
 type ProjectIn = { settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null };
 type ClipIn = {
   bumpers?: { intro?: string | null; outro?: string | null } | null;
-  /** overlays and music tracks also hold library assets (see `assetRefs`) */
-  overlays?: { assetId?: string | null }[] | null;
+  /** layers (or the older overlays + audio) also hold library assets (see `assetRefs`) */
+  layers?: unknown;
+  overlays?: unknown;
   audio?: unknown;
 };
 
-/** Library assets a clip lays over itself or plays under itself: overlay asset ids and music track asset ids. */
-export function assetRefs(clip: Pick<ClipIn, "overlays" | "audio">): Set<string> {
+/** Library assets a clip lays over itself or plays under itself: asset and audio layer ids (legacy overlays + audio rows read as layers). */
+export function assetRefs(clip: Pick<ClipIn, "layers" | "overlays" | "audio">): Set<string> {
   const ids = new Set<string>();
-  for (const o of clip.overlays ?? []) if (o.assetId) ids.add(o.assetId);
-  for (const m of clipAudioList(clip.audio)) ids.add(m.assetId);
+  for (const l of clipLayers(clip)) if (l.kind !== "text") ids.add(l.assetId);
   return ids;
 }
 
@@ -59,7 +59,8 @@ export function bumperCoverage(project: ProjectIn, clips: ClipIn[]): BumperCover
 }
 
 /**
- * Per asset id: how many projects and clips use it (intro, outro, overlay or music), by the same resolution the render uses. A project counts
+ * Per asset id: how many projects and clips use it (intro, outro, layer), by the same resolution the render uses. The database path
+ * (`bumperUsageCounts`) counts a clip only when it names the asset itself; this pure version also counts clips that inherit it. A project counts
  * when at least one of its clips uses the asset anywhere (a clip using it in several places counts
  * once); a project with no clips counts when its settings name the asset. Pure: no database.
  */

@@ -39,6 +39,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `MAX_UPLOAD_MB` | `4096` | Largest accepted file upload in MB. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_SOURCE_FILE_MB` | `8192` | Largest file yt-dlp may download for a link source, in MB (`--max-filesize`). Runtime setting: admins can change it under Settings → System without a restart. |
 | `ALLOW_PRIVATE_SOURCE_URLS` | `false` | `true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). Runtime setting: admins can change it under Settings → System without a restart. |
+| `CATALOG_URL` | `https://reelsaw.com/catalog/v1/index.json` | Reelsaw catalog manifest (sounds, icons, stickers for the Library's Browse panel), fetched hourly with ETag; the starter pack bundled in the image is used until a newer version arrives. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Accounts and sign-up
 
@@ -88,6 +89,13 @@ either; `pnpm docs:check` fails when this file is stale.
 | `OPENAI_COMPATIBLE_API_KEY` | unset | Key for the compat server (`ollama` for Ollama). |
 | `OPENAI_COMPATIBLE_NAME` | `compat` | Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>`. |
 | `OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS` | `true` | Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient. |
+| `PEXELS_API_KEY` | unset | Pexels key (free): stock photos and portrait videos in Library → Browse. Empty = hidden. Runtime setting: admins can change it under Settings → System without a restart. |
+| `PIXABAY_API_KEY` | unset | Pixabay key (free): photos, illustrations, vectors and videos in Library → Browse. Results are cached 24 h; files are downloaded, never hotlinked. Empty = hidden. Runtime setting: admins can change it under Settings → System without a restart. |
+| `FREESOUND_API_KEY` | unset | Freesound key (free): CC0 (or CC-BY) sound effects in Library → Browse. Empty = hidden. Runtime setting: admins can change it under Settings → System without a restart. |
+| `GIPHY_API_KEY` | unset | Giphy key: GIFs and stickers in Library → Browse (shows "Powered by GIPHY"). Empty = hidden. Runtime setting: admins can change it under Settings → System without a restart. |
+| `KLIPY_API_KEY` | unset | Klipy key: GIF search in Library → Browse (experimental). Empty = hidden. Runtime setting: admins can change it under Settings → System without a restart. |
+| `ICONIFY_API_URL` | `https://api.iconify.design` | Iconify API for icon search (permissive sets only: lucide, tabler, mdi, ph, heroicons, ri, solar); point it at a self-hosted instance if you prefer. https only. Runtime setting: admins can change it under Settings → System without a restart. |
+| `OPENVERSE_ENABLED` | `false` | Show Openverse (CC0 and CC-BY images and audio, no key) in Library → Browse. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Pipeline tuning
 

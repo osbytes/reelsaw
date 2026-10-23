@@ -79,6 +79,17 @@ export const OPERATIONS_FIELDS: Field[] = [
   { key: "HEALTH_DETAILS", label: "Machine numbers in /api/health", kind: "bool", on: "Anyone", off: "Admins only" },
 ];
 
+export const LIBRARY_FIELDS: Field[] = [
+  { key: "CATALOG_URL", label: "Reelsaw catalog URL", kind: "url", placeholder: "https://reelsaw.com/catalog/v1/index.json" },
+  { key: "PEXELS_API_KEY", label: "Pexels key", kind: "secret", placeholder: "not set" },
+  { key: "PIXABAY_API_KEY", label: "Pixabay key", kind: "secret", placeholder: "not set" },
+  { key: "FREESOUND_API_KEY", label: "Freesound key", kind: "secret", placeholder: "not set" },
+  { key: "GIPHY_API_KEY", label: "Giphy key", kind: "secret", placeholder: "not set" },
+  { key: "KLIPY_API_KEY", label: "Klipy key (beta)", kind: "secret", placeholder: "not set" },
+  { key: "ICONIFY_API_URL", label: "Iconify API", kind: "url", placeholder: "https://api.iconify.design" },
+  { key: "OPENVERSE_ENABLED", label: "Openverse", kind: "bool", on: "Shown", off: "Hidden" },
+];
+
 /** The settings state, shared by every group on the page (one query). */
 export function useInstanceSettings() {
   const trpc = useTRPC();
@@ -124,6 +135,7 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
         void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.system.status.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.admin.updates.pathKey() });
+        void qc.invalidateQueries({ queryKey: trpc.library.pathKey() }); // Browse lists providers by their keys
       },
       onError: (e) => toast.error(e.message),
     }),

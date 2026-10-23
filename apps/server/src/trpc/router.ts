@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
-import { router, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
+import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, clipOverlaySchema, MAX_CLIP_OVERLAYS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, clipAudioSchema, CLIP_AUDIO_DEFAULTS, MAX_CLIP_AUDIO, clipAudioList, TEXT_FONTS, styleSchema, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -20,8 +20,12 @@ import type { UnitOfWork } from "../uow.js";
 import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
-import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../bumpers/service.js";
+import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
+import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload } from "../library/service.js";
+import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
+import { assetVisibleTo } from "../library/visible.js";
+import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
@@ -70,8 +74,8 @@ function publicClip(c: schema.Clip) {
     layoutSegments: c.layoutSegments ?? [],
     style: c.style ?? null,
     bumpers: c.bumpers ?? null,
-    overlays: c.overlays ?? [],
-    audio: clipAudioList(c.audio),
+    /** everything laid over or played under the clip: assets, text and sounds */
+    layers: clipLayers(c),
     scores: c.scores ?? null,
     emphasis: c.emphasis ?? [],
     status: c.status,
@@ -230,22 +234,6 @@ async function rerenderOverlapping(svc: Services, u: UnitOfWork, p: schema.Proje
 }
 
 /** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. */
-/** Set (or clear) the user's default intro/outro: one atomic JSON merge, ownership and liveness checked in the same unit of work. */
-async function setBumperDefault(db: Db, userId: string, slot: "intro" | "outro", assetId: string | null) {
-  const key = slot === "intro" ? "introAssetId" : "outroAssetId";
-  if (!assetId) {
-    await db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${userId}`);
-    return;
-  }
-  const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, assetId), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
-  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
-  const patch = { [key]: assetId };
-  await db
-    .insert(schema.userSettings)
-    .values({ userId, projectDefaults: patch })
-    .onConflictDoUpdate({ target: schema.userSettings.userId, set: { projectDefaults: sql`${schema.userSettings.projectDefaults} || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() } });
-}
-
 async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: schema.Clip) => boolean = (c) => c.status === "done" || c.status === "failed") {
   let n = 0;
   await lockProjectClips(u, projectId);
@@ -257,7 +245,7 @@ async function rerenderClips(svc: Services, u: UnitOfWork, projectId: string, wh
 async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
-  const rows = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(inArray(schema.bumperAssets.id, want), eq(schema.bumperAssets.userId, userId), isNull(schema.bumperAssets.deletedAt)));
+  const rows = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
   if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
 }
 
@@ -279,6 +267,33 @@ function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: { startSec:
     else out.push({ ...base, assetId: o.assetId!, w: r3(o.w ?? ASSET_OVERLAY_DEFAULT_W) });
   }
   return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
+}
+
+/**
+ * Layers as stored: asset and text layers cleaned like overlays (plus `loop`), audio layers like music tracks,
+ * one id space, ordered by start; null when empty.
+ */
+function cleanLayers(list: ClipLayer[] | null | undefined, clip: { startSec: number; endSec: number }): ClipLayer[] | null {
+  if (!list?.length) return null;
+  if (list.length > MAX_CLIP_LAYERS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can have at most ${MAX_CLIP_LAYERS} layers` });
+  const ids = new Set<string>();
+  for (const l of list) {
+    if (ids.has(l.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Layer id “${l.id}” is used twice` });
+    ids.add(l.id);
+  }
+  const { overlays, audio } = layersToLegacy(list);
+  const loops = new Map(list.flatMap((l) => (l.kind === "asset" && l.loop !== undefined ? [[l.id, l.loop] as const] : [])));
+  const visual: ClipLayer[] = (cleanOverlays(overlays, clip) ?? []).map((o) => {
+    if (overlayKind(o) === "text") {
+      const { assetId: _a, w: _w, kind: _k, ...rest } = o;
+      return { ...rest, kind: "text" as const, text: o.text! };
+    }
+    const { text: _t, size: _s, color: _c, box: _b, font: _f, kind: _k, ...rest } = o;
+    const loop = loops.get(o.id);
+    return { ...rest, kind: "asset" as const, assetId: o.assetId!, ...(loop !== undefined ? { loop } : {}) };
+  });
+  const sounds: ClipLayer[] = (cleanAudio(audio, clip) ?? []).map((a) => ({ ...a, kind: "audio" as const }));
+  return [...visual, ...sounds].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
 }
 
 /** Music tracks as stored: ordered by start, ids unique, clamped to the clip, defaults left out, numbers rounded; null when empty. */
@@ -371,7 +386,9 @@ async function peekUrlMeta(url: string): Promise<{ title?: string; thumbnail?: s
   }
 }
 
-export const appRouter = router({
+// appRouter is three routers merged (head, bumpers, rest) so the library router can be mounted under two names
+// (`bumpers` and `library`) without moving its code.
+const headRouter = router({
   health: publicProcedure.query(() => ({ ok: true, time: new Date().toISOString() })),
 
   /** Public: what the sign-in page and the top bar need before/without an approved account. */
@@ -458,162 +475,159 @@ export const appRouter = router({
     /** The Stripe Billing Portal (invoices, card, cancel at period end). */
     portal: protectedProcedure.mutation(({ ctx }) => billingOf(ctx.svc).portal(ctx.user)),
   }),
-  /** The user's library of intro/outro videos and images (docs/specs/bumpers.md). Files arrive through POST /api/upload first. */
-  bumpers: router({
+});
+
+/** The library as the screens and tools list it: live rows with usage, and the removals of the last 30 days. */
+async function listLibrary(svc: Services, userId: string) {
+    const db = svc.database.db;
+    // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
+    const own = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
+    const savedRows = await db
+      .select({ asset: schema.assets, savedAt: schema.assetSaves.createdAt })
+      .from(schema.assetSaves)
+      .innerJoin(schema.assets, eq(schema.assetSaves.assetId, schema.assets.id))
+      .where(and(eq(schema.assetSaves.userId, userId), isNull(schema.assets.userId)));
+    const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
+    const usage = await bumperUsageCounts(db, userId);
+    // audio has no thumbnail: the pickers draw a music glyph instead
+    const pub = (r: (typeof rows)[number]) => ({
+      id: r.id,
+      kind: r.kind,
+      name: r.name,
+      durationSec: r.durationSec,
+      width: r.width,
+      height: r.height,
+      hasAudio: r.hasAudio,
+      sizeBytes: r.sizeBytes,
+      createdAt: r.createdAt.toISOString(),
+      thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
+      usedBy: usage.get(r.id)?.projects ?? 0,
+      usedByClips: usage.get(r.id)?.clips ?? 0,
+      mime: r.mime,
+      tags: r.tags,
+      provenance: r.provenance,
+      system: r.system,
+      /** "me": the user's own upload; "shared": an instance row every account can use (saved into this library) */
+      owner: (r.userId ? "me" : "shared") as "me" | "shared",
+      saved: r.saved,
+    });
+    // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+    return {
+      assets: rows.filter((r) => !r.deletedAt).map(pub),
+      deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
+    };
+}
+type LibraryRow = Awaited<ReturnType<typeof listLibrary>>["assets"][number];
+
+/** A library row in the shape of a search hit, so one picker lists catalog, provider and own items alike. */
+function libraryHit(r: LibraryRow) {
+  return {
+    provider: "library",
+    externalId: r.id,
+    kind: r.kind,
+    mime: r.mime ?? undefined,
+    name: r.name,
+    previewUrl: `/media/assets/${r.id}`,
+    thumbUrl: r.thumbnailUrl,
+    durationSec: r.durationSec,
+    width: r.width || undefined,
+    height: r.height || undefined,
+    license: r.provenance?.license ?? { id: "own", name: "Your upload" },
+    attribution: r.provenance?.attribution,
+    url: r.provenance?.url,
+  };
+}
+
+/** What `library.add` answers for every source. */
+interface AddedAsset extends ImportedAsset {
+  mime: string | null;
+  owner: "me" | "shared";
+  saved: boolean;
+}
+
+/** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
+const libraryRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
-    list: protectedProcedure.query(async ({ ctx }) => {
-      const db = ctx.svc.database.db;
-      const rows = await db.select().from(schema.bumperAssets).where(eq(schema.bumperAssets.userId, ctx.user.id)).orderBy(desc(schema.bumperAssets.createdAt));
-      const usage = await bumperUsageCounts(db, ctx.user.id);
-      // audio has no thumbnail: the pickers draw a music glyph instead
-      const pub = (r: (typeof rows)[number]) => ({ id: r.id, kind: r.kind, name: r.name, durationSec: r.durationSec, width: r.width, height: r.height, hasAudio: r.hasAudio, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(), thumbnailUrl: r.kind === "audio" ? "" : `/media/bumpers/${r.id}/thumb.jpg`, usedBy: usage.get(r.id)?.projects ?? 0, usedByClips: usage.get(r.id)?.clips ?? 0 });
-      // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
-      const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-      return {
-        assets: rows.filter((r) => !r.deletedAt).map(pub),
-        deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(pub),
-      };
-    }),
+    list: protectedProcedure.query(({ ctx }) => listLibrary(ctx.svc, ctx.user.id)),
     /**
      * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
-     * choice. Two queries (projects whose settings name it, clips that name it or sit in such a project).
+     * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
      */
     usage: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
       const db = ctx.svc.database.db;
-      const [asset] = await db.select({ id: schema.bumperAssets.id }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)));
+      // an instance-shared row is readable by everyone; bumperAssetUsage only ever reports the caller's own projects
+      const [asset] = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), assetVisibleTo(ctx.user.id)));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-      const slots = ["intro", "outro"] as const;
-      const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
-      const projectRows = await db
-        .select({ id: schema.projects.id, title: schema.projects.title, settings: schema.projects.settings })
-        .from(schema.projects)
-        .where(and(eq(schema.projects.userId, ctx.user.id), or(sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`, sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`)))
-        .limit(500);
-      // overlays are a jsonb list; audio is a list too, except rows written before several tracks per clip (one object)
-      const ref = JSON.stringify([{ assetId: input.id }]);
-      const clipRows = await db
-        .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, overlays: schema.clips.overlays, audio: schema.clips.audio, projectId: schema.projects.id, projectTitle: schema.projects.title, settings: schema.projects.settings })
-        .from(schema.clips)
-        .innerJoin(schema.projects, eq(schema.clips.projectId, schema.projects.id))
-        .where(
-          and(
-            eq(schema.projects.userId, ctx.user.id),
-            or(
-              sql`${schema.clips.bumpers} ->> 'intro' = ${input.id}`,
-              sql`${schema.clips.bumpers} ->> 'outro' = ${input.id}`,
-              sql`${schema.projects.settings} ->> 'introAssetId' = ${input.id}`,
-              sql`${schema.projects.settings} ->> 'outroAssetId' = ${input.id}`,
-              sql`${schema.clips.overlays} @> ${ref}::jsonb`,
-              sql`(jsonb_typeof(${schema.clips.audio}) = 'array' and ${schema.clips.audio} @> ${ref}::jsonb)`,
-              sql`(jsonb_typeof(${schema.clips.audio}) = 'object' and ${schema.clips.audio} ->> 'assetId' = ${input.id})`,
-            ),
-          ),
-        )
-        .orderBy(schema.clips.index)
-        .limit(2000);
-      type Role = "intro" | "outro" | "overlay" | "music";
-      type Clip = { id: string; index: number; title: string; slots: Role[]; via: "clip" | "project"; overlays: number; music: number };
-      const out = new Map<string, { id: string; title: string; slots: Array<"intro" | "outro">; via: "project"; clips: Clip[] }>();
-      for (const p of projectRows) out.set(p.id, { id: p.id, title: p.title, via: "project", slots: slots.filter((s) => p.settings[key[s]] === input.id), clips: [] });
-      for (const c of clipRows) {
-        const own = c.bumpers ?? {};
-        const mine = slots.filter((s) => own[s] === input.id);
-        // a slot the clip leaves alone follows the project
-        const inherited = slots.filter((s) => own[s] === undefined && c.settings[key[s]] === input.id);
-        const overlays = (c.overlays ?? []).filter((o) => o.assetId === input.id).length;
-        const music = clipAudioList(c.audio).filter((m) => m.assetId === input.id).length;
-        if (!mine.length && !inherited.length && !overlays && !music) continue;
-        const p = out.get(c.projectId) ?? { id: c.projectId, title: c.projectTitle, via: "project" as const, slots: slots.filter((s) => c.settings[key[s]] === input.id), clips: [] };
-        out.set(p.id, p);
-        const roles: Role[] = [...slots.filter((s) => mine.includes(s) || inherited.includes(s)), ...(overlays ? (["overlay"] as const) : []), ...(music ? (["music"] as const) : [])];
-        p.clips.push({ id: c.id, index: c.index, title: c.title, slots: roles, via: mine.length || overlays || music ? "clip" : "project", overlays, music });
-      }
-      // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
-      const bare = [...out.values()].filter((p) => !p.clips.length).map((p) => p.id);
-      if (bare.length) {
-        const withClips = new Set((await db.selectDistinct({ id: schema.clips.projectId }).from(schema.clips).where(inArray(schema.clips.projectId, bare))).map((r) => r.id));
-        for (const id of bare) if (withClips.has(id)) out.delete(id);
-      }
-      return { projects: [...out.values()] };
+      return bumperAssetUsage(db, ctx.user.id, input.id);
     }),
     /** Rename a library item and/or change how long an image lasts (updateBumperAsset; also the rename_bumper tool). */
     update: protectedProcedure
-      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional() }))
-      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds })),
-    /** Validate an uploaded video or image with ffprobe and add it to the library; `setDefault` also makes it the user's intro or outro. */
-    create: protectedProcedure
-      .input(z.object({ uploadId: z.string().min(1).max(100), imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(), setDefault: z.enum(["intro", "outro"]).optional() }))
-      .mutation(async ({ ctx, input }) => {
-        const { svc } = ctx;
-        const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
-        if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
-        const ext = path.extname(up.filename).toLowerCase();
-        const kind = bumperKind(ext) ?? "video";
-        const id = randomUUID();
-        const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
+      .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional(), tags: assetTagsSchema.optional() }))
+      .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, tags: input.tags })),
+    /**
+     * Add to the library from exactly one source: an `uploadId` (POST /api/upload), a public `url` (downloaded
+     * server-side), or a catalog / provider result (`provider` + `externalId`: one shared copy per instance, saved
+     * into this account). The file is probed and limited like every upload; `setDefault` also makes it the intro or outro.
+     */
+    add: protectedProcedure
+      .input(
+        z.object({
+          uploadId: z.string().min(1).max(100).optional(),
+          url: z.url().optional(),
+          provider: z.string().min(1).max(40).optional(),
+          externalId: z.string().min(1).max(200).optional(),
+          color: z.string().max(9).optional(),
+          imageSeconds: z.number().min(BUMPER_IMAGE_SEC.min).max(BUMPER_IMAGE_SEC.max).optional(),
+          setDefault: z.enum(["intro", "outro"]).optional(),
+          name: bumperNameSchema.optional(),
+          tags: assetTagsSchema.optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }): Promise<AddedAsset> => {
         try {
-          // cheap checks first so a huge file is not pulled out of storage just to be refused
-          const early = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, { durationSec: 1, width: 1000, height: 1000 });
-          if (early) throw new TRPCError({ code: "BAD_REQUEST", message: early });
-          await fs.mkdir(svc.paths.tmp, { recursive: true });
-          await svc.storage.ensureLocal(up.storageKey, local);
-          const probe = await svc.media.ffprobe(local).catch(() => null);
-          if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.` });
-          const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
-          if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
-          const sourceKey = keys.bumper(id, ext);
-          const contentHash = await sha256File(local);
-          const row = await svc.tx(async (u) => {
-            // one upload of a given file at a time per user, so two racing copies cannot both insert
-            await takeTxLock(u.db, txLock.bumper(ctx.user.id, contentHash));
-            const [same] = await u.db.select().from(schema.bumperAssets).where(and(eq(schema.bumperAssets.userId, ctx.user.id), eq(schema.bumperAssets.contentHash, contentHash))).orderBy(sql`(${schema.bumperAssets.deletedAt} is not null)`).limit(1);
-            if (same) {
-              const wasRemoved = !!same.deletedAt;
-              if (wasRemoved) await u.db.update(schema.bumperAssets).set({ deletedAt: null }).where(eq(schema.bumperAssets.id, same.id));
-              if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, same.id);
-              return { asset: same, duplicate: true as const, restored: wasRemoved };
-            }
-            // ownership is re-checked in the unit of work that writes
-            const [still] = await u.db.select({ id: schema.uploads.id }).from(schema.uploads).where(and(eq(schema.uploads.id, up.id), eq(schema.uploads.userId, ctx.user.id)));
-            if (!still) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
-            const [asset] = await u.db
-              .insert(schema.bumperAssets)
-              .values({
-                id,
-                userId: ctx.user.id,
-                kind,
-                name: up.filename.replace(/\.[^.]+$/, "").slice(0, 120) || "Untitled",
-                durationSec: kind === "image" ? (input.imageSeconds ?? BUMPER_IMAGE_SEC.default) : probe.durationSec,
-                // audio has no picture: bumperProblem already refused images/videos without dimensions
-                width: probe.width ?? 0,
-                height: probe.height ?? 0,
-                hasAudio: kind === "audio" || (kind === "video" && probe.hasAudio),
-                sourceKey,
-                sizeBytes: up.sizeBytes,
-                contentHash,
-              })
-              .returning();
-            if (input.setDefault) await setBumperDefault(u.db, ctx.user.id, input.setDefault, id);
-            // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
-            u.afterCommit(async () => {
-              try {
-                await svc.storage.putFile(sourceKey, local);
-                // the picker thumbnail (none for audio); if this fails the media route makes it on first request
-                const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
-                if (thumbKey) await svc.database.db.update(schema.bumperAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.bumperAssets.id, id)).catch(() => {});
-              } finally {
-                await fs.rm(local, { force: true }).catch(() => {});
-              }
-            });
-            return { asset: asset!, duplicate: false as const, restored: false };
-          });
-          if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
-          return { id: row.asset.id, name: row.asset.name, kind: row.asset.kind, durationSec: row.asset.durationSec, duplicate: row.duplicate, restored: row.restored };
+          requireOneSource(input);
         } catch (err) {
-          await fs.rm(local, { force: true }).catch(() => {});
-          throw err;
+          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : String(err) });
         }
+        if (input.provider) {
+          if (input.setDefault || input.imageSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
+          const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
+          return { ...r, mime: r.mime ?? null, owner: "shared", saved: true };
+        }
+        const uploadId = input.uploadId ?? (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then((d) => d.uploadId, (err) => asTrpc(err)));
+        const created = await createAsset(ctx.svc, { uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, name: input.name, tags: input.tags, userId: ctx.user.id, actorId: ctx.user.id });
+        return { ...created, owner: "me", saved: false };
       }),
+    /**
+     * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or
+     * "catalog" = the Reelsaw catalog; otherwise a provider an admin enabled (see `providers`). Same hit shape for all.
+     */
+    search: protectedProcedure
+      .input(
+        z.object({
+          q: z.string().max(200).default(""),
+          source: z.string().min(1).max(40).optional().describe('"library", "catalog" (default) or a provider id'),
+          kind: z.enum(["video", "image", "audio"]).optional(),
+          cursor: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(60).default(24),
+          license: z.enum(["cc0", "by"]).optional(),
+          /** library only: the items removed in the last 30 days (restorable with `restore`) instead of the live ones */
+          removed: z.boolean().optional(),
+        }),
+      )
+      .query(async ({ ctx, input }) => {
+        const { source, removed: _removed, ...rest } = input;
+        if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
+        const q = input.q.trim().toLowerCase();
+        const lib = await listLibrary(ctx.svc, ctx.user.id);
+        const hits = (input.removed ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
+        const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
+        const page = hits.slice(from, from + input.limit);
+        return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
+      }),
+    /** The sources search and add accept besides "library": the catalog and the providers an admin switched on. */
+    providers: protectedProcedure.query(({ ctx }) => libraryProviders(ctx.svc).registry.list()),
     /** Make a library asset the user's default intro or outro for new projects (assetId null clears it). */
     setDefault: protectedProcedure.input(z.object({ slot: z.enum(["intro", "outro"]), assetId: z.string().min(1).max(100).nullable() })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
@@ -622,28 +636,56 @@ export const appRouter = router({
       });
     }),
     /** Soft delete: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
-    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
-        const gone = await u.db
-          .update(schema.bumperAssets)
-          .set({ deletedAt: new Date() })
-          .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id), isNull(schema.bumperAssets.deletedAt)))
-          .returning({ id: schema.bumperAssets.id });
-        if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+        // an instance-shared row is never removed by a user: this drops the user's save only (the sweep owns the row)
+        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId)));
+        if (shared) {
+          const dropped = await u.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id))).returning({ assetId: schema.assetSaves.assetId });
+          if (!dropped.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+        } else {
+          const gone = await u.db
+            .update(schema.assets)
+            .set({ deletedAt: new Date() })
+            .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
+            .returning({ id: schema.assets.id });
+          if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+        }
         for (const key of ["introAssetId", "outroAssetId"]) {
           await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
         }
         return { ok: true };
       });
     }),
+    /** Undo a removal; for an instance-shared row this saves it again. */
     restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      const r = await ctx.svc.database.db
-        .update(schema.bumperAssets)
-        .set({ deletedAt: null })
-        .where(and(eq(schema.bumperAssets.id, input.id), eq(schema.bumperAssets.userId, ctx.user.id)))
-        .returning({ id: schema.bumperAssets.id });
-      if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
-      return { ok: true };
+      return ctx.svc.tx(async (u) => {
+        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId), isNull(schema.assets.deletedAt)));
+        if (shared) {
+          await u.db.insert(schema.assetSaves).values({ userId: ctx.user.id, assetId: shared.id }).onConflictDoNothing();
+          return { ok: true };
+        }
+        const r = await u.db
+          .update(schema.assets)
+          .set({ deletedAt: null })
+          .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id)))
+          .returning({ id: schema.assets.id });
+        if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
+        return { ok: true };
+      });
+    }),
+});
+
+const restRouter = router({
+  /** The Reelsaw catalog manifest (admins); search, providers and import are `library.*`. */
+  catalog: router({
+    status: adminProcedure.query(async ({ ctx }) => ({ ...(await libraryProviders(ctx.svc).catalog.status()), providers: libraryProviders(ctx.svc).registry.list() })),
+    refresh: adminProcedure.mutation(async ({ ctx }) => {
+      try {
+        return (await libraryProviders(ctx.svc).catalog.refresh({ force: true })).status;
+      } catch (err) {
+        return asTrpc(err);
+      }
     }),
   }),
 
@@ -1061,6 +1103,7 @@ export const appRouter = router({
           .insert(schema.projects)
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
           .returning();
+        await syncProjectRefs(u.db, row!); // the defaults' intro/outro
         await u.emit(id, "project.created", { title });
         await startRun(u, id, { reason: "created", status: "queued" });
         await u.enqueue(QUEUES.ingest, { projectId: id });
@@ -1154,14 +1197,15 @@ export const appRouter = router({
               if (mine[key]) patch[key] = mine[key]!;
             } else {
               // a library asset of this user; the one the project already uses stays valid even if it was since removed
-              const [asset] = await u.db.select({ id: schema.bumperAssets.id, deletedAt: schema.bumperAssets.deletedAt }).from(schema.bumperAssets).where(and(eq(schema.bumperAssets.id, choice), eq(schema.bumperAssets.userId, ctx.user.id)));
+              const [asset] = await u.db.select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt }).from(schema.assets).where(and(eq(schema.assets.id, choice), assetVisibleTo(ctx.user.id)));
               if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
               patch[key] = choice;
             }
           }
           // clips first, the project row last (lock order clip → project)
           const n = input.rerender ? await rerenderClips(svc, u, p.id) : 0;
-          await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+          const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
+          await syncProjectRefs(u.db, after!);
           return n;
         });
         return { ok: true, rerendered };
@@ -1379,10 +1423,8 @@ export const appRouter = router({
           emphasis: z.array(z.string().min(1).max(40)).max(30).optional(),
           /** This clip's own intro/outro choice, replacing the whole value: a missing key inherits the project, null is none. */
           bumpers: clipBumpersSchema.nullable().optional(),
-          /** Library images/videos laid over the clip, replacing the whole list; null or [] = none. */
-          overlays: z.array(clipOverlaySchema).max(MAX_CLIP_OVERLAYS).nullable().optional(),
-          /** Background music tracks under the clip (library audio assets), replacing the whole list; null or [] = none. */
-          audio: z.array(clipAudioSchema).max(MAX_CLIP_AUDIO).nullable().optional(),
+          /** Everything laid over or played under the clip (assets, text, sounds), replacing the whole list; null or [] = none. */
+          layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional(),
           startSec: z.number().min(0).optional(),
           endSec: z.number().min(0).optional(),
           rerender: z.boolean().optional(),
@@ -1407,16 +1449,16 @@ export const appRouter = router({
         const emphasisChanged = input.emphasis !== undefined && JSON.stringify(input.emphasis) !== JSON.stringify(c.emphasis ?? []);
         const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
         const bumpersChanged = input.bumpers !== undefined && JSON.stringify(cleanBumpers) !== JSON.stringify(c.bumpers ?? null);
-        const cleanedOverlays = input.overlays !== undefined ? cleanOverlays(input.overlays, { startSec, endSec }) : undefined;
-        const overlaysChanged = cleanedOverlays !== undefined && JSON.stringify(cleanedOverlays) !== JSON.stringify(c.overlays?.length ? c.overlays : null);
-        const cleanedAudio = input.audio !== undefined ? cleanAudio(input.audio, { startSec, endSec }) : undefined;
-        const audioChanged = cleanedAudio !== undefined && JSON.stringify(cleanedAudio) !== JSON.stringify(clipAudioList(c.audio).length ? clipAudioList(c.audio) : null);
-        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || overlaysChanged || audioChanged; // these are burned into the video
+        // layers replace the whole list
+        const currentLayers = clipLayers(c);
+        const nextLayers: ClipLayer[] | undefined = input.layers !== undefined ? (input.layers ?? []) : undefined;
+        const cleanedLayers = nextLayers !== undefined ? cleanLayers(nextLayers, { startSec, endSec }) : undefined;
+        const layersChanged = cleanedLayers !== undefined && JSON.stringify(cleanedLayers) !== JSON.stringify(currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
+        const needsRender = bumpersChanged || boundsChanged || hookChanged || layoutChanged || sectionsChanged || styleChanged || emphasisChanged || layersChanged; // these are burned into the video
         const cur = c;
         // ownership of the chosen assets is checked in the unit of work that writes
         if (bumpersChanged) await assertOwnedBumpers(u.db, ctx.user.id, [cleanBumpers?.intro, cleanBumpers?.outro], [cur.bumpers?.intro, cur.bumpers?.outro]);
-        if (overlaysChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedOverlays ?? []).map((o) => o.assetId), (cur.overlays ?? []).map((o) => o.assetId), "overlay");
-        if (audioChanged && cleanedAudio) await assertOwnedBumpers(u.db, ctx.user.id, cleanedAudio.map((t) => t.assetId), clipAudioList(cur.audio).map((t) => t.assetId), "music");
+        if (layersChanged) await assertOwnedBumpers(u.db, ctx.user.id, (cleanedLayers ?? []).flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), currentLayers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), "library item");
         const [row] = await u.db
           .update(schema.clips)
           .set({
@@ -1429,8 +1471,8 @@ export const appRouter = router({
             ...(input.emphasis !== undefined ? { emphasis: input.emphasis.length ? input.emphasis : null } : {}),
             ...(input.style !== undefined ? { style: input.style && Object.keys(input.style).length ? input.style : null } : {}),
             ...(input.bumpers !== undefined ? { bumpers: cleanBumpers } : {}),
-            ...(cleanedOverlays !== undefined ? { overlays: cleanedOverlays } : {}),
-            ...(cleanedAudio !== undefined ? { audio: cleanedAudio } : {}),
+            // a clip saved with layers no longer carries the two old lists (clipLayers reads either)
+            ...(cleanedLayers !== undefined ? { layers: cleanedLayers, overlays: null, audio: null } : {}),
             startSec: Number(startSec.toFixed(2)),
             endSec: Number(endSec.toFixed(2)),
             editedAt: new Date(), // a clip the user touched survives a re-analyze
@@ -1441,6 +1483,7 @@ export const appRouter = router({
         // the edit and its re-render (generation bump, job, project reopened) commit together
         if (needsRender && input.rerender) await requestRender(svc, u, p.id, c.id);
         const [fresh] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, c.id));
+        if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, fresh ?? row!);
         return fresh ?? row!;
         });
         return publicClip(updated);
@@ -1469,6 +1512,7 @@ export const appRouter = router({
               .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
               .where(inArray(schema.clips.id, ids));
           }
+          await syncClipsRefs(u.db, p.id, await u.db.select({ id: schema.clips.id, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.id, ids)));
           let rerendered = 0;
           if (input.rerender) for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
           return { ok: true, updated: ids.length, rerendered };
@@ -1558,4 +1602,5 @@ export const appRouter = router({
   }),
 });
 
+export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter }), restRouter);
 export type AppRouter = typeof appRouter;

@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -289,18 +289,26 @@ export const uploads = pgTable(
 );
 
 /**
- * A user's intro/outro video. Immutable: replacing one is a new row, so a cache keyed by id is
- * correct and a clip's diagnostics say exactly which version it used. Soft-deleted rows still
- * resolve at render time so projects that snapshotted the id keep working.
+ * The user's library: intros / outros, logos, stickers, b-roll, music and sound effects. Immutable: replacing
+ * one is a new row, so a cache keyed by id is correct and a clip's diagnostics say exactly which version it
+ * used. Soft-deleted rows still resolve at render time so projects that snapshotted the id keep working.
+ * Storage keys are stored in full (`source_key`), so rows made before the rename keep their `bumpers/<id>/…`
+ * objects and new rows write `assets/<id>/…`.
  */
-export const bumperAssets = pgTable(
-  "bumper_assets",
+export const assets = pgTable(
+  "assets",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    /** the account that uploaded it; null = an instance-shared row (imported from the catalog or a provider, visible to every account) */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     kind: text("kind").$type<"video" | "image" | "audio">().notNull().default("video"),
+    /** exact format (image/svg+xml, image/gif, video/mp4, audio/mpeg…); null for rows made before it existed */
+    mime: text("mime"),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** where an imported item came from and its license; null for the user's own uploads */
+    provenance: jsonb("provenance").$type<AssetProvenance>(),
+    /** came from the Reelsaw catalog (shown with a badge; otherwise an ordinary row) */
+    system: boolean("system").notNull().default(false),
     name: text("name").notNull(),
     durationSec: real("duration_sec").notNull(),
     width: integer("width").notNull(),
@@ -315,12 +323,53 @@ export const bumperAssets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash),
+  (t) => [index("assets_user_idx").on(t.userId), index("assets_hash_idx").on(t.userId, t.contentHash),
     // the hourly purge looks for removed assets across all users
-    index("bumper_assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
+    index("assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
+    // one instance-shared row per catalog / provider item (and Iconify colour), however many accounts import it
+    uniqueIndex("assets_shared_source_idx")
+      .on(sql`(${t.provenance}->>'provider')`, sql`(${t.provenance}->>'externalId')`, sql`coalesce(${t.provenance}->>'variant', '')`)
+      .where(sql`${t.userId} is null and ${t.deletedAt} is null`),
   ],
 );
-export type BumperAsset = typeof bumperAssets.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+/** @deprecated use Asset */
+export type LibraryAsset = Asset;
+
+/** An instance-shared asset a user keeps in their library ("Add" on a catalog or provider item); removing it unsaves. */
+export const assetSaves = pgTable(
+  "asset_saves",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.assetId] }), index("asset_saves_asset_idx").on(t.assetId)],
+);
+
+/**
+ * Which library assets a project or clip uses, and how, maintained in the same transaction as the write
+ * that changed `clips.layers`, `clips.bumpers` or the project's intro/outro settings. "Used by N", the
+ * purge's "still referenced" test and the credits list read this instead of scanning jsonb.
+ */
+export const assetRefs = pgTable(
+  "asset_refs",
+  {
+    assetId: text("asset_id").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** null = the project's own settings name the asset */
+    clipId: text("clip_id").references(() => clips.id, { onDelete: "cascade" }),
+    role: text("role").$type<"intro" | "outro" | "layer">().notNull(),
+  },
+  (t) => [index("asset_refs_asset_idx").on(t.assetId), index("asset_refs_project_idx").on(t.projectId), index("asset_refs_clip_idx").on(t.clipId)],
+);
+export type AssetRef = typeof assetRefs.$inferSelect;
 
 export const projects = pgTable(
   "projects",
@@ -461,6 +510,8 @@ export const clips = pgTable(
     overlays: jsonb("overlays").$type<ClipOverlay[]>(),
     /** background music under parts of the clip (library audio tracks, ducked under speech); null = none. Read through `clipAudioList` (older rows hold one object). */
     audio: jsonb("audio").$type<ClipAudio[]>(),
+    /** everything laid over or played under the clip (assets, text, sounds), replacing `overlays` + `audio`; null = read those (see `clipLayers`) */
+    layers: jsonb("layers").$type<ClipLayer[]>(),
     /** the caption lines the last render burned in, in the rendered video's seconds, for SRT / VTT export */
     captions: jsonb("captions").$type<RenderedCaptions>(),
     /** last time the user edited the clip (clips.update); an edited clip survives a re-analyze */

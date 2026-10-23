@@ -7,7 +7,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzl
 import { TRPCError } from "@trpc/server";
 import type { ProjectStatus } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
-import { projectBumperSummaries } from "./bumpers/service.js";
+import { projectBumperSummaries } from "./library/service.js";
 import { decodeCursor, pageOf } from "./pagination.js";
 
 export const ACTIVE_STATUSES = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const satisfies readonly ProjectStatus[];

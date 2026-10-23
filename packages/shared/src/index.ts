@@ -156,12 +156,12 @@ export const hasAdjust = (s: Pick<LayoutSection, "offsetX" | "offsetY" | "offset
  * An image or short video from the library laid over part of the clip (a logo, a sticker, b-roll).
  * Times are absolute source seconds like sections; position and size are fractions of the 9:16 output.
  */
-export const clipOverlaySchema = z
+const clipOverlayBase = z
   .object({
     id: z.string().min(1).max(40).describe("Stable id for this overlay (any short string; keep it when editing)"),
     /** absent = asset (rows stored before text overlays existed) */
     kind: z.enum(["asset", "text"]).optional().describe("asset (default): a library image or video; text: a line of text"),
-    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (list_bumpers), an image or a video"),
+    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (search_assets with source library), an image or a video"),
     text: z.string().trim().min(1).max(120).optional().describe("text: the line to show (1-120 chars)"),
     start: z.number().min(0).describe("Shown from this second of the source video"),
     end: z.number().min(0).describe("Hidden after this second of the source video"),
@@ -177,8 +177,8 @@ export const clipOverlaySchema = z
     box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
     font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
     opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
-  })
-  .refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
+  });
+export const clipOverlaySchema = clipOverlayBase.refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
 export type ClipOverlay = z.infer<typeof clipOverlaySchema>;
 export const MAX_CLIP_OVERLAYS = 20;
 
@@ -188,7 +188,7 @@ export const MAX_CLIP_OVERLAYS = 20;
  */
 export const clipAudioSchema = z.object({
   id: z.string().min(1).max(40).describe("Stable id for this track (any short string; keep it when editing)"),
-  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_bumpers, kind audio); the same asset can be used more than once"),
+  assetId: z.string().min(1).max(100).describe("Library audio asset id (search_assets with source library, kind audio); the same asset can be used more than once"),
   start: z.number().min(0).describe("Music starts at this second of the source video"),
   end: z.number().min(0).describe("Music stops after this second of the source video"),
   offset: z.number().min(0).optional().describe("Seconds into the track to start from (default 0)"),
@@ -209,6 +209,112 @@ export function clipAudioList(v: unknown): ClipAudio[] {
   }
   return [];
 }
+
+// ── layers: one list for everything laid over or played under a clip ──────────
+
+/** The sound-effect treatment of an audio layer: one shot at full level, no ducking, no fade, no loop. */
+export const SFX_AUDIO_DEFAULTS = { volume: 1, duck: false, fade: 0, loop: false } as const;
+
+/**
+ * An image or video from the library laid over part of the clip (a logo, a sticker, b-roll).
+ * `loop` repeats a video or animated image inside its window (default: on for GIF / animated WebP,
+ * off for videos; the renderer decides from the asset when it is left out).
+ */
+export const assetLayerSchema = clipOverlayBase
+  .omit({ kind: true, text: true, size: true, color: true, box: true, font: true })
+  .extend({
+    kind: z.literal("asset"),
+    assetId: z.string().min(1).max(100).describe("Library asset id (search_assets with source library): an image, an animation or a video"),
+    loop: z.boolean().optional().describe("Repeat a video / animation while its window is open (default: on for GIF and animated WebP, off for videos)"),
+  });
+/** A line of text drawn with the caption font and plate. */
+export const textLayerSchema = clipOverlayBase
+  .omit({ kind: true, assetId: true, w: true })
+  .extend({ kind: z.literal("text"), text: z.string().trim().min(1).max(120).describe("The line to show (1-120 chars)") });
+/** Music or a sound effect under part of the clip (clipAudioSchema with a kind). */
+export const audioLayerSchema = clipAudioSchema.extend({ kind: z.literal("audio") });
+
+/**
+ * Everything on a clip's Layers lane. Discriminated on `kind`; the shared fields (`id`, `start`, `end`,
+ * absolute source seconds) are what the lane, drag, trim, copy/paste and undo work on. Intro / outro are
+ * not layers: they sit outside the clip's time range (`clips.bumpers`).
+ */
+export const clipLayerSchema = z.discriminatedUnion("kind", [assetLayerSchema, textLayerSchema, audioLayerSchema]);
+export type ClipLayer = z.infer<typeof clipLayerSchema>;
+export type AssetLayer = z.infer<typeof assetLayerSchema>;
+export type TextLayer = z.infer<typeof textLayerSchema>;
+export type AudioLayer = z.infer<typeof audioLayerSchema>;
+export const MAX_CLIP_LAYERS = 30;
+export const isVisualLayer = (l: ClipLayer): l is AssetLayer | TextLayer => l.kind !== "audio";
+
+/**
+ * A clip's layers whatever generation of row it is: `layers` when the clip has been saved with them,
+ * otherwise its `overlays` (asset or text) and `audio` tracks read as layers. Ids are kept; a collision
+ * between the two old lists (never seen; they used different prefixes) prefixes the audio id.
+ */
+export function clipLayers(clip: { layers?: unknown; overlays?: unknown; audio?: unknown }): ClipLayer[] {
+  if (Array.isArray(clip.layers)) return clip.layers.flatMap((x) => (clipLayerSchema.safeParse(x).success ? [clipLayerSchema.parse(x)] : []));
+  const out: ClipLayer[] = [];
+  const overlays = Array.isArray(clip.overlays) ? clip.overlays : [];
+  for (const raw of overlays) {
+    const r = clipOverlaySchema.safeParse(raw);
+    if (!r.success) continue;
+    const o = r.data;
+    if (overlayKind(o) === "text") {
+      const { assetId: _a, w: _w, ...rest } = o;
+      out.push({ ...rest, kind: "text", text: o.text! });
+    } else {
+      const { text: _t, size: _s, color: _c, box: _b, font: _f, ...rest } = o;
+      out.push({ ...rest, kind: "asset", assetId: o.assetId! });
+    }
+  }
+  const ids = new Set(out.map((l) => l.id));
+  for (const m of clipAudioList(clip.audio)) out.push({ ...m, kind: "audio", id: ids.has(m.id) ? `a:${m.id}` : m.id });
+  return out;
+}
+
+/** Split layers back into the two legacy lists (for callers that still speak overlays / audio, e.g. older MCP clients). */
+export function layersToLegacy(layers: ClipLayer[]): { overlays: ClipOverlay[]; audio: ClipAudio[] } {
+  const overlays: ClipOverlay[] = [];
+  const audio: ClipAudio[] = [];
+  for (const l of layers) {
+    if (l.kind === "audio") {
+      const { kind: _k, ...rest } = l;
+      audio.push(rest);
+    } else if (l.kind === "text") overlays.push(l);
+    else {
+      const { loop: _l, ...rest } = l;
+      overlays.push(rest);
+    }
+  }
+  return { overlays, audio };
+}
+
+// ── library assets ───────────────────────────────────────────────────────────
+
+/** Coarse type the renderer and the pickers branch on; the exact format is the asset's `mime`. */
+export const ASSET_KINDS = ["video", "image", "audio"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
+export const assetTagsSchema = z.array(z.string().trim().min(1).max(40)).max(30);
+
+/** Where an imported asset came from and under which license; null for the user's own uploads. */
+export const assetProvenanceSchema = z.object({
+  provider: z.string().min(1).max(40).describe("reelsaw (the catalog), pexels, pixabay, freesound, iconify, openverse, giphy, klipy, url"),
+  externalId: z.string().max(200).optional(),
+  /** the colour an Iconify icon was fetched in (hex without #), "" otherwise; part of the shared-row key with provider and externalId */
+  variant: z.string().max(20).optional(),
+  url: z.url().max(2000).optional().describe("The item's page at the source"),
+  license: z.object({ id: z.string().max(40), name: z.string().max(120), url: z.url().max(2000).optional() }).optional(),
+  attribution: z.string().max(300).optional().describe("Credit line as the source wants it shown"),
+  importedAt: z.string().optional(),
+});
+export type AssetProvenance = z.infer<typeof assetProvenanceSchema>;
+
+/** Sound effects are short; anything longer is music. */
+export const SFX_MAX_SEC = 8;
+
+/** The treatment a sound gets when it lands on the lane: a short file is a one-shot effect, a long one is music. */
+export const audioLayerDefaultsFor = (asset: { durationSec: number }) => (asset.durationSec <= SFX_MAX_SEC ? SFX_AUDIO_DEFAULTS : CLIP_AUDIO_DEFAULTS);
 
 /**
  * Fonts a text overlay can use: installed in the server image (Dockerfile) and served to the editor
@@ -374,8 +480,8 @@ export const projectSettingsSchema = styleSchema.extend({
    * defaults when the project is created. Unset = none; null is reserved for "none, although my
    * default has one" (project override, phase 2).
    */
-  introAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the intro (list_bumpers); null = none"),
-  outroAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the outro (list_bumpers); null = none"),
+  introAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the intro (search_assets with source library); null = none"),
+  outroAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the outro (search_assets with source library); null = none"),
   /** How long an image intro / outro lasts in this project, overriding the library item's own length. */
   introSec: bumperSecondsSchema.optional(),
   outroSec: bumperSecondsSchema.optional(),

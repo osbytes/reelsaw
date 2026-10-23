@@ -10,12 +10,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { addBumperInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/bumpers/service.js";
+import { addAssetInput, assetMap, bumperNameSchema, clipBumpersCall, downloadAsUpload, effectiveBumpers, FETCH_MAX_BYTES, isPrivateAddress, projectBumpersCall, requireOneSource, setClipBumpersInput, setProjectBumpersInput } from "../src/library/service.js";
 import type { Services } from "../src/services.js";
 
 const clipIn = z.object(setClipBumpersInput);
 const projectIn = z.object(setProjectBumpersInput);
-const addIn = z.object(addBumperInput);
+const addIn = z.object(addAssetInput);
 
 describe("tool input schemas", () => {
   it("set_clip_bumpers needs clips and an explicit rerender, and bounds seconds", () => {
@@ -30,18 +30,30 @@ describe("tool input schemas", () => {
     for (const v of ["default", "none", "3f2a"]) assert.ok(projectIn.safeParse({ projectId: "p", intro: v, rerender: true }).success);
     assert.ok(!projectIn.safeParse({ projectId: "p", intro: 5, rerender: true }).success);
   });
-  it("rename_bumper trims the name and refuses an empty one", () => {
+  it("update_asset trims the name and refuses an empty one", () => {
     assert.equal(bumperNameSchema.parse("  Logo sting "), "Logo sting");
     assert.ok(!bumperNameSchema.safeParse("   ").success);
     assert.ok(!bumperNameSchema.safeParse("x".repeat(121)).success);
   });
-  it("add_bumper wants a real url and one source", () => {
+  it("add_asset wants a real url and one source", () => {
     assert.ok(!addIn.safeParse({ url: "not a url" }).success);
     assert.ok(!addIn.safeParse({ url: "https://x.test/a.png", imageSeconds: 0.5 }).success);
     assert.ok(!addIn.safeParse({ url: "https://x.test/a.png", setDefault: "middle" }).success);
     assert.throws(() => requireOneSource({}), /exactly one/);
     assert.throws(() => requireOneSource({ url: "https://x.test/a.png", uploadId: "u" }), /exactly one/);
+    assert.throws(() => requireOneSource({ provider: "pexels" }), /go together/);
+    assert.throws(() => requireOneSource({ uploadId: "u", provider: "pexels", externalId: "1" }), /exactly one/);
     requireOneSource({ uploadId: "u" });
+    requireOneSource({ provider: "pexels", externalId: "1" });
+  });
+});
+
+describe("add_asset input", () => {
+  const assetIn = z.object(addAssetInput);
+  it("takes tidy tags and has no category input", () => {
+    assert.ok(assetIn.safeParse({ url: "https://x.test/a.gif", tags: ["fun", "party"] }).success);
+    assert.equal("category" in addAssetInput, false);
+    assert.ok(!assetIn.safeParse({ url: "https://x.test/a.gif", tags: Array(50).fill("t") }).success);
   });
 });
 
@@ -106,7 +118,7 @@ describe("downloadAsUpload", () => {
     await assert.rejects(downloadAsUpload(h.svc, "u", "file:///etc/passwd", { fetch: f, lookup: pub }), /http/);
     const redirect = async () => new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } });
     await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/a.png", { fetch: redirect, lookup: pub }), /not reachable/);
-    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/page", { fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }), lookup: pub }), /MP4, MOV or WebM/);
+    await assert.rejects(downloadAsUpload(h.svc, "u", "https://cdn.test/page", { fetch: async () => new Response("x", { headers: { "content-type": "text/html" } }), lookup: pub }), /Use a video/);
     assert.equal(h.rows.length, 0);
   });
   it("enforces the size limit by header and while streaming", async () => {

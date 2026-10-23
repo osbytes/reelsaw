@@ -1,5 +1,7 @@
 # Intro and outro scenes (bumpers)
 
+> Historical: the library grew past intros and outros. Current names and surfaces are in [library.md](library.md) (`library.*`, `search_assets` / `add_asset`, `reelsaw library`); the names below are the originals.
+
 ## Job
 When I publish clips, I want my own intro and/or outro (a short video, or an image shown for a few
 seconds) attached to every clip automatically, so that every export is on-brand without opening
@@ -36,7 +38,8 @@ another editor. Today branding is added by hand. Appetite: about 3 days for phas
 | Type | Accepted | Limits |
 |---|---|---|
 | Video | mp4, mov, webm | at most 10 s, at most 50 MB, any size/fps/codec ffmpeg reads |
-| Image | png, jpg | shown 1 to 10 s, default 3 s, user sets seconds |
+| Image | png, jpg, webp, gif, svg (still) | at most 20 MB and 8192 px a side, shown 1 to 10 s, default 3 s, user sets seconds; an SVG is rasterised at 1080 px by resvg first |
+| Animation | gif, animated webp | read as a silent video: at most 10 s and 50 MB, own length (animated WebP needs an ffmpeg that can decode it) |
 | Sound (phase 3) | mp3, m4a, wav | under an image, clipped to its length |
 
 Checked server-side with ffprobe, not by file name. Errors are sentences: "This video is 14 s long.
@@ -55,7 +58,7 @@ mixed: the clip does not play under the outro, and its last 0.2 s fades out when
 Loudness is not changed; a bumper far louder than speech gets a plain warning in the preview.
 
 ## Data model
-New table `bumper_assets` in `db/schema.ts` (`npx drizzle-kit generate --name bumper_assets`):
+New table `bumper_assets` (renamed `assets` in Oct 2026, see library.md) in `db/schema.ts` (`npx drizzle-kit generate --name bumper_assets`):
 `id`, `user_id` (references user, cascade), `kind` (video|image), `name`, `duration_sec`, `width`,
 `height`, `has_audio`, `source_key` (`bumpers/{id}/source{ext}`), `size_bytes`, `created_at`,
 `deleted_at`.
@@ -171,16 +174,16 @@ is unchanged.
   each ("overlay ×2", "music", "intro · from project").
 
 ## API, MCP, CLI
-tRPC `bumpers.*`; the ids ride on project settings and user defaults. MCP gets optional ids on project
-creation and read-only `list_bumpers` (uploading stays in the web UI). CLI: `reelsaw bumpers`.
-`bumpers.list` / `list_bumpers` carry `usedBy`, `usedByClips` (intro, outro, overlay and music uses) and
-`url` (the file itself, for playing or viewing); `bumpers.usage` / `bumper_usage` / `reelsaw bumpers usage`
-return the roles per clip (`slots`, with `overlays` and `music` counts). `bumpers.update` / `rename_bumper` /
-`reelsaw bumpers rename` change the label.
+tRPC `library.*` (first `bumpers.*`); the ids ride on project settings and user defaults. MCP gets optional ids on project
+creation and read-only `search_assets` with source library (first `list_bumpers`; uploading stays in the web UI). CLI: `reelsaw library`.
+`library.list` carries `usedBy`, `usedByClips` (intro, outro, overlay and music uses) and
+`url` (the file itself, for playing or viewing); `library.usage` / `asset_usage` / `reelsaw library usage`
+return the roles per clip (`slots`, with `overlays` and `music` counts). `library.update` / `update_asset` /
+`reelsaw library rename` change the label.
 
 ## Edge cases
 - Source without audio: body gets generated silence, so concat always has audio.
-- VFR or rotated phone video: normalising forces 30 fps CFR and autorotates. GIF/WebP: rejected.
+- VFR or rotated phone video: normalising forces 30 fps CFR and autorotates. An animated GIF is a silent video; a still GIF/WebP and an SVG are images (SVG via its PNG).
 - Imported issue report: asset ids don't exist locally; the failure rule skips them.
 
 ## Plan
@@ -195,7 +198,7 @@ timing identical to a render without bumpers.
 selection (inherit / none / asset per slot, replacing the opt-out) with bulk apply and a card
 popover, editor label, a library of several assets with restore, "Used by N projects".
 
-**Phase 3:** image + sound, loudness warning, MCP and CLI (done: `list_bumpers`, `add_bumper`, `set_default_bumper`, `remove_bumper`, `restore_bumper`, `bumper_usage`, `set_project_bumpers`, `set_clip_bumpers`, effective bumpers in `get_project`/`get_clip`; `reelsaw bumpers|project-bumpers|clip-bumpers`), cleanup job, optional 0.15 s crossfade.
+**Phase 3:** image + sound, loudness warning, MCP and CLI (done, now `search_assets`, `add_asset`, `set_default_bumper`, `remove_asset`, `restore_asset`, `asset_usage`, `set_project_bumpers`, `set_clip_bumpers`, effective bumpers in `get_project`/`get_clip`; `reelsaw library|project-bumpers|clip-bumpers`), cleanup job, optional 0.15 s crossfade.
 
 ## Risks
 - Concat needs audio in every slot; the no-cuts branch has optional audio today.

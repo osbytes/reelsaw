@@ -13,6 +13,7 @@ import { useMe } from "../lib/account";
 import { toast } from "sonner";
 import { extractUrls, isOnlyUrls, linkKey, youtubeId } from "../lib/links";
 import { ago } from "../lib/time";
+import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { formatTime } from "@reelsaw/shared";
@@ -62,9 +63,9 @@ interface Item {
 
 
 /** kind, length, size and badges of a library item on one line */
-function assetHint(a: { kind: string; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
+function assetHint(a: { kind: string; mime?: string | null; durationSec: number; width: number; height: number; usedBy: number; id: string }, defaults?: { introAssetId?: string; outroAssetId?: string }): string {
   const badges = [defaults?.introAssetId === a.id ? "default intro" : "", defaults?.outroAssetId === a.id ? "default outro" : "", a.usedBy ? `used by ${a.usedBy}` : ""].filter(Boolean);
-  return [a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].join(" · ");
+  return [formatTag(a.mime) ?? a.kind, `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`, `${a.width}×${a.height}`, ...badges].filter(Boolean).join(" · ");
 }
 
 function download(href: string) {
@@ -90,17 +91,17 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
-  const setDefault = useMutation(trpc.bumpers.setDefault.mutationOptions());
-  const removeAsset = useMutation(trpc.bumpers.delete.mutationOptions());
-  const restoreAsset = useMutation(trpc.bumpers.restore.mutationOptions());
+  const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
+  const removeAsset = useMutation(trpc.library.remove.mutationOptions());
+  const restoreAsset = useMutation(trpc.library.restore.mutationOptions());
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
 
-  // the intro/outro library, fetched only while the palette is open
-  const libQ = useQuery({ ...trpc.bumpers.list.queryOptions(), enabled: open, staleTime: 30_000 });
+  // the library, fetched only while the palette is open
+  const libQ = useQuery({ ...trpc.library.list.queryOptions(), enabled: open, staleTime: 30_000 });
   const library = libQ.data?.assets;
-  const libFuse = useMemo(() => (library ? createFuzzy(library, [{ name: "name", weight: 1 }]) : null), [library]);
+  const libFuse = useMemo(() => (library ? createFuzzy(library.map(searchable), SEARCH_KEYS) : null), [library]);
   const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
 
   // The list before typing is the 20 most recent projects; typing asks the server (debounced), which matches in SQL
@@ -350,8 +351,8 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       { key: "a-new", group: "Actions", icon: <Plus className="h-4 w-4" />, label: "New project", hint: "paste a link or upload", run: go(() => nav("/new")) },
       { key: "a-upload", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload videos…", hint: "several start a project each", run: () => fileRef.current?.click() },
       { key: "a-projects", group: "Actions", icon: <FolderOpen className="h-4 w-4" />, label: "Go to projects", run: go(() => nav("/")) },
-      { key: "a-library", group: "Actions", icon: <Images className="h-4 w-4" />, label: "Go to library", hint: "intros and outros", run: go(() => nav("/library")) },
-      { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload intro / outro…", hint: "video or image for your library", run: () => bumperFileRef.current?.click() },
+      { key: "a-library", group: "Actions", icon: <Images className="h-4 w-4" />, label: "Go to library", hint: "intros, outros, images, audio", run: go(() => nav("/library")) },
+      { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
@@ -532,7 +533,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     back();
                   }
                 }}
-                placeholder={target ? (target.kind === "pick" ? "Filter intros and outros…" : "Filter actions…") : "Search projects, clips and your library, or paste video links…"}
+                placeholder={target ? (target.kind === "pick" ? "Filter your library…" : "Filter actions…") : "Search projects, clips and your library, or paste video links…"}
                 className="h-[52px] min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-ink3 focus-visible:outline-none"
                 aria-label={target ? "Filter actions" : "Search"}
               />
@@ -681,7 +682,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           const c = confirm!;
           removeAsset.mutateAsync({ id: c.id }).then(
             () => {
-              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.bumpers.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
+              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.library.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
               refresh();
               toast(`Removed ${c.title}`, { duration: 8000, action: { label: "Undo", onClick: () => void restoreAsset.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
             },

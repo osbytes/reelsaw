@@ -188,6 +188,16 @@ export const envSchema = z.object({
   /** Include machine resources in GET /api/health for anonymous callers (load balancers on a private network). Admins always get them. */
   HEALTH_DETAILS: boolFalse,
 
+  // Library: the Reelsaw catalog and remote asset providers (library/providers, library/catalog.ts). Keys are runtime settings.
+  CATALOG_URL: z.string().trim().url().default("https://reelsaw.com/catalog/v1/index.json"),
+  PEXELS_API_KEY: z.string().optional(),
+  PIXABAY_API_KEY: z.string().optional(),
+  FREESOUND_API_KEY: z.string().optional(),
+  GIPHY_API_KEY: z.string().optional(),
+  KLIPY_API_KEY: z.string().optional(),
+  ICONIFY_API_URL: z.string().trim().url().default("https://api.iconify.design"),
+  OPENVERSE_ENABLED: boolFalse,
+
   // enterprise edition (apps/server/src/ee, docs/specs/ee.md): billing through Stripe. Off, the folder is never imported.
   REELSAW_EE: boolFalse,
   STRIPE_SECRET_KEY: z.string().optional(),

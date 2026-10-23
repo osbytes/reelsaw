@@ -45,7 +45,7 @@ describe("mcp stdio bridge", () => {
       const r = await client.callTool({ name: "list_projects", arguments: {} });
       assert.equal(r.isError, true);
       assert.match(textOf(r), /REELSAW_API_KEY is not set/);
-      const noInput = await client.callTool({ name: "list_bumpers", arguments: {} });
+      const noInput = await client.callTool({ name: "search_assets", arguments: {} });
       assert.equal(noInput.isError, true);
       assert.match(textOf(noInput), /REELSAW_API_KEY/);
     } finally {
