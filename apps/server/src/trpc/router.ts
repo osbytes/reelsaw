@@ -20,7 +20,8 @@ import type { UnitOfWork } from "../uow.js";
 import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
-import { bumperKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
+import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
+import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { projectBumperSummaries, bumperUsageCounts, bumperNameSchema, updateBumperAsset } from "../library/service.js";
 import { applyFlags } from "../pipeline/entities.js";
 import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
@@ -588,7 +589,8 @@ export const appRouter = router({
         const up = await svc.database.db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, ctx.user.id)) });
         if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "Upload not found" });
         const ext = path.extname(up.filename).toLowerCase();
-        const kind = bumperKind(ext) ?? "video";
+        // the extension's guess; a GIF or WebP is re-decided from the probe below (animated = video)
+        let kind = bumperKind(ext) ?? "video";
         const id = randomUUID();
         const local = path.join(svc.paths.tmp, `bumper-${id}${ext}`);
         try {
@@ -597,8 +599,13 @@ export const appRouter = router({
           if (early) throw new TRPCError({ code: "BAD_REQUEST", message: early });
           await fs.mkdir(svc.paths.tmp, { recursive: true });
           await svc.storage.ensureLocal(up.storageKey, local);
-          const probe = await svc.media.ffprobe(local).catch(() => null);
+          // ffprobe cannot size an SVG reliably (and not every ffmpeg build reads one): resvg gives its size
+          const svgText = ext === ".svg" ? await fs.readFile(local) : null;
+          if (svgText && svgHasExternalRefs(svgText)) throw new TRPCError({ code: "BAD_REQUEST", message: "This SVG links to other files. Embed its images, or export it as a PNG." });
+          const svgDims = svgText ? svgSize(svgText) : null;
+          const probe = ext === ".svg" ? (svgDims ? { durationSec: 0, width: svgDims.width, height: svgDims.height, hasAudio: false } : null) : await svc.media.ffprobe(local).catch(() => null);
           if (!probe) throw new TRPCError({ code: "BAD_REQUEST", message: `This file could not be read as ${kind === "image" ? "an image" : kind === "audio" ? "audio" : "a video"}.` });
+          kind = assetKind(ext, probe) ?? kind;
           const problem = bumperProblem(input.setDefault, { ext, sizeBytes: up.sizeBytes }, probe);
           if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
           const sourceKey = keys.asset(id, ext);
@@ -645,7 +652,7 @@ export const appRouter = router({
               try {
                 await svc.storage.putFile(sourceKey, local);
                 // the picker thumbnail (none for audio); if this fails the media route makes it on first request
-                const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey }, local).catch(() => null);
+                const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey, mime: assetMime(ext) }, local).catch(() => null);
                 if (thumbKey) await svc.database.db.update(schema.libraryAssets).set({ thumbnailKey: thumbKey }).where(eq(schema.libraryAssets.id, id)).catch(() => {});
               } finally {
                 await fs.rm(local, { force: true }).catch(() => {});

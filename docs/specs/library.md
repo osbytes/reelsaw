@@ -71,14 +71,30 @@ without leaving the editor or finding files on my disk.
    list become indexed lookups instead of jsonb `->>` scans over every clip. Backfilled once by the
    migration's follow-up job.
 5. **Accepted types widen.** Images: png, jpg, **webp, gif, svg**. Video: mp4, mov, webm. Audio:
-   mp3, m4a, aac, wav, ogg, flac. Probed by ffprobe, never by extension (as today).
-   - **SVG**: rasterised once into `assets/<id>/norm.v1.png` at 1080 px wide (`ffmpeg -i x.svg`
-     with the librsvg decoder's `-width 1080`), the same "normalise once, cache by id" rule as bumpers
-     (`v1` tied to the canvas). The compositor and the thumbnail use the PNG; the editor preview uses
-     the SVG itself. Fonts inside an SVG are whatever fontconfig finds in the image; the upload warns
-     when the SVG references `<text>` with a family the image lacks.
-   - **GIF / animated WebP**: fed to the overlay chain as they are, with `-ignore_loop 0` so they
-     repeat, and `eof_action=repeat`; `format=rgba` already keeps the alpha. Static WebP is an image.
+   mp3, m4a, aac, wav, ogg, flac. Probed by ffprobe, never by extension (as today), except an SVG,
+   which ffprobe cannot size and is measured by resvg.
+   - **Kind from the probe** (`assetKind(ext, probe)`): an animated GIF or WebP (more than one frame, or
+     longer than 0.1 s) is `kind: video` with its own duration and no audio; a still GIF / WebP and every
+     SVG is `kind: image`.
+   - **SVG**: built, not as first written, with **`@resvg/resvg-js`** (MIT, prebuilt binaries for linux
+     x64/arm64 and darwin) instead of ffmpeg's librsvg: the dev Macs' ffmpeg has no librsvg and the
+     Docker image's would differ in fonts and features, so one renderer everywhere. Rasterised once into
+     `assets/<id>/raster.v1.1080.png` (`keys.assetRaster`, `ensureRaster`, idempotent like
+     `ensureNormalised`) at 1080 px wide, the output frame's width. The compositor, the 270x480 thumbnail
+     and an SVG used as an intro / outro image (through `ensureNormalised`) all use that PNG; the editor
+     preview uses the SVG itself. Width and height come from resvg (width/height, else viewBox, else its
+     content); a very tall drawing is capped at 8192 px high. Fonts: system fonts are not loaded, so
+     `<text>` falls back to resvg's defaults; convert text to paths for exact type. An SVG that links to
+     other files (`<image>`, `<use>`, `<feImage>` with an href that is not `#id` or `data:`) is refused
+     at upload and at render, so an uploaded file cannot make the server open paths.
+   - **GIF / animated WebP**: fed to the overlay chain with `loop` on by default (`layer.loop ?? mime is
+     gif or webp`; videos default off, stills never loop). A looped input is always finite: GIF gets
+     `-ignore_loop 0`, any looped input gets `-stream_loop N` with N = `ceil(window / assetDuration)`
+     (never -1) and `-t window`, and the chain trims it to the window (`trim=duration`) before
+     `setpts`, with `eof_action=repeat`; a video that plays once keeps `eof_action=pass`. `format=rgba`
+     keeps the alpha. An animated GIF as an intro / outro normalises like any silent video.
+   - **Known gap**: ffmpeg 7.1 cannot decode *animated* WebP (the probe reports width 0), so such a file
+     is refused with "save it as a GIF or an MP4 instead"; a build that can decode it works unchanged.
 6. **Providers import, never hotlink.** A remote result becomes a normal immutable library row via
    the existing `downloadAsUpload` → `create` path (SSRF guard, size and duration limits, sha256
    dedupe), with `provenance` filled. Renders only ever read the library. Pixabay forbids permanent
@@ -170,8 +186,9 @@ surfaces rule.
 
 ## Render changes (small)
 
-- `overlayChain`: `loop` adds `-ignore_loop 0` for gif inputs and `eof_action=repeat`; svg assets are
-  replaced by their `norm.v1.png` before the inputs are built; failure rule unchanged (skip with
+- `overlayChain`: `loop` adds `-ignore_loop 0` for gif inputs, a finite `-stream_loop`, a `trim` to the
+  window and `eof_action=repeat` (see decision 5); svg assets are replaced by their `raster.v1.1080.png`
+  before the inputs are built; failure rule unchanged (skip with
   `clip.layer_skipped`, retry without layers).
 - `musicMix`: reads `audio` layers; nothing else changes.
 - Diagnostics record layer ids and asset ids used, as today for overlays and music.

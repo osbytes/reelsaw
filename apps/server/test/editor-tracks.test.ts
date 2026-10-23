@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { coverTimeline, adjustDecision, subjectTrack, type FaceSample, type LayoutDecision } from "../src/pipeline/layout.js";
-import { overlayChain, textOverlayEvents, musicMix, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
+import { overlayChain, overlayInputArgs, textOverlayEvents, musicMix, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
 import { bumperProblem } from "../src/pipeline/bumpers.js";
 import { buildAss, WATERMARK_LOGO, watermarkTextY } from "../src/pipeline/captions.js";
 import { resolveStyle } from "@reelsaw/shared";
@@ -93,7 +93,7 @@ describe("subjectTrack", () => {
 });
 
 describe("overlayChain", () => {
-  const item = (over: Partial<LoadedOverlay> = {}): LoadedOverlay => ({ id: "a", assetId: "x", path: "/x.png", kind: "image", start: 1, end: 4, x: 0.5, y: 0.5, w: 0.3, opacity: 1, ...over });
+  const item = (over: Partial<LoadedOverlay> = {}): LoadedOverlay => ({ id: "a", assetId: "x", path: "/x.png", kind: "image", loop: false, start: 1, end: 4, x: 0.5, y: 0.5, w: 0.3, opacity: 1, ...over });
 
   it("scales, composites and enables an image over its window", () => {
     const { chain, out } = overlayChain([item()], 1, 1080, 1920, "[in]");
@@ -108,6 +108,18 @@ describe("overlayChain", () => {
     assert.ok(chain.includes("eof_action=pass"), chain);
   });
 
+  it("trims a looped item to its window and repeats its last frame", () => {
+    const { chain } = overlayChain([item({ kind: "video", loop: true, start: 1, end: 4 })], 1, 1080, 1920, "[in]");
+    assert.ok(chain.includes("[1:v]trim=duration=3.000,setpts=PTS-STARTPTS+1.000/TB,scale=324:-2,format=rgba[ov0]"), chain);
+    assert.ok(chain.includes("eof_action=repeat"), chain);
+    assert.ok(!chain.includes("eof_action=pass"), chain);
+  });
+
+  it("does not trim a video that plays once", () => {
+    const { chain } = overlayChain([item({ kind: "video" })], 1, 1080, 1920, "[in]");
+    assert.ok(!chain.includes("trim="), chain);
+  });
+
   it("adds the opacity mix below 1", () => {
     const { chain } = overlayChain([item({ opacity: 0.5 })], 1, 1080, 1920, "[in]");
     assert.ok(chain.includes("colorchannelmixer=aa=0.500"), chain);
@@ -118,6 +130,32 @@ describe("overlayChain", () => {
     assert.ok(chain.includes("[oc0][ov1]overlay"), chain);
     assert.ok(chain.includes("[2:v]"), chain);
     assert.equal(out, "[oc1]");
+  });
+});
+
+describe("overlayInputArgs", () => {
+  const base = { path: "/a.gif", start: 1, end: 4 } as const;
+
+  it("reads a still or a video that plays once as a plain input", () => {
+    assert.deepEqual(overlayInputArgs({ ...base, loop: false }), ["-i", "/a.gif"]);
+  });
+
+  it("makes a looped GIF honour its loop flag and bounds it to the window", () => {
+    const args = overlayInputArgs({ ...base, loop: true, gif: true, durationSec: 1 });
+    assert.deepEqual(args, ["-ignore_loop", "0", "-stream_loop", "3", "-t", "3.000", "-i", "/a.gif"]);
+  });
+
+  it("gives a looped video a finite stream_loop (never -1)", () => {
+    const args = overlayInputArgs({ path: "/v.mp4", start: 0, end: 10, loop: true, durationSec: 3 });
+    assert.deepEqual(args, ["-stream_loop", "4", "-t", "10.000", "-i", "/v.mp4"]);
+    assert.ok(!args.includes("-1"));
+    assert.ok(!args.includes("-ignore_loop"));
+  });
+
+  it("stays finite when the asset length is unknown", () => {
+    const args = overlayInputArgs({ path: "/v.mp4", start: 0, end: 2, loop: true });
+    assert.equal(args[args.indexOf("-stream_loop") + 1], "0");
+    assert.ok(args.includes("-t"));
   });
 });
 
