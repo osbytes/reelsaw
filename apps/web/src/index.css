@@ -83,7 +83,12 @@
   --shadow-pop: var(--shadow);
 }
 
-html, body, #root { height: 100%; overflow: hidden; }
+/* 100vh is the large viewport on a phone (browser chrome hidden). The shell does not
+   scroll, so that extra height is clipped and a bottom bar sits below the fold.
+   100dvh follows the visible viewport as the URL bar shows and hides. Desktop device
+   mode does not simulate that chrome, which is why the clip only shows on a phone.
+   100% stays for browsers that do not understand dvh. */
+html, body, #root { height: 100%; height: 100dvh; overflow: hidden; }
 body { @apply bg-bg font-sans text-[14px] text-ink antialiased; }
 /* in the base layer so per-element utilities (outline-none, ring-*) can override it */
 @layer base {

@@ -115,7 +115,10 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
     Run: `pnpm eval cuts` (see [EVALS.md](EVALS.md)).
 - **Browser checks** (agent sessions): the Chrome extension runs in a background tab, where timers and media are
   throttled; responsive layouts were checked by loading the page into a 390 px iframe and measuring
-  `scrollWidth` / elements wider than the viewport.
+  `scrollWidth` / elements wider than the viewport. That width check (and desktop Chrome device
+  mode) does **not** simulate the mobile URL bar: `100vh` equals the iframe height there, so a
+  bottom bar can look fine and still sit below the fold on a phone. Full-height shells use
+  `h-dvh`; confirm bottom-anchored UI on a real device ([UI.md](UI.md)).
 
 ## Reading the logs
 

@@ -260,7 +260,7 @@ export function ClipCard({
 
       <Modal open={postOpen} onOpenChange={setPost} title={`Clip ${clip.index + 1}: caption & hashtags`} width={440}>
         <Dialog.Description className="sr-only">The caption and hashtags to post with this clip.</Dialog.Description>
-        <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+        <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
           <div className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-3 text-[13px] leading-snug">
             <div className="font-semibold">{clip.title}</div>
             <div>{clip.caption || <span className="text-ink3">No caption</span>}</div>

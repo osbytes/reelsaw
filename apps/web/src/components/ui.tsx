@@ -120,7 +120,7 @@ export function Modal({ open, onOpenChange, title, children, width = 420 }: { op
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/40" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[90vh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none"
+          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[90dvh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-[18px] border border-line bg-panel p-5 text-ink shadow-pop outline-none"
           style={{ maxWidth: width }}
           onPointerDownOutside={keepIfMenu}
           onFocusOutside={keepIfMenu}

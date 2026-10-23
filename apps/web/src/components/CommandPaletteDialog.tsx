@@ -473,7 +473,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           {/* z-[85]/[86] sit above the confirm dialogs (z-[70]/[71]); the palette closes before a confirm opens */}
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/40" />
           <Dialog.Content
-            className="fixed left-1/2 top-[12vh] z-[86] flex w-[min(640px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-[18px] border border-line bg-panel text-ink shadow-pop outline-none"
+            className="fixed left-1/2 top-[12dvh] z-[86] flex w-[min(640px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-[18px] border border-line bg-panel text-ink shadow-pop outline-none"
             aria-describedby={undefined}
             onEscapeKeyDown={(e) => {
               if (target) {
@@ -538,7 +538,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
               />
               <span className="kbd">esc</span>
             </div>
-            <ScrollArea className="max-h-[min(460px,60vh)]">
+            <ScrollArea className="max-h-[min(460px,60dvh)]">
               <div ref={listRef} className="flex flex-col p-1.5">
                 {items.length === 0 && (target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && (
                   <SkeletonRegion label="Loading…" className="flex flex-col">

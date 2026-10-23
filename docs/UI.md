@@ -1,4 +1,11 @@
-# Overlay, portal and stacking gotchas
+# UI gotchas
+
+Two classes of bug that look like a broken component and are not. Overlay stacking (a Select
+inside a Dialog that paints but ignores clicks) is first. The mobile viewport (`100vh` vs the
+visible phone screen) is second. Encode the fix in the primitive or the shell; do not patch one
+screen.
+
+## Overlay, portal and stacking
 
 Radix Dialog, Select, Popover and DropdownMenu (the shadcn pattern we wrap in
 `apps/web/src/components/ui.tsx`) each portal to `document.body` and take over pointer events.
@@ -76,3 +83,63 @@ too.
 3. If a menu is visible but dead, check z-index against the table, then pointer-events
    (#2122), then whether the dialog treated the click as outside.
 4. Append the upstream issue you used to the sources table.
+
+## The mobile viewport (`100vh` is taller than the screen)
+
+A full-height, non-scrolling app (`overflow-hidden` on `html` / `body` / `#root` so pages own
+scrolling via `ScrollArea`) must be sized to the *visible* viewport. `100vh` / Tailwind
+`h-screen` is not that number on a phone.
+
+### The units
+
+| Unit | Tailwind | What it is |
+| --- | --- | --- |
+| `100vh` | `h-screen` | The **large** viewport: the layout size with mobile browser chrome *hidden*. Stable, and too tall while the URL bar is showing. |
+| `100svh` | `h-svh` | The **small** viewport: chrome always showing. Bottom chrome stays visible, but the shell leaves a gap when the URL bar hides. |
+| `100dvh` | `h-dvh` | The **dynamic** viewport: follows the visible height as chrome shows and hides. This is the one the shell uses. Shrinking with the URL bar is the intended fit, not layout shift. |
+
+`html, body, #root` are `height: 100%; height: 100dvh` (`apps/web/src/index.css`). Shells
+(`App.tsx` `Shell` / `Protected` bare / `AppSkeleton`) and full-page `ScrollArea`s (login,
+consent, pending) are `h-dvh`. Do not add a new `h-screen`. Viewport-relative max-heights
+(`max-h-[90vh]`, `max-h-[70vh]`) use `dvh` the same way, so a dialog cannot outgrow the
+visible screen.
+
+`env(safe-area-inset-bottom)` is a different gap (home indicator / notch). It does not fix a
+shell that is already taller than the screen.
+
+### Why desktop cannot reproduce it
+
+Chrome DevTools device mode, a 390 px iframe, and resizing the window all set **one** viewport
+height. `100vh` and the visible height are the same number, so the bottom of the layout is on
+screen. A real mobile browser has two: the large viewport (`100vh`) and the visual viewport
+(what you see under the URL bar). The gap is on the order of the toolbar, tens of pixels, so
+Firefox can show a sliver of a bottom bar while Chrome and Brave hide it entirely. That is the
+same bug. Confirm bottom-anchored UI on a real phone.
+
+A bottom bar that is missing only on a phone, while desktop device mode looks fine, is this —
+not a `z-index`, not `overflow` on the `ScrollArea`, not the sticky class.
+
+### What we hit (Oct 2026)
+
+The clips selection bar (`BatchBar`) is `sticky bottom-0` inside the clips `ScrollArea`. The
+app shell was `h-screen`. On a Pixel 9a the URL bar ate the bottom of that shell; the sticky
+edge sat below the fold. Chrome and Brave hid the bar; Firefox showed a sliver of its top.
+Desktop device mode did not reproduce it. The shell is `h-dvh`; the bar stayed sticky.
+
+### Adding a full-height or bottom-anchored surface
+
+1. Size the shell and `html` / `body` / `#root` with `h-dvh` / `100dvh`. Never `h-screen` /
+   `100vh` / `min-h-screen` for something that must fit on screen.
+2. Keep bottom actions inside that shell (`sticky bottom-0` in the pane's `ScrollArea`, or a
+   flex child of the `h-dvh` column). Do not pin them to `100vh`.
+3. Caps that mean "must fit on screen" (`max-h-[90vh]`, a preview `max-h-[70vh]`) use `dvh`.
+4. Width at 390 px is not a height check. If you cannot use a real phone, say so; do not treat
+   device-toolbar Chrome as coverage for this class.
+
+### Sources
+
+| Source | What it is |
+| --- | --- |
+| [MDN viewport-percentage lengths](https://developer.mozilla.org/en-US/docs/Web/CSS/length#relative_length_units_based_on_viewport) | `vh` vs `svh` / `lvh` / `dvh`. `vh` is the large viewport. |
+| [CSS values: large, small and dynamic viewport](https://drafts.csswg.org/css-values/#viewport-relative-lengths) | The spec: UA chrome changes the *visual* viewport; `vh` does not follow it. |
+| [The large, small and dynamic viewports (Bramus)](https://www.bram.us/2021/07/08/the-large-small-and-dynamic-viewports/) | Why `100vh` overflowed mobile browsers for a decade, and what the new units are for. |

@@ -249,6 +249,8 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   exists". Overlay stacking (a Select inside a Dialog that paints but ignores clicks) is a known
   Radix/shadcn trap: three choices is `Segmented`, portaled menus over a dialog use `z-[80]`, and
   the scale plus upstream issues live in [UI.md](UI.md). Do not invent a new z-index on one screen.
+  The other UI.md class is the mobile viewport: a full-height shell sized with `100vh` is taller
+  than the visible phone screen while the URL bar is showing.
 - **No layout shift.**
   - Nothing appears *above* what the user is interacting with and pushes it down.
   - Follow-up actions go into space reserved for them (a label row, a status line that's always
@@ -291,9 +293,21 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   location. Offer a copy-link button where it's useful.
 - **Status is a glyph plus a word**, never colour alone. Every icon-only control has an
   `aria-label` and a tooltip.
+- **The visible viewport, not 100vh.** Full-height shells (`overflow-hidden`, pages own scrolling)
+  use `h-dvh` / `100dvh`, never `h-screen` / `100vh`. `html, body, #root` already do. On a phone,
+  `100vh` is the *large* viewport (browser chrome hidden). The shell cannot scroll, so that extra
+  height is clipped and anything at the bottom of the layout (a sticky selection bar, a last flex
+  child, `fixed bottom-0`) sits below the fold. Desktop device mode and a 390 px iframe do not
+  simulate that chrome: they set one viewport height, so `100vh` looks fine there. A bottom bar
+  that only fails on a real phone is this, not a z-index or overflow bug. The shell tracking
+  `dvh` as chrome shows and hides is that fit, not the layout-shift rule (nothing is being
+  inserted above the user). Dialogs and other `max-h-[…vh]` caps use `dvh` too. Details and
+  the incident: [UI.md](UI.md).
 - **Responsive by default.** Check every screen at 390 px wide: the important content gets the
   space, secondary panels collapse into tabs, and rows that would wrap become scrollable rows
-  instead.
+  instead. Check height the same way: a bottom action, toast or sticky footer has to stay on
+  screen while the mobile URL bar is showing (`h-dvh`, not `h-screen`). Device-toolbar width is
+  not a phone-height check.
 - **Live data comes from events.** Mutations invalidate queries, and the project event stream
   drives refreshes and progress. Don't poll when an event exists.
 - **Keyboard first in editors.** Shortcuts are consistent across views and listed in the UI
@@ -323,10 +337,11 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 ## Process
 
 - Typecheck both apps, build, deploy (`docker compose --profile local-ai up -d --build app`) and
-  check the change in the browser, including at phone width for UI work. Run the relevant
-  evals for pipeline work.
+  check the change in the browser, including at phone width for UI work. Device-toolbar Chrome
+  is not a phone-height check: a bottom bar needs a real phone (or at least `h-dvh`, never a
+  new `h-screen`). Run the relevant evals for pipeline work.
 - Commit and push only when asked. Commit messages describe the change and why; no
   tool-attribution trailers.
 - Keep docs current: `EVALS.md` for suites, `TROUBLESHOOTING.md` for operator recipes,
-  `RESEARCH.md` for findings, `UI.md` for overlay/portal/stacking gotchas, and this file for
+  `RESEARCH.md` for findings, `UI.md` for overlay/portal/stacking and mobile-viewport gotchas, and this file for
   principles.
