@@ -26,7 +26,13 @@ export interface Storage {
   deletePrefix(prefix: string): Promise<void>;
 }
 
-const MIME: Record<string, string> = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg" };
+/** Content types for the files this server streams (uploads, library assets, renders); anything else is an octet stream. */
+const MIME: Record<string, string> = {
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+  ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
+  ".json": "application/json", ".zip": "application/zip",
+};
 export function contentTypeFor(file: string) {
   return MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 }
