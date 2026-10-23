@@ -278,22 +278,8 @@
     {
       "idx": 39,
       "version": "7",
-      "when": 1792765637800,
-      "tag": "0039_library_assets",
-      "breakpoints": true
-    },
-    {
-      "idx": 40,
-      "version": "7",
-      "when": 1792769946175,
-      "tag": "0040_shared_assets_saves",
-      "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "7",
-      "when": 1792770376717,
-      "tag": "0041_shared_assets_no_category",
+      "when": 1792773831701,
+      "tag": "0039_library",
       "breakpoints": true
     }
   ]

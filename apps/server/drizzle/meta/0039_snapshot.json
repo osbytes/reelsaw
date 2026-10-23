@@ -1,5 +1,5 @@
 {
-  "id": "04cdc2f8-787a-402a-ba3b-77e4d36530f2",
+  "id": "6a2f57d0-a560-42db-882e-39073cc0e565",
   "prevId": "7e08805b-04aa-4d6a-a5eb-f1dd1380351d",
   "version": "7",
   "dialect": "postgresql",
@@ -1229,7 +1229,7 @@
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "kind": {
           "name": "kind",
@@ -1240,12 +1240,6 @@
         },
         "mime": {
           "name": "mime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "category": {
-          "name": "category",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1390,6 +1384,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "bumper_assets_shared_source_idx": {
+          "name": "bumper_assets_shared_source_idx",
+          "columns": [
+            {
+              "expression": "(\"provenance\"->>'provider')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(\"provenance\"->>'externalId')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"provenance\"->>'variant', '')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"bumper_assets\".\"user_id\" is null and \"bumper_assets\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1408,6 +1430,89 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.library_saves": {
+      "name": "library_saves",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "library_saves_asset_idx": {
+          "name": "library_saves_asset_idx",
+          "columns": [
+            {
+              "expression": "asset_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "library_saves_user_id_user_id_fk": {
+          "name": "library_saves_user_id_user_id_fk",
+          "tableFrom": "library_saves",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "library_saves_asset_id_bumper_assets_id_fk": {
+          "name": "library_saves_asset_id_bumper_assets_id_fk",
+          "tableFrom": "library_saves",
+          "tableTo": "bumper_assets",
+          "columnsFrom": [
+            "asset_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "library_saves_user_id_asset_id_pk": {
+          "name": "library_saves_user_id_asset_id_pk",
+          "columns": [
+            "user_id",
+            "asset_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

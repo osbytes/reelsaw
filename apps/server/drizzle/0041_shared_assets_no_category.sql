@@ -1,2 +1,0 @@
-CREATE UNIQUE INDEX "bumper_assets_shared_source_idx" ON "bumper_assets" USING btree (("provenance"->>'provider'),("provenance"->>'externalId'),coalesce("provenance"->>'variant', '')) WHERE "bumper_assets"."user_id" is null and "bumper_assets"."deleted_at" is null;--> statement-breakpoint
-ALTER TABLE "bumper_assets" DROP COLUMN "category";
