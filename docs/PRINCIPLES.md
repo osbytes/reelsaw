@@ -345,3 +345,11 @@ nothing below hurts yet; every rule exists because a query or screen we already 
 - Keep docs current: `EVALS.md` for suites, `TROUBLESHOOTING.md` for operator recipes,
   `RESEARCH.md` for findings, `UI.md` for overlay/portal/stacking and mobile-viewport gotchas, and this file for
   principles.
+- **One agent context, no agent-specific concepts.** `AGENTS.md` is the only agent instruction
+  file, and it follows the shared [AGENTS.md convention](https://agents.md) every coding agent
+  reads. No `CLAUDE.md`, `.cursor/rules`, `.cursorrules`, `copilot-instructions.md` or other
+  tool-specific rule files: they drift from each other, duplicate the docs, and bind the project to
+  one vendor. `AGENTS.md` stays a short map (layout, everyday commands, what to read first); the
+  rules themselves live in the docs it points at (`PRINCIPLES.md`, `UI.md`, `EVALS.md`), where
+  people read them too. A tool that needs its own file gets a local, untracked pointer to
+  `AGENTS.md`, never a second copy of the content.
