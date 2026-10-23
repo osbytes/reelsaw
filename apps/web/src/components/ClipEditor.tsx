@@ -115,7 +115,7 @@ const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
 /** shortest a layer may be: pictures and text 0.1 s, sounds 0.5 s */
 const layerMin = (l: Pick<ClipLayer, "kind">) => (l.kind === "audio" ? 0.5 : 0.1);
 /** a library row as the editor reads it: the list also carries the mime type and category */
-type LayerAsset = LibraryAsset & { mime?: string | null; category?: string | null };
+type LayerAsset = LibraryAsset;
 /** GIF / animated WebP / video: a picture that moves, so it can repeat inside its window */
 const isAnimatedAsset = (a: LayerAsset | undefined) => !!a && (a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp");
 /** a short or sfx-tagged sound gets the one-shot treatment */
@@ -824,7 +824,7 @@ export function ClipEditor(props: Props) {
     () =>
       layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
-        const a = assetById(l.assetId) as LayerAsset | undefined;
+        const a = assetById(l.assetId);
         const name = a?.name ?? (library.isPending ? "…" : "removed");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name, kind: "audio" as const };
         return { id: l.id, start: l.start, end: l.end, name, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
@@ -838,7 +838,7 @@ export function ClipEditor(props: Props) {
       .filter((l) => t >= l.start - 0.001 && t <= l.end + 0.001)
       .flatMap((l): PreviewAssetOverlay[] => {
         if (l.kind === "text") return [{ kind: "text", id: l.id, text: l.text, x: l.x, y: l.y, size: l.size ?? TEXT_OVERLAY_DEFAULTS.size, color: l.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!l.box, opacity: l.opacity ?? 1, ...(l.font ? { font: l.font } : {}) }];
-        const a = assetById(l.assetId) as LayerAsset | undefined;
+        const a = assetById(l.assetId);
         if (!a) return [];
         // an image, GIF or WebP is drawn as the file itself (browsers loop GIFs natively); a video shows its poster
         return [{ kind: "asset", id: l.id, url: a.kind === "image" ? `/media/bumpers/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1 }];
@@ -1398,7 +1398,7 @@ export function ClipEditor(props: Props) {
           <LayerCard
             key={l.id}
             layer={l}
-            asset={l.kind === "text" ? undefined : (assetById(l.assetId) as LayerAsset | undefined)}
+            asset={l.kind === "text" ? undefined : (assetById(l.assetId))}
             selected={l.id === selectedLayer}
             rangeStart={range[0]}
             rangeEnd={range[1]}
@@ -1937,7 +1937,7 @@ export function ClipEditor(props: Props) {
           assets={(library.data?.assets ?? []).filter((a) => a.kind !== "audio")}
           loading={library.isPending}
           onChange={(id) => {
-            const a = assetById(id) as LayerAsset | undefined;
+            const a = assetById(id);
             const t = picker?.t ?? current;
             setPicker(null);
             if (a) addAssetLayer(a, t);
@@ -1958,7 +1958,7 @@ export function ClipEditor(props: Props) {
           assets={(library.data?.assets ?? []).filter((a) => a.kind === "audio")}
           loading={library.isPending}
           onChange={(id) => {
-            const a = assetById(id) as LayerAsset | undefined;
+            const a = assetById(id);
             const t = picker?.t ?? current;
             setPicker(null);
             if (a) addSoundLayer(a, t);
