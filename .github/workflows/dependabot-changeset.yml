@@ -2,11 +2,11 @@
 # (.changeset/README.md). This adds a patch changeset to a Dependabot PR that touches the app
 # packages (the website and the workflow actions are not versioned, so their PRs get none).
 #
-# pull_request_target runs with repository secrets on a PR from the bot's branch. It is safe here
-# because the job is restricted to dependabot[bot], runs only git commands (no install, no build,
-# nothing from the PR executes) and writes one file whose content is the PR title. The push uses
-# RELEASE_TOKEN rather than GITHUB_TOKEN so CI runs on the new commit (pushes made with
-# GITHUB_TOKEN never trigger workflows).
+# pull_request_target runs with repository secrets, so nothing from the PR may run here: the job
+# never checks the PR out. It reads the PR's file list and writes the changeset through the GitHub
+# contents API, as github-actions[bot] (which the DCO and CLA checks exempt), using RELEASE_TOKEN
+# so CI runs on the new commit (commits made with GITHUB_TOKEN never trigger workflows). The only
+# PR-controlled input is the title, which goes into the file body as data.
 name: dependabot-changeset
 
 on:
@@ -21,21 +21,19 @@ jobs:
     if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-          persist-credentials: true
-
       - name: Add a changeset when the PR changes the app
         env:
-          TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
         run: |
-          changed=$(git diff --name-only "origin/main...HEAD")
+          set -euo pipefail
+          changed=$(gh api --paginate "repos/$REPO/pulls/$NUMBER/files" --jq '.[].filename')
           if ! grep -qE '^(pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|apps/|packages/|Dockerfile$)' <<<"$changed"; then
             echo "no app package changed; no changeset needed"; exit 0
           fi
@@ -43,11 +41,15 @@ jobs:
           if grep -qE '^\.changeset/.+\.md$' <<<"$changed"; then
             echo "the PR already carries a changeset"; exit 0
           fi
-          f=".changeset/dependabot-$NUMBER.md"
-          # the title is data: written through printf, never evaluated
-          printf -- '---\n"@reelsaw/server": patch\n---\n\nDependencies: %s.\n' "$TITLE" > "$f"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$f"
-          git commit -s -m "Add a changeset for this dependency update"
-          git push
+          path=".changeset/dependabot-$NUMBER.md"
+          # the title is data: written through printf into the file body, never evaluated
+          content=$(printf -- '---\n"@reelsaw/server": patch\n---\n\nDependencies: %s.\n' "$TITLE" | base64 -w0)
+          gh api --method PUT "repos/$REPO/contents/$path" \
+            --field branch="$BRANCH" \
+            --field message="Add a changeset for this dependency update" \
+            --field content="$content" \
+            --field 'committer[name]=github-actions[bot]' \
+            --field 'committer[email]=41898282+github-actions[bot]@users.noreply.github.com' \
+            --field 'author[name]=github-actions[bot]' \
+            --field 'author[email]=41898282+github-actions[bot]@users.noreply.github.com' \
+            --jq '.commit.sha'
