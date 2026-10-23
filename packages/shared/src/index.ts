@@ -161,7 +161,7 @@ const clipOverlayBase = z
     id: z.string().min(1).max(40).describe("Stable id for this overlay (any short string; keep it when editing)"),
     /** absent = asset (rows stored before text overlays existed) */
     kind: z.enum(["asset", "text"]).optional().describe("asset (default): a library image or video; text: a line of text"),
-    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (list_bumpers), an image or a video"),
+    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (list_assets), an image or a video"),
     text: z.string().trim().min(1).max(120).optional().describe("text: the line to show (1-120 chars)"),
     start: z.number().min(0).describe("Shown from this second of the source video"),
     end: z.number().min(0).describe("Hidden after this second of the source video"),
@@ -188,7 +188,7 @@ export const MAX_CLIP_OVERLAYS = 20;
  */
 export const clipAudioSchema = z.object({
   id: z.string().min(1).max(40).describe("Stable id for this track (any short string; keep it when editing)"),
-  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_bumpers, kind audio); the same asset can be used more than once"),
+  assetId: z.string().min(1).max(100).describe("Library audio asset id (list_assets, kind audio); the same asset can be used more than once"),
   start: z.number().min(0).describe("Music starts at this second of the source video"),
   end: z.number().min(0).describe("Music stops after this second of the source video"),
   offset: z.number().min(0).optional().describe("Seconds into the track to start from (default 0)"),
@@ -488,8 +488,8 @@ export const projectSettingsSchema = styleSchema.extend({
    * defaults when the project is created. Unset = none; null is reserved for "none, although my
    * default has one" (project override, phase 2).
    */
-  introAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the intro (list_bumpers); null = none"),
-  outroAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the outro (list_bumpers); null = none"),
+  introAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the intro (list_assets); null = none"),
+  outroAssetId: z.string().max(100).nullable().optional().describe("Library asset id of the outro (list_assets); null = none"),
   /** How long an image intro / outro lasts in this project, overriding the library item's own length. */
   introSec: bumperSecondsSchema.optional(),
   outroSec: bumperSecondsSchema.optional(),
