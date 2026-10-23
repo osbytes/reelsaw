@@ -1,5 +1,19 @@
 # @reelsaw/server
 
+## 0.18.2
+
+### Patch Changes
+
+- [#135](https://github.com/osbytes/reelsaw/pull/135) [`ba237ac`](https://github.com/osbytes/reelsaw/commit/ba237acf2b07599e09d93eee6577d1643280d59e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Dependency updates across the app: AI SDK providers and `ai` 7.0.150, AWS S3 SDK 3.1156, better-auth 1.7.12, posthog, react 19.3.1, react-router 8.5, react-query, lucide icons, vite 8.3.5. OpenTelemetry stays on the 2.12 / 0.223 line and API 1.9 until the SDK moves to 3.0 as a set.
+
+- [#117](https://github.com/osbytes/reelsaw/pull/117) [`1f2cdbe`](https://github.com/osbytes/reelsaw/commit/1f2cdbee0664e4a380690192c9437262e2d23b17) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Dependency fix: body-parser 2.4.0 (GHSA-27r3-jxmh-p828, a denial of service through trailing bytes after a compressed request, reachable through the MCP endpoint's Express layer). The image's base layers are now pinned by digest and Dependabot keeps them, the npm packages and the workflow actions current.
+
+- [#111](https://github.com/osbytes/reelsaw/pull/111) [`ff53ef5`](https://github.com/osbytes/reelsaw/commit/ff53ef55c152786f62212bc10201d393d1e164c8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Reelsaw is published to the official MCP registry as `io.github.osbytes/reelsaw` on every release, and the Docker image carries the registry's server-name label, so registry-aware clients can install the `reelsaw mcp` bridge straight from the image.
+
+- [#124](https://github.com/osbytes/reelsaw/pull/124) [`2a50493`](https://github.com/osbytes/reelsaw/commit/2a50493325aef3ed6db385a61a1055b0b9e98e04) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The image is back on Node 22 LTS (an automated bump had moved it to Node 25, which is not an LTS line and was never built by CI). Automated base-image updates now stay within the major.
+
+- [#131](https://github.com/osbytes/reelsaw/pull/131) [`4cc0fb7`](https://github.com/osbytes/reelsaw/commit/4cc0fb7d22c046f114353e476345493918ec824b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Dependency fixes: nodemailer 10.2.1 (three address-parser advisories, GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h) and fast-uri 3.1.9 (four URI parsing advisories reached through the MCP SDK's ajv). Each release's install folder now ships with a provenance attestation next to the zip.
+
 ## 0.18.1
 
 ### Patch Changes
