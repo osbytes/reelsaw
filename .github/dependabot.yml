@@ -14,6 +14,15 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # OpenTelemetry ships SDK majors and the 0.x experimental packages as one coordinated set
+      # (3.0 pairs with 0.300 and removes sdk-trace-node). One PR per package cannot work; the
+      # whole set moves in one deliberate PR with a telemetry smoke test.
+      - dependency-name: "@opentelemetry/*"
+        update-types: ["version-update:semver-major"]
+      # @types/node tracks the Node line the image runs (Dockerfile), not the newest Node
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # reelsaw.com has its own lockfile, outside the workspace
   - package-ecosystem: npm
