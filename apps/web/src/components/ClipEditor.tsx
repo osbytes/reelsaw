@@ -12,6 +12,7 @@ import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type LayerBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
+import { BrowseLibraryDialog } from "./BrowseLibrary";
 import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
 import { loadTextFonts } from "../lib/fonts";
 import { z } from "zod";
@@ -479,6 +480,8 @@ export function ClipEditor(props: Props) {
   }, [selectedLayer]);
   /** the asset or sound picker: what is being added and where the playhead was when it was asked for */
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
+  /** the Browse dialog (catalog + providers), remembering the playhead it was opened at so an import lands there */
+  const [browseAt, setBrowseAt] = useState<number | null>(null);
   const library = useBumperLibrary();
   const libraryAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
   const assetById = (id: string | null | undefined): LibraryAsset | undefined => (id ? libraryAssets.find((a) => a.id === id) : undefined);
@@ -800,7 +803,8 @@ export function ClipEditor(props: Props) {
     if (tab !== "layers" && tab !== "transcript") setTab("layers");
     toast(note);
   };
-  const addAssetLayer = (asset: LayerAsset, t: number) => {
+  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec" | "category">;
+  const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const video = asset.kind === "video";
     const [start, end] = layerWindow(t, video ? Math.max(1, Math.min(asset.durationSec, range[1] - t)) : 4);
     pushLayer({ id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: video ? 0.5 : 0.18, w: video ? 1 : ASSET_OVERLAY_DEFAULT_W }, `${asset.name} added ${video ? "as b-roll" : "as an overlay"} · drag it on the preview`);
@@ -809,7 +813,7 @@ export function ClipEditor(props: Props) {
     const [start, end] = layerWindow(t, 4);
     pushLayer({ id: newLayerId(), kind: "text", text: "Your text", start, end, x: 0.5, y: 0.3, size: TEXT_OVERLAY_DEFAULTS.size, color: TEXT_OVERLAY_DEFAULTS.color }, "Text added · type it in the Layers tab, drag it on the preview");
   };
-  const addSoundLayer = (asset: LayerAsset, t: number) => {
+  const addSoundLayer = (asset: NewLayerAsset, t: number) => {
     const defaults = audioLayerDefaultsFor({ durationSec: asset.durationSec, category: asset.category });
     const oneShot = defaults === SFX_AUDIO_DEFAULTS;
     // a one-shot sound lasts as long as the file; music starts at the playhead and runs to the end of the clip
@@ -909,8 +913,8 @@ export function ClipEditor(props: Props) {
     pushLayer({ ...l, id: newLayerId(), start: Number(t.toFixed(2)), end: Number(Math.min(range[1], t + len).toFixed(2)) }, "Pasted at the playhead");
     return true;
   };
-  /** "Browse library…" in the + menu: until the Browse dialog exists this opens the Library page (unsaved edits would be lost, so ask first) */
-  const browseLibrary = () => (changed ? toast("Save your edits first, then open the Library") : navigate("/library"));
+  /** "Browse library…" in the + menu: the catalog and providers in a dialog; an imported item lands on the lane at the playhead */
+  const browseLibrary = () => setBrowseAt(current);
 
   // ----- intro / outro as blocks on the timeline -----
   const bumperBlock = (slot: BumperSlot): BumperBlock | null => {
@@ -1925,6 +1929,18 @@ export function ClipEditor(props: Props) {
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
 
+      <BrowseLibraryDialog
+        open={browseAt !== null}
+        onOpenChange={(o) => !o && setBrowseAt(null)}
+        onImported={(asset) => {
+          const t = browseAt ?? current;
+          setBrowseAt(null);
+          // the import result is a plain row; the lane helpers want the library's kind union
+          const a = { ...asset, kind: asset.kind === "audio" ? ("audio" as const) : asset.kind === "video" ? ("video" as const) : ("image" as const), category: (asset.category ?? null) as LibraryAsset["category"] };
+          if (a.kind === "audio") addSoundLayer(a, t);
+          else addAssetLayer(a, t);
+        }}
+      />
       <Modal open={picker?.kind === "asset"} onOpenChange={(o) => !o && setPicker(null)} title="Add an image or video">
         <p className="text-sm leading-relaxed text-ink2">
           A library image, GIF or video, shown from <span className="font-mono">{fmtPrecise(Math.max(0, (picker?.t ?? current) - range[0]))}</span>. New files are added on the Library page.

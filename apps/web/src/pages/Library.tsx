@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ScrollText, Search, X } from "lucide-react";
+import { Compass, FolderOpen, ScrollText, Search, X } from "lucide-react";
 import { ASSET_CATEGORIES, type AssetCategory } from "@reelsaw/shared";
 import { useLocation, useNavigate } from "react-router";
 import { useMe } from "../lib/account";
@@ -9,6 +9,7 @@ import { categoryLabel, KIND_FILTERS, matchesCategory, SEARCH_KEYS, searchable, 
 import { onBumperFiles, takePendingBumperFiles } from "../lib/uploads";
 import { ScrollArea } from "../components/scroll-area";
 import { Skeleton, SkeletonRegion } from "../components/ui";
+import { BrowseLibrary } from "../components/BrowseLibrary";
 import { AssetCard, AssetCardSkeleton, AssetLightbox, copyCredits, RemoveDialog, UploadCard, useBumperActions, useBumperLibrary, type LibraryAsset } from "../components/BumperField";
 
 /**
@@ -48,6 +49,8 @@ export function LibraryPage() {
   const kind: LibraryKind | "" = kindParam === "video" || kindParam === "image" || kindParam === "audio" ? kindParam : "";
   const category = params.get("category") ?? "";
   const q = params.get("q") ?? "";
+  /** `?view=browse` shows the catalog and providers instead of the user's own items */
+  const view: "mine" | "browse" = params.get("view") === "browse" ? "browse" : "mine";
   const setFilter = (patch: Record<string, string>) => {
     const next = new URLSearchParams(loc.search);
     for (const [k, v] of Object.entries(patch)) (v ? next.set(k, v) : next.delete(k));
@@ -118,6 +121,21 @@ export function LibraryPage() {
           </button>
           <span className="min-w-[4.5rem] text-right text-sm text-ink2">{list.isPending ? <Skeleton className="ml-auto h-3.5 w-12" /> : filtered ? `${assets.length} of ${all.length}` : `${all.length} item${all.length === 1 ? "" : "s"}`}</span>
         </div>
+        <div role="tablist" aria-label="Library view" className="flex gap-1 rounded-[10px] bg-sunk p-1 self-start">
+          {(
+            [
+              ["mine", "Your library", FolderOpen],
+              ["browse", "Browse", Compass],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button key={id} role="tab" type="button" aria-selected={view === id} className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-sm ${view === id ? "bg-panel font-medium shadow-sm" : "text-ink2 hover:text-ink"}`} onClick={() => setFilter({ view: id === "browse" ? "browse" : "" })}>
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === "browse" && <BrowseLibrary className="min-h-[480px]" />}
+        {view === "mine" && (<>
         <UploadCard inputRef={input} actions={actions} />
         <div className="flex flex-col gap-2">
           <div className="relative">
@@ -213,6 +231,7 @@ export function LibraryPage() {
           onTags={(tags) => viewing && void actions.setTags(viewing, tags)}
         />
         <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={fadeOut} />
+        </>)}
       </main>
     </ScrollArea>
   );
