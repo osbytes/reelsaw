@@ -18,3 +18,6 @@ minimumReleaseAgeExclude:
 overrides:
   # GHSA-67mh-4wv8-2f99: the deprecated esbuild-kit (pulled in by drizzle-kit) pins a vulnerable esbuild
   "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+  # better-auth 1.7.12 pins better-call 1.4.2 while @better-auth/core 1.7.12 wants 1.4.4; one version
+  # keeps a single core instance (two break the plugin types in auth.ts)
+  better-call: 1.4.4

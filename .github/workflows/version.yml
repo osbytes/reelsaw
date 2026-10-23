@@ -37,9 +37,14 @@ jobs:
       - name: Release PR or tag
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
+          # v2 takes the token as an input and refuses a GITHUB_TOKEN env var that differs from it
+          github-token: ${{ secrets.RELEASE_TOKEN }}
           pr-title: "Release"
-          commit-message: "Release"
+          # the Release commit is created through the API as the token's owner; the trailer is what
+          # the DCO check in contributors.yml requires of every non-bot commit
+          commit-message: |
+            Release
+
+            Signed-off-by: dillonstreator <dillonstreator@gmail.com>
           version-script: pnpm release:version
           publish-script: pnpm release:tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
