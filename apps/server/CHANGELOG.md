@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.18.1
+
+### Patch Changes
+
+- [#105](https://github.com/osbytes/reelsaw/pull/105) [`b8f29a7`](https://github.com/osbytes/reelsaw/commit/b8f29a7bde05d78c7b8db91811ecc0f200a64799) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The arm64 image starts again: SVG rasterising uses resvg compiled to WebAssembly instead of a native package that only existed for the build host's architecture.
+
 ## 0.18.0
 
 ### Minor Changes
