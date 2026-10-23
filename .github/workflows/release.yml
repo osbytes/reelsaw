@@ -141,6 +141,24 @@ jobs:
           sed -i "s#\${REELSAW_IMAGE:-[^}]*}#\${REELSAW_IMAGE:-${GHCR_IMAGE}:${VERSION}}#" out/reelsaw/docker-compose.yml
           (cd out && zip -r "reelsaw-${VERSION}.zip" reelsaw)
 
+      # provenance for the install folder, like the image: the attestation is stored on the repository,
+      # and its Sigstore bundle is attached to the release next to the zip (`gh attestation verify
+      # reelsaw-<v>.zip --owner osbytes` works online; the .intoto.jsonl is the offline copy)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          subject-path: out/reelsaw-${{ steps.v.outputs.version }}.zip
+      - name: Attestation bundle for the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          cd out
+          gh attestation download "reelsaw-${VERSION}.zip" --repo "$GITHUB_REPOSITORY"
+          mv sha256:*.jsonl "reelsaw-${VERSION}.zip.intoto.jsonl"
+          ls -la
+
       # the release body is this version's CHANGELOG.md section (what changesets wrote), not the tag message
       - name: Release notes
         if: startsWith(github.ref, 'refs/tags/')
@@ -150,5 +168,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           body_path: out/release-notes.md
-          files: out/reelsaw-${{ steps.v.outputs.version }}.zip
+          files: |
+            out/reelsaw-${{ steps.v.outputs.version }}.zip
+            out/reelsaw-${{ steps.v.outputs.version }}.zip.intoto.jsonl
           prerelease: ${{ contains(github.ref_name, '-') }}
