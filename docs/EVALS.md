@@ -409,6 +409,7 @@ eval/
   baselines/<suite>.json    accepted results, in git
   .cache/                   materialised media + cached ASR/model calls (gitignored)
   reports/                  run reports (gitignored)
+  references/<slug>/        gold-standard clips from other channels: what to copy, not pass/fail (eval/references/README.md)
 ```
 
 Big media never goes in git. A fixture names it as a **media source**:
