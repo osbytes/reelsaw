@@ -432,7 +432,7 @@ export function ProjectPage() {
           sideOffset={8}
           onOpenAutoFocus={(e) => e.preventDefault()} // don't ring the first entry on open
           collisionPadding={12}
-          className="z-50 flex max-h-[min(60vh,var(--radix-popover-content-available-height))] w-[min(460px,calc(100vw-24px))] flex-col rounded-[14px] border border-line bg-panel shadow-pop"
+          className="z-50 flex max-h-[min(60dvh,var(--radix-popover-content-available-height))] w-[min(460px,calc(100vw-24px))] flex-col rounded-[14px] border border-line bg-panel shadow-pop"
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
             <b>Activity</b>
@@ -443,7 +443,7 @@ export function ProjectPage() {
               </span>
             )}
           </div>
-          <ScrollArea className="max-h-[min(calc(60vh-46px),calc(var(--radix-popover-content-available-height)-46px))]">
+          <ScrollArea className="max-h-[min(calc(60dvh-46px),calc(var(--radix-popover-content-available-height)-46px))]">
             <div className="px-4 py-3">{activityList}</div>
           </ScrollArea>
         </Popover.Content>
@@ -611,7 +611,7 @@ export function ProjectPage() {
   const pct = (t: number) => `${dur ? (t / dur) * 100 : 0}%`;
   const source = (
     <div className={`flex shrink-0 px-4 sm:px-5 ${compact ? "items-center gap-3 py-2.5" : "flex-wrap items-center gap-4 py-3.5"}`}>
-      <div className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video w-[44%]" : "aspect-video h-[clamp(110px,24vh,214px)]"}`}>
+      <div className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video w-[44%]" : "aspect-video h-[clamp(110px,24dvh,214px)]"}`}>
         {p.sourceVideoUrl && (
           <video
             ref={sourceRef}
@@ -904,7 +904,7 @@ export function ProjectPage() {
                 <X className="h-4 w-4" />
               </Dialog.Close>
             </div>
-            {preview?.videoUrl && <video ref={previewRef} src={preview.videoUrl} poster={preview.thumbnailUrl ?? undefined} controls autoPlay playsInline className="aspect-[9/16] max-h-[70vh] w-full rounded-[12px] bg-black object-contain" />}
+            {preview?.videoUrl && <video ref={previewRef} src={preview.videoUrl} poster={preview.thumbnailUrl ?? undefined} controls autoPlay playsInline className="aspect-[9/16] max-h-[70dvh] w-full rounded-[12px] bg-black object-contain" />}
             <div className="flex items-center justify-between text-xs text-ink2">
               <span className="font-mono">
                 {preview && `${formatTime(preview.startSec)}–${formatTime(preview.endSec)}`}

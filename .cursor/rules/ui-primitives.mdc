@@ -1,12 +1,12 @@
 ---
-description: Radix/shadcn/Tailwind overlay and stacking rules. Use when changing dialogs, selects, menus, popovers, z-index, or overflow.
+description: Radix/shadcn/Tailwind overlay, stacking, and mobile viewport-height rules. Use when changing dialogs, selects, menus, popovers, z-index, overflow, h-screen, 100vh, sticky/fixed bottom bars, or full-height shells.
 globs: apps/web/**/*.{tsx,css}
 alwaysApply: false
 ---
 
-# Overlay primitives
+# Overlay primitives and the mobile viewport
 
-Read [docs/UI.md](docs/UI.md) before nesting a menu in a dialog or adding a z-index.
+Read [docs/UI.md](docs/UI.md) before nesting a menu in a dialog, adding a z-index, or sizing a full-height shell / bottom bar.
 
 - Three mutually exclusive choices → `Segmented` in `ui.tsx`, not `Select`.
 - Page menus `.menu` = `z-50`. Dialogs = `z-[70]`/`z-[71]`. Menus over a dialog = `z-[80]`. Command palette = `z-[85]`/`z-[86]`. Do not invent `z-[9999]`.
@@ -15,3 +15,4 @@ Read [docs/UI.md](docs/UI.md) before nesting a menu in a dialog or adding a z-in
 - Select uses `position="popper"` on purpose (`item-aligned` breaks in `overflow-hidden`).
 - `overflow-hidden` / `transform` / `opacity-<100` clip or trap stacking. Portal out; do not raise z-index on the clipped child.
 - Cap `ScrollArea` height on the ScrollArea, never with native `overflow-auto` on a wrapper that contains a menu.
+- Full-height shells are `h-dvh` / `100dvh`, never `h-screen` / `100vh`. `html, body, #root` already use `100dvh`. A sticky or fixed bottom bar that vanishes on a real phone but looks fine in desktop device mode is the large-viewport gap, not a z-index bug. Viewport-relative max-heights use `dvh` too (`max-h-[90dvh]`).

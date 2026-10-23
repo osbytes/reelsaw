@@ -553,7 +553,7 @@ function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAss
           <Popover.Portal>
             <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
               <b className="text-[13px]">Where “{a.name}” is used</b>
-              <UsageList id={a.id} className="mt-2 max-h-[min(280px,50vh)]" />
+              <UsageList id={a.id} className="mt-2 max-h-[min(280px,50dvh)]" />
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
@@ -601,7 +601,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               {(a.usedBy > 0 || a.usedByClips > 0) && (
                 <div className="rounded-[12px] border border-line p-3">
                   <b className="text-xs">Where it’s used</b>
-                  <UsageList id={a.id} className="mt-2 max-h-[min(200px,30vh)]" />
+                  <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
                 </div>
               )}
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
@@ -679,7 +679,7 @@ export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsse
               ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
               : `“${asset.name}” will be removed. You can restore it for 30 days.`}
           </p>
-          {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35vh)]" />}
+          {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
           <div className="mt-1 flex justify-end gap-2">
             <button className="btn-ghost" onClick={onClose}>
               Cancel

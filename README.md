@@ -90,7 +90,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) (principles, tests, sign-off). Roadmap for learning from user decisions: [docs/SELF-IMPROVEMENT.md](docs/SELF-IMPROVEMENT.md).
 
-Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrency and UI rules every change follows. Overlay stacking (Select inside a Dialog, z-index, portals) is [docs/UI.md](docs/UI.md). Agent instructions live in `AGENTS.md` / `CLAUDE.md`.
+Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) first: the consistency, concurrency and UI rules every change follows. Overlay stacking (Select inside a Dialog, z-index, portals) and the mobile viewport (`h-dvh`, not `h-screen`) are [docs/UI.md](docs/UI.md). Agent instructions live in `AGENTS.md` / `CLAUDE.md`.
 
 ## Install (no source needed)
 

@@ -102,7 +102,7 @@ export function ClipEditorSkeleton() {
       </div>
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-w-0 flex-1 flex-col items-center gap-4 p-4">
-          <Skeleton className="aspect-[9/16] max-h-[60vh] w-full max-w-[340px] rounded-[14px]" />
+          <Skeleton className="aspect-[9/16] max-h-[60dvh] w-full max-w-[340px] rounded-[14px]" />
           <Skeleton className="h-10 w-full max-w-[720px] rounded-[8px]" />
         </div>
         <div className="flex w-full flex-col gap-4 border-t border-line p-4 lg:w-[360px] lg:border-l lg:border-t-0">

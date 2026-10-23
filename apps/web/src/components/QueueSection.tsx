@@ -276,7 +276,7 @@ export function QueueSection() {
           </SkeletonRegion>
         ) : items.length > 0 ? (
           <>
-            <ScrollArea className="max-h-[min(28rem,55vh)]">
+            <ScrollArea className="max-h-[min(28rem,55dvh)]">
               <table className="w-full table-fixed text-[13px]">
                 <caption className="sr-only">Failed projects and clips, newest first</caption>
                 <colgroup>
@@ -365,7 +365,7 @@ export function QueueSection() {
               </p>
             </Dialog.Description>
             <p className="min-h-4 text-xs text-ink3">{retryHint(detail)}</p>
-            <ScrollArea className="max-h-[min(16rem,40vh)] rounded-[10px] border border-line bg-sunk">
+            <ScrollArea className="max-h-[min(16rem,40dvh)] rounded-[10px] border border-line bg-sunk">
               <pre className="whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-ink">{detail.error?.trim() || "Failed with no reason recorded"}</pre>
             </ScrollArea>
             <div className="flex flex-wrap justify-end gap-2">

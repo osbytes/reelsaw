@@ -2,10 +2,10 @@
 
 Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) before changing code. It holds the backend
 (transactions, locking, versioned jobs, evals) and frontend (tokens, overlays, no layout shift, deep links,
-responsive) rules that apply to every change, and the surfaces rule: MCP is the UI for agents and
+responsive, visible viewport not 100vh) rules that apply to every change, and the surfaces rule: MCP is the UI for agents and
 the glue for integrations, so every user-facing feature ships with its MCP tool (and CLI command)
 backed by the same service code as the screen. Overlay stacking (Select/Combobox inside a dialog)
-is [docs/UI.md](docs/UI.md).
+and the mobile viewport (`h-dvh`, never `h-screen`) are [docs/UI.md](docs/UI.md).
 
 Layout: `apps/server` (Hono, tRPC, Drizzle, pg-boss workers), `apps/web` (Vite, React, Tailwind,
 Radix), `packages/shared` (zod schemas, shared geometry/caption helpers; rebuild with

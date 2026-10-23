@@ -410,7 +410,7 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
           onClose();
         }}
       >
-        <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+        <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
           <div className="flex flex-col gap-4 pr-3">
             {hasPlans && (
               <div className="flex flex-col gap-1.5">

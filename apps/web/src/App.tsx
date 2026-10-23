@@ -180,10 +180,11 @@ export function TopBar() {
   );
 }
 
-/** Pages own their scrolling (ScrollArea) so the workspace can split into independent panes. */
+/** Pages own their scrolling (ScrollArea) so the workspace can split into independent panes.
+ *  h-dvh tracks the visible viewport, so a bottom bar stays on screen while the mobile URL bar is showing. */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col">
         <ErrorBoundary>
@@ -207,7 +208,7 @@ function PageFallback() {
 /** What shows while the session and account load: a bar and a few content blocks, no "Loading…" text. */
 function AppSkeleton() {
   return (
-    <SkeletonRegion label="Loading…" className="flex h-screen flex-col overflow-hidden">
+    <SkeletonRegion label="Loading…" className="flex h-dvh flex-col overflow-hidden">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-6">
         <Skeleton className="h-6 w-28" />
         <Skeleton className="ml-auto h-8 w-8 rounded-full" />
@@ -238,7 +239,7 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   // the editor hides the global bar so the timeline gets the room
   if (bare)
     return (
-      <div className="flex h-screen flex-col overflow-hidden">
+      <div className="flex h-dvh flex-col overflow-hidden">
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>{children}</Suspense>
         </ErrorBoundary>

@@ -10,8 +10,8 @@ export function PendingPage() {
   const blocked = me.data?.blocked;
   const suspended = blocked?.kind === "banned";
   return (
-    <ScrollArea className="h-screen">
-    <div className="relative flex min-h-screen items-center justify-center p-6">
+    <ScrollArea className="h-dvh">
+    <div className="relative flex min-h-dvh items-center justify-center p-6">
       <ThemeToggle className="absolute right-4 top-4" />
       <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
         <Logo />

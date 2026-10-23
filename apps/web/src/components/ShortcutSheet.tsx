@@ -7,7 +7,7 @@ export function ShortcutSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   const groups = useShortcutGroups();
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Keyboard shortcuts" width={460}>
-      <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+      <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-4 text-[13px]">
           {groups.map((g) => (
             <section key={g.scope} className="flex flex-col gap-2">

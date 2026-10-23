@@ -1595,7 +1595,7 @@ export function ClipEditor(props: Props) {
   const tbtn = "grid h-[34px] min-w-[34px] place-items-center rounded-[10px] border border-line bg-panel px-2 text-[13px] text-ink hover:bg-sunk";
   const preview = (
     <div className={`flex min-h-0 min-w-0 flex-col items-center gap-2.5 px-4 pb-3 pt-3.5 ${compact ? "" : "flex-1"}`}>
-      <div className={`relative flex w-full justify-center ${compact ? "h-[min(62vh,520px)]" : "min-h-0 flex-1"}`}>
+      <div className={`relative flex w-full justify-center ${compact ? "h-[min(62dvh,520px)]" : "min-h-0 flex-1"}`}>
         <LivePreview
           clock={clock}
           framingAt={framingAt}
@@ -1942,7 +1942,7 @@ export function ClipEditor(props: Props) {
             <div className="px-4 pt-3">{canvasHeader}</div>
             {preview}
             <div className="border-y border-line bg-panel">{timeline}</div>
-            <div className="flex h-[70vh] flex-col bg-panel">{inspector}</div>
+            <div className="flex h-[70dvh] flex-col bg-panel">{inspector}</div>
           </div>
         </ScrollArea>
       ) : (

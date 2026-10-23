@@ -167,7 +167,7 @@ export function ReportDialog() {
   const uploadWithoutSource = !feedbackOnly && preview?.sourceType === "upload" && !inc.source;
   return (
     <Modal open={open} onOpenChange={(o) => !o && !busy && closeReport()} title="Report an issue" width={520}>
-      <ScrollArea className="max-h-[min(60vh,calc(90vh-8rem))]">
+      <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-3 pr-3">
           <Dialog.Description className="-mt-1 text-sm text-ink2">
             {projectId ? <>About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>. </> : null}

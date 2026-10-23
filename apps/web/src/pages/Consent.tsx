@@ -45,8 +45,8 @@ export function ConsentPage() {
 
   const what: Record<string, string> = { openid: "know who you are", profile: "see your name", email: "see your email address", offline_access: "stay connected without signing in again" };
   return (
-    <ScrollArea className="h-screen">
-    <div className="relative flex min-h-screen items-center justify-center p-6">
+    <ScrollArea className="h-dvh">
+    <div className="relative flex min-h-dvh items-center justify-center p-6">
       <ThemeToggle className="absolute right-4 top-4" />
       <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
         <Logo />
