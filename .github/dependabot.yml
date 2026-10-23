@@ -1,0 +1,46 @@
+# Dependabot: version updates, weekly, grouped so a week's bumps arrive as one PR per ecosystem
+# (security updates still come on their own, as soon as an advisory lands). Every PR runs CI, and
+# the app's dependency bumps need a changeset like any other change (see .changeset/README.md).
+version: 2
+updates:
+  # the pnpm workspace: apps/server, apps/web, packages/shared share one lockfile at the root
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      app:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # reelsaw.com has its own lockfile, outside the workspace
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      website:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    open-pull-requests-limit: 3
+
+  # actions are pinned by commit SHA with a version comment; Dependabot keeps both in step
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # base image digests in the Dockerfile (the compose files pull by tag on purpose: operators get
+  # Postgres and Speaches patch releases without waiting for a Reelsaw release)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

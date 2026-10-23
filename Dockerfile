@@ -1,16 +1,17 @@
+# Base images are pinned by digest (multi-arch index digests; Dependabot's docker ecosystem bumps them).
 # Multi-arch builds: only the `system` and `runtime` stages run per target architecture (under
 # emulation in CI). Everything architecture-independent (model files, the JS build and production
 # node_modules; the one native dependency, onnxruntime-node, ships binaries for every platform)
 # runs once on the build machine's own architecture ($BUILDPLATFORM).
 
 # ---------- models: downloaded once, natively ----------
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS models
+FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS models
 RUN apk add --no-cache curl
 COPY scripts/download-models.sh /tmp/download-models.sh
 RUN sh /tmp/download-models.sh /models
 
 # ---------- system: OS packages and media tools (shared by dev and runtime) ----------
-FROM node:22-bookworm-slim AS system
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS system
 # yt-dlp is pinned and verified. To bump: take the tag from https://github.com/yt-dlp/yt-dlp/releases,
 # then the linux `yt-dlp` line of that release's SHA2-256SUMS file, and update both args (and THIRD_PARTY.md).
 # The `yt-dlp` file is a Python zipapp, the same for amd64 and arm64.
@@ -33,7 +34,7 @@ RUN apt-get update \
 COPY --from=models /models /app/server/models
 
 # ---------- build: once, natively ----------
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -52,7 +53,7 @@ RUN pnpm -r build \
 
 # ---------- server for one target architecture: drop the other platforms' native binaries ----------
 # A separate stage (not a RUN in `runtime`): deleting files in a later layer wouldn't shrink the image.
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS server
+FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS server
 ARG TARGETARCH
 COPY --from=build /out/server /out/server
 RUN set -eu; \

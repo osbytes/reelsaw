@@ -13,15 +13,18 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# read-only by default; the one job takes exactly the write scopes it needs
 permissions:
-  contents: write      # create the GitHub release
-  packages: write      # push to GHCR
-  id-token: write      # sign the build provenance attestation (Sigstore, via GitHub OIDC)
-  attestations: write  # store it on the repository and next to the image
+  contents: read
 
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the GitHub release
+      packages: write      # push to GHCR
+      id-token: write      # sign the build provenance attestation (Sigstore, via GitHub OIDC)
+      attestations: write  # store it on the repository and next to the image
     env:
       # image names must be lowercase (owners can have capitals)
       GHCR_IMAGE_IN: ${{ vars.GHCR_IMAGE || format('ghcr.io/{0}/reelsaw', github.repository_owner) }}
