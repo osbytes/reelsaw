@@ -109,6 +109,20 @@ describe("bumperPurgeable", () => {
     assert.ok(!bumperPurgeable({ deletedAt: null }, false, NOW));
     assert.ok(!bumperPurgeable(gone(400), true, NOW));
   });
+  describe("instance-shared rows (user_id null)", () => {
+    const shared = (days: number, deletedAt: Date | null = null) => ({ userId: null, deletedAt, createdAt: new Date(NOW - days * 24 * 3600_000) });
+    it("go once over 30 days old with no reference and no save", () => {
+      assert.ok(bumperPurgeable(shared(31), false, NOW, false));
+    });
+    it("stay while new, referenced or saved by anyone", () => {
+      assert.ok(!bumperPurgeable(shared(29), false, NOW, false));
+      assert.ok(!bumperPurgeable(shared(400), true, NOW, false));
+      assert.ok(!bumperPurgeable(shared(400), false, NOW, true));
+    });
+    it("an own row is not judged by its age", () => {
+      assert.ok(!bumperPurgeable({ userId: "u", deletedAt: null, createdAt: new Date(NOW - 400 * 24 * 3600_000) }, false, NOW, false));
+    });
+  });
 });
 
 describe("planSweep with a partial listing", () => {

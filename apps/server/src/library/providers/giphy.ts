@@ -60,7 +60,7 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
       const f = file(g, type === "sticker");
       if (!f.url) throw new ProviderError("Giphy returned no file for that item.");
       const user = str(obj(g.user).display_name) ?? str(g.username);
-      return { url: f.url, ext: f.ext, name: clip(str(g.title) ?? `GIPHY ${id}`, 120), kind: type === "sticker" ? "image" : "video", category: "sticker", tags: [], provenance: { provider: "giphy", externalId, url: httpsUrl(g.url), license: LICENSE, attribution: clip(user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", 300) } };
+      return { url: f.url, ext: f.ext, name: clip(str(g.title) ?? `GIPHY ${id}`, 120), kind: type === "sticker" ? "image" : "video", tags: [], provenance: { provider: "giphy", externalId, url: httpsUrl(g.url), license: LICENSE, attribution: clip(user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", 300) } };
     },
   };
 }

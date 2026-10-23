@@ -87,9 +87,8 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
         ext: "svg",
         name: clip(name.replace(/-/g, " "), 120),
         kind: "image",
-        category: "sticker",
         tags: [...name.split("-"), prefix, "icon"],
-        provenance: { provider: "iconify", externalId, url: `https://icon-sets.iconify.design/${prefix}/${name}/`, license, attribution: license.id.startsWith("cc-by") ? clip(`${name} icon (${prefix}) via Iconify`, 300) : undefined },
+        provenance: { provider: "iconify", externalId, variant: (opts?.color ?? "#ffffff").replace(/^#/, "").toLowerCase(), url: `https://icon-sets.iconify.design/${prefix}/${name}/`, license, attribution: license.id.startsWith("cc-by") ? clip(`${name} icon (${prefix}) via Iconify`, 300) : undefined },
       };
     },
   };

@@ -54,7 +54,7 @@ export function freesound({ settings, http }: ProviderDeps): Provider {
       const name = str(s.name);
       if (!file || !name) throw new ProviderError("Freesound returned no preview for that sound.");
       const tags = arr(s.tags).flatMap((t) => (typeof t === "string" ? [t.toLowerCase()] : [])).slice(0, 12);
-      return { url: file, ext: "mp3", name: clip(name.replace(/\.(wav|mp3|flac|ogg|aif+)$/i, ""), 120), kind: "audio", category: (num(s.duration) ?? 0) <= 8 ? "sfx" : undefined, tags, provenance: { provider: "freesound", externalId, url: httpsUrl(s.url), license, attribution: credit(name, str(s.username)) } };
+      return { url: file, ext: "mp3", name: clip(name.replace(/\.(wav|mp3|flac|ogg|aif+)$/i, ""), 120), kind: "audio", tags, provenance: { provider: "freesound", externalId, url: httpsUrl(s.url), license, attribution: credit(name, str(s.username)) } };
     },
   };
 }

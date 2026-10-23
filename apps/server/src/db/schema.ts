@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, AssetProvenance, AssetCategory, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -305,8 +305,6 @@ export const libraryAssets = pgTable(
     kind: text("kind").$type<"video" | "image" | "audio">().notNull().default("video"),
     /** exact format (image/svg+xml, image/gif, video/mp4, audio/mpeg…); null for rows made before it existed */
     mime: text("mime"),
-    /** hint for pickers and filters (logo, sticker, broll, music, sfx, intro); never enforced by the renderer */
-    category: text("category").$type<AssetCategory>(),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     /** where an imported item came from and its license; null for the user's own uploads */
     provenance: jsonb("provenance").$type<AssetProvenance>(),
@@ -329,6 +327,10 @@ export const libraryAssets = pgTable(
   (t) => [index("bumper_assets_user_idx").on(t.userId), index("bumper_assets_hash_idx").on(t.userId, t.contentHash),
     // the hourly purge looks for removed assets across all users
     index("bumper_assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
+    // one instance-shared row per catalog / provider item (and Iconify colour), however many accounts import it
+    uniqueIndex("bumper_assets_shared_source_idx")
+      .on(sql`(${t.provenance}->>'provider')`, sql`(${t.provenance}->>'externalId')`, sql`coalesce(${t.provenance}->>'variant', '')`)
+      .where(sql`${t.userId} is null and ${t.deletedAt} is null`),
   ],
 );
 export type LibraryAsset = typeof libraryAssets.$inferSelect;

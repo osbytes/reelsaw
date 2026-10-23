@@ -75,14 +75,14 @@ export function pexels({ settings, http }: ProviderDeps): Provider {
         const url = httpsUrl(src.large2x) ?? httpsUrl(src.large) ?? httpsUrl(src.original);
         if (!url) throw new ProviderError("Pexels returned no file for that photo.");
         const who = str(p.photographer);
-        return { url, ext: extOf(url, "jpg"), name: clip(str(p.alt) ?? `Pexels photo ${id}`, 120), kind: "image", category: "broll", tags: [], provenance: { provider: "pexels", externalId, url: httpsUrl(p.url), license: LICENSE, attribution: clip(who ? `Photo by ${who} on Pexels` : "Photo on Pexels", 300) } };
+        return { url, ext: extOf(url, "jpg"), name: clip(str(p.alt) ?? `Pexels photo ${id}`, 120), kind: "image", tags: [], provenance: { provider: "pexels", externalId, url: httpsUrl(p.url), license: LICENSE, attribution: clip(who ? `Photo by ${who} on Pexels` : "Photo on Pexels", 300) } };
       }
       if (type === "video") {
         const v = obj(await http.json("pexels", `${API}/v1/videos/videos/${id}`, { headers: headers() }));
         const file = pickVideo(videoFiles(v));
         if (!file) throw new ProviderError("Pexels returned no file for that video.");
         const who = str(obj(v.user).name);
-        return { url: file.link, ext: "mp4", name: `Pexels video ${id}`, kind: "video", category: "broll", tags: [], provenance: { provider: "pexels", externalId, url: httpsUrl(v.url), license: LICENSE, attribution: clip(who ? `Video by ${who} on Pexels` : "Video on Pexels", 300) } };
+        return { url: file.link, ext: "mp4", name: `Pexels video ${id}`, kind: "video", tags: [], provenance: { provider: "pexels", externalId, url: httpsUrl(v.url), license: LICENSE, attribution: clip(who ? `Video by ${who} on Pexels` : "Video on Pexels", 300) } };
       }
       throw new ProviderError("That is not a Pexels id (photo:<id> or video:<id>).");
     },

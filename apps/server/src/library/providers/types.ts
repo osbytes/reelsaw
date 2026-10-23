@@ -1,5 +1,5 @@
 /** The shared shapes of the remote asset providers (Pexels, Pixabay, Freesound, Iconify, Openverse, Giphy, Klipy) and the Reelsaw catalog. */
-import type { AssetCategory, AssetKind, AssetProvenance } from "@reelsaw/shared";
+import type { AssetKind, AssetProvenance } from "@reelsaw/shared";
 import type { RuntimeKey, RuntimeSettings } from "../../instance-settings.js";
 import type { ProviderHttp } from "./http.js";
 
@@ -46,7 +46,6 @@ export interface Resolved {
   ext: string;
   name: string;
   kind: AssetKind;
-  category?: AssetCategory;
   tags?: string[];
   provenance: AssetProvenance;
   /** the file must hash to this (the Reelsaw catalog) */

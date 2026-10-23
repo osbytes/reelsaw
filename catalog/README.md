@@ -21,7 +21,7 @@ equivalents; the copyrighted originals people mean by "viral sounds" are never b
 (default `https://reelsaw.com/catalog/v1/index.json`) supersedes the bundled one when its `version` is higher; see
 `apps/server/src/library/catalog.ts`.
 
-Manifest item: `{ id, kind, mime, name, tags, category, durationSec?, width?, height?, bytes, sha256, url, license:
+Manifest item: `{ id, kind, mime, name, tags, durationSec?, width?, height?, bytes, sha256, url, license:
 { id, name, url }, attribution?, source: { url } }`. Imports verify the `sha256`.
 
 Icons are tinted white (they are laid over video) and sized 512 px; sounds are converted to mono MP3 at 64 kbps.

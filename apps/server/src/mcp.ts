@@ -10,7 +10,6 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
-import type { AssetCategory } from "@reelsaw/shared";
 import type { Services } from "./services.js";
 import type { AuthUser } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
@@ -338,15 +337,15 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
   // the library tools and their old *_bumper names share one handler each
   const listAssets = () => run(() => libraryView(svc, api, user.id, (p) => abs(p)!));
-  const addAsset = (input: { url?: string; uploadId?: string; name?: string; category?: AssetCategory; tags?: string[]; imageSeconds?: number; setDefault?: "intro" | "outro" }) =>
+  const addAsset = (input: { url?: string; uploadId?: string; name?: string; tags?: string[]; imageSeconds?: number; setDefault?: "intro" | "outro" }) =>
     run(async () => {
       requireOneSource(input);
       if (input.uploadId && input.name) throw new Error("name can only be set together with url");
       const uploadId = input.uploadId ?? (await downloadAsUpload(svc, user.id, input.url!, { name: input.name })).uploadId;
-      const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, category: input.category, tags: input.tags });
+      const created = await api.bumpers.create({ uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, tags: input.tags });
       return { ...created, isDefault: input.setDefault ?? null };
     });
-  const updateAsset = ({ assetId, ...patch }: { assetId: string; name?: string; category?: AssetCategory | null; tags?: string[]; imageSeconds?: number }) => run(() => api.bumpers.update({ id: assetId, ...patch }));
+  const updateAsset = ({ assetId, ...patch }: { assetId: string; name?: string; tags?: string[]; imageSeconds?: number }) => run(() => api.bumpers.update({ id: assetId, ...patch }));
   const removeAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.delete({ id: assetId }));
   const restoreAsset = ({ assetId }: { assetId: string }) => run(() => api.bumpers.restore({ id: assetId }));
   const assetUsage = ({ assetId }: { assetId: string }) => run(() => api.bumpers.usage({ id: assetId }));

@@ -103,9 +103,9 @@ describe("pixabay", () => {
     const hit = { id: 5, pageURL: "https://pixabay.com/p/5/", tags: "cat", largeImageURL: "https://pixabay.com/l.png", vectorURL: "https://pixabay.com/v.svg", user: "Di" };
     const { registry, calls } = setup(() => json({ hits: [hit] }));
     const photo = await registry.resolve("pixabay", "photo:5");
-    assert.deepEqual([photo.url, photo.ext, photo.category], ["https://pixabay.com/l.png", "png", "broll"]);
+    assert.deepEqual([photo.url, photo.ext], ["https://pixabay.com/l.png", "png"]);
     const vector = await registry.resolve("pixabay", "vector:5");
-    assert.deepEqual([vector.url, vector.ext, vector.category], ["https://pixabay.com/v.svg", "svg", "sticker"]);
+    assert.deepEqual([vector.url, vector.ext], ["https://pixabay.com/v.svg", "svg"]);
     assert.equal(calls[0]!.url.searchParams.get("id"), "5");
     await assert.rejects(setup(() => json({ hits: [] })).registry.resolve("pixabay", "photo:5"), /no longer/);
   });
@@ -131,7 +131,7 @@ describe("freesound", () => {
   it("resolves to an mp3 with the license and credit; refuses a non-commercial sound", async () => {
     const { registry } = setup(() => json(sound({ license: "http://creativecommons.org/licenses/by/4.0/" })));
     const r = await registry.resolve("freesound", "1");
-    assert.deepEqual([r.url, r.ext, r.kind, r.category], ["https://cdn.freesound.org/previews/1/1_1-hq.mp3", "mp3", "audio", "sfx"]);
+    assert.deepEqual([r.url, r.ext, r.kind], ["https://cdn.freesound.org/previews/1/1_1-hq.mp3", "mp3", "audio"]);
     assert.equal(r.provenance.attribution, "boom.wav by zed (Freesound)");
     assert.equal(r.provenance.license?.id, "cc-by");
     await assert.rejects(setup(() => json(sound({ license: "http://creativecommons.org/licenses/by-nc/4.0/" }))).registry.resolve("freesound", "1"), /cannot be imported/);
@@ -163,7 +163,7 @@ describe("iconify", () => {
     assert.equal(u.pathname, "/lucide/star.svg");
     assert.equal(u.searchParams.get("color"), "#ff0000");
     assert.equal(u.searchParams.get("width"), "512");
-    assert.deepEqual([r.ext, r.category, r.kind], ["svg", "sticker", "image"]);
+    assert.deepEqual([r.ext, r.kind], ["svg", "image"]);
     assert.equal((await registry.resolve("iconify", "lucide:star")).url.includes("color=%23ffffff"), true, "white by default");
     await assert.rejects(registry.resolve("iconify", "lucide:star", { color: "red" }), /hex/);
     await assert.rejects(registry.resolve("iconify", "evil:star"), /allowed set/);

@@ -65,8 +65,8 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   log-level [<level|module=level,...>|reset] [--for 15m]
  *                                           show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s
  *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
- *   library list [--kind video|image|audio] [--category c] [--q text] | add <file-or-url> [--name n] [--category c] [--tags a,b]
- *           | rename <id> <name…> | update <id> [--category c|none] [--tags a,b] | remove <id> | restore <id> | usage <id>
+ *   library list [--kind video|image|audio] [--q text] | add <file-or-url> [--name n] [--tags a,b]
+ *           | rename <id> <name…> | update <id> --tags a,b | remove <id> | restore <id> | usage <id>
  *           | default <intro|outro> <id|none> | reindex            [--user <email>]
  *                                           the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and
  *                                           sound effects (`bumpers …` is the old name). The user is --user, else the only
@@ -86,7 +86,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --rerender re-renders only the affected clips
  *   clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]
  *                                           everything laid over or played under a clip, one list (source seconds, x/y/w/size as
- *                                           fractions of the 9:16 frame); a sound of 8 s or less, or category sfx, is a one-shot at
+ *                                           fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at
  *                                           full level, anything else music (ducked, faded, looped); with no change flag it lists them
  *   clip-audio <projectId> <clipId> [--add <assetId> [--from <sec>] [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--no-duck] [--no-loop] | --track <trackId> [same options, --duck] | --remove <trackId> | --clear] [--rerender]
  *                                           background music tracks under parts of a clip from library audio items (source seconds;
@@ -145,12 +145,13 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime, clipOverlaySchema, clipAudioSchema, clipAudioList, clipLayerSchema, clipLayers, assetCategorySchema, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipAudio, type ClipLayer } from "@reelsaw/shared";
+import { formatTime, clipOverlaySchema, clipAudioSchema, clipAudioList, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipAudio, type ClipLayer } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, downloadAsUpload, libraryView, projectBumpersCall, uploadLocalFile } from "./library/service.js";
 import { backfillAssetRefs } from "./library/refs.js";
 import { libraryProviders } from "./library/import.js";
+import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
@@ -818,7 +819,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
-      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) removed over 30 days ago and used nowhere`);
+      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) (removed over 30 days ago, or shared and saved by nobody) and used nowhere`);
       const del = await purgeDeleted(svc, { dryRun: dry });
       console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
       return;
@@ -944,7 +945,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async library(svc) {
     const o = bumperArgs();
     const [sub, a, b] = o.pos;
-    const usage = "usage: reelsaw library list [--kind video|image|audio] [--category c] [--q text] | search <q…> [--provider p] [--kind k] [--license cc0|by] | import <provider> <externalId> [--color #hex] [--category c] [--tags a,b] | add <file-or-url> [--name n] [--category c] [--tags a,b] | rename <id> <name…> | update <id> [--category c|none] [--tags a,b] | remove <id> | restore <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
+    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--provider p] [--kind k] [--license cc0|by] | import <provider> <externalId> [--color #hex] [--tags a,b] | add <file-or-url> [--name n] [--tags a,b] | rename <id> <name…> | update <id> --tags a,b | remove <id> | restore <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
     if (sub === "reindex") {
       const r = await backfillAssetRefs(svc, { all: true });
       console.log(`reindexed ${r.projects} project(s), ${r.clips} clip(s), ${r.refs} reference(s)`);
@@ -952,12 +953,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     }
     const { api, user } = await bumperApi(svc, undefined);
     const tagList = o.tags === undefined ? undefined : o.tags.split(",").map((t) => t.trim()).filter(Boolean);
-    const category = o.category === undefined ? undefined : o.category === "none" ? null : assetCategorySchema.parse(o.category);
     if (sub === "list") {
       const lib = await libraryView(svc, api, user.id);
       const q = o.q?.toLowerCase();
-      const keep = (x: (typeof lib.assets)[number]) => (!o.kind || x.kind === o.kind) && (!o.category || x.category === o.category) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
-      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", category: x.category ?? "", tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips });
+      const keep = (x: (typeof lib.assets)[number]) => (!o.kind || x.kind === o.kind) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
+      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", owner: x.owner, tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips });
       table(lib.assets.filter(keep).map(row));
       const removed = lib.removed.filter(keep);
       if (removed.length) {
@@ -967,8 +967,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "add" && a) {
       const isUrl = /^https?:\/\//i.test(a);
       const up = isUrl ? await downloadAsUpload(svc, user.id, a, { name: o.name }) : await uploadLocalFile(svc, user.id, a);
-      const r = await api.bumpers.create({ uploadId: up.uploadId, ...(o.name ? { name: o.name } : {}), ...(category ? { category } : {}), ...(tagList ? { tags: tagList } : {}) });
-      console.log(`${r.duplicate ? (r.restored ? "restored existing" : "already in the library") : "added"} ${r.id}  ${r.name}  (${r.kind}${r.category ? `, ${r.category}` : ""})`);
+      const r = await api.bumpers.create({ uploadId: up.uploadId, ...(o.name ? { name: o.name } : {}), ...(tagList ? { tags: tagList } : {}) });
+      console.log(`${r.duplicate ? (r.restored ? "restored existing" : "already in the library") : "added"} ${r.id}  ${r.name}  (${r.kind})`);
     } else if (sub === "usage" && a) {
       const u = await api.bumpers.usage({ id: a });
       if (!u.projects.length) console.log("(not used)");
@@ -982,9 +982,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "rename" && a && b) {
       const r = await api.bumpers.update({ id: a, name: o.pos.slice(2).join(" ") });
       console.log(`renamed ${a}: ${r.previousName} → ${r.name}`);
-    } else if (sub === "update" && a && (category !== undefined || tagList)) {
-      const r = await api.bumpers.update({ id: a, ...(category !== undefined ? { category } : {}), ...(tagList ? { tags: tagList } : {}) });
-      console.log(`updated ${a}: category ${r.category ?? "-"}, tags ${r.tags.join(",") || "-"}`);
+    } else if (sub === "update" && a && tagList) {
+      const r = await api.bumpers.update({ id: a, tags: tagList });
+      console.log(`updated ${a}: tags ${r.tags.join(",") || "-"}`);
     } else if ((sub === "remove" || sub === "restore") && a) {
       await api.bumpers[sub === "remove" ? "delete" : "restore"]({ id: a });
       console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
@@ -996,8 +996,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       table(r.items.map((i) => ({ provider: i.provider, externalId: i.externalId, kind: i.kind, name: i.name, license: i.license.name, sec: i.durationSec ?? "", attribution: i.attribution ?? "" })));
       if (r.nextCursor) console.log(`more results exist: narrow the query (the web Browse panel pages through them)`);
     } else if (sub === "import" && a && b) {
-      const r = await api.catalog.import({ provider: a, externalId: b, color: o.color, ...(category ? { category } : {}), ...(tagList ? { tags: tagList } : {}) });
-      console.log(`${r.duplicate ? "already in the library" : "added"}${r.restored ? " (restored)" : ""}: ${r.name}  ${r.id}  (${r.kind}${r.category ? `, ${r.category}` : ""})`);
+      const r = await api.catalog.import({ provider: a, externalId: b, color: o.color, ...(tagList ? { tags: tagList } : {}) });
+      console.log(`${r.duplicate ? "saved (already on this instance)" : "added"}: ${r.name}  ${r.id}  (${r.kind})`);
     } else throw new Error(usage);
   },
   /** Old name of `library`. */
@@ -1133,10 +1133,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       next = [...current, parsed.data];
     } else if (addSound !== undefined) {
       if (from === undefined) throw new Error(`--add-sound needs --from (and --to; a sound effect defaults to its own length)\n${usage}`);
-      const asset = await svc.database.db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, addSound), eq(schema.libraryAssets.userId, user.id)), columns: { kind: true, durationSec: true, category: true } });
+      const asset = await svc.database.db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, addSound), assetVisibleTo(user.id)), columns: { kind: true, durationSec: true } });
       if (!asset) throw new Error(`no library item ${addSound}`);
       if (asset.kind !== "audio") throw new Error(`${addSound} is a ${asset.kind}, not a sound: use --add`);
-      // a short file or an sfx is a one-shot at full level; anything else is music (ducked, faded, looped)
+      // a short file is a one-shot at full level; anything else is music (ducked, faded, looped)
       const defaults = audioLayerDefaultsFor(asset);
       const sfx = defaults === SFX_AUDIO_DEFAULTS;
       const end = to ?? (sfx ? Math.min(clip.endSec, from + asset.durationSec) : clip.endSec);
@@ -1237,7 +1237,6 @@ function bumperArgs() {
     opacity: undefined as number | undefined,
     // library
     kind: undefined as string | undefined,
-    category: undefined as string | undefined,
     q: undefined as string | undefined,
     tags: undefined as string | undefined,
     name: undefined as string | undefined,
@@ -1282,7 +1281,6 @@ function bumperArgs() {
     else if (a === "--loop") out.loop = true;
     else if (a === "--add-sound") out.addSound = val();
     else if (a === "--kind") out.kind = val();
-    else if (a === "--category") out.category = val();
     else if (a === "--q") out.q = val();
     else if (a === "--tags") out.tags = val();
     else if (a === "--name") out.name = val();

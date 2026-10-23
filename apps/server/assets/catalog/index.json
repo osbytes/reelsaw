@@ -10,9 +10,9 @@
       "tags": [
         "icon",
         "favorite",
-        "rating"
+        "rating",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 585,
@@ -36,9 +36,9 @@
       "tags": [
         "icon",
         "love",
-        "like"
+        "like",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 370,
@@ -63,9 +63,9 @@
         "icon",
         "like",
         "yes",
-        "approve"
+        "approve",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 397,
@@ -89,9 +89,9 @@
       "tags": [
         "icon",
         "dislike",
-        "no"
+        "no",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 396,
@@ -116,9 +116,9 @@
         "icon",
         "tick",
         "done",
-        "yes"
+        "yes",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 236,
@@ -143,9 +143,9 @@
         "icon",
         "close",
         "no",
-        "wrong"
+        "wrong",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 257,
@@ -170,9 +170,9 @@
         "icon",
         "arrow",
         "next",
-        "pointer"
+        "pointer",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 258,
@@ -197,9 +197,9 @@
         "icon",
         "arrow",
         "back",
-        "pointer"
+        "pointer",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 259,
@@ -224,9 +224,9 @@
         "icon",
         "arrow",
         "up",
-        "pointer"
+        "pointer",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 258,
@@ -251,9 +251,9 @@
         "icon",
         "arrow",
         "down",
-        "pointer"
+        "pointer",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 259,
@@ -277,9 +277,9 @@
       "tags": [
         "icon",
         "video",
-        "start"
+        "start",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 303,
@@ -303,9 +303,9 @@
       "tags": [
         "icon",
         "video",
-        "stop"
+        "stop",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 310,
@@ -330,9 +330,9 @@
         "icon",
         "sound",
         "audio",
-        "volume"
+        "volume",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 473,
@@ -357,9 +357,9 @@
         "icon",
         "voice",
         "podcast",
-        "record"
+        "record",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 323,
@@ -382,9 +382,9 @@
       "name": "Camera",
       "tags": [
         "icon",
-        "photo"
+        "photo",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 434,
@@ -408,9 +408,9 @@
       "tags": [
         "icon",
         "film",
-        "record"
+        "record",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 347,
@@ -434,9 +434,9 @@
       "tags": [
         "icon",
         "song",
-        "audio"
+        "audio",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 305,
@@ -461,9 +461,9 @@
         "icon",
         "notification",
         "alert",
-        "subscribe"
+        "subscribe",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 390,
@@ -488,9 +488,9 @@
         "icon",
         "fire",
         "hot",
-        "trending"
+        "trending",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 390,
@@ -515,9 +515,9 @@
         "icon",
         "energy",
         "fast",
-        "power"
+        "power",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 376,
@@ -542,9 +542,9 @@
         "icon",
         "magic",
         "new",
-        "shine"
+        "shine",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 564,
@@ -568,9 +568,9 @@
       "tags": [
         "icon",
         "happy",
-        "face"
+        "face",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 366,
@@ -595,9 +595,9 @@
         "icon",
         "funny",
         "face",
-        "lol"
+        "lol",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 381,
@@ -622,9 +622,9 @@
         "icon",
         "celebrate",
         "confetti",
-        "congrats"
+        "congrats",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 731,
@@ -649,9 +649,9 @@
         "icon",
         "win",
         "award",
-        "first"
+        "first",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 522,
@@ -676,9 +676,9 @@
         "icon",
         "king",
         "best",
-        "premium"
+        "premium",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 461,
@@ -702,9 +702,9 @@
       "tags": [
         "icon",
         "present",
-        "giveaway"
+        "giveaway",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 431,
@@ -728,9 +728,9 @@
       "tags": [
         "icon",
         "idea",
-        "tip"
+        "tip",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 368,
@@ -755,9 +755,9 @@
         "icon",
         "look",
         "watch",
-        "views"
+        "views",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 357,
@@ -782,9 +782,9 @@
         "icon",
         "chat",
         "comment",
-        "reply"
+        "reply",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 344,
@@ -808,9 +808,9 @@
       "tags": [
         "icon",
         "send",
-        "social"
+        "social",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 415,
@@ -833,9 +833,9 @@
       "name": "Bookmark",
       "tags": [
         "icon",
-        "save"
+        "save",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 272,
@@ -860,9 +860,9 @@
         "icon",
         "launch",
         "growth",
-        "fast"
+        "fast",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 530,
@@ -887,9 +887,9 @@
         "icon",
         "announce",
         "promo",
-        "shout"
+        "shout",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 428,
@@ -914,9 +914,9 @@
         "icon",
         "alert",
         "caution",
-        "danger"
+        "danger",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 342,
@@ -940,9 +940,9 @@
       "tags": [
         "icon",
         "information",
-        "note"
+        "note",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 291,
@@ -967,9 +967,9 @@
         "icon",
         "help",
         "why",
-        "question"
+        "question",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 319,
@@ -994,9 +994,9 @@
         "icon",
         "place",
         "map",
-        "where"
+        "where",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 356,
@@ -1021,9 +1021,9 @@
         "icon",
         "time",
         "wait",
-        "timer"
+        "timer",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 268,
@@ -1048,9 +1048,9 @@
         "icon",
         "money",
         "price",
-        "cash"
+        "cash",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 312,
@@ -1075,9 +1075,9 @@
         "icon",
         "mention",
         "handle",
-        "email"
+        "email",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 296,
@@ -1103,9 +1103,9 @@
         "lol",
         "funny",
         "laugh",
-        "face"
+        "face",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 6563,
@@ -1130,9 +1130,9 @@
         "emoji",
         "hot",
         "lit",
-        "trending"
+        "trending",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2527,
@@ -1157,9 +1157,9 @@
         "emoji",
         "like",
         "yes",
-        "approve"
+        "approve",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 5459,
@@ -1184,9 +1184,9 @@
         "emoji",
         "celebrate",
         "confetti",
-        "congrats"
+        "congrats",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 5759,
@@ -1211,9 +1211,9 @@
         "emoji",
         "wow",
         "shock",
-        "face"
+        "face",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2136,
@@ -1238,9 +1238,9 @@
         "emoji",
         "100",
         "perfect",
-        "score"
+        "score",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2444,
@@ -1265,9 +1265,9 @@
         "emoji",
         "praise",
         "hooray",
-        "yay"
+        "yay",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 9076,
@@ -1292,9 +1292,9 @@
         "emoji",
         "love",
         "face",
-        "crush"
+        "crush",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 4440,
@@ -1319,9 +1319,9 @@
         "emoji",
         "shock",
         "wow",
-        "explode"
+        "explode",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 10649,
@@ -1346,9 +1346,9 @@
         "emoji",
         "look",
         "watch",
-        "side eye"
+        "side eye",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2847,
@@ -1373,9 +1373,9 @@
         "emoji",
         "magic",
         "new",
-        "shine"
+        "shine",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2662,
@@ -1400,9 +1400,9 @@
         "emoji",
         "launch",
         "growth",
-        "fast"
+        "fast",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 5438,
@@ -1427,9 +1427,9 @@
         "emoji",
         "dead",
         "dying",
-        "funny"
+        "funny",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 2894,
@@ -1454,9 +1454,9 @@
         "emoji",
         "hmm",
         "question",
-        "face"
+        "face",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 6015,
@@ -1481,9 +1481,9 @@
         "emoji",
         "applause",
         "bravo",
-        "clap"
+        "clap",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 5819,
@@ -1508,9 +1508,9 @@
         "emoji",
         "sad",
         "tears",
-        "face"
+        "face",
+        "sticker"
       ],
-      "category": "sticker",
       "width": 512,
       "height": 512,
       "bytes": 3554,
@@ -1536,9 +1536,9 @@
         "pop",
         "bubble",
         "appear",
-        "cartoon"
+        "cartoon",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.18,
       "bytes": 1714,
       "sha256": "1db1f66e95a0921ba725064ecc35f89539eaa950ccc3c51f3f402660033be3be",
@@ -1563,9 +1563,9 @@
         "ding",
         "bell",
         "notification",
-        "correct"
+        "correct",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.34,
       "bytes": 2968,
       "sha256": "31e468eb431f5648e24e637412a783fd00a9bfe6e97e3d7587d74a3cdf3d9120",
@@ -1590,9 +1590,9 @@
         "success",
         "win",
         "done",
-        "level up"
+        "level up",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.57,
       "bytes": 4849,
       "sha256": "7411a1ff5e960c32375b9eaa0f2198880beae99b3c320c3a3784abf2c6c44ba0",
@@ -1616,9 +1616,9 @@
         "sound",
         "chime",
         "notification",
-        "message"
+        "message",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.52,
       "bytes": 4431,
       "sha256": "cdee51a4468f472cd3507c51a1cc802beaeeef516e8178989985b671243cef98",
@@ -1644,9 +1644,9 @@
         "wrong",
         "buzzer",
         "fail",
-        "nope"
+        "nope",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.21,
       "bytes": 1923,
       "sha256": "ffa89574c0be94e01cc126870429c569155bd101e580bbc2840c59963db935d6",
@@ -1670,9 +1670,9 @@
         "sound",
         "click",
         "tap",
-        "button"
+        "button",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.13,
       "bytes": 1296,
       "sha256": "4547fccca6bce82ab0661cbcd1c5532b1c38f8891fcbf50ae4c29d5dbaffc4af",
@@ -1696,9 +1696,9 @@
         "sound",
         "click",
         "mouse",
-        "press"
+        "press",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.1,
       "bytes": 1087,
       "sha256": "5f1666270b094e0b01000149c15b1eaa0a0b2146296c1c6956f40d98af473a80",
@@ -1723,9 +1723,9 @@
         "whoosh",
         "swoosh",
         "transition",
-        "swipe"
+        "swipe",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.44,
       "bytes": 3804,
       "sha256": "9159bd78711ce60a48029e96f62d672d8f4ddd2d78b8393c0f32b59b23386778",
@@ -1750,9 +1750,9 @@
         "whoosh",
         "swoosh",
         "transition",
-        "swipe"
+        "swipe",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.44,
       "bytes": 3804,
       "sha256": "9818d24b7a86020a7f87dc51e52630a97b8635d424e7dc4b11544531ab0f7d77",
@@ -1777,9 +1777,9 @@
         "bong",
         "gong",
         "boom",
-        "dramatic"
+        "dramatic",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.16,
       "bytes": 1505,
       "sha256": "aff3a11099516ed349df34b6f83d8d92c002239d43f031fe1270710912f48604",
@@ -1803,9 +1803,9 @@
         "sound",
         "pluck",
         "boing",
-        "cartoon"
+        "cartoon",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.13,
       "bytes": 1296,
       "sha256": "3a622dbb3873da6be9c32befc6332e978c2f7b2b17e211d974548b6256172320",
@@ -1830,9 +1830,9 @@
         "glass",
         "ting",
         "sparkle",
-        "clink"
+        "clink",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.31,
       "bytes": 2759,
       "sha256": "6216e4dac2e52c9ec089986fb1c1577394933d327ad0845bce425ea9a2515fb2",
@@ -1857,9 +1857,9 @@
         "glitch",
         "digital",
         "static",
-        "tech"
+        "tech",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.05,
       "bytes": 669,
       "sha256": "e24bdd36bf8e28aed42fb556544c84d45ba963dfefce230ff868a82ce932c6f4",
@@ -1884,9 +1884,9 @@
         "scratch",
         "record",
         "freeze frame",
-        "wait what"
+        "wait what",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.18,
       "bytes": 1714,
       "sha256": "fef8f8f9f926ebaba2db3e446a55f79a3f1514bd72c2fb1c3296dfbd453f3213",
@@ -1910,9 +1910,9 @@
         "sound",
         "question",
         "hmm",
-        "confused"
+        "confused",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.52,
       "bytes": 4431,
       "sha256": "25774c93101acb08d336e7c2ffd7a953370cc356acc355b91b694f030defb356",
@@ -1937,9 +1937,9 @@
         "tick",
         "clock",
         "timer",
-        "countdown"
+        "countdown",
+        "sfx"
       ],
-      "category": "sfx",
       "durationSec": 0.08,
       "bytes": 878,
       "sha256": "b8d3ccd346fe506ab41795f2100a88063cac0e800bf4f5c5d515800aa15a6830",

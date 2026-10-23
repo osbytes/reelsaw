@@ -6,6 +6,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { projectSettingsSchema, defaultProjectSettings, userProjectDefaultsSchema, type ProjectSettings, type UserProjectDefaults } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
+import { assetVisibleTo } from "../library/visible.js";
 
 export async function userDefaults(db: Db, userId: string): Promise<UserProjectDefaults> {
   const row = await db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, userId), columns: { projectDefaults: true } });
@@ -26,7 +27,7 @@ export async function resolveProjectSettings(db: Db, userId: string, input: Part
       delete merged[k === "introAssetId" ? "introSec" : "outroSec"];
       continue;
     }
-    const row = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, id), eq(schema.libraryAssets.userId, userId), isNull(schema.libraryAssets.deletedAt)), columns: { id: true } });
+    const row = await db.query.libraryAssets.findFirst({ where: and(eq(schema.libraryAssets.id, id), assetVisibleTo(userId), isNull(schema.libraryAssets.deletedAt)), columns: { id: true } });
     if (row) continue;
     // an id the caller named that is not theirs is an error; a stale saved default is just dropped, with its seconds
     if (given[k] === id) throw new TRPCError({ code: "NOT_FOUND", message: `That ${k === "introAssetId" ? "intro" : "outro"} is not in your library` });

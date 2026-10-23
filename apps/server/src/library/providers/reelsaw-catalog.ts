@@ -20,7 +20,6 @@ export function reelsawCatalog(catalog: Catalog): Provider {
         ext,
         name: item.name,
         kind: item.kind,
-        category: item.category,
         tags: item.tags,
         sha256: item.sha256,
         ...(localPath ? { localPath } : {}),

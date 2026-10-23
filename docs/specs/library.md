@@ -17,7 +17,7 @@ without leaving the editor or finding files on my disk.
 
 | piece | today | problem |
 |---|---|---|
-| store | `bumper_assets` (`kind` video / image / audio, immutable, soft delete, sha256 dedupe, URL import with SSRF guard, 30-day purge) | right model, wrong name and too narrow: no SVG, GIF, WebP; no tags, category or provenance; "Used by" loads every project and clip of the user (scale.md #11, #12) |
+| store | `bumper_assets` (`kind` video / image / audio, immutable, soft delete, sha256 dedupe, URL import with SSRF guard, 30-day purge) | right model, wrong name and too narrow: no SVG, GIF, WebP; no tags or provenance; "Used by" loads every project and clip of the user (scale.md #11, #12) |
 | clip refs | `clips.bumpers {intro, outro}`, `clips.overlays[]` (asset \| text), `clips.audio[]` | two lists with two id spaces, two lanes, two inspector cards, two MCP fields, two CLI commands, two copy/paste paths, for items that share id / start / end / level / fade |
 | render | `overlayChain` (images repeat, videos play once), `musicMix` (loop, duck, fade), bumper concat | fine; needs loop for stickers, raster step for SVG |
 | surfaces | `list_bumpers` … `set_clip_bumpers`, `update_clip { overlays, audio }`, `reelsaw bumpers`, `clip-overlays`, `clip-audio` | named after the first use case |
@@ -31,11 +31,12 @@ without leaving the editor or finding files on my disk.
    `source_key` / `thumbnail_key`, so old `bumpers/<id>/…` objects stay where they are and new rows
    write `assets/<id>/…`; derived caches use `keys.assetDir(source_key)`).
    Columns added: `mime` (exact type: `image/svg+xml`, `image/gif`, `image/webp`, `audio/mpeg`…),
-   `category` (`intro`, `outro`, `logo`, `sticker`, `icon`, `broll`, `music`, `sfx`; a hint for pickers,
-   never enforced by the renderer), `tags text[]`, `provenance jsonb` (`{ provider, externalId, url,
+   `tags text[]`, `provenance jsonb` (`{ provider, externalId, variant, url,
    license: { id, name, url }, attribution, importedAt }`, null for uploads), `system boolean`
    (came from the Reelsaw catalog; shown with a badge, same row otherwise). `kind` stays coarse
-   (video / image / audio): it is what the renderer and the pickers branch on. Animated GIF / WebP are
+   (video / image / audio): it is what the renderer and the pickers branch on, and the only classification:
+   there are no categories (a sound of 8 s or less gets one-shot layer defaults, longer is music; that is
+   a default, not a label). Search is by name, tags and credit. Animated GIF / WebP are
    `kind: "video"` with the mime saying what they are.
 2. **One per-clip list, `clips.layers`.** A discriminated union on `kind`:
 
@@ -104,8 +105,16 @@ without leaving the editor or finding files on my disk.
    - **Known gap**: ffmpeg 7.1 cannot decode *animated* WebP (the probe reports width 0), so such a file
      is refused with "save it as a GIF or an MP4 instead"; a build that can decode it works unchanged.
 6. **Providers import, never hotlink.** A remote result becomes a normal immutable library row via
-   the existing `downloadAsUpload` → `create` path (SSRF guard, size and duration limits, sha256
-   dedupe), with `provenance` filled. Renders only ever read the library. Pixabay forbids permanent
+   the existing `downloadAsUpload` → `createAsset` path (SSRF guard, size and duration limits, sha256
+   dedupe), with `provenance` filled. **Imports are instance-shared rows**: one `bumper_assets` row with
+   `user_id` null per `(provider, externalId, variant)` (variant = the Iconify colour; a unique partial
+   index and a lock keyed on it make two accounts importing at once converge), plus a `library_saves` row
+   for the importing account. Any signed-in account may use a shared row (media routes, project and clip
+   pickers, renders); only the accounts that saved it see it in their library, it never counts toward a
+   storage quota, and it cannot be renamed or retagged ("Shared items keep the name they came with").
+   Removing one deletes the account's save, never the row. The hourly sweep (`purgeBumperAssets`) hard
+   deletes a shared row, its files and its cache once it is over 30 days old, no `asset_refs` row
+   names it and no account has it saved (`reelsaw storage sweep --dry-run` lists them). Renders only ever read the library. Pixabay forbids permanent
    hotlinking and requires a 24 h cache of search results; Pexels wants a visible "Photos provided by
    Pexels" link and photographer credit; both are satisfied by the Browse panel's footer and the
    stored attribution, not by anything at render time. Self-hosted instances with no keys still get
@@ -114,7 +123,7 @@ without leaving the editor or finding files on my disk.
 ## System assets: the Reelsaw catalog
 
 A static, versioned manifest plus files, published from `website/` (or a release asset) and
-mirrored on a CDN: `catalog/v1/index.json` with `{ id, kind, mime, name, tags, category,
+mirrored on a CDN: `catalog/v1/index.json` with `{ id, kind, mime, name, tags,
 durationSec, width, height, bytes, sha256, url, license: { id, name, url }, attribution }` per item,
 `ETag`/`max-age`. The server fetches and caches it (hourly, `reelsaw catalog refresh`), serves it at
 `GET /api/catalog` and searches it with the same Fuse index the Library page already uses (a few
@@ -172,7 +181,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
   when it scrolls into view or its chip is selected, with the provider's attribution line under it).
   A source chip shows only that section and paginates ("Show more"). Every tile (`AssetTile`) says
   whether the item is in your library: a check badge "In your library", or a "+ Add" button for a
-  catalog / provider result (`catalog.import`) or a shared item you have not saved (`library.save`).
+  catalog / provider result (`catalog.import`; an item already on the instance is only saved, nothing is downloaded again) or a shared item you have not saved (`library.save`).
   Tiles show kind, format, license badge for imported items and "Used by N"; own items keep rename,
   tags, remove and usage in the viewer, saved shared items get "Remove from your library". Deep links:
   `#asset=<id>`, `?kind=&source=&q=`.
@@ -187,8 +196,8 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 | action | tRPC | MCP | CLI |
 |---|---|---|---|
-| list / search own library | `library.list { kind?, category?, q?, cursor }` | `list_assets` (alias `list_bumpers` for one release) | `reelsaw library list [--kind] [--q]` |
-| upload / import by URL | `library.create { uploadId \| url, name?, category?, tags? }` | `add_asset` (alias `add_bumper`) | `reelsaw library add <file\|url>` |
+| list / search own library | `library.list { kind?, q?, cursor }` | `list_assets` (alias `list_bumpers` for one release) | `reelsaw library list [--kind] [--q]` |
+| upload / import by URL | `library.create { uploadId \| url, name?, tags? }` | `add_asset` (alias `add_bumper`) | `reelsaw library add <file\|url>` |
 | rename, tag, remove, restore, usage | `library.update / delete / restore / usage` (`library` and `bumpers` are the same router) | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` (old `*_bumper` names stay as aliases) | `reelsaw library rename\|update\|remove\|restore\|usage` |
 | rebuild the refs table | none (reconciler backfill, bounded ticks) | none | `reelsaw library reindex` |
 | search catalog and providers | `library.search { provider, q, kind?, cursor? }` | `search_library { provider?, q, kind? }` | `reelsaw library search <q> [--provider] [--kind]` |
@@ -212,9 +221,9 @@ surfaces rule.
 
 | phase | appetite | ships |
 |---|---|---|
-| 0. Widen the store | 1 day | table rename + `mime`, `category`, `tags`, `provenance`, `system`; svg / gif / webp accepted; svg raster cache; gif loop; `library.*` procedures with the old names as aliases; `list_assets` / `add_asset` MCP (+ aliases); `reelsaw library` |
+| 0. Widen the store | 1 day | table rename + `mime`, `tags`, `provenance`, `system`; svg / gif / webp accepted; svg raster cache; gif loop; `library.*` procedures with the old names as aliases; `list_assets` / `add_asset` MCP (+ aliases); `reelsaw library` |
 | 1. Layers | 3 days | `clipLayerSchema`, `clips.layers`, read-path merge, write-path null-out, `asset_refs` + backfill job, one lane, one inspector card, `+ Sound`, MCP / CLI aliases, spec update, eval fixture renders with a gif sticker, an svg logo and a sound effect |
-| 2. Library page | 2 days | chips, search, categories, license badges, credits in export and `get_project` |
+| 2. Library page | 2 days | chips, search, license badges, credits in export and `get_project` |
 | 3. Catalog + providers | 3 days | provider interface, 24 h search cache, runtime key settings, Browse tab + dialog, Reelsaw manifest + `catalog:build` + starter pack in the image, Pexels, Freesound, Iconify; Openverse and Pixabay behind a flag until their limits are verified in practice |
 | 3b. GIF search | 1 day | Giphy and Klipy providers (bring your own key), sticker vs GIF import rule, attribution mark; a GIF layer previews with `<img>` (browsers loop GIFs natively) and renders through the looped overlay input |
 | later | — | `suggest_layers` (LLM picks b-roll / sfx moments from the transcript and searches the catalog; RESEARCH.md #12 becomes cheap once search exists), b-roll `fit: fill` as a layout piece, CC0 music loops in the catalog |

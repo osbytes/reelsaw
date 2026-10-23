@@ -719,7 +719,7 @@ async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: stri
       await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
     const asset = await db.query.libraryAssets.findFirst({ where: eq(schema.libraryAssets.id, id) });
-    if (!asset || asset.userId !== userId) {
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip(`the ${slot} file is no longer available`);
       continue;
     }
@@ -786,7 +786,7 @@ async function loadOverlays(ctx: StageContext, userId: string, overlays: AssetLa
       continue;
     }
     const asset = await db.query.libraryAssets.findFirst({ where: eq(schema.libraryAssets.id, o.assetId) });
-    if (!asset || asset.userId !== userId) {
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip("the library file is no longer available");
       continue;
     }
@@ -865,7 +865,7 @@ async function loadMusic(ctx: StageContext, userId: string, tracks: Array<ClipAu
       continue;
     }
     const asset = await db.query.libraryAssets.findFirst({ where: eq(schema.libraryAssets.id, audio.assetId) });
-    if (!asset || asset.userId !== userId) {
+    if (!asset || (asset.userId !== null && asset.userId !== userId)) {
       await skip("the music file is no longer in the library");
       continue;
     }
