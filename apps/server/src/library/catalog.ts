@@ -10,6 +10,8 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import Fuse from "fuse.js";
 import { z } from "zod";
 import { ASSET_KINDS, assetCategorySchema, type AssetKind } from "@reelsaw/shared";
@@ -74,7 +76,16 @@ export interface CatalogDeps {
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
-export const DEFAULT_BUNDLED_DIR = path.resolve(process.cwd(), "assets/catalog");
+/**
+ * The starter pack shipped next to the server code: `apps/server/assets/catalog` in a checkout, `/app/server/assets/catalog`
+ * in the image (where the process runs from `/app`, so the working directory cannot be relied on). Resolved from this module
+ * like the migrations folder in db/index.ts: the bundle lives in `dist/` (or `dist/chunks/`), the sources in `src/library/`.
+ */
+export const DEFAULT_BUNDLED_DIR = (() => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [path.resolve(here, "../assets/catalog"), path.resolve(here, "../../assets/catalog"), path.resolve(here, "../../../assets/catalog"), path.resolve(process.cwd(), "assets/catalog"), path.resolve(process.cwd(), "apps/server/assets/catalog")];
+  return candidates.find((d) => existsSync(path.join(d, "index.json"))) ?? candidates[0]!;
+})();
 
 async function readManifest(file: string): Promise<Manifest | null> {
   try {
