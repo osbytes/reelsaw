@@ -42,8 +42,14 @@ jobs:
           path: apps/server/models
           key: onnx-models-${{ hashFiles('scripts/download-models.sh') }}
       - run: pnpm --filter @reelsaw/server models:download
+      # a static ffmpeg + ffprobe build (BtbN), cached by the action: seconds instead of the five
+      # minutes apt-get needs for ffmpeg's dependency tree
       - name: ffmpeg for the media suites
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffmpeg -version | head -1
+        uses: FedericoCarboni/setup-ffmpeg@37062fbf7149fc5578d6c57e08aed62458b375d6 # v3.1
+        with:
+          ffmpeg-version: release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: ffmpeg -version | head -1 && ffprobe -version | head -1
       # model-free eval suites against the committed baselines; suites whose media is not in git
       # skip themselves under --offline, and any regression fails the job
       - run: pnpm --filter @reelsaw/server eval:offline
