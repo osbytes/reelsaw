@@ -19,6 +19,7 @@ import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from "./library/service.js";
 import { assetVisibleTo } from "./library/visible.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
+import { listReleasesResult } from "./releases.js";
 import { restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
@@ -381,6 +382,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "check_for_update",
     TOOLS.check_for_update,
     ({ refresh }) => run(() => (refresh ? api.admin.updates.check() : api.admin.updates.get())),
+  );
+
+  server.registerTool(
+    "list_releases",
+    TOOLS.list_releases,
+    (input) => run(() => api.releases.get().then((s) => listReleasesResult(s, input))),
   );
 
   server.registerTool(

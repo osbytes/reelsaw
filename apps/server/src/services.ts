@@ -27,6 +27,7 @@ import { loadAligner, type Aligner } from "./audio/align.js";
 import { createLogger, type Logger } from "./log.js";
 import { createLogLevelSettings, type LogLevelSettings } from "./log-level.js";
 import { createUpdateChecker, type UpdateChecker } from "./updates.js";
+import { createReleaseFeed, type ReleaseFeed } from "./releases.js";
 import { createInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 import type { Entitlements } from "./quota.js";
 import type { EE } from "./ee/index.js";
@@ -68,6 +69,8 @@ export interface Services {
   resources: ResourceGovernor;
   /** is a newer release published (updates.ts); checked by the http process, shown to admins */
   updates: UpdateChecker;
+  /** GitHub releases + 90-day commit heatmap (releases.ts); reelsaw.com/releases, list_releases, reelsaw releases */
+  releases: ReleaseFeed;
   /** null when ALIGNER=false; then cut boundaries come from the whisper-based search only. */
   aligner: Aligner | null;
   /** null when VAD=false; then pauses are never trimmed. */
@@ -232,6 +235,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const logLevel = createLogLevelSettings(log, { listen: env.REELSAW_CLI !== "1" });
   const updates = createUpdateChecker(config, log.child({ module: "updates" }), { enabled: () => settings.get().UPDATE_CHECK });
+  const releases = createReleaseFeed(config, log.child({ module: "releases" }));
   await step("log level settings", async () => {
     await logLevel.attach(database.db, config.DATABASE_URL);
   });
@@ -313,7 +317,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
 
-  const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
+  const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, releases, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
   svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads

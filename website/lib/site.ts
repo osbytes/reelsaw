@@ -16,7 +16,9 @@ export const SITE = {
   /** the hosted service (docs/specs/ee.md); only meaningful when `hosted` is true */
   app: hostedUrl ?? "https://app.reelsaw.com",
   github: "https://github.com/osbytes/reelsaw",
+  /** GitHub's own releases (zips, tags). The changelog page is `/releases`. */
   releases: "https://github.com/osbytes/reelsaw/releases",
+  changelog: "/releases",
   issues: "https://github.com/osbytes/reelsaw/issues",
   docker: "https://github.com/osbytes/reelsaw/pkgs/container/reelsaw",
   osbytes: "https://www.osbytes.io",

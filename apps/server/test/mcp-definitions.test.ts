@@ -38,6 +38,7 @@ const EXPECTED = [
   "list_failures",
   "list_layer_templates",
   "list_projects",
+  "list_releases",
   "list_workers",
   "reanalyze_project",
   "remove_asset",
