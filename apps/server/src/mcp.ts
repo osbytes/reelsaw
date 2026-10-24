@@ -9,14 +9,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Services } from "./services.js";
 import type { AuthUser } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
-import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall, type AssetRef } from "./library/service.js";
+import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from "./library/service.js";
+import { assetVisibleTo } from "./library/visible.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
@@ -87,10 +88,15 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     thumbnailUrl: abs(c.thumbnailUrl),
   });
 
-  /** Names and lengths of every library asset (removed ones too: clips that still use them keep rendering with them). */
-  const assetsById = async () => {
-    const lib = await api.library.list();
-    return assetMap([...lib.assets, ...lib.deleted] as AssetRef[]);
+  /** Names and lengths of the assets these ids name (own uploads, removed ones still in use, or instance-shared rows). */
+  const assetsByIds = async (ids: Array<string | null | undefined>) => {
+    const want = [...new Set(ids.filter((id): id is string => !!id))];
+    if (!want.length) return assetMap([]);
+    const rows = await db
+      .select({ id: schema.assets.id, name: schema.assets.name, kind: schema.assets.kind, durationSec: schema.assets.durationSec })
+      .from(schema.assets)
+      .where(and(inArray(schema.assets.id, want), assetVisibleTo(user.id)));
+    return assetMap(rows);
   };
 
   server.registerTool(
@@ -110,7 +116,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
       run(async () => {
         const p = await api.projects.get({ id });
         const { clips, transcript, ...rest } = p;
-        const assets = await assetsById();
+        const assets = await assetsByIds([p.settings.introAssetId, p.settings.outroAssetId, ...clips.flatMap((c) => [c.bumpers?.intro, c.bumpers?.outro])]);
         return {
           ...rest,
           bumpers: effectiveBumpers(p.settings, {}, assets),
@@ -248,7 +254,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
         const p = await api.projects.get({ id: c.projectId });
         const clip = p.clips.find((x) => x.id === id);
         if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `This clip was deleted or replaced by a re-analyze. restore_clip brings it back (possible ${restorableFor(svc)} after that).` });
-        return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsById()) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
+        return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsByIds([p.settings.introAssetId, p.settings.outroAssetId, clip.bumpers?.intro, clip.bumpers?.outro])) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
       }),
   );
 

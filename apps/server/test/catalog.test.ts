@@ -157,13 +157,11 @@ function fakeSvc(opts: { fetch?: typeof fetch; bundledDir: string }) {
 describe("importing from the catalog", () => {
   // an in-memory stand-in for the shared rows: one per (provider, externalId, variant), like the unique index
   const created: Array<Record<string, any>> = [];
-  const saves: Array<[string, string]> = [];
   const rows = new Map<string, { id: string; name: string; kind: string; mime: string; durationSec: number; duplicate: boolean; restored: boolean }>();
   const shared = {
-    saveExisting: async (_svc: unknown, userId: string, k: { provider: string; externalId: string; variant: string }) => {
+    existing: async (_svc: unknown, k: { provider: string; externalId: string; variant: string }) => {
       const row = rows.get(`${k.provider}|${k.externalId}|${k.variant}`);
       if (!row) return null;
-      saves.push([userId, row.id]);
       return { ...row, duplicate: true };
     },
     create: async (_svc: unknown, i: Record<string, any>) => {
@@ -171,13 +169,11 @@ describe("importing from the catalog", () => {
       const p = i.provenance;
       const row = { id: `asset-${rows.size + 1}`, name: i.name, kind: "audio", mime: "audio/mpeg", durationSec: 1, duplicate: false, restored: false };
       rows.set(`${p.provider}|${p.externalId}|${p.variant ?? ""}`, row);
-      saves.push([i.saveFor, row.id]);
       return row;
     },
   } as never;
   beforeEach(() => {
     created.length = 0;
-    saves.length = 0;
     rows.clear();
   });
 
@@ -194,13 +190,13 @@ describe("importing from the catalog", () => {
     assert.equal(c.system, true);
     assert.equal(c.userId, null, "an import is an instance-shared row");
     assert.equal(c.actorId, "u1");
-    assert.equal(c.saveFor, "u1", "and is saved into the importing account's library");
+    assert.equal("saveFor" in c, false);
     assert.equal("category" in c, false);
     assert.deepEqual(c.tags, ["bubble", "extra"]);
     assert.deepEqual(c.provenance, { provider: "reelsaw", externalId: "sfx-pop", url: "https://example.com/", license: { id: "cc0", name: "CC0 1.0", url: "https://creativecommons.org/publicdomain/zero/1.0/" }, variant: "" });
   });
 
-  it("a second account importing the same item reuses the shared row and only saves it", async () => {
+  it("a second account importing the same item reuses the shared row", async () => {
     const b = await bundle(manifest(1, [item("sfx-pop", "Pop", { sha256: sha("abc") })]), { "sfx-pop.mp3": "abc" });
     const { svc, uploads } = fakeSvc({ bundledDir: b });
     const first = await importAsset(svc, "u1", { provider: "reelsaw", externalId: "sfx-pop" }, { shared });
@@ -210,7 +206,6 @@ describe("importing from the catalog", () => {
     assert.equal(second.id, first.id);
     assert.equal(created.length, 1, "one row for the whole instance");
     assert.equal(uploads.length, 1, "nothing is copied or downloaded the second time");
-    assert.deepEqual(saves, [["u1", first.id], ["u2", first.id]]);
   });
 
   it("refuses a bundled file that no longer matches the manifest", async () => {

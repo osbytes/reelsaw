@@ -494,17 +494,10 @@ const headRouter = router({
   }),
 });
 
-/** The library as the screens and tools list it: live rows with usage, and the removals of the last 30 days. */
+/** The library as the screens and tools list it: the account's own uploads, with usage, and the removals of the last 30 days. Catalog / provider files are instance-shared and listed by search, not here. */
 async function listLibrary(svc: Services, userId: string) {
     const db = svc.database.db;
-    // the user's own uploads, plus the instance-shared rows they saved (catalog / provider imports)
-    const own = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
-    const savedRows = await db
-      .select({ asset: schema.assets, savedAt: schema.assetSaves.createdAt })
-      .from(schema.assetSaves)
-      .innerJoin(schema.assets, eq(schema.assetSaves.assetId, schema.assets.id))
-      .where(and(eq(schema.assetSaves.userId, userId), isNull(schema.assets.userId)));
-    const rows = [...own.map((r) => ({ ...r, saved: false, sortAt: r.createdAt })), ...savedRows.map(({ asset, savedAt }) => ({ ...asset, saved: true, sortAt: savedAt }))].sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
+    const rows = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId)).orderBy(desc(schema.assets.createdAt));
     const usage = await bumperUsageCounts(db, userId);
     // audio has no thumbnail: the pickers draw a music glyph instead
     const pub = (r: (typeof rows)[number]) => ({
@@ -524,9 +517,7 @@ async function listLibrary(svc: Services, userId: string) {
       tags: r.tags,
       provenance: r.provenance,
       system: r.system,
-      /** "me": the user's own upload; "shared": an instance row every account can use (saved into this library) */
-      owner: (r.userId ? "me" : "shared") as "me" | "shared",
-      saved: r.saved,
+      owner: "me" as const,
     });
     // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
     const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
@@ -560,7 +551,6 @@ function libraryHit(r: LibraryRow) {
 interface AddedAsset extends ImportedAsset {
   mime: string | null;
   owner: "me" | "shared";
-  saved: boolean;
 }
 
 /** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
@@ -583,9 +573,10 @@ const libraryRouter = router({
       .input(z.object({ id: z.string().min(1).max(100), name: bumperNameSchema.optional(), imageSeconds: bumperSecondsSchema.optional(), tags: assetTagsSchema.optional() }))
       .mutation(({ ctx, input }) => updateBumperAsset(ctx.svc, ctx.user.id, input.id, { name: input.name, imageSeconds: input.imageSeconds, tags: input.tags })),
     /**
-     * Add to the library from exactly one source: an `uploadId` (POST /api/upload), a public `url` (downloaded
-     * server-side), or a catalog / provider result (`provider` + `externalId`: one shared copy per instance, saved
-     * into this account). The file is probed and limited like every upload; `setDefault` also makes it the intro or outro.
+     * Add from exactly one source: an `uploadId` (POST /api/upload) or a public `url` (downloaded server-side) becomes
+     * this account's library row; a catalog / provider result (`provider` + `externalId`) materializes one instance-shared
+     * copy (not listed in this library). The file is probed and limited like every upload; `setDefault` also makes an
+     * own upload the intro or outro.
      */
     add: protectedProcedure
       .input(
@@ -610,11 +601,11 @@ const libraryRouter = router({
         if (input.provider) {
           if (input.setDefault || input.imageSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
           const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
-          return { ...r, mime: r.mime ?? null, owner: "shared", saved: true };
+          return { ...r, mime: r.mime ?? null, owner: "shared" };
         }
         const uploadId = input.uploadId ?? (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then((d) => d.uploadId, (err) => asTrpc(err)));
         const created = await createAsset(ctx.svc, { uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, name: input.name, tags: input.tags, userId: ctx.user.id, actorId: ctx.user.id });
-        return { ...created, owner: "me", saved: false };
+        return { ...created, owner: "me" };
       }),
     /**
      * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or
@@ -652,36 +643,24 @@ const libraryRouter = router({
         return { ok: true };
       });
     }),
-    /** Soft delete: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
+    /** Soft delete one of your uploads: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
     remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
-        // an instance-shared row is never removed by a user: this drops the user's save only (the sweep owns the row)
-        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId)));
-        if (shared) {
-          const dropped = await u.db.delete(schema.assetSaves).where(and(eq(schema.assetSaves.userId, ctx.user.id), eq(schema.assetSaves.assetId, input.id))).returning({ assetId: schema.assetSaves.assetId });
-          if (!dropped.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-        } else {
-          const gone = await u.db
-            .update(schema.assets)
-            .set({ deletedAt: new Date() })
-            .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
-            .returning({ id: schema.assets.id });
-          if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-        }
+        const gone = await u.db
+          .update(schema.assets)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id), isNull(schema.assets.deletedAt)))
+          .returning({ id: schema.assets.id });
+        if (!gone.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
         for (const key of ["introAssetId", "outroAssetId"]) {
           await u.db.execute(sql`update user_settings set project_defaults = project_defaults - ${key}::text, updated_at = now() where user_id = ${ctx.user.id} and project_defaults ->> ${key}::text = ${input.id}`);
         }
         return { ok: true };
       });
     }),
-    /** Undo a removal; for an instance-shared row this saves it again. */
+    /** Undo a removal of one of your uploads. */
     restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
-        const [shared] = await u.db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.id), isNull(schema.assets.userId), isNull(schema.assets.deletedAt)));
-        if (shared) {
-          await u.db.insert(schema.assetSaves).values({ userId: ctx.user.id, assetId: shared.id }).onConflictDoNothing();
-          return { ok: true };
-        }
         const r = await u.db
           .update(schema.assets)
           .set({ deletedAt: null })

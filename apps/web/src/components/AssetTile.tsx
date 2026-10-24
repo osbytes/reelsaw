@@ -1,9 +1,9 @@
 /**
- * One tile for every asset the finder lists: your own upload, a shared row you saved, a catalog result, a provider result.
+ * One tile for every asset the finder lists: your own upload, a catalog result, a provider result.
  * Same box for all of them (fixed thumbnail, one-line name, fixed-height rows) so nothing shifts while data arrives.
- * No in-library badge: the tile is simply there. The only control is one CTA ("+ Add" in the library for
- * a result that is not saved yet, "Add to clip" in the picker): a round button on the thumbnail corner, shown on
- * hover / focus on desktop and always on touch.
+ * No in-library badge: the tile is simply there. In the picker the CTA is "Add to clip" on the thumbnail corner,
+ * shown on hover / focus on desktop and always on touch. The library page has no add control: catalog and
+ * provider results are browsed here and imported when a clip uses them.
  */
 import { useEffect, useRef, useState } from "react";
 import { AudioLines, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from "lucide-react";
@@ -27,10 +27,8 @@ export interface TileModel {
   source: string;
   /** license id (CC0, ISC, Pexels…) for the meta line */
   license?: string;
-  /** the library row behind it (own, saved shared, or the row a catalog / provider result was imported as) */
+  /** the library row behind it (one of this account's uploads) */
   row?: LibraryAsset;
-  /** a shared row that exists on the instance but is not in this library yet (`library.restore` saves it) */
-  unsavedShared?: boolean;
   /** "2 clips" / "1 project" for a library item that is in use */
   usage?: string;
 }
@@ -44,19 +42,17 @@ export function AssetTile({
   highlighted,
   leaving,
   mode,
-  onAdd,
   onOpen,
   onSelect,
   onPick,
   pickLabel = "Add to clip",
 }: {
   tile: TileModel;
-  /** adding to the library (or picking) is in flight */
+  /** picking (importing a catalog / provider result, then adding the layer) is in flight */
   pending: boolean;
   highlighted?: boolean;
   leaving?: boolean;
   mode: "library" | "picker";
-  onAdd: () => void;
   onOpen?: () => void;
   onSelect?: () => void;
   onPick?: () => void;
@@ -96,7 +92,6 @@ export function AssetTile({
     setPlaying(true);
   };
   const row = t.row;
-  const inLibrary = !!row && !t.unsavedShared;
   const picker = mode === "picker";
   const fmt = formatTag(t.mime);
   const thumb = !failed && (t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined));
@@ -104,8 +99,8 @@ export function AssetTile({
   const chip = "inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white";
   // an image's stored duration is only how long it shows as an intro / outro, never a media length
   const size = t.kind === "image" ? (t.width && t.height ? `${t.width}×${t.height}` : "") : t.durationSec ? lengthText({ durationSec: t.durationSec }) : "";
-  const showAdd = picker || !inLibrary;
-  const addLabel = picker ? `${pickLabel}: ${t.name}` : `Add ${t.name} to your library`;
+  const showAdd = picker;
+  const addLabel = `${pickLabel}: ${t.name}`;
   const meta = [t.kind, size, t.source, t.license].filter(Boolean).join(" · ");
   return (
     <li id={row ? `asset-${row.id}` : undefined} className={`group flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
@@ -140,9 +135,9 @@ export function AssetTile({
           <button
             type="button"
             disabled={pending}
-            onClick={picker ? onPick : onAdd}
+            onClick={onPick}
             aria-label={pending ? "Adding…" : addLabel}
-            title={picker ? pickLabel : "Add to library"}
+            title={pickLabel}
             className="absolute right-1.5 top-1.5 inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
           >
             {pending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}

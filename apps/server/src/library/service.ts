@@ -61,9 +61,9 @@ export const setClipBumpersInput = {
 };
 /** add_asset: exactly one of uploadId, url or provider + externalId (`library.add`); the url takes every format the library stores. */
 export const addAssetInput = {
-  url: z.url().optional().describe("http(s) link to a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC); the server downloads it (max 50 MB, 60 s)"),
+  url: z.url().optional().describe("http(s) link to a video (MP4/MOV/WebM), image (PNG/JPG/WebP/GIF/SVG) or sound (MP3/M4A/AAC/WAV/OGG/FLAC); the server downloads it into your library (max 50 MB, 60 s)"),
   uploadId: z.string().min(1).max(100).optional().describe("An existing upload id (from POST /api/upload) instead of a url"),
-  provider: z.string().min(1).max(40).optional().describe("A search_assets hit's provider (catalog or an enabled provider), together with externalId; instead of url / uploadId"),
+  provider: z.string().min(1).max(40).optional().describe("A search_assets hit's provider (catalog or an enabled provider), together with externalId; materializes the instance-shared file instead of adding an upload"),
   externalId: z.string().min(1).max(200).optional().describe("A search_assets hit's externalId, together with provider"),
   color: z.string().max(9).optional().describe("iconify hits only: icon color as hex, e.g. #ffffff (default white)"),
   name: z.string().min(1).max(120).optional().describe("Library name (url or uploadId; default: the file name). update_asset changes it later"),
@@ -137,8 +137,6 @@ export interface CreateAssetInput {
   tags?: string[];
   provenance?: AssetProvenance;
   system?: boolean;
-  /** shared rows: also add the row to this account's library, in the same transaction */
-  saveFor?: string;
 }
 export interface CreatedAsset {
   id: string;
@@ -195,7 +193,6 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     const contentHash = await sha256File(local);
     const row = await svc.tx(async (u) => {
       const keep = async (asset: typeof schema.assets.$inferSelect, restored: boolean) => {
-        if (input.saveFor && !asset.userId) await u.db.insert(schema.assetSaves).values({ userId: input.saveFor, assetId: asset.id }).onConflictDoNothing();
         if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, asset.id);
         return { asset, duplicate: true as const, restored };
       };
@@ -236,7 +233,6 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           contentHash,
         })
         .returning();
-      if (input.saveFor && shared) await u.db.insert(schema.assetSaves).values({ userId: input.saveFor, assetId: id }).onConflictDoNothing();
       if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, id);
       // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
       u.afterCommit(async () => {
@@ -421,7 +417,6 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     isDefaultOutro: defaults.outroAssetId === a.id,
     mime: a.mime,
     owner: a.owner,
-    saved: a.saved,
     tags: a.tags,
     provenance: a.provenance,
     system: a.system,
