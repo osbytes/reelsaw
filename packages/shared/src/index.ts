@@ -707,11 +707,11 @@ export const projectSettingsSchema = styleSchema.extend({
    * is off (Settings → System → Pipeline, or the matching .env) wins and the step stays skipped
    * even when these are true. Existing transcript flags stay until refine is re-run.
    */
-  refineEntities: z.boolean().describe("Fix misheard names after transcription (LLM). Off by default; on runs that refine step.").default(false),
+  refineEntities: z.boolean().describe("Fix misheard names after transcription (LLM). On by default; off skips that refine step.").default(true),
   refineDisfluency: z.boolean().describe("Find fillers, repetitions and false starts. Off by default; on runs that refine step.").default(false),
   /** Only used when refineDisfluency is on; rules still run when this is off. */
   disfluencyLlm: z.boolean().describe("Model pass on top of rule-based disfluency detection. Off by default (rules only when disfluency is on).").default(false),
-  refineScenes: z.boolean().describe("Detect scene cuts and on-screen text. Off by default; on runs that refine step.").default(false),
+  refineScenes: z.boolean().describe("Scan the video for on-screen text (burned-in captions, watermarks, slides). On by default; off skips that refine step. Shot cuts are always detected.").default(true),
   /**
    * Intro / outro video (bumper_assets ids) attached to every clip. Snapshotted from the user's
    * defaults when the project is created. Unset = none; null is reserved for "none, although my

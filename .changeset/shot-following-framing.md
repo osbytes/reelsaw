@@ -1,0 +1,5 @@
+---
+"@reelsaw/server": minor
+---
+
+Framing follows the source's cutting. Shot cuts are now detected for every project before clip selection (they used to exist only when a project opted into the scenes refine step, which is now just the on-screen text scan), clip boundaries snap to them, a render detects them on the clip when an older project or an imported report has none, and the layout may change at every cut: a multi-camera talk show that alternates a close-up with a wide shot every second or two gets a full-frame close-up, then the wide shot, then the close-up again, instead of one split held across a dozen shots with a pane framed on an empty seat. A wide shot of three or more people is shown whole rather than split between two of them. Name fixes and the on-screen text scan now run by default (instance gates `TRANSCRIPT_CORRECTION` and `REFINE_SCENES`, project settings `refineEntities` and `refineScenes`); filler removal stays opt-in. Importing an issue report whose project was re-rendered no longer fails on its timestamps.

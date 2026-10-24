@@ -22,7 +22,7 @@ Layer templates (list_layer_templates, save_layer_template, update_layer_templat
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
-const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, refine steps off). Set refineEntities / refineDisfluency / disfluencyLlm / refineScenes true to opt into polish (instance Pipeline gates must be on).");
+const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, name fixes and the on-screen text scan on, filler removal off). Set refineDisfluency / disfluencyLlm true to opt into filler removal, refineEntities / refineScenes false to skip those steps (instance Pipeline gates must be on).");
 
 /** Ids and scalars only, never bodies (captions, transcripts, prompts): enough to find what a tool touched. */
 export function argSummary(args: unknown): Record<string, unknown> {

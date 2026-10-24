@@ -6,13 +6,18 @@ import { refineStepOn, resolveRefineOptions } from "../src/pipeline/refine-optio
 const on = { TRANSCRIPT_CORRECTION: true, DISFLUENCY_REMOVAL: true, DISFLUENCY_LLM: true, REFINE_SCENES: true };
 
 describe("resolveRefineOptions", () => {
-  it("defaults every step off when the project omits fields (opt-in)", () => {
+  it("runs name fixes and the text scan, not filler removal, when the project omits fields (the built-in defaults)", () => {
     const o = resolveRefineOptions(on, {});
-    assert.deepEqual(o, { entities: false, disfluency: false, disfluencyLlm: false, scenes: false });
-    assert.ok(!refineStepOn(o, "entities") && !refineStepOn(o, "disfluency") && !refineStepOn(o, "scenes"));
+    assert.deepEqual(o, { entities: true, disfluency: false, disfluencyLlm: false, scenes: true });
+    assert.ok(refineStepOn(o, "entities") && !refineStepOn(o, "disfluency") && refineStepOn(o, "scenes"));
   });
 
-  it("runs only the steps the project opts into when the instance ceiling is open", () => {
+  it("lets a project turn name fixes and the text scan off", () => {
+    const o = resolveRefineOptions(on, { refineEntities: false, refineScenes: false });
+    assert.deepEqual(o, { entities: false, disfluency: false, disfluencyLlm: false, scenes: false });
+  });
+
+  it("runs only the steps the project asks for when the instance ceiling is open", () => {
     const o = resolveRefineOptions(on, { refineEntities: false, refineDisfluency: true, disfluencyLlm: false, refineScenes: false });
     assert.deepEqual(o, { entities: false, disfluency: true, disfluencyLlm: false, scenes: false });
   });
@@ -32,7 +37,7 @@ describe("resolveRefineOptions", () => {
   });
 
   it("runs the model pass only when both disfluency and disfluencyLlm are opted in", () => {
-    const o = resolveRefineOptions(on, { refineDisfluency: true, disfluencyLlm: true });
+    const o = resolveRefineOptions(on, { refineEntities: false, refineDisfluency: true, disfluencyLlm: true, refineScenes: false });
     assert.deepEqual(o, { entities: false, disfluency: true, disfluencyLlm: true, scenes: false });
   });
 });

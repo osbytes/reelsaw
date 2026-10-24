@@ -77,23 +77,35 @@ for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame ver
 (`probeDivider`, `content-region.ts`) and the webcam-tile probe around the largest face
 (`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
-(`attachText`) and are the only text input the layout reads. Scene cuts come from the transcript
-stage (`scenes.ts`, adaptive threshold). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
+(`attachText`) and are the only text input the layout reads. Scene cuts (`scenes.ts`, adaptive
+threshold) are detected once per project before clip selection (`ensureSceneCuts`, `analyze.ts`) and
+kept on the transcript; a project from before that, or an imported report, has none, and the render
+detects them on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the
+layout always has the edits. The `layout resolved` log line says how many and from
+where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
 correlated with the audio envelope) runs only on `split` segments of 3 s or more. Static "faces"
 (posters, photos) are dropped first (`dropStaticFaces`).
 
 **Order of rules in `decideLayout`** (first match wins):
 
 1. face in fewer than `LAYOUT_MIN_FACE_RATIO` of frames: `fit`
-2. a second face (at least 8% tall) in at least 50% of frames: `split`
-3. face under `LAYOUT_MIN_FACE_SIZE`, or parked in a corner: `stack` (whole frame on top, or the webcam tile and the frame without its band when `aggregateTile` finds one). Rule 1 defers to this when the face is rare but its tile stands steady.
-4. big face with a content region (`detectContentRegion`): `stack` with `panel`
-5. otherwise `face`
+2. three or more people (boxes over the second-face floor, at least 60% of the second face's height,
+   not overlapping each other horizontally) in at least 50% of frames: `fit` (a couch, a panel: a 9:16
+   crop cannot hold them and a split would show two of them; AutoFlip pads in the same situation)
+3. a second face (at least 8% tall) in at least 50% of frames: `split`
+4. face under `LAYOUT_MIN_FACE_SIZE`, or parked in a corner: `stack` (whole frame on top, or the webcam tile and the frame without its band when `aggregateTile` finds one). Rule 1 defers to this when the face is rare but its tile stands steady.
+5. big face with a content region (`detectContentRegion`): `stack` with `panel`
+6. otherwise `face`
 
-**Segmenting** (`segmentLayouts`, `layout.ts:299`): each sample is `face`, `split`, `panel` or `none`;
-states are smoothed over 2 samples either side (split holds across a missed second face for 3 s),
-boundaries snap to a scene cut within 1 s, pieces under 2.5 s fold into a neighbour, each piece
-runs `decideLayout` on its own samples, and neighbours with the same layout (and panel side) merge.
+**Segmenting** (`segmentLayouts`, `layout.ts`): each sample is `crowd`, `split`, `face` or `none`;
+states are smoothed over 2 samples either side within the same shot (split holds across a missed
+second face for 3 s, never across a cut and never over a crowd), boundaries snap to a scene cut
+within 1 s, and pieces under 2.5 s fold into a neighbour unless a detected cut bounds them: a shot
+change is a real edge, so a piece between cuts may be as short as `MIN_SHOT_SEC` (0.5 s; the cut detector merges cuts closer than that). Television
+cuts every 3-4 s on average with many 1-2 s shots, and a multi-camera talk show alternating a
+close-up with a wide shot every 2 s must change layout at every edit (AutoFlip likewise decides per
+scene and resets at each shot boundary). Each piece runs `decideLayout` on its own samples, and
+neighbours with the same layout (and panel side) merge.
 Content regions are segmented separately (`contentRuns`, `content-runs.ts`): runs of frames that voted for a
 panel (holes up to 0.75 s closed; gaps up to 4 s bridged when the divider stays at the same x),
 trimmed to the last voting frame plus one sample and snapped to a scene cut within 0.25 s. A run under
@@ -104,7 +116,9 @@ A short one-face stretch beside a split that is one of its speakers is held as s
 **Post-passes** (`render.ts`): active-speaker expansion of splits; `fitTextHeavy` turns auto
 segments into `fit` where text fills the frame (a slide, or a paragraph of 4+ lines) for at least 2 s,
 snapped to scene cuts, but never over a segment that has a content region (its text is why the frame
-looks text-heavy); a clip with several pieces becomes 9:16 throughout. `tripodTrack` smooths the face
+looks text-heavy); only the sliver under 1.5 s left of a segment after a run folds into that run, a
+segment no run touches is kept however short (a one-shot piece between two cuts); a clip with several
+pieces becomes 9:16 throughout. `tripodTrack` smooths the face
 path: dead zone 0.025, capped pan speed. **Tripod.** The camera never pans across a break: a scene
 cut, or a face that jumps more than 0.15 of the width between consecutive samples and stays there for
 the next two (a cut the detector missed; a one-frame flip to another box is not a break). Each stretch
@@ -136,7 +150,8 @@ decision is stored per clip (`layoutSegments`, with `content`) and shown in the 
 - A webcam tile needs straight edges on all four sides (or the frame edge) and a landscape shape: a circular or portrait webcam, a tile with a rounded or shadowed border, or one whose border is lost against a dark panel in part of its span (a dark room beside a dark editor still measures ~1.5x) gets the face-sized crop as before. A thin flat margin under ~3 px at 320 wide between the tile and a strong edge counts as part of the tile. The tile is one rectangle per clip segment: a webcam that moves or resizes mid-segment is not followed.
 - A presenter who switches sides mid-clip is handled by the tripod snap at scene cuts only; without a
   cut the crop pans at the capped speed.
-- More than two speakers: only the two largest faces get crops.
+- Three or more people of comparable size are shown whole (`fit`); a third person much smaller than
+  the two main faces (under 60% of the second face's height) is ignored and the two largest get crops.
 - Speaker swaps faster than the 2.5 s minimum shot are smoothed away, so a quick back-and-forth stays
   on one speaker or the split.
 - Panels that animate (scrolling feeds, video) are fine for the divider but make text detection

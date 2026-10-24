@@ -21,8 +21,9 @@ project already hit the problem it prevents.
   (sign-up policy, quotas, refine gates, retention, …; `instance-settings.ts`): `.env`, then the
   admin's runtime override, read at the point of use and never captured at boot; refine steps
   (`TRANSCRIPT_CORRECTION`, `DISFLUENCY_*`, `REFINE_SCENES`): that instance value is a ceiling
-  (defaults off), then the project's `refineEntities` / `refineDisfluency` / `disfluencyLlm` /
-  `refineScenes` (from user defaults or the create form) must opt in to run a step; other stage knobs (`TRANSCRIPT_BIAS`,
+  (name fixes and the text scan default on, disfluency off), then the project's `refineEntities` /
+  `refineDisfluency` / `disfluencyLlm` / `refineScenes` (from user defaults or the create form)
+  decides, the same way round; other stage knobs (`TRANSCRIPT_BIAS`,
   detectors, concurrency): `.env` only; a project: shared defaults, the user's defaults, the create
   input, frozen into `projects.settings`; style: project, then clip; framing: auto, project, clip,
   section; quotas and the watermark: `.env`, then the instance setting, then what the account's plan

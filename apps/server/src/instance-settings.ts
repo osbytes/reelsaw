@@ -73,10 +73,10 @@ export const RUNTIME_SETTINGS = {
   MAX_SOURCE_FILE_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest file a link source may download (yt-dlp --max-filesize), in MB."),
   ALLOW_PRIVATE_SOURCE_URLS: def("limits", z.boolean(), "Let link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard)."),
 
-  TRANSCRIPT_CORRECTION: def("pipeline", z.boolean(), "After transcription, fix misheard names with the language model. Off by default (ceiling closed); turn on so projects may opt in via refineEntities."),
+  TRANSCRIPT_CORRECTION: def("pipeline", z.boolean(), "After transcription, fix misheard names with the language model. On by default; off closes the ceiling so no project runs it (projects opt out via refineEntities)."),
   DISFLUENCY_REMOVAL: def("pipeline", z.boolean(), "Detect fillers, repetitions and false starts after transcription. Off by default; turn on so projects may opt in via refineDisfluency."),
   DISFLUENCY_LLM: def("pipeline", z.boolean(), "Model pass on top of rule-based disfluency detection. Off by default. Ignored when disfluency removal is off. Turn on so projects may opt in via disfluencyLlm."),
-  REFINE_SCENES: def("pipeline", z.boolean(), "Detect scene cuts and on-screen text during refine. Off by default; turn on so projects may opt in via refineScenes."),
+  REFINE_SCENES: def("pipeline", z.boolean(), "Scan the video for on-screen text (burned-in captions, watermarks, slides) during refine. On by default; off closes the ceiling (projects opt out via refineScenes). Shot cuts are always detected."),
 
   SOURCE_RETENTION_DAYS: def("retention", int0, days("Delete stored source videos this many days after upload; the project stays and Retry re-fetches.")),
   CLIP_RETENTION_DAYS: def("retention", int0, days("Delete rendered clip files this many days after rendering; the clip stays and can be re-rendered.")),

@@ -25,6 +25,37 @@ export function faceFloor(frac: number, config: { srcAspect?: number }): number 
 /** Smallest second face (fraction of min(srcW, srcH)) that makes a shot a two-person shot. */
 const MIN_SECOND_FACE = 0.08;
 
+/**
+ * Shortest piece a real shot change may bound. Detected cuts are reliable edges (unlike a flicker of
+ * face presence, which needs `minSeg`), and television cuts every 3-4 s on average with plenty of 1-2 s
+ * shots, so the layout must be free to change at every edit: a multi-camera talk show that alternates a
+ * close-up with a wide shot every 2 s is otherwise framed as one shot (AutoFlip likewise decides per
+ * scene and resets at each shot boundary). Half a second: the cut detector already merges cuts closer
+ * than that, and a 0.7 s close-up before a two-shot framed as the two-shot is the reported defect.
+ */
+export const MIN_SHOT_SEC = 0.5;
+
+/**
+ * A frame with three or more people of comparable size: a 9:16 crop cannot hold them and a split shows
+ * two of them (the wrong two, when the detector's largest boxes are not the talkers), so the shot is
+ * shown whole over a blurred background (what AutoFlip does when the required regions do not fit).
+ * Three people means three boxes that clear the second-face floor, are at least 60% of the second
+ * face's height, and stand apart horizontally (no overlap, a gap of at least 0.02 of the width): a
+ * distant onlooker, or the spurious box the detector puts beside a speaker, is not another person.
+ */
+export function isCrowd(s: FaceSample, config: LayoutConfig): boolean {
+  if (s.boxes.length < 3) return false;
+  const h = (b: FaceBox) => b.y2 - b.y1;
+  const floor = Math.max(faceFloor(MIN_SECOND_FACE, config), 0.6 * h(s.boxes[1]!));
+  const people: FaceBox[] = [];
+  for (const b of s.boxes) {
+    if (h(b) < floor) continue;
+    if (people.some((p) => b.x1 < p.x2 + 0.02 && p.x1 < b.x2 + 0.02)) continue;
+    people.push(b);
+  }
+  return people.length >= 3;
+}
+
 /** Resolved layout for one clip. */
 export type Layout = "face" | "split" | "stack" | "fit" | "center" | "none";
 
@@ -166,6 +197,9 @@ export function decideLayout(
     if (stack.tile && withFace.length >= 2) return { ...base, ...stack, reason: `face in only ${Math.round(faceRatio * 100)}% of frames${reasonSuffix}` };
     return { ...base, layout: "fit", reason: withFace.length ? `face in only ${Math.round(faceRatio * 100)}% of frames` : "no face detected" };
   }
+  // three or more people most of the time (a couch, a panel): the whole frame, not two of them
+  const crowd = samples.filter((s) => isCrowd(s, config)).length / Math.max(1, samples.length);
+  if (crowd >= 0.5) return { ...base, layout: "fit", reason: `${Math.round(faceCount)} people across the frame in ${Math.round(crowd * 100)}% of frames, shown whole` };
   // two people on screen most of the time (interview / podcast wide shot) → one crop per speaker
   const twoFaces = samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config)).length / Math.max(1, samples.length);
   if (twoFaces >= 0.5) {
@@ -416,24 +450,32 @@ export function segmentLayouts(
   diag?: LayoutDiag,
 ): LayoutSegment[] {
   if (!samples.length || duration <= 0) return [];
-  // per-sample framing state, smoothed over ±2 samples
+  const cuts = sceneCuts.filter((c) => c > 0 && c < duration).sort((a, b) => a - b);
+  // which shot each sample is in: smoothing never reads across a cut, since the next shot is a
+  // different picture (a close-up beside a wide shot is not a flicker of the wide shot)
+  const shot = samples.map((s) => cuts.filter((c) => c <= s.t + 1e-9).length);
+  // per-sample framing state, smoothed over ±2 samples of the same shot
   const raw = samples.map((s) => {
     const big = !!s.box && s.box.y2 - s.box.y1 >= faceFloor(config.LAYOUT_MIN_FACE_SIZE, config);
     const two = s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config);
-    return two ? "split" : big ? "face" : "none";
+    return isCrowd(s, config) ? "crowd" : two ? "split" : big ? "face" : "none";
   });
+  type State = (typeof raw)[number];
+  const window = (i: number, r: number): State[] => {
+    const out: State[] = [];
+    for (let j = Math.max(0, i - r); j <= Math.min(raw.length - 1, i + r); j++) if (shot[j] === shot[i]) out.push(raw[j]!);
+    return out;
+  };
   // a second speaker who briefly disappears (drinks, turns away, leans out) shouldn't flip the
-  // layout: "split" holds while two faces were seen in ≥35% of the surrounding ±3 s
+  // layout: "split" holds while two faces were seen in ≥35% of the surrounding ±3 s of this shot
   const hold = Math.max(2, Math.round(3 * (samples.length > 1 ? (samples.length - 1) / Math.max(0.01, samples.at(-1)!.t - samples[0]!.t) : 4)));
   const state = raw.map((_, i) => {
-    const wide = raw.slice(Math.max(0, i - hold), i + hold + 1);
-    if (wide.filter((w) => w === "split").length / wide.length >= 0.35) return "split" as const;
-    const win = raw.slice(Math.max(0, i - 2), i + 3);
-    const counts = { face: 0, split: 0, none: 0 };
-    for (const w of win) counts[w as keyof typeof counts]++;
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as "face" | "split" | "none";
+    const wide = window(i, hold);
+    if (wide.filter((w) => w === "split").length / wide.length >= 0.35 && !wide.some((w) => w === "crowd")) return "split" as const;
+    const counts: Record<State, number> = { face: 0, split: 0, none: 0, crowd: 0 };
+    for (const w of window(i, 2)) counts[w]++;
+    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as State;
   });
-  const cuts = sceneCuts.filter((c) => c > 0 && c < duration).sort((a, b) => a - b);
   const bounds = new Set<number>([0, duration, ...cuts]);
   for (let i = 1; i < state.length; i++) {
     if (state[i] === state[i - 1]) continue;
@@ -442,13 +484,16 @@ export function segmentLayouts(
     bounds.add(near ?? t);
   }
   let edges = [...bounds].sort((a, b) => a - b);
-  // drop boundaries that would create segments shorter than minSeg
+  // drop boundaries that would create pieces shorter than minSeg; a detected cut is a real edge and
+  // may bound a piece as short as MIN_SHOT_SEC (the layout follows the editor's cutting)
+  const isCut = new Set(cuts);
+  const minFor = (e: number) => (isCut.has(e) ? Math.min(minSeg, MIN_SHOT_SEC) : minSeg);
   const kept: number[] = [edges[0]!];
   for (let i = 1; i < edges.length; i++) {
     const e = edges[i]!;
     const isLast = i === edges.length - 1;
-    if (e - kept[kept.length - 1]! < minSeg && !isLast) continue;
-    if (isLast && e - kept[kept.length - 1]! < minSeg && kept.length > 1) kept.pop();
+    if (e - kept[kept.length - 1]! < minFor(e) && !isLast) continue;
+    if (isLast && e - kept[kept.length - 1]! < MIN_SHOT_SEC && kept.length > 1) kept.pop();
     kept.push(e);
   }
   edges = kept;
@@ -497,8 +542,9 @@ export function segmentLayouts(
   // undetected (drinking, turned away): keep it split instead of flipping layouts for a few seconds
   for (let i = 0; i < segs.length; i++) {
     const sg = segs[i]!;
-    if (sg.decision.layout === "split" || sg.end - sg.start > 8 || !sg.decision.track.length) continue;
-    const nb = [segs[i - 1], segs[i + 1]].find((n) => n?.decision.layout === "split" && n.decision.track2?.length);
+    if (sg.decision.layout !== "face" || sg.end - sg.start > 8 || !sg.decision.track.length) continue;
+    // a neighbour across a scene cut is another shot, not the same shot with a face missing
+    const nb = [segs[i - 1], segs[i + 1]].find((n) => n?.decision.layout === "split" && n.decision.track2?.length && !isCut.has(n.start === sg.end ? sg.end : sg.start));
     if (!nb) continue;
     const me = trackCenter(sg.decision.track);
     const a = trackCenter(nb.decision.track);
@@ -516,6 +562,13 @@ export function segmentLayouts(
       last.end = seg.end;
       last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
     } else merged.push({ ...seg, decision: { ...seg.decision } });
+  }
+  // a merged stack keeps its first piece's decision; when that piece alone had too few tile probes
+  // (the detector lost the webcam face for a while) the webcam tile is looked for over the whole span
+  for (const seg of merged) {
+    if (seg.decision.layout !== "stack" || seg.decision.tile || !isFullFrame(seg.decision.content)) continue;
+    const { reasonSuffix, ...stack } = webcamStack(samples.filter((s) => s.t >= seg.start && s.t < seg.end));
+    if (stack.tile) seg.decision = { ...seg.decision, ...stack, reason: `${seg.decision.reason}${reasonSuffix}` };
   }
   return merged;
 }
@@ -922,8 +975,10 @@ export function fitTextHeavy(segments: ResolvedSegment[], runs: Array<[number, n
       out.push({ start: from, end: b, manual: false, decision: { ...staticDecision("fit", "text fills the frame (slide or document)") } });
       t = b;
     }
-    if (sg.end - t >= minPiece) out.push({ ...sg, start: t, end: sg.end });
-    else if (out.length) out[out.length - 1]!.end = sg.end;
+    // a segment no run touched is kept whole, however short (a one-shot piece between two cuts);
+    // only the sliver left after a run inside the same segment folds into that run
+    if (t === sg.start || sg.end - t >= minPiece) out.push({ ...sg, start: t, end: sg.end });
+    else out[out.length - 1]!.end = sg.end;
   }
   return out;
 }

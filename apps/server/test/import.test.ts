@@ -32,8 +32,9 @@ describe("import-report", () => {
 
   before(async () => {
     owner = await signUp();
+    // run_started_at / stage_started_at travel as ISO strings and must come back as timestamps (a re-rendered project has them)
     await pool.query(
-      `insert into projects (id, user_id, title, source_type, source_url, source_meta, duration_sec, status, settings) values ($1, $2, 'Import test', 'url', 'file:///etc/passwd', '{}', 3, 'done', $3)`,
+      `insert into projects (id, user_id, title, source_type, source_url, source_meta, duration_sec, status, settings, run_started_at, stage_started_at) values ($1, $2, 'Import test', 'url', 'file:///etc/passwd', '{}', 3, 'done', $3, now(), now())`,
       [projectId, owner.userId, JSON.stringify(settings)],
     );
     await pool.query(`insert into transcripts (project_id, language, text, words, raw_words, segments, flags) values ($1, 'en', $2, $3, $3, $4, $5)`, [
@@ -43,7 +44,7 @@ describe("import-report", () => {
       JSON.stringify([{ start: 0, end: 2.2, text: words.map((w) => w.text).join(" ") }]),
       JSON.stringify(flags),
     ]);
-    await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, layout_segments) values ($1, $2, 0, 'Clip one', 'Hook', 0.5, 2.2, 77, 'because', '["a","b"]', 'done', $3)`, [clipId, projectId, JSON.stringify([{ start: 0.5, end: 2.2, layout: "fit", reason: "test", clipId }])]);
+    await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status, layout_segments, edited_at) values ($1, $2, 0, 'Clip one', 'Hook', 0.5, 2.2, 77, 'because', '["a","b"]', 'done', $3, now())`, [clipId, projectId, JSON.stringify([{ start: 0.5, end: 2.2, layout: "fit", reason: "test", clipId }])]);
     await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'clip.done', $2)`, [projectId, JSON.stringify({ clipId })]);
     await pool.query(`insert into stage_artifacts (project_id, stage, kind, models, data) values ($1, 'analyze', 'candidates', '{"language":"test:model"}', $2)`, [projectId, JSON.stringify({ candidates: [{ clipId, outcome: "chosen" }] })]);
   });
@@ -84,6 +85,7 @@ describe("import-report", () => {
     assert.equal(p.status, "done");
     assert.deepEqual(p.settings, settings);
     assert.equal(p.source_meta.report.projectId, projectId);
+    assert.ok(p.run_started_at instanceof Date && p.stage_started_at instanceof Date, "run timestamps come back as dates");
     const t = (await pool.query(`select * from transcripts where project_id = $1`, [id])).rows[0];
     assert.deepEqual(t.words, words);
     assert.deepEqual(t.flags, flags);
@@ -93,6 +95,7 @@ describe("import-report", () => {
     assert.notEqual(c.id, clipId);
     assert.deepEqual([c.title, c.hook, c.start_sec, c.end_sec, c.score, c.reasoning, c.hashtags], ["Clip one", "Hook", 0.5, 2.2, 77, "because", ["a", "b"]]);
     assert.equal(c.layout_segments[0].clipId, c.id, "references to the old clip id follow the new one");
+    assert.ok(c.edited_at instanceof Date, "edited_at comes back as a date");
     assert.equal(c.status, "failed", "no render in the zip: never left queued");
     const ev = (await pool.query(`select payload from project_events where project_id = $1 order by id`, [id])).rows;
     assert.equal(ev.length, 1);
