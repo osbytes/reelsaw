@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.21.0
+
+### Minor Changes
+
+- [#155](https://github.com/osbytes/reelsaw/pull/155) [`1a5a370`](https://github.com/osbytes/reelsaw/commit/1a5a3701841b1e6691d19a83fce726866f8134f8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Changelog at reelsaw.com/releases (GitHub feed, 90-day commit heatmap). The app's What's new, version line and update banner link there; `list_releases` and `reelsaw releases` read the same feed.
+
 ## 0.20.0
 
 ### Minor Changes
