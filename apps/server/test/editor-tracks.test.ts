@@ -4,8 +4,8 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coverTimeline, adjustDecision, subjectTrack, type FaceSample, type LayoutDecision } from "../src/pipeline/layout.js";
-import { overlayChain, overlayInputArgs, textOverlayEvents, musicMix, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
+import { coverTimeline, adjustDecision, subjectTrack, cleanAdjust, type FaceSample, type LayoutDecision } from "../src/pipeline/layout.js";
+import { overlayChain, overlayInputArgs, textOverlayEvents, musicMix, layoutFilter, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
 import { bumperProblem } from "../src/pipeline/bumpers.js";
 import { buildAss, WATERMARK_LOGO, watermarkTextY } from "../src/pipeline/captions.js";
 import { resolveStyle, isStickerAsset, assetLayerDefaultsFor, ASSET_OVERLAY_DEFAULT_W } from "@reelsaw/shared";
@@ -256,5 +256,42 @@ describe("assetLayerDefaultsFor", () => {
     assert.equal(isStickerAsset({ kind: "image", mime: "image/gif" }), true);
     assert.equal(assetLayerDefaultsFor({ kind: "image", mime: "image/gif" }).loop, true);
     assert.equal(assetLayerDefaultsFor({ kind: "image", mime: "image/png" }).loop, undefined);
+  });
+});
+
+describe("fixed crops", () => {
+  const crop = { x1: 0.1, y1: 0.2, x2: 0.6, y2: 0.9 };
+  it("cleanAdjust keeps crops and drops empty ones", () => {
+    assert.deepEqual(cleanAdjust({ crop, offsetX: 0 }), { crop });
+    assert.equal(cleanAdjust({ crop: { x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.6 } }), undefined);
+    assert.deepEqual(coverTimeline(10, [{ start: 0, end: 10, mode: "auto", contentCrop: crop }], "auto")[0]!.adjust, { contentCrop: crop });
+  });
+  it("a crop makes the subject and offset moot and drops the webcam tile", () => {
+    const d: LayoutDecision = { ...decision("stack"), tile: { x1: 0.8, y1: 0, x2: 1, y2: 0.2 } };
+    const r = adjustDecision(d, { crop, offsetX: 0.2, subjectX: 0.7 }, twoFaces(), [], 0);
+    assert.equal(r.decision.tile, undefined);
+    assert.equal(r.subject, undefined);
+    assert.deepEqual(r.decision.track, d.track);
+    assert.match(r.decision.reason, /fixed crop/);
+  });
+  it("a top crop replaces a stack's content region; a fitted frame takes only the crop", () => {
+    const r = adjustDecision(decision("stack"), { contentCrop: crop }, twoFaces(), [], 0);
+    assert.deepEqual(r.decision.content, crop);
+    const f = adjustDecision(decision("fit"), { crop, offsetX: 0.3 }, twoFaces(), [], 0);
+    assert.deepEqual(f.decision.track, decision("fit").track);
+    assert.match(f.decision.reason, /fixed crop/);
+  });
+  it("layoutFilter shows a fixed crop at its own shape over a blurred copy", () => {
+    const px = `crop=960:756:192:216`; // 1920x1080 × (0.5, 0.7) at (0.1, 0.2)
+    const whole = layoutFilter("face", 1920, 1080, track(0.3), [], { crop }).chain;
+    assert.ok(whole.startsWith(`[0:v]${px},split=2[tbg][tfg];`), whole);
+    assert.ok(whole.endsWith("overlay=(W-w)/2:(H-h)/2,setsar=1"), whole);
+    assert.ok(layoutFilter("fit", 1920, 1080, [], [], { crop }).chain.includes(px));
+    const split = layoutFilter("split", 1920, 1080, track(0.3), track(0.7), { crop2: crop }).chain;
+    assert.ok(split.includes(`[b]${px},split=2[tbbg][tbfg];`) && split.includes("[a]crop=") && split.includes("[as][bs]vstack"), split);
+    const stack = layoutFilter("stack", 1920, 1080, track(0.3), [], { crop, tile: { x1: 0.8, y1: 0, x2: 1, y2: 0.2 } }).chain;
+    assert.ok(stack.includes(`[bot]${px},split=2`) && !stack.includes("crop=384:216"), stack);
+    // no crop: the face-sized window as before
+    assert.ok(!layoutFilter("face", 1920, 1080, track(0.3), [], {}).chain.includes("split=2"));
   });
 });

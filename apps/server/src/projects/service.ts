@@ -8,7 +8,7 @@
 import fs from "node:fs/promises";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { REFINE_STEPS, projectSettingsSchema, styleSchema, type ClearableSetting, type ProjectSettings, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { REFINE_STEPS, adjustOf, projectSettingsSchema, styleSchema, type ClearableSetting, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -236,7 +236,7 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
 /** Settings that only change which clips are picked: they apply on the next re-analyze. */
 const SELECTION_KEYS = new Set<string>(["maxClips", "minClipSeconds", "maxClipSeconds", "focus", "instructions"]);
 /** Settings burned into the video: they apply on each clip's next render. */
-const RENDER_KEYS = new Set<string>([...Object.keys(styleSchema.shape), "reframe", "pauses", "sourceText"]);
+const RENDER_KEYS = new Set<string>([...Object.keys(styleSchema.shape), "reframe", "reframeAdjust", "pauses", "sourceText"]);
 /** Refine-stage toggles: they apply the next time refine runs (projects.refine / retry). */
 const REFINE_KEYS = new Set<string>(["refineEntities", "refineDisfluency", "disfluencyLlm", "refineScenes"]);
 /** Set through `projects.setBumpers`, which checks the library. */
@@ -292,6 +292,58 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
       needsRerender && "rerender_clips applies the style/framing to finished clips",
     ].filter(Boolean);
     return { ok: true, changed, needsReanalyze, needsRefine, needsRerender, ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}) };
+  });
+}
+
+/** What `applyProjectFraming` takes from one section of a clip: its mode and what the user adjusted on it. */
+export interface FramingTemplate {
+  reframe: SectionMode;
+  adjust?: SectionAdjustFields;
+}
+
+/**
+ * The framing of a clip's section (the one at `at` seconds into the source, else the first section that is not plain
+ * automatic, else the first), as a template for the whole project.
+ */
+export function framingOfClip(clip: { startSec: number; layoutSections: LayoutSection[] | null; layoutOverride?: string | null }, at?: number): FramingTemplate {
+  const sections = [...(clip.layoutSections ?? [])].sort((a, b) => a.start - b.start);
+  const pick = at !== undefined ? sections.find((s) => at >= s.start && at < s.end) : (sections.find((s) => s.mode !== "auto" || adjustOf(s)) ?? sections[0]);
+  if (pick) return { reframe: pick.mode, ...(adjustOf(pick) ? { adjust: adjustOf(pick) } : {}) };
+  const legacy = clip.layoutOverride && clip.layoutOverride !== "auto" ? (clip.layoutOverride === "none" ? "fit" : clip.layoutOverride) : "auto";
+  return { reframe: legacy as SectionMode };
+}
+
+/**
+ * Make one framing the project's: `reframe` and `reframeAdjust` are set on the project, every clip's own sections and
+ * legacy override are cleared (unless `keepOverrides`), and the finished clips are re-rendered. The same for every
+ * clip the project creates from now on. One transaction: clips locked in id order, then the project row.
+ */
+export async function applyProjectFraming(svc: Services, actor: Actor, projectId: string, input: FramingTemplate & { keepOverrides?: boolean; rerender?: boolean }) {
+  return svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    const adjust = input.adjust ? adjustOf(input.adjust) : undefined;
+    await lockProjectClips(u, p.id);
+    let cleared = 0;
+    if (!input.keepOverrides) {
+      const rows = await u.db
+        .update(schema.clips)
+        .set({ layoutSections: null, layoutOverride: null, updatedAt: new Date() })
+        .where(and(eq(schema.clips.projectId, p.id), isNull(schema.clips.deletedAt), sql`(${schema.clips.layoutSections} is not null or ${schema.clips.layoutOverride} is not null)`))
+        .returning({ id: schema.clips.id });
+      cleared = rows.length;
+    }
+    let rerendered = 0;
+    if (input.rerender !== false) {
+      for (const c of await listClips(u.db, p.id)) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
+    }
+    const write = { reframe: input.reframe, reframeAdjust: adjust ?? null };
+    await u.db
+      .update(schema.projects)
+      .set({ settings: sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`, updatedAt: new Date() })
+      .where(eq(schema.projects.id, p.id));
+    await u.emit(p.id, "project.updated", { changed: ["reframe", "reframeAdjust"], framingCleared: cleared });
+    u.afterCommit(() => svc.log.child({ module: "projects", projectId: p.id }).info({ reframe: input.reframe, adjust, cleared, rerendered }, "framing applied to the project"));
+    return { ok: true, reframe: input.reframe, adjust: adjust ?? null, cleared, rerendered };
   });
 }
 

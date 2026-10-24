@@ -1,0 +1,14 @@
+{
+  "kind": "tile",
+  "note": "Zoom-style webinar recording (Resistant Starch, 1920x1080), source 800-860 s: slides fill the left 87% of the frame, a black column on the right holds a small 16:9 webcam tile at the top (x 0.874-1.0, y 0.083-0.218, the speaker's name plate below it) and nothing else. UltraFace sees the ~57 px face in only a few percent of the frames, so before the tile probe this was 'fit' (auto) or a plain stack (manual) whose face-sized speaker crop reached into the rice photo on the slide, the black band and the name plate, with the speaker shown twice. Expected: stack with the tile as the speaker pane and the frame without the black column on top.",
+  "source": { "id": "resistant-starch-800-860", "url": "https://www.youtube.com/watch?v=cJmDDK5BJQA", "start": 800, "end": 860, "localPath": "/data/projects/5f07570f-c075-4986-b6c5-204aeaed9753/source.mp4" },
+  "start": 4,
+  "end": 58,
+  "srcW": 1920,
+  "srcH": 1080,
+  "expect": {
+    "layout": "stack",
+    "minAgreement": 0.9,
+    "tile": { "box": [0.874, 0.083, 1, 0.218], "tol": 0.03, "content": [0, 0, 0.874, 1] }
+  }
+}

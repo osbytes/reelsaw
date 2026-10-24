@@ -1,0 +1,14 @@
+{
+  "kind": "tile",
+  "note": "Filippo Valsorda live-coding (CC BY), source 9:40-11:00, 1152x720: editor + terminal screencast with the webcam in the bottom-right corner (x 0.6-1.0, y 0.67-1.0), face ~0.2 of the frame height, no flat band around the tile (an editor pane sits above it and a browser beside it), so the whole frame stays on top. The range starts after the Twitch page with a second copy of his face (see shots-screencast-corner-webcam). Expected: stack with the tile as the speaker pane, not a face-sized crop reaching into the editor.",
+  "source": { "id": "valsorda-540-660", "url": "https://www.youtube.com/watch?v=YNzgRNsB9UA", "start": 540, "end": 660, "sha256": "8e95e2913a7d28999baa0379b3ed74b9c877a31c49928f2a4c7a12b7628313ec" },
+  "start": 40,
+  "end": 120,
+  "srcW": 1152,
+  "srcH": 720,
+  "expect": {
+    "layout": "stack",
+    "minAgreement": 0.9,
+    "tile": { "box": [0.6, 0.667, 1, 1], "tol": 0.04 }
+  }
+}

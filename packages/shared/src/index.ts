@@ -115,11 +115,22 @@ export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosit
 export const sectionModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center"]).describe("Framing for this section (same modes as the project's reframe, without none)");
 export type SectionMode = z.infer<typeof sectionModeSchema>;
 
-/** A user-forced framing for part of a clip, in absolute source seconds (survives retrims). */
-export const layoutSectionSchema = z.object({
-  start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
-  end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
-  mode: sectionModeSchema,
+/** A part of the source frame as fractions of its width and height (`ContentRegion`): at least 5% wide and tall. */
+export const contentRegionSchema = z
+  .object({
+    x1: z.number().min(0).max(1).describe("Left edge, fraction of the source width"),
+    y1: z.number().min(0).max(1).describe("Top edge, fraction of the source height"),
+    x2: z.number().min(0).max(1).describe("Right edge, fraction of the source width"),
+    y2: z.number().min(0).max(1).describe("Bottom edge, fraction of the source height"),
+  })
+  .refine((r) => r.x2 - r.x1 >= 0.05 && r.y2 - r.y1 >= 0.05, { message: "A crop must be at least 5% of the source wide and tall" });
+
+/** The per-pane fields of a section (offsets, subjects and fixed crops) plus the stack's top crop: what the user adjusted on top of the mode. */
+const sectionAdjustShape = {
+  /** A fixed crop for the first pane: exactly this part of the source, instead of following a face. Fitted at its own aspect over a blurred copy when its shape differs from the pane's. */
+  crop: contentRegionSchema.optional().describe("Show exactly this part of the source in the (top / only) pane, as fractions of the source size; replaces the automatic crop, the offset and the subject. A shape unlike the pane's is fitted over a blurred copy"),
+  crop2: contentRegionSchema.optional().describe("Split only: a fixed crop for the bottom pane"),
+  contentCrop: contentRegionSchema.optional().describe("Stack only: the part of the frame shown on top instead of the whole frame or the detected content region"),
   /** Manual re-centring of the first pane (the only pane, or the top of a split): shifts the crop by this fraction of the source width, relative to the tracked face. */
   offsetX: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop sideways by this fraction of the source width (-0.5 to 0.5), relative to the face it follows"),
   offsetY: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop up or down by this fraction of the source height; only matters where the crop is shorter than the frame (split, stack)"),
@@ -129,32 +140,78 @@ export const layoutSectionSchema = z.object({
   /** Follow the person at this x instead of the detector's pick: the render re-assigns the pane's track to the face nearest it (no face there = a fixed crop at that x). */
   subjectX: z.number().min(0).max(1).optional().describe("Follow the person at this x (0-1 of the source width) in the top/only pane; the offset still applies on top"),
   subjectX2: z.number().min(0).max(1).optional().describe("Split only: follow the person at this x in the bottom pane"),
+};
+export const sectionAdjustSchema = z.object(sectionAdjustShape);
+export type SectionAdjustFields = z.infer<typeof sectionAdjustSchema>;
+/** A user-forced framing for part of a clip, in absolute source seconds (survives retrims). */
+export const layoutSectionSchema = z.object({
+  start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
+  end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
+  mode: sectionModeSchema,
+  ...sectionAdjustShape,
 });
 export type LayoutSection = z.infer<typeof layoutSectionSchema>;
-/** One pane's adjustment: pane 0 is the only pane or the top of a split, pane 1 the bottom of a split. */
+/** One pane's adjustment: pane 0 is the only pane or the top of a split, pane 1 the bottom of a split. A crop replaces the offset and the subject. */
 export interface PaneAdjust {
   offsetX?: number;
   offsetY?: number;
   subjectX?: number;
+  crop?: ContentRegion;
 }
-export function paneOf(s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">, pane: 0 | 1): PaneAdjust {
-  return pane === 0 ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX } : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2 };
+export function paneOf(s: SectionAdjustFields, pane: 0 | 1): PaneAdjust {
+  return pane === 0 ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX, crop: s.crop } : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2, crop: s.crop2 };
 }
 /** Write one pane's adjustment back onto a section (undefined fields are removed). */
-export function withPane<T extends Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">>(s: T, pane: 0 | 1, a: PaneAdjust): T {
+export function withPane<T extends SectionAdjustFields>(s: T, pane: 0 | 1, a: PaneAdjust): T {
   const out: T = { ...s };
-  const keys = pane === 0 ? (["offsetX", "offsetY", "subjectX"] as const) : (["offsetX2", "offsetY2", "subjectX2"] as const);
-  const vals = [a.offsetX, a.offsetY, a.subjectX];
-  keys.forEach((k, i) => {
-    const v = vals[i];
-    if (v === undefined || (k !== "subjectX" && k !== "subjectX2" && Math.abs(v) < 1e-4)) delete out[k];
+  const num = (k: "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2", v: number | undefined, zeroIsNone: boolean) => {
+    if (v === undefined || (zeroIsNone && Math.abs(v) < 1e-4)) delete out[k];
     else out[k] = v;
-  });
+  };
+  if (pane === 0) {
+    num("offsetX", a.offsetX, true);
+    num("offsetY", a.offsetY, true);
+    num("subjectX", a.subjectX, false);
+    if (a.crop) out.crop = a.crop;
+    else delete out.crop;
+  } else {
+    num("offsetX2", a.offsetX, true);
+    num("offsetY2", a.offsetY, true);
+    num("subjectX2", a.subjectX, false);
+    if (a.crop) out.crop2 = a.crop;
+    else delete out.crop2;
+  }
   return out;
 }
 /** True when a section carries any manual adjustment (and so must be stored even in Auto mode). */
-export const hasAdjust = (s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">) =>
-  !!(s.offsetX || s.offsetY || s.offsetX2 || s.offsetY2 || s.subjectX !== undefined || s.subjectX2 !== undefined);
+export const hasAdjust = (s: SectionAdjustFields) =>
+  !!(s.offsetX || s.offsetY || s.offsetX2 || s.offsetY2 || s.subjectX !== undefined || s.subjectX2 !== undefined || s.crop || s.crop2 || s.contentCrop);
+/** "12–60% × 0–100%" for a crop. */
+export function regionLabel(r: ContentRegion): string {
+  const p = (v: number) => Math.round(v * 100);
+  return `${p(r.x1)}–${p(r.x2)}% × ${p(r.y1)}–${p(r.y2)}%`;
+}
+/** The adjustment of a section on its own (no times, no mode, nothing unset), for the project's default framing; undefined when there is none. */
+export function adjustOf(s: SectionAdjustFields): SectionAdjustFields | undefined {
+  const out: SectionAdjustFields = {};
+  for (const k of Object.keys(sectionAdjustShape) as Array<keyof SectionAdjustFields>) {
+    const v = s[k];
+    if (v === undefined) continue;
+    if (typeof v === "number" && !k.startsWith("subject") && Math.abs(v) < 1e-4) continue;
+    Object.assign(out, { [k]: v });
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+/**
+ * The framing a clip without sections of its own gets from its project: the `reframe` mode (`none`, an original-aspect
+ * choice, has no section mode and shows the whole frame) with the `reframeAdjust` nudge or crop on top, as one section
+ * over `[start, end]`. Only `auto` with no adjustment is a plain automatic section.
+ */
+export function projectDefaultSection(settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null }, start: number, end: number): LayoutSection {
+  const reframe = settings.reframe ?? "auto";
+  const mode: SectionMode = reframe === "none" ? "fit" : reframe;
+  return { start, end, mode, ...(settings.reframeAdjust ? adjustOf(settings.reframeAdjust) : {}) };
+}
 
 /**
  * An image or short video from the library laid over part of the clip (a logo, a sticker, b-roll).
@@ -558,6 +615,8 @@ export interface DetectedSegment {
   track2?: Array<[number, number]>;
   /** "stack" only: the part of the frame shown on top (absent = the whole frame) */
   content?: ContentRegion;
+  /** "stack" only: the speaker is a webcam tile at these bounds, and the bottom pane shows just the tile (`tileCrop`) */
+  tile?: ContentRegion;
 }
 
 /**
@@ -629,6 +688,12 @@ export const projectSettingsSchema = styleSchema.extend({
   sourceText: z.enum(["hide", "keep", "always"]).describe("Text already in the video: hide (blur captions/logos except in slide decks, default), always (blur even then), keep").default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
+  /**
+   * Nudge, subject or fixed crop applied with `reframe` to every clip that has no framing sections of its own
+   * (`apply_framing` sets both from one clip, for a recording whose layout never changes, such as a slide deck with a
+   * webcam tile). A clip's own sections replace it for their time range.
+   */
+  reframeAdjust: sectionAdjustSchema.nullable().optional().describe("Applied with reframe to clips without their own sections: offsetX/Y, offsetX2/Y2, subjectX/X2, crop, crop2, contentCrop as on a clip's section; null = none. apply_framing sets it from one clip"),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
   language: z.string().max(10).optional().describe("Spoken language code (e.g. en); unset = detected"),
@@ -713,7 +778,7 @@ function withoutDefaults<T = ProjectSettingsPatch>(shape: z.ZodRawShape): z.ZodT
 }
 export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.shape);
 /** Optional settings a project update can reset to their default (unset). */
-export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary"] as const;
+export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary", "reframeAdjust"] as const;
 export type ClearableSetting = (typeof CLEARABLE_SETTINGS)[number];
 
 export const createProjectInputSchema = z.object({
@@ -1051,10 +1116,36 @@ export function contentSide(c: ContentRegion): "left" | "right" | null {
   return null;
 }
 /** "Stack" for the whole frame, "Stack · content left 50%" for a region. */
-export function contentLabel(c: ContentRegion | undefined | null): string {
-  if (isFullFrame(c)) return "Stack";
+export function contentLabel(c: ContentRegion | undefined | null, tile?: ContentRegion | null): string {
+  const cam = tile ? " · webcam" : "";
+  if (isFullFrame(c)) return `Stack${cam}`;
   const side = contentSide(c!);
-  return `Stack · content ${side ?? "inset"} ${Math.round((c!.x2 - c!.x1) * 100)}%`;
+  return `Stack · content ${side ?? "inset"} ${Math.round((c!.x2 - c!.x1) * 100)}%${cam}`;
+}
+
+/**
+ * The speaker pane of a stack when the speaker is a webcam tile (a picture-in-picture box over a
+ * screen share or in a meeting layout): the crop is the tile itself, nothing around it, and the pane
+ * shows it at its own aspect over a blurred copy (the way `fit` and a content region are shown).
+ * The tile is small, so a crop sized to the face (`speakerCrop`) would reach past it into the slide,
+ * the black band or a name plate; a tile a quarter of the frame wide upscaled four times is soft,
+ * but it is the speaker only. Source pixels, even sizes, kept inside the frame.
+ */
+/** `r` moved by (dx, dy) (normalized), as far as it stays inside the frame: a nudge of a tile pane. */
+export function shiftRegion(r: ContentRegion, dx: number, dy: number): ContentRegion {
+  const r3 = (v: number) => Number(v.toFixed(3));
+  const mx = Math.max(-r.x1, Math.min(1 - r.x2, dx));
+  const my = Math.max(-r.y1, Math.min(1 - r.y2, dy));
+  return { x1: r3(r.x1 + mx), y1: r3(r.y1 + my), x2: r3(r.x2 + mx), y2: r3(r.y2 + my) };
+}
+
+export function tileCrop(srcW: number, srcH: number, tile: ContentRegion): { x: number; y: number; w: number; h: number } {
+  const even = (v: number) => Math.max(2, Math.floor(v / 2) * 2);
+  const x = Math.max(0, Math.floor(tile.x1 * srcW));
+  const y = Math.max(0, Math.floor(tile.y1 * srcH));
+  const w = even(Math.min(srcW - x, Math.ceil((tile.x2 - tile.x1) * srcW)));
+  const h = even(Math.min(srcH - y, Math.ceil((tile.y2 - tile.y1) * srcH)));
+  return { x, y, w, h };
 }
 
 /**

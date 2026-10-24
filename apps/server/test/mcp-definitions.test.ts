@@ -15,6 +15,7 @@ import { INSTRUCTIONS, TOOL_NAMES } from "../src/mcp-tools.js";
 
 const EXPECTED = [
   "add_asset",
+  "apply_framing",
   "apply_layer_template",
   "asset_usage",
   "billing_checkout_url",

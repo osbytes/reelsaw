@@ -4,6 +4,7 @@ import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reels
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
 import { probeDivider, detectContentRegion, contentReason, frameVote, type ContentSignals, type PBox, type DividerProbe } from "./content-region.js";
+import { probeTiles, aggregateTile, tileContent, tileReason, TILE, type TileProbe } from "./webcam-tile.js";
 
 /**
  * Layout thresholds config. Face sizes are normalized to the frame height, so their meaning shifts
@@ -35,6 +36,8 @@ export interface FaceSample {
   text?: PBox[];
   /** strongest straight vertical edge of the frame, for side-by-side composites */
   divider?: DividerProbe;
+  /** rectangles that could be the webcam tile (picture-in-picture box) around the largest face, smallest first; `aggregateTile` picks one across frames */
+  tiles?: TileProbe[];
 }
 
 export interface LayoutDecision {
@@ -55,6 +58,8 @@ export interface LayoutDecision {
   content?: ContentRegion;
   /** content-region detector inputs and outcome, for the debug log */
   contentSignals?: ContentSignals;
+  /** "stack" only: the speaker is a webcam tile at these bounds; the speaker pane shows just the tile */
+  tile?: ContentRegion;
 }
 
 export interface LayoutOptions {
@@ -64,12 +69,21 @@ export interface LayoutOptions {
   durationSec: number;
   signal?: AbortSignal;
   sampleFps?: number;
+  /** the source's width / height, for the shape of a webcam tile (the raster is not aspect-preserving); 16:9 when unknown */
+  srcAspect?: number;
 }
 
 /** Sample frames at `sampleFps` through ffmpeg and run the detector on each. */
 export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promise<FaceSample[]> {
   const fps = opts.sampleFps ?? 2;
   const frameBytes = FACE_INPUT_W * FACE_INPUT_H * 3;
+  let lastBox: { box: FaceBox; t: number } | undefined;
+  // frames with no face yet, kept until a face appears so they can be probed around it (bounded: `backSec`)
+  const pending: Array<{ px: Uint8Array; index: number }> = [];
+  const probe = (px: Uint8Array, box: FaceBox) => {
+    const tiles = probeTiles(px, FACE_INPUT_W, FACE_INPUT_H, box, opts.srcAspect);
+    return tiles.length ? { tiles } : {};
+  };
   const ff = spawn(
     opts.ffmpegPath,
     ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", opts.startSec.toFixed(3), "-t", opts.durationSec.toFixed(3), "-i", opts.source, "-vf", `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
@@ -88,7 +102,22 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
       const px = new Uint8Array(frame);
       const boxes = await det.detect(px);
       const sorted = boxes.sort((a, b) => (b.x2 - b.x1) * (b.y2 - b.y1) - (a.x2 - a.x1) * (a.y2 - a.y1));
-      samples.push({ t: i / fps, box: sorted[0] ?? null, boxes: sorted, divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H) });
+      const t = i / fps;
+      const sample: FaceSample = { t, box: sorted[0] ?? null, boxes: sorted, divider: probeDivider(px, FACE_INPUT_W, FACE_INPUT_H) };
+      // the webcam tile around the face; a frame where the detector blinked (a tiny webcam face is missed
+      // more often than not) is probed around the last face seen, or the next one, since a tile does not move
+      if (sorted[0]) {
+        lastBox = { box: sorted[0], t };
+        for (const p of pending) Object.assign(samples[p.index]!, probe(p.px, sorted[0]));
+        pending.length = 0;
+        Object.assign(sample, probe(px, sorted[0]));
+      } else if (lastBox && t - lastBox.t <= TILE.holdSec) {
+        Object.assign(sample, probe(px, lastBox.box));
+      } else {
+        pending.push({ px: new Uint8Array(px), index: i });
+        while (pending.length > TILE.backSec * fps) pending.shift();
+      }
+      samples.push(sample);
       i++;
     }
   }
@@ -131,6 +160,10 @@ export function decideLayout(
   const base = { faceRatio: Number(faceRatio.toFixed(2)), faceSize: Number(faceSize.toFixed(3)), track, faceCount };
 
   if (faceRatio < config.LAYOUT_MIN_FACE_RATIO) {
+    // a webcam too small for the detector most of the time is still a speaker when its tile stands
+    // steady through the clip (probed around the last face seen): stack the tile, not the whole frame
+    const { reasonSuffix, ...stack } = webcamStack(samples);
+    if (stack.tile && withFace.length >= 2) return { ...base, ...stack, reason: `face in only ${Math.round(faceRatio * 100)}% of frames${reasonSuffix}` };
     return { ...base, layout: "fit", reason: withFace.length ? `face in only ${Math.round(faceRatio * 100)}% of frames` : "no face detected" };
   }
   // two people on screen most of the time (interview / podcast wide shot) → one crop per speaker
@@ -142,7 +175,8 @@ export function decideLayout(
     return { ...base, track: t1, track2: t2, speakerSizes: pairSizes(pair), layout: "split", reason: `two faces in ${Math.round(twoFaces * 100)}% of frames` };
   }
   if (faceSize < faceFloor(config.LAYOUT_MIN_FACE_SIZE, config) || inCorner) {
-    return { ...base, layout: "stack", content: FULL_FRAME, reason: inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)` };
+    const { reasonSuffix, ...stack } = webcamStack(samples);
+    return { ...base, ...stack, reason: `${inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)`}${reasonSuffix}` };
   }
   // a big speaker beside an app screen / title card (a side-by-side composite): stack that region on top
   if (opts.content === false) return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
@@ -536,16 +570,26 @@ export interface SectionAdjust {
   offsetY2?: number;
   subjectX?: number;
   subjectX2?: number;
+  /** a fixed crop for pane 1 / pane 2: exactly this part of the source, instead of a face-sized crop around the followed face */
+  crop?: ContentRegion;
+  crop2?: ContentRegion;
+  /** stack: the part of the frame shown on top, instead of the whole frame or the detected content region */
+  contentCrop?: ContentRegion;
 }
-const ADJUST_KEYS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
+const ADJUST_NUMBERS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
+const ADJUST_REGIONS = ["crop", "crop2", "contentCrop"] as const;
 /** Only the adjustment fields that do something, or undefined when there are none. */
 export function cleanAdjust(a: SectionAdjust | undefined): SectionAdjust | undefined {
   if (!a) return undefined;
   const out: SectionAdjust = {};
-  for (const k of ADJUST_KEYS) {
+  for (const k of ADJUST_NUMBERS) {
     const v = a[k];
     if (v === undefined) continue;
     if (k.startsWith("subject") ? Number.isFinite(v) : Math.abs(v) >= 1e-4) out[k] = v;
+  }
+  for (const k of ADJUST_REGIONS) {
+    const r = a[k];
+    if (r && r.x2 > r.x1 && r.y2 > r.y1) out[k] = r;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -564,10 +608,12 @@ export interface TimelinePiece {
  * Cover [0, duration] with the user's sections (clip-relative) and the default mode in the gaps.
  * Later sections win where they overlap; slivers under 0.1 s are dropped.
  */
-export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode): TimelinePiece[] {
+export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode, defaultAdjust?: SectionAdjust): TimelinePiece[] {
   const clean = sections
     .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), mode: s.mode, adjust: cleanAdjust(s) }))
     .filter((s) => s.end - s.start >= 0.1);
+  // the project's framing (mode and adjustment) covers the time no section claims
+  const fallbackAdjust = cleanAdjust(defaultAdjust);
   const edges = [...new Set([0, duration, ...clean.flatMap((s) => [s.start, s.end])])].sort((a, b) => a - b);
   const out: TimelinePiece[] = [];
   for (let i = 0; i + 1 < edges.length; i++) {
@@ -578,12 +624,12 @@ export function coverTimeline(duration: number, sections: Array<{ start: number;
     const hit = [...clean].reverse().find((s) => s.start <= mid && s.end >= mid);
     const mode = hit?.mode ?? defaultMode;
     const manual = !!hit && hit.mode !== "auto";
-    const adjust = hit?.adjust;
+    const adjust = hit ? hit.adjust : fallbackAdjust;
     const last = out[out.length - 1];
     if (last && last.mode === mode && last.manual === manual && sameAdjust(last.adjust, adjust)) last.end = b;
     else out.push({ start: a, end: b, mode, manual, ...(adjust ? { adjust } : {}) });
   }
-  return out.length ? out : [{ start: 0, end: duration, mode: defaultMode, manual: false }];
+  return out.length ? out : [{ start: 0, end: duration, mode: defaultMode, manual: false, ...(fallbackAdjust ? { adjust: fallbackAdjust } : {}) }];
 }
 
 /**
@@ -615,6 +661,19 @@ export function staticDecision(layout: Layout, reason: string): LayoutDecision {
   return { layout, reason, faceRatio: 0, faceSize: 0, track: [], faceCount: 0 };
 }
 
+/**
+ * The stack for a small or corner speaker: the whole frame on top and the speaker below, unless the
+ * speaker is a webcam tile whose edges were found in enough frames (`aggregateTile`). Then the
+ * bottom pane is the tile alone, and when the tile sits in a flat band along a frame edge (a black
+ * column beside the slides) the top pane is the frame without that band, so the speaker is not
+ * shown twice. `reason` is a suffix for the caller's reason.
+ */
+function webcamStack(samples: FaceSample[]): Pick<LayoutDecision, "layout" | "content" | "tile"> & { reasonSuffix: string } {
+  const found = aggregateTile(samples);
+  if (!found) return { layout: "stack", content: FULL_FRAME, reasonSuffix: "" };
+  return { layout: "stack", content: found.band ? tileContent(found.tile, found.band) : FULL_FRAME, tile: found.tile, reasonSuffix: `; ${tileReason(found)}` };
+}
+
 /** Use the detector's tracks but force the layout the user asked for. */
 export function forcedDecision(samples: FaceSample[], layout: Layout, config: LayoutConfig, sceneCuts: number[]): LayoutDecision {
   if (!samples.length || !samples.some((s) => s.box)) return staticDecision(layout === "face" || layout === "split" || layout === "stack" ? "center" : layout, "manual (no face found, centre crop)");
@@ -623,8 +682,13 @@ export function forcedDecision(samples: FaceSample[], layout: Layout, config: La
     const pair = assignPair(samples);
     return { ...base, layout, reason: "manual", track: tripodTrack(pair.a, sceneCuts), track2: tripodTrack(pair.b, sceneCuts), speakerSizes: pairSizes(pair) };
   }
-  // a forced Stack is the whole frame on top: the detected content region only applies to the automatic choice
-  return { ...base, layout, reason: "manual", content: layout === "stack" ? FULL_FRAME : undefined, contentSignals: undefined };
+  // a forced Stack is the whole frame on top: the detected content region only applies to the automatic choice.
+  // A webcam tile is not a content region but the speaker's own bounds, so it applies to a forced stack too.
+  if (layout === "stack") {
+    const { reasonSuffix, ...stack } = webcamStack(samples);
+    return { ...base, ...stack, reason: `manual${reasonSuffix}`, contentSignals: undefined };
+  }
+  return { ...base, layout, reason: "manual", content: undefined, contentSignals: undefined, tile: undefined };
 }
 
 function shiftDecision(d: LayoutDecision, by: number): LayoutDecision {
@@ -643,33 +707,50 @@ export interface ResolvedSegment extends LayoutSegment {
 /**
  * Apply the user's adjustments to a decision: a subject re-assigns the pane's track to the person
  * at that x (or fixes the crop there), then the pane's offset shifts the crop relative to what it
- * follows. Pane 1 moves `track`, pane 2 moves `track2`. Whole-frame layouts are left alone.
+ * follows. Pane 1 moves `track`, pane 2 moves `track2`. A fixed crop on a pane makes its subject and
+ * offset moot (the renderer shows the crop itself, `FrameGeometry.crop`); a stack's `contentCrop`
+ * replaces the content region. Whole-frame layouts take only a crop.
  */
 export function adjustDecision(d: LayoutDecision, adjust: SectionAdjust | undefined, samples: FaceSample[], sceneCuts: number[], start: number): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
   const a = cleanAdjust(adjust);
-  if (!a || d.layout === "fit" || d.layout === "none") return { decision: d };
+  if (!a || d.layout === "none" || (d.layout === "fit" && !a.crop)) return { decision: d };
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   let out: LayoutDecision = { ...d };
   let subject: "followed" | "fixed" | undefined;
   let subject2: "followed" | "fixed" | undefined;
   const notes: string[] = [];
-  if (a.subjectX !== undefined) {
+  if (a.crop) {
+    // the pane is this part of the source, not a window around a face: nothing to follow, no tile to show
+    notes.push("fixed crop");
+    out = { ...out, tile: undefined };
+  }
+  if (a.crop2 && d.layout === "split") notes.push("bottom: fixed crop");
+  if (a.contentCrop && d.layout === "stack") {
+    out = { ...out, content: a.contentCrop };
+    notes.push("top: fixed crop");
+  }
+  if (d.layout === "fit") {
+    if (notes.length) out = { ...out, reason: `${out.reason}; ${notes.join("; ")}` };
+    return { decision: out };
+  }
+  if (a.subjectX !== undefined && !a.crop) {
     const s = subjectTrack(samples, a.subjectX, sceneCuts, start);
     subject = s.fixed ? "fixed" : "followed";
     out = { ...out, track: s.track, ...(s.size ? { faceSize: s.size, ...(out.speakerSizes ? { speakerSizes: [s.size, out.speakerSizes[1]] as [number, number] } : {}) } : {}) };
     notes.push(s.fixed ? `no face at ${Math.round(a.subjectX * 100)}%, fixed crop` : `following the person at ${Math.round(a.subjectX * 100)}%`);
   }
-  if (a.subjectX2 !== undefined && d.layout === "split") {
+  if (a.subjectX2 !== undefined && d.layout === "split" && !a.crop2) {
     const s = subjectTrack(samples, a.subjectX2, sceneCuts, start);
     subject2 = s.fixed ? "fixed" : "followed";
     out = { ...out, track2: s.track, ...(s.size ? { speakerSizes: [out.speakerSizes?.[0] ?? out.faceSize, s.size] as [number, number] } : {}) };
     notes.push(s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`);
   }
   const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) => (dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx), y: clamp(p.y + dy) })) : tr);
-  if (a.offsetX || a.offsetY) {
+  if ((a.offsetX || a.offsetY) && !a.crop) {
     out = { ...out, track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }] };
+    // a webcam tile stays as detected: the renderer and the preview move its window by the pane's offset (`shiftRegion`)
   }
-  if ((a.offsetX2 || a.offsetY2) && d.layout === "split") {
+  if ((a.offsetX2 || a.offsetY2) && d.layout === "split" && !a.crop2) {
     const base = out.track2?.length ? out.track2 : out.track;
     out = { ...out, track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }] };
   }

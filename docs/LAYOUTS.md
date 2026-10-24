@@ -17,6 +17,7 @@ writing; search for the function name if they drifted.
 | `face` | one speaker, big in frame | full-height 9:16 crop that follows the face (heavy-tripod smoothing) | face in at least `LAYOUT_MIN_FACE_RATIO` (0.6) of sampled frames, median face height at least `LAYOUT_MIN_FACE_SIZE` (0.18), not in a corner, no second face, no side panel (`decideLayout`, `layout.ts:92`) | section mode "Follow speaker"; drag the picture to offset (`offsetX`/`offsetY`), or point at another person (`subjectX`) |
 | `split` | two people in one wide shot | two speaker-sized crops, one above the other | a second face (at least 8% tall) in at least 50% of frames (`layout.ts:116`); inside it the crop follows whoever talks when `activeSpeakers` is confident (`render.ts:276`) | section mode "Two stacked" |
 | `stack` | small webcam over a screen share or slides | whole frame on top, zoomed speaker below | median face under `LAYOUT_MIN_FACE_SIZE`, or face centre in a corner (x < 0.22 or > 0.78 and y < 0.3 or > 0.7) (`layout.ts:106`) | section mode "Screen + speaker" |
+| `stack` with a webcam tile | the speaker is a picture-in-picture box (Zoom, Teams, Meet, OBS) over the screen or in a flat band beside it | the tile alone below, at its own aspect over a blurred copy of itself; on top the whole frame, or the frame without the tile's flat band | the small / corner rule above, or a face seen too rarely for `face` whose tile stands steady; `probeTiles` + `aggregateTile` (`webcam-tile.ts`): see thresholds below | the tile applies to a forced "Screen + speaker" too (it is the speaker's own bounds, not a content region); a drag on the pane moves the tile's window |
 | `stack` with a content region | big speaker on one side, app screen / title card / slide on the other (side-by-side composite) | only the panel on top (own aspect, over a blurred copy of itself), speaker below, cropped from the other side | `detectContentRegion` (`content-region.ts`): see thresholds below | none of its own: forcing "Screen + speaker" gives the plain stack (whole frame on top); forcing "Follow speaker" gives `face` |
 | `fit` | no usable face: graphics, b-roll, screencasts, slides | whole frame over a blurred background | face in under `LAYOUT_MIN_FACE_RATIO` of frames; or a text-heavy run (`fitTextHeavy`, `layout.ts:605`) | section mode "Whole frame" |
 | `center` | anything | static centre crop | only when there is no face detector, or a manual mode found no face | section mode "Centre crop" |
@@ -34,19 +35,47 @@ Content-region thresholds (`REGION`, `content-region.ts:41`), all general, none 
 | size | panel at least 0.22 of the width; clears the speaker's face by 0.02 |
 | decision | `stack` with `content { x1, y1, x2, y2 }` (here a full-height strip on one side); reason "app panel / title card / content beside the speaker (right 32%)" |
 
+Webcam-tile thresholds (`TILE`, `webcam-tile.ts`), from the 320x240 frames the face detector decodes:
+
+| signal | threshold |
+|---|---|
+| candidate edges | per side of the face, the 4 nearest columns (rows) whose mean luma step over the face's rows (columns) is at least 0.16 and 2.5x the typical column in reach (0.45 of the frame), or the frame edge |
+| rectangle | encloses the face box with a 10% margin, at least 1.4 face widths / heights, at most 0.6 of the frame on either axis, 1.2 to 2.1 wide:high in source pixels (a landscape camera) |
+| edges hold | each quarter of every edge's span steps at least 0.04 and 1.4x the column (row) 3 px outside the rectangle (texture and a flat band both fail), and the row (column) 3 px inside shows a picture (step at least 0.004 in 3 of 4 quarters) |
+| frames | a frame without a face is probed around the last face up to 30 s before it, or the next face up to 10 s after it; the tile does not move when the detector blinks |
+| per clip | rectangles clustered by position (every edge within 0.04); the cluster seen in at least 60% of the frames with the most frames wins, and a cluster seen in at least 90% as many frames that lies outside it wins over it (a line inside the webcam picture is a rectangle in some frames, the border in all) |
+| band | the strip from the tile to the frame edge it is flush with is a flat band when at most 10% of its pixels differ from its median luma by more than 0.08 (a name plate is a few percent), and the rest of the frame is at least 0.4 wide / tall; the top pane is then the frame without the band |
+| decision | `stack` with `tile { x1, y1, x2, y2 }` (and `content` = the frame minus the band); reason "… ; webcam tile top-right (x 0.87-1.00, y 0.08-0.22), in a flat band on the right" |
+
 Where the user can override: project setting `reframe` (`reframeModeSchema`, `packages/shared/src/index.ts:50`),
 per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; `coverTimeline`,
 `layout.ts:418`), the editor's section mode select and drag-to-offset, and the MCP `layoutOverride` /
 `layoutSections` fields. A section in any mode but Auto is "manual": automatic post-passes leave it alone.
 Each pane of a section has its own adjustment: `offsetX` / `offsetY` for the top (or only) pane,
 `offsetX2` / `offsetY2` for the bottom of a split, and `subjectX` / `subjectX2` to follow the person at that
-x (a fixed crop there when no face is found). See [specs/editor-tracks.md](specs/editor-tracks.md).
+x (a fixed crop there when no face is found). A fixed crop goes further: `crop` / `crop2` make the pane show
+exactly that part of the source (`contentRegionSchema`, fractions of the source; at least 5% wide and tall)
+and `contentCrop` fixes what a stack shows on top. A crop replaces the pane's offset, subject and webcam tile;
+a crop shaped like the pane fills it, any other shape is fitted at its own aspect over a blurred copy
+(`fitPane`, `render.ts`, the same chain as a webcam tile). The editor sets them from the picture's right-click
+menu (Set crop…: a box over the whole source frame to drag, resize or draw, starting at the automatic window, with
+the numbers beside it; afterwards a drag on the pane moves the fixed crop), the timeline's section menu
+and the section's Crop… button. See [specs/editor-tracks.md](specs/editor-tracks.md).
+
+The same fields exist once per project: `settings.reframe` (the mode) and `settings.reframeAdjust` (the nudge,
+subject or crop). `coverTimeline` gives them to every stretch of a clip no section of its own claims, and the
+editor shows a clip without sections as that one section. "Use for all N clips…" on the Framing tab
+(`projects.applyFraming`, `apply_framing`, `reelsaw apply-framing`) copies one section there, clears the other
+clips' own sections and re-renders them: the way to frame a slide deck with a webcam tile once for the whole
+video. Editing the timeline of such a clip stores the clip's own sections again; "Use the project framing" takes
+them back.
 
 ## 2. How the decision is made
 
 **Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps, 320x240,
 for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame vertical-divider probe
-(`probeDivider`, `content-region.ts`). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
+(`probeDivider`, `content-region.ts`) and the webcam-tile probe around the largest face
+(`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
 (`attachText`) and are the only text input the layout reads. Scene cuts come from the transcript
 stage (`scenes.ts`, adaptive threshold). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
@@ -57,7 +86,7 @@ correlated with the audio envelope) runs only on `split` segments of 3 s or more
 
 1. face in fewer than `LAYOUT_MIN_FACE_RATIO` of frames: `fit`
 2. a second face (at least 8% tall) in at least 50% of frames: `split`
-3. face under `LAYOUT_MIN_FACE_SIZE`, or parked in a corner: `stack` (whole frame on top)
+3. face under `LAYOUT_MIN_FACE_SIZE`, or parked in a corner: `stack` (whole frame on top, or the webcam tile and the frame without its band when `aggregateTile` finds one). Rule 1 defers to this when the face is rare but its tile stands steady.
 4. big face with a content region (`detectContentRegion`): `stack` with `panel`
 5. otherwise `face`
 
@@ -103,7 +132,8 @@ decision is stored per clip (`layoutSegments`, with `content`) and shown in the 
 - Profile, turned-away or looking-down faces drop out of UltraFace; under 60% of frames becomes `fit`.
 - Glasses glare, backlight and heavy compression lower detection; the 5-sample smoothing hides short
   gaps, not long ones.
-- Very small webcams are often missed by UltraFace at 320x240, so the shot becomes `fit`, not `stack`.
+- Very small webcams are often missed by UltraFace at 320x240; the shot is still a `stack` when the webcam's tile is found around the few faces seen, else it becomes `fit`.
+- A webcam tile needs straight edges on all four sides (or the frame edge) and a landscape shape: a circular or portrait webcam, a tile with a rounded or shadowed border, or one whose border is lost against a dark panel in part of its span (a dark room beside a dark editor still measures ~1.5x) gets the face-sized crop as before. A thin flat margin under ~3 px at 320 wide between the tile and a strong edge counts as part of the tile. The tile is one rectangle per clip segment: a webcam that moves or resizes mid-segment is not followed.
 - A presenter who switches sides mid-clip is handled by the tripod snap at scene cuts only; without a
   cut the crop pans at the capped speed.
 - More than two speakers: only the two largest faces get crops.
@@ -154,8 +184,8 @@ committed samples (faces, plus text boxes and divider for `panel` cases), so it 
 | `stack` with panel, left (title card, appears and goes away) | `panel-left-title-card` |
 | panel held through a short gap in the evidence; full-screen table with no face is `fit` | `panel-left-hold-through-gap` |
 | panel ends 1-3 s before the clip: the tail stays `face` | `panel-left-card-ends-before-clip`, `panel-left-card-ends-before-clip-2` |
-| `stack`: small webcam over a screen share | no fixture yet |
-| `stack`: webcam in a corner | no fixture yet |
+| `stack` with a webcam tile in a flat band (Zoom webinar, face seen in 3% of frames) | `tile-webinar-black-band` |
+| `stack` with a corner webcam tile over a screencast, no band | `tile-screencast-corner-webcam`, `shots-screencast-corner-webcam` (the tile check; the case still fails on the split, see below) |
 | `fit`: no face (b-roll, graphics) | no fixture yet |
 | `fit`: text-heavy run over a speaker | no fixture yet |
 | negatives: lower-third text, text on both sides, room edges, narrow panel | unit tests only (`apps/server/test/side-panel.test.ts`); no real-footage fixture yet |

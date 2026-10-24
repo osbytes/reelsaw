@@ -22,6 +22,12 @@
  *    but never scored. `maxFaceFrames` caps the share of sampled frames with any face box (a source
  *    with no face must not grow one), and `minCropWidth` the face crop's share of the source width
  *    (a vertical source should come out near the identity).
+ *  - tile cases: a webcam tile (picture-in-picture box) over a screen share or in a meeting layout.
+ *    The range must segment as a stack whose decision carries the tile at the labelled bounds
+ *    (+-`tol`), a forced "Screen + speaker" must find the same tile, the detected faces must lie
+ *    inside it, and the top pane must be the labelled `content` region (the frame without the
+ *    tile's flat band) or the whole frame. Samples carry the per-frame tile probe. A shots case may
+ *    give `tile` too: every stack piece must then frame it.
  * Face samples are committed (samples.json, derived from the video); when missing they are
  * regenerated from the materialised media with UltraFace.
  */
@@ -29,7 +35,7 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { speakerCrop, cropX, isFullFrame, contentSide, verticalCrop } from "@reelsaw/shared";
-import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, dropStaticFaces, type FaceSample } from "../../pipeline/layout.js";
+import { decideLayout, segmentLayouts, sampleFaces, tripodTrack, trackCenter, dropStaticFaces, forcedDecision, type FaceSample } from "../../pipeline/layout.js";
 import { attachText } from "../../pipeline/content-region.js";
 import { sampleClipText } from "../../pipeline/overlays.js";
 import { loadFaceDetector } from "../../vision/faces.js";
@@ -49,7 +55,7 @@ interface ShotWindow {
 }
 
 interface FramingCase {
-  kind: "split" | "track" | "content" | "shots";
+  kind: "split" | "track" | "content" | "shots" | "tile";
   note?: string;
   source: MediaSource;
   /** seconds inside the materialised media */
@@ -86,7 +92,69 @@ interface FramingCase {
     maxFaceFrames?: number;
     /** shots cases: a face crop must keep at least this share of the source width */
     minCropWidth?: number;
+    /**
+     * tile cases (and shots cases with a webcam tile): the tile's bounds (+-`tol`, default 0.03), and
+     * the region shown on top when the tile sits in a flat band (absent = the whole frame on top)
+     */
+    tile?: { box: [number, number, number, number]; tol?: number; content?: [number, number, number, number] };
   };
+}
+
+const fmtBox = (b: { x1: number; y1: number; x2: number; y2: number }) => [b.x1, b.y1, b.x2, b.y2].map((v) => v.toFixed(2)).join(",");
+const boxErr = (b: { x1: number; y1: number; x2: number; y2: number }, want: [number, number, number, number]) => Math.max(...[b.x1, b.y1, b.x2, b.y2].map((v, i) => Math.abs(v - want[i]!)));
+
+/**
+ * A webcam tile over a screen share or in a meeting layout: the auto segmentation must stack the
+ * range with the tile at the expected bounds, a forced "Screen + speaker" must find the same tile,
+ * the faces the detector did see must lie inside it, and the top pane must be the expected region
+ * (the frame without the tile's band) or the whole frame.
+ */
+function judgeTile(id: string, c: FramingCase, raw: FaceSample[], config: Parameters<typeof segmentLayouts>[1]): CaseResult {
+  const samples = dropStaticFaces(raw).samples;
+  const cuts = c.sceneCuts ?? [];
+  const segs = segmentLayouts(samples, config, cuts, c.end - c.start);
+  const fails: string[] = [];
+  const checks: Record<string, number | string> = { segments: segs.map((sg) => `${sg.decision.layout}@${sg.start.toFixed(1)}`).join(",") };
+  const stackSec = segs.filter((sg) => sg.decision.layout === "stack").reduce((n, sg) => n + sg.end - sg.start, 0);
+  const share = stackSec / (c.end - c.start);
+  checks.stackShare = Number(share.toFixed(3));
+  const minAgree = c.expect.minAgreement ?? 0.9;
+  if (share < minAgree) fails.push(`stack for ${(share * 100).toFixed(0)}% of the range, expected at least ${(minAgree * 100).toFixed(0)}%`);
+  const auto = segs.filter((sg) => sg.decision.layout === "stack").sort((a, b) => b.end - b.start - (a.end - a.start))[0]?.decision;
+  const forced = forcedDecision(samples, "stack", config, cuts);
+  const want = c.expect.tile;
+  const tol = want?.tol ?? 0.03;
+  let worst = 0;
+  for (const [label, d] of [["auto", auto], ["forced", forced]] as const) {
+    if (!d) {
+      fails.push(`${label}: no stack piece`);
+      continue;
+    }
+    checks[`${label}.reason`] = d.reason;
+    if (!d.tile) {
+      fails.push(`${label}: no webcam tile found`);
+      continue;
+    }
+    checks[`${label}.tile`] = fmtBox(d.tile);
+    if (want) {
+      const err = boxErr(d.tile, want.box);
+      worst = Math.max(worst, err);
+      if (err > tol) fails.push(`${label}: tile ${fmtBox(d.tile)}, expected ${want.box.join(",")} (+-${tol})`);
+      if (want.content) {
+        if (!d.content || isFullFrame(d.content)) fails.push(`${label}: the whole frame on top, expected the region ${want.content.join(",")}`);
+        else if (boxErr(d.content, want.content) > tol) fails.push(`${label}: region ${fmtBox(d.content)} on top, expected ${want.content.join(",")} (+-${tol})`);
+      } else if (d.content && !isFullFrame(d.content)) fails.push(`${label}: region ${fmtBox(d.content)} on top, expected the whole frame`);
+    }
+    // the faces the detector did see sit inside the tile
+    const faces = samples.filter((s) => s.box);
+    const inside = faces.filter((s) => s.box!.x1 >= d.tile!.x1 - 0.02 && s.box!.x2 <= d.tile!.x2 + 0.02 && s.box!.y1 >= d.tile!.y1 - 0.02 && s.box!.y2 <= d.tile!.y2 + 0.02).length;
+    const inTile = faces.length ? inside / faces.length : 1;
+    checks[`${label}.facesInTile`] = Number(inTile.toFixed(2));
+    if (inTile < 0.9) fails.push(`${label}: only ${(inTile * 100).toFixed(0)}% of the detected faces lie inside the tile`);
+  }
+  checks.tileErr = Number(worst.toFixed(3));
+  checks.faceFrames = Number((samples.filter((s) => s.box).length / Math.max(1, samples.length)).toFixed(3));
+  return { id, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" };
 }
 
 async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promise<FaceSample[]> {
@@ -95,7 +163,7 @@ async function samplesFor(ctx: EvalContext, dir: string, c: FramingCase): Promis
   const media = await materialize(ctx, c.source);
   const det = await loadFaceDetector(ctx.config().FACE_MODEL_PATH);
   try {
-    let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4 });
+    let samples = await sampleFaces(det, { ffmpegPath: ctx.config().FFMPEG_PATH, source: media, startSec: c.start, durationSec: c.end - c.start, sampleFps: 4, srcAspect: c.srcW / c.srcH });
     if (c.kind === "content" || c.kind === "shots") {
       // content cases read text beside the speaker: scan it the way a render does (2 fps), keep boxes only
       const text = await loadTextDetector(ctx.config().TEXT_MODEL_PATH);
@@ -156,6 +224,17 @@ function judgeShots(id: string, c: FramingCase, raw: FaceSample[], config: Param
   const minAgree = c.expect.minAgreement ?? 0.8;
   if (agreement < minAgree) fails.push(`layout agrees with the labels for ${(agreement * 100).toFixed(0)}% of the labelled time, expected at least ${(minAgree * 100).toFixed(0)}%`);
   if (worstFace > tol) fails.push(`crop ${worstFace.toFixed(2)} of the width off a labelled face (tolerance ${tol})`);
+  if (c.expect.tile) {
+    // every stack piece must frame the webcam tile, at the labelled bounds
+    const tol = c.expect.tile.tol ?? 0.03;
+    const stacks = segs.filter((sg) => sg.decision.layout === "stack");
+    const tiles = stacks.flatMap((sg) => (sg.decision.tile ? [sg.decision.tile] : []));
+    const worst = tiles.length ? Math.max(...tiles.map((t) => boxErr(t, c.expect.tile!.box))) : NaN;
+    checks.tile = tiles.length ? fmtBox(tiles[0]!) : "none";
+    checks.tileErr = Number.isFinite(worst) ? Number(worst.toFixed(3)) : "n/a";
+    if (tiles.length < stacks.length) fails.push(`${stacks.length - tiles.length} of ${stacks.length} stack pieces found no webcam tile`);
+    if (worst > tol) fails.push(`tile ${worst.toFixed(2)} off the labelled bounds ${c.expect.tile.box.join(",")} (tolerance ${tol})`);
+  }
   if (c.expect.minCropWidth !== undefined) {
     const share = verticalCrop(c.srcW, c.srcH).w / c.srcW;
     checks.cropWidth = Number(share.toFixed(3));
@@ -253,6 +332,8 @@ export const framingSuite: Suite = {
         out.push({ id: name, pass: !fails.length, metrics: checks, notes: fails.join("; ") || c.note || "" });
       } else if (c.kind === "shots") {
         out.push(judgeShots(name, c, samples, lcfg));
+      } else if (c.kind === "tile") {
+        out.push(judgeTile(name, c, samples, lcfg));
       } else {
         const track = tripodTrack(samples, c.sceneCuts ?? []);
         // tolerances are fractions of the source width; legacy px keys are 1920 px source pixels
@@ -291,8 +372,10 @@ export const framingSuite: Suite = {
     const offs = results.flatMap((r) => ["A.offset", "B.offset"].map((k) => r.metrics?.[k]).filter((v): v is number => typeof v === "number"));
     const errs = results.map((r) => r.metrics?.medianErrPx).filter((v): v is number => typeof v === "number");
     const agree = results.filter((r) => !r.skipped).map((r) => r.metrics?.agreement).filter((v): v is number => typeof v === "number");
+    const tileErrs = results.filter((r) => !r.skipped).map((r) => r.metrics?.tileErr).filter((v): v is number => typeof v === "number");
     return {
       worstShotAgreement: { value: agree.length ? Math.min(...agree) : 1, better: "higher", tolerance: 0.05 },
+      worstTileErr: { value: tileErrs.length ? Math.max(...tileErrs) : 0, better: "lower", tolerance: 0.01 },
       worstSpeakerOffset: { value: offs.length ? Math.max(...offs) : 0, better: "lower", tolerance: 0.03 },
       worstTrackErrPx: { value: errs.length ? Math.max(...errs) : 0, better: "lower", tolerance: 6 },
       passRate: { value: Number((results.filter((r) => r.pass).length / (results.length || 1)).toFixed(2)), better: "higher" },
