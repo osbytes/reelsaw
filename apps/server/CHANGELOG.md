@@ -1,5 +1,25 @@
 # @reelsaw/server
 
+## 0.19.0
+
+### Minor Changes
+
+- [#147](https://github.com/osbytes/reelsaw/pull/147) [`d08a8e5`](https://github.com/osbytes/reelsaw/commit/d08a8e5f7a7e3cdd2b7afb6b49eba773d7bd5644) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Operators can set a forgotten password from the shell without email: `reelsaw set-password you@example.com`. `--must-change` signs them in with that temporary password and then a blocking page asks for a new one (no current-password field). Other devices are signed out; API keys keep working.
+  
+  **Upgrade:** existing databases add `user.must_change_password` at boot (default off). On a box without email, `docker compose exec app reelsaw set-password you@example.com` replaces a forgotten password; pass `--must-change` when the operator invented it.
+
+- [#147](https://github.com/osbytes/reelsaw/pull/147) [`d08a8e5`](https://github.com/osbytes/reelsaw/commit/d08a8e5f7a7e3cdd2b7afb6b49eba773d7bd5644) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Sign-in has Forgot password. When email is on, it sends a 24-hour reset link, and choosing a new password signs out other devices.
+
+### Patch Changes
+
+- [#150](https://github.com/osbytes/reelsaw/pull/150) [`31a78a1`](https://github.com/osbytes/reelsaw/commit/31a78a123958769f5a7247cefc66ee7c26799282) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Catalog and provider items are no longer saved into your library. Search them from the library or editor and add them to a clip; they stay on the instance while a clip uses them.
+  
+  **Upgrade:** Shared items you had bookmarked under Yours drop out of that list. Clips that already use them are unchanged, and the files still appear in catalog and provider search.
+
+- [#149](https://github.com/osbytes/reelsaw/pull/149) [`99e57c4`](https://github.com/osbytes/reelsaw/commit/99e57c416053f1bc0c3d729b7da5408d1354cf87) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Searching the library no longer calls Iconify (or other remote providers) with an empty query, which used to return an error as you started typing.
+
+- [#149](https://github.com/osbytes/reelsaw/pull/149) [`99e57c4`](https://github.com/osbytes/reelsaw/commit/99e57c416053f1bc0c3d729b7da5408d1354cf87) Thanks [@dillonstreator](https://github.com/dillonstreator)! - After a deploy, a tab that still has the old page reloads itself when nothing is unsaved. If you are in the middle of editing a clip, a header chip asks you to save first, then refresh.
+
 ## 0.18.2
 
 ### Patch Changes
