@@ -18,7 +18,8 @@ import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { checkStorageQuota } from "./quota.js";
-import { keys, contentTypeFor } from "./storage/index.js";
+import { keys } from "./storage/index.js";
+import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
@@ -47,35 +48,6 @@ const clientLogSchema = z.object({
 });
 
 class UploadTooLarge extends Error {}
-
-/** Range-capable file response for video playback. */
-async function sendFile(req: Request, file: string, downloadName?: string): Promise<Response> {
-  let st: fs.Stats;
-  try {
-    st = await fsp.stat(file);
-  } catch {
-    return new Response("Not found", { status: 404 });
-  }
-  const headers: Record<string, string> = { "Content-Type": contentTypeFor(file), "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600" };
-  if (downloadName) headers["Content-Disposition"] = `attachment; filename="${downloadName.replace(/"/g, "")}"`;
-  let start = 0;
-  let end = st.size - 1;
-  let status = 200;
-  const m = /bytes=(\d*)-(\d*)/.exec(req.headers.get("range") ?? "");
-  if (m) {
-    if (m[1]) start = Number(m[1]);
-    if (m[2]) end = Math.min(Number(m[2]), st.size - 1);
-    if (!m[1] && m[2]) {
-      start = Math.max(0, st.size - Number(m[2]));
-      end = st.size - 1;
-    }
-    if (start > end || start >= st.size) return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${st.size}` } });
-    status = 206;
-    headers["Content-Range"] = `bytes ${start}-${end}/${st.size}`;
-  }
-  headers["Content-Length"] = String(end - start + 1);
-  return new Response(Readable.toWeb(fs.createReadStream(file, { start, end })) as ReadableStream, { status, headers });
-}
 
 export function createApp(svc: Services) {
   const { config, auth, storage, paths } = svc;
@@ -323,7 +295,7 @@ export function createApp(svc: Services) {
     const name = `${String(clip.index + 1).padStart(2, "0")}-${clip.title.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60)}.mp4`;
     const loc = await storage.resolve(key, { downloadName: download ? name : undefined });
     if ("url" in loc) return c.redirect(loc.url, 302);
-    return sendFile(c.req.raw, loc.file, download ? name : undefined);
+    return sendFile(c.req.raw, loc.file, download ? name : undefined, { revalidate: true });
   });
 
   // Bulk export: zip of all rendered clips + YouTube/TikTok metadata

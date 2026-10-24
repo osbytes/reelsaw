@@ -347,6 +347,12 @@ and list it in `SUPPORTED` in `language.ts`.
 - Normalising the layout track must not merge equal neighbours, or a fresh split (Auto | Auto) disappears on the
   next drag.
 - Inline-block spans swallow trailing spaces (karaoke "howyour"): put the space outside the scaled span.
+- "My edit did not take" after a re-render, while the file on disk is right: the clip's mp4 and jpg live at a URL
+  that never changes (`/media/clips/<project>/<clip>.mp4`), so a cached copy replays the previous render. Clip
+  media is served `no-cache` with an ETag (`send-file.ts`): the browser asks every time and gets a 304 unless the
+  file changed. Any new route that serves a file whose content changes under one URL must do the same.
+- The editor's "unsaved" count compares every field of `layoutSectionSchema` (`SECTION_FIELDS` in `ClipEditor`);
+  a field listed by hand was how a new one (the fixed crop) was neither counted nor saved.
 
 ## Lessons: framing and burned-in text
 
