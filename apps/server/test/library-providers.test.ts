@@ -259,6 +259,21 @@ describe("transport rules", () => {
   });
 });
 
+describe("empty query", () => {
+  it("does not ask a remote provider, and still searches the catalog", async () => {
+    let catalogHits = 0;
+    const catalog = { ...catalogStub, search: async () => (catalogHits++, { items: [] }) } as unknown as Catalog;
+    const m = mockFetch(() => json({}));
+    const http = createProviderHttp({ fetch: m.f, version: "9.9.9", log, now: () => 1 });
+    const registry = createProviderRegistry({ settings: () => KEYS as unknown as RuntimeSettings, http, catalog, now: () => 1 });
+    assert.deepEqual((await registry.search("iconify", "")).items, []);
+    assert.deepEqual((await registry.search("pexels", "  ")).items, []);
+    assert.equal(m.calls.length, 0);
+    await registry.search("reelsaw", "");
+    assert.equal(catalogHits, 1);
+  });
+});
+
 describe("search cache", () => {
   const ok = () => json({ photos: [{ id: 1, src: { large: "https://i.example/1.jpg" } }] });
   it("serves a repeat from memory for 24 h, keyed by provider, q, kind and cursor", async () => {

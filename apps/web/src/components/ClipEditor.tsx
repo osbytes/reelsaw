@@ -17,6 +17,8 @@ import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
 import { loadTextFonts } from "../lib/fonts";
 import { z } from "zod";
 import { ThemeToggle } from "../App";
+import { HeaderAlerts } from "./HeaderAlerts";
+import { useUnsavedFlag } from "../lib/unsaved";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
@@ -1010,6 +1012,7 @@ export function ClipEditor(props: Props) {
   const busy = update.isPending || updateStyle.isPending;
   const requestExit = () => (changed ? setGuard(true) : onExit());
 
+  useUnsavedFlag("clip-editor", changed);
   // warn on tab close with unsaved edits
   useEffect(() => {
     const on = (e: BeforeUnloadEvent) => {
@@ -1837,6 +1840,7 @@ export function ClipEditor(props: Props) {
       <button className={hb} disabled={!history.canRedo} onClick={history.redo} title={`Redo (${MOD}⇧Z)`} aria-label="Redo">
         <Redo2 className="h-4 w-4" />
       </button>
+      <HeaderAlerts />
       <span className={`hidden whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold md:inline ${dirtyCls}`}>{dirtyLabel}</span>
       {!compact && (
         <button className={`${hb} ${layout === "transcript" ? "!border-acc !bg-acc-soft !text-acc-text" : ""}`} onClick={() => setLayout(layout === "transcript" ? "classic" : "transcript")} title={layout === "transcript" ? "Hide the transcript column" : "Show the transcript as a column"} aria-pressed={layout === "transcript"}>

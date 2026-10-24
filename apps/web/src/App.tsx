@@ -20,6 +20,7 @@ const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default:
 const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default: m.LibraryPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 import { UpdateDot, UpdateMenuHint } from "./components/UpdateNotice";
+import { HeaderAlerts } from "./components/HeaderAlerts";
 import { PendingPage } from "./pages/Pending";
 import { MustChangePasswordPage } from "./pages/MustChangePassword";
 const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
@@ -66,27 +67,11 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   );
 }
 
-/** "Always-visible machine state": shows when heavy jobs are paused, and why. */
-function MachineChip() {
-  const status = useSystemStatus(10_000);
-  const why = status.data?.paused;
-  if (!why) return null;
-  const reason = why === "disk" ? "disk nearly full" : `${why} busy`;
-  return (
-    <Link to="/settings" className="chip min-w-0 shrink-0 whitespace-nowrap bg-warn-soft text-ink no-underline" title="Heavy jobs wait until the machine has room" aria-label={`Jobs paused: ${reason}`}>
-      {/* the mono glyph's ink sits low in its box; a pixel up centres it on the text */}
-      <span className="relative -top-px font-mono leading-none" aria-hidden>
-        ◷
-      </span>
-      <span className="hidden sm:inline">Jobs paused · {reason}</span>
-    </Link>
-  );
-}
-
-/** Account menu: settings (with the update hint for admins), report, sign out. */
+/** Account menu: settings (with the update hint for admins), report, sign out. Theme and Report live here on a 390 px bar so the header keeps nav + search. */
 function Avatar() {
   const { data } = useSession();
   const navigate = useNavigate();
+  const [theme, toggleTheme] = useTheme();
   const u = data?.user;
   if (!u) return null;
   const initials = (u.name || u.email)
@@ -109,6 +94,9 @@ function Avatar() {
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
             <SettingsIcon className="h-4 w-4" /> Settings
             <UpdateMenuHint />
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item sm:hidden" onSelect={toggleTheme}>
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />} {theme === "dark" ? "Light theme" : "Dark theme"}
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={openReportHere}>
             <LifeBuoy className="h-4 w-4" /> Report an issue…
@@ -171,12 +159,12 @@ export function TopBar() {
         <UsersLink nav={nav} />
       </nav>
       <div className="flex-1" />
-      <MachineChip />
+      <HeaderAlerts />
       <SearchButton />
-      <button className="btn-ghost h-[34px] w-[34px] px-0" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
+      <button className="btn-ghost hidden h-[34px] w-[34px] px-0 sm:grid" onClick={openReportHere} title="Report an issue (!)" aria-label="Report an issue">
         <LifeBuoy className="h-4 w-4" />
       </button>
-      <ThemeToggle />
+      <ThemeToggle className="hidden sm:inline-flex" />
       <Avatar />
     </header>
   );
