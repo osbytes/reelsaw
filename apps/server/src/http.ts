@@ -22,7 +22,7 @@ import { keys, contentTypeFor } from "./storage/index.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
-import { requester, activeRequester, bearerToken, blockedReason, mcpResource, API_KEY_PREFIX } from "./auth.js";
+import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
@@ -134,7 +134,7 @@ export function createApp(svc: Services) {
     if (!action || c.req.method !== "POST") return;
     const log = c.get("log");
     if (status < 400) {
-      if (action === "sign-in" || action === "sign-up") return; // logged with the user id by the database hooks in auth.ts
+      if (action === "sign-in" || action === "sign-up" || action === "password reset") return; // logged with the user id in auth.ts
       void auth.api.getSession({ headers: c.req.raw.headers }).then((s) => log.info({ action, status, userId: s?.user.id }, "auth"), () => log.info({ action, status }, "auth"));
     } else log[status >= 500 ? "error" : "warn"]({ action, status, reason: status === 401 ? "bad credentials or unknown account" : status === 403 ? "not allowed (unverified email, waiting for approval, captcha or suspended)" : status === 422 ? "sign-up refused" : status === 429 ? "rate limited" : "rejected" }, "auth failed");
   };
@@ -166,8 +166,8 @@ export function createApp(svc: Services) {
         async (_req, claims) => {
         const user = claims.sub ? await db.query.user.findFirst({ where: eq(schema.user.id, claims.sub) }) : undefined;
         if (!user) return c.json({ error: "unauthorized" }, 401);
-        const blocked = blockedReason(user);
-        if (blocked) return c.json({ error: "forbidden", message: blocked.reason }, 403);
+        const why = cannotUseApp(user, "oauth");
+        if (why) return c.json({ error: "forbidden", message: why }, 403);
           return handleMcp(c, svc, user);
         },
         // the JWKS is served by this very process: fetch it over loopback, not through APP_URL (which may not resolve from inside a container)
@@ -177,7 +177,8 @@ export function createApp(svc: Services) {
     }
     const who = await requester(auth, db, c.req.raw.headers);
     if (!who) return mcpUnauthorized(c);
-    if (who.blocked) return c.json({ error: "forbidden", message: who.blocked.reason }, 403);
+    const why = cannotUseApp(who.user, who.via);
+    if (why) return c.json({ error: "forbidden", message: why }, 403);
     return handleMcp(c, svc, who.user);
   });
 

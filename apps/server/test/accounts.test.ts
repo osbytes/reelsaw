@@ -6,7 +6,8 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { BASE, db, signUp } from "./helpers.js";
+import { MUST_CHANGE_PASSWORD_MESSAGE, MUST_CHANGE_PASSWORD_REUSE } from "@reelsaw/shared";
+import { BASE, createKey, db, signUp } from "./helpers.js";
 
 type U = Awaited<ReturnType<typeof signUp>>;
 const json = { "content-type": "application/json", origin: BASE };
@@ -94,6 +95,37 @@ describe("accounts", () => {
     assert.equal(ban.error?.data.code, "BAD_REQUEST");
     const rm = await trpc(admin.cookie, "admin.users.remove", { id: admin.userId });
     assert.equal(rm.error?.data.code, "BAD_REQUEST");
+  });
+
+  it("blocks a must-change browser session, keeps API keys, and accepts a new secret without the current password", async () => {
+    const locked = await signUp();
+    const key = await createKey(locked.cookie, "keep-working");
+    await pool.query(`update "user" set must_change_password = true where id = $1`, [locked.userId]);
+    const me = await trpc(locked.cookie, "me.get", undefined, "GET");
+    assert.equal(me.status, 200);
+    assert.equal((me.data as { mustChangePassword: boolean }).mustChangePassword, true);
+    const list = await trpc(locked.cookie, "projects.list", undefined, "GET");
+    assert.equal(list.error?.data.code, "FORBIDDEN");
+    assert.equal(list.error?.message, MUST_CHANGE_PASSWORD_MESSAGE);
+    assert.equal((await fetch(`${BASE}/media/source/${victimProject}`, { headers: { cookie: locked.cookie } })).status, 401);
+    const mcp = await fetch(`${BASE}/api/mcp`, { method: "POST", headers: { ...json, cookie: locked.cookie, accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } } }) });
+    assert.equal(mcp.status, 403);
+    const viaKey = await fetch(`${BASE}/api/trpc/projects.list`, { method: "GET", headers: { ...json, authorization: `Bearer ${key.key}` } });
+    assert.equal(viaKey.status, 200);
+    const reuse = await trpc(locked.cookie, "me.completePasswordChange", { password: locked.password });
+    assert.equal(reuse.error?.data.code, "BAD_REQUEST");
+    assert.equal(reuse.error?.message, MUST_CHANGE_PASSWORD_REUSE);
+    const next = `next-${randomUUID()}`;
+    const done = await trpc(locked.cookie, "me.completePasswordChange", { password: next });
+    assert.deepEqual(done.data, { ok: true });
+    const list2 = await trpc(locked.cookie, "projects.list", undefined, "GET");
+    assert.equal(list2.status, 200);
+    const me2 = await trpc(locked.cookie, "me.get", undefined, "GET");
+    assert.equal((me2.data as { mustChangePassword: boolean }).mustChangePassword, false);
+    const again = await trpc(locked.cookie, "me.completePasswordChange", { password: `again-${randomUUID()}` });
+    assert.equal(again.error?.data.code, "BAD_REQUEST");
+    await pool.query(`delete from "user" where id = $1`, [locked.userId]);
+    await pool.query(`delete from admin_events where user_id = $1`, [locked.userId]);
   });
 
   it("changes roles and removes an account with its projects", async () => {

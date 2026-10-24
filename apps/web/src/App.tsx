@@ -10,6 +10,7 @@ import { useTRPC } from "./lib/trpc";
 import { useTheme } from "./lib/theme";
 import { MOD, useShortcuts } from "./lib/shortcuts";
 import { LoginPage, takeAfterSignIn } from "./pages/Login";
+import { ResetPasswordPage } from "./pages/ResetPassword";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
 import { initOtel } from "./lib/otel";
 import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
@@ -20,6 +21,7 @@ const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default:
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 import { UpdateDot, UpdateMenuHint } from "./components/UpdateNotice";
 import { PendingPage } from "./pages/Pending";
+import { MustChangePasswordPage } from "./pages/MustChangePassword";
 const AdminUsersPage = lazy(() => import("./pages/AdminUsers").then((m) => ({ default: m.AdminUsersPage })));
 import { Skeleton, SkeletonRegion } from "./components/ui";
 import { ConsentPage } from "./pages/Consent";
@@ -235,6 +237,8 @@ function Protected({ children, bare, admin }: { children: React.ReactNode; bare?
   }
   // waiting for approval or suspended: one page, nothing else (the server refuses everything anyway)
   if (me.data?.blocked) return <PendingPage />;
+  // operator set a temporary password: they must pick theirs before the shell (not a dismissible dialog)
+  if (me.data?.mustChangePassword) return <MustChangePasswordPage />;
   if (admin && me.data?.role !== "admin") return <Navigate to="/" replace />;
   // a plan picked on the website before sign-up (Login.tsx); an email verification link lands here, not on the login page
   const after = takeAfterSignIn();
@@ -311,6 +315,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<LoginPage signup />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/consent" element={<ConsentPage />} />
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />

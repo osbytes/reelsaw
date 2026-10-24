@@ -1,10 +1,14 @@
 /**
- * Account administration: approve, change role, suspend, remove. One function per transition,
- * each a unit of work that writes the user row and its admin event together and sends mail after
- * commit. tRPC (admin router) and the CLI call these; nothing else edits role/approval columns.
+ * Account administration: approve, change role, suspend, remove, set password. One function per
+ * transition, each a unit of work that writes the user row and its admin event together and sends
+ * mail after commit. tRPC (admin router) and the CLI call these; nothing else edits role/approval
+ * columns or the credential hash.
  */
 import { and, eq, ne, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
+import { MUST_CHANGE_PASSWORD_REUSE, passwordLengthError } from "@reelsaw/shared";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import type { UnitOfWork } from "./uow.js";
@@ -134,5 +138,59 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
     await u.db.insert(schema.adminEvents).values({ type: "user.limits_changed", actorId, userId, email: user.email, payload: { limits: row!.limits } });
     audit(svc, u, "user.limits_changed", actorId, userId);
     return { ok: true, overrides: row!.limits };
+  });
+}
+
+const CREDENTIAL = "credential";
+
+async function credentialAccount(u: UnitOfWork, userId: string) {
+  const [row] = await u.db
+    .select({ id: schema.account.id, password: schema.account.password })
+    .from(schema.account)
+    .where(and(eq(schema.account.userId, userId), eq(schema.account.providerId, CREDENTIAL)))
+    .for("update");
+  return row ?? null;
+}
+
+async function dropSessions(u: UnitOfWork, userId: string, keepSessionId: string | undefined) {
+  if (keepSessionId) {
+    await u.db.delete(schema.session).where(and(eq(schema.session.userId, userId), ne(schema.session.id, keepSessionId)));
+    return;
+  }
+  await u.db.delete(schema.session).where(eq(schema.session.userId, userId));
+}
+
+/**
+ * Set the email/password hash (Better Auth's scrypt, same as sign-up). Operator CLI and the
+ * must-change page both call this. `mustChange: true` blocks the app until they pick a different
+ * password (no current-password field: the session already proved they knew the temporary one).
+ * Other browser sessions end; API keys stay valid.
+ */
+export async function setUserPassword(
+  svc: Services,
+  actorId: string | null,
+  userId: string,
+  password: string,
+  opts: { mustChange: boolean; keepSessionId?: string; rejectReuse?: boolean },
+) {
+  const length = passwordLengthError(password);
+  if (length) throw new TRPCError({ code: "BAD_REQUEST", message: length });
+  const hash = await hashPassword(password);
+  return svc.tx(async (u) => {
+    const user = await lockedUser(u, userId);
+    const cred = await credentialAccount(u, userId);
+    if (opts.rejectReuse) {
+      if (!user.mustChangePassword) throw new TRPCError({ code: "BAD_REQUEST", message: "This account does not need a new password." });
+      if (cred?.password && (await verifyPassword({ hash: cred.password, password }))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: MUST_CHANGE_PASSWORD_REUSE });
+      }
+    }
+    if (cred) await u.db.update(schema.account).set({ password: hash, updatedAt: new Date() }).where(eq(schema.account.id, cred.id));
+    else await u.db.insert(schema.account).values({ id: randomUUID(), accountId: userId, providerId: CREDENTIAL, userId, password: hash });
+    await u.db.update(schema.user).set({ mustChangePassword: opts.mustChange, updatedAt: new Date() }).where(eq(schema.user.id, userId));
+    await dropSessions(u, userId, opts.keepSessionId);
+    await u.db.insert(schema.adminEvents).values({ type: "user.password_set", actorId, userId, email: user.email, payload: { mustChange: opts.mustChange } });
+    audit(svc, u, "user.password_set", actorId, userId);
+    return { ok: true as const };
   });
 }

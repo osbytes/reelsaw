@@ -1,7 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { Services } from "../services.js";
-import { requester, type Requester } from "../auth.js";
+import { cannotUseApp, requester, type Requester } from "../auth.js";
 import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
@@ -45,7 +45,8 @@ export const signedInProcedure = t.procedure.use(({ ctx, next }) => {
 
 /** An approved, not suspended account: everything that touches user data. */
 export const protectedProcedure = signedInProcedure.use(async ({ ctx, next, type }) => {
-  if (ctx.who.blocked) throw new TRPCError({ code: "FORBIDDEN", message: ctx.who.blocked.reason });
+  const why = cannotUseApp(ctx.user, ctx.who.via);
+  if (why) throw new TRPCError({ code: "FORBIDDEN", message: why });
   // changes are rate-limited per account (abuse.ts; off unless MAX_REQUESTS_PER_* is set); reads are not
   if (type === "mutation") {
     try {

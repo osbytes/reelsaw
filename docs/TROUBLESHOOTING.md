@@ -56,6 +56,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw users` | list accounts: role, status, sign-up date |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw set-password <email> [--must-change]` | set an account's password from a prompt (or two stdin lines); `--must-change` requires a new one at next sign-in. Do not put the secret on the command line |
 | `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
 | `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
 | `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |

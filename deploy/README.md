@@ -121,6 +121,8 @@ The first account is the admin. `SIGNUP_MODE=open|approval|closed` in `.env` con
 with `approval`, new people wait until you approve them on the **Users** page (or
 `docker compose exec app reelsaw approve them@example.com`). Set `EMAIL_DRIVER` to get an email
 when someone is waiting. Locked out: `docker compose exec app reelsaw make-admin you@example.com`.
+Forgotten password without email: `docker compose exec app reelsaw set-password you@example.com`
+(add `--must-change` so they pick their own at next sign-in).
 
 ## Agents (MCP)
 
