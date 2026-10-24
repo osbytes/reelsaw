@@ -257,7 +257,7 @@ export const TOOLS = {
   search_assets: {
     title: "Search library, catalog and providers",
     description:
-      "Find assets. source \"library\" = your own uploads (name and tags; empty q lists all; ids go into update_clip layers, set_project_bumpers, set_default_bumper); omitted or \"catalog\" = the Reelsaw catalog (CC0, works offline); or a provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy) an admin enabled. Returns { provider, items: [{ provider, externalId, name, kind, license, durationSec }], nextCursor }. Adds nothing: a catalog / provider hit's provider + externalId go to add_asset (that materializes the file, then put the id on a clip).",
+      "Find assets. source \"library\" = your own uploads (name and tags; empty q lists all); omitted or \"catalog\" = the Reelsaw catalog (CC0, works offline); or a provider an admin enabled. Returns { provider, items: [{ provider, externalId, name, kind, license, durationSec }], nextCursor }. Adds nothing: a catalog / provider hit's provider + externalId go to add_asset.",
     inputSchema: {
       q: z.string().max(200).default("").describe("What to look for, e.g. \"whoosh\", \"arrow\", \"city at night\"; empty lists everything in the source"),
       source: z.string().min(1).max(40).optional().describe("library, catalog (default), pexels, pixabay, freesound, iconify, openverse, giphy or klipy"),
