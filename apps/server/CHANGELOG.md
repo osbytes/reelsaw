@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.23.0
+
+### Minor Changes
+
+- [#161](https://github.com/osbytes/reelsaw/pull/161) [`7fe603f`](https://github.com/osbytes/reelsaw/commit/7fe603f4666a70dcdbc1f64f869b3ca63aa86049) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Whisper decoder loops (one word or a prompt list cycling for minutes) are collapsed after transcription, and each collapse shows up as a transcript fix. The as-heard repeats stay in the transcript; rejecting the fix puts them back. Captions stay empty across that stretch unless you type replacement text on the flag. Re-transcribe to recover the missing speech.
+
+- [#159](https://github.com/osbytes/reelsaw/pull/159) [`bdd11ae`](https://github.com/osbytes/reelsaw/commit/bdd11aee514abaf3d5b0ba3f9860a20fecfd4646) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Framing follows the source's cutting. Shot cuts are now detected for every project before clip selection (they used to exist only when a project opted into the scenes refine step, which is now just the on-screen text scan), clip boundaries snap to them, a render detects them on the clip when an older project or an imported report has none, and the layout may change at every cut: a multi-camera talk show that alternates a close-up with a wide shot every second or two gets a full-frame close-up, then the wide shot, then the close-up again, instead of one split held across a dozen shots with a pane framed on an empty seat. A wide shot of three or more people is shown whole rather than split between two of them. Name fixes and the on-screen text scan now run by default (instance gates `TRANSCRIPT_CORRECTION` and `REFINE_SCENES`, project settings `refineEntities` and `refineScenes`); filler removal stays opt-in. Importing an issue report whose project was re-rendered no longer fails on its timestamps.
+
 ## 0.22.0
 
 ### Minor Changes
