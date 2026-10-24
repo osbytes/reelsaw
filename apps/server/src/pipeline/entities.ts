@@ -300,6 +300,19 @@ export function applyFlags(rawWords: Word[], flags: TranscriptFlag[]): Word[] {
     if (f && f.wordIndex === i) {
       const first = rawWords[i]!;
       const last = rawWords[Math.min(rawWords.length - 1, i + f.span - 1)]!;
+      if (f.kind === "loop") {
+        // rawWords still has the full run; keep the short copy (or a typed caption across the hole)
+        const text = (f.replacement ?? "").trim();
+        const keepN = f.suggested.trim().split(/\s+/).filter(Boolean).length;
+        if (text && text !== f.suggested.trim()) {
+          out.push(...spreadWords(text, first.start, Math.max(last.end, f.end)));
+        } else {
+          for (let k = 0; k < keepN && i + k < rawWords.length; k++) out.push(rawWords[i + k]!);
+        }
+        i += f.span;
+        fi++;
+        continue;
+      }
       // manual corrections are typed with their own punctuation; detector fixes inherit the sentence's
       const trailing = f.subkind === "manual" ? "" : (/[.,!?;:]$/.exec(last.text)?.[0] ?? "");
       const text = f.replacement ?? f.suggested;

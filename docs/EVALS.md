@@ -193,6 +193,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | --- | --- | --- |
 | `selection` | nothing (runs offline) | chunking, timestamp repair and sentence snapping invariants on a real transcript; recall of creators' own short picks |
 | `framing` | nothing (runs offline) | speaker crops centre faces and avoid burned-in text; tripod camera settles on the face |
+| `asr-loops` | nothing (runs offline) | ASR decoder-loop collapse: runaway unigram/n-gram repeats are trimmed; short emphatic repeats and 2-copy phrases are kept |
 | `scenes` | media | shot-cut detection on real footage (dark/low-contrast included): precision and recall vs hand-verified cuts |
 | `pauses` | nothing (runs offline) | voice activity detection + pause trimming: inserted silences found and shortened to the target pause |
 | `alignment` | nothing (runs offline) | wav2vec2 forced alignment: deleted words land inside cuts verified clean by ear; spans ordered and in bounds |
@@ -221,6 +222,7 @@ Scene-cut defaults (`SCENE_FLOOR`, `SCENE_RATIO` in `pipeline/scenes.ts`) were t
 | `transcription` | STT + LLM; macOS `say` for the synthetic audio; media for the real cases | WER, entity recall and false insertions through the configured STT, vocabulary bias and correction. 5 **synthetic** cases (`say`, one voice, fabricated name-dense text: they measure bias + correction, not recognition; the unprefixed summary metrics) and **real** cases (`source` set: 2-minute slices of real videos graded against the video's human caption track; `real.*` metrics: raw WER, WER after filler/repeat normalisation, names-only error rate, and `misheard`, how many of YouTube's own ASR misspellings the output repeats). See "Real-speech transcription cases" below |
 | `selection-model` | LLM | one real map call per sampled chunk: candidates parse, land inside the chunk and snap; model-free quality proxies (in-range, overlapping, weak-hook rates) for comparing models |
 | `disfluency` | nothing (`--offline`: rules only); LLM for the full pipeline | precision / recall / auto-applied false positives of disfluency detection on 98 real-transcript windows: 50 around the app's own proposals (user-accepted = cut, user-rejected = keep, plus hand-labelled emphasis and stutters) and 48 from caption diffs of two other videos, which are **not** drawn from the detector's proposals (see "Disfluency cases from caption diffs"). LLM calls are cached by prompt |
+| `asr-loops` | nothing | Whisper decoder-loop collapse on word lists: the 2026-10-24 triathlon report's `"no"` run and prompt-list loop must shrink and emit a `kind: "loop"` transcript flag; rejecting that flag must restore the as-heard words; spoken `no no no no`, `I think I think`, `had had`, and a 3-copy cheer must not |
 
 Known issues recorded in the baselines today:
 - `disfluency`: discourse "like" fillers ("and like throwing a ball") and optional "that" are missed
@@ -448,6 +450,7 @@ deliberately not cached (they're what's being tested, or they call the model int
      and labels to `labels.json`, or a `framing/<name>/case.json` with a media source + time range
      (face samples are generated on first run; commit `samples.json`)
    - selection: export the transcript (`transcripts.segments`) to `eval/fixtures/selection/<name>/transcript.json`
+   - ASR decoder loop (one word or a prompt-list cycling for minutes): a compact word list in `eval/fixtures/asr-loops/cases.json` (`repeat` / `phrase`, plus a keep-case so emphasis is not eaten)
 3. **Label the expectation** in `case.json` (`"expect": "clean"`, boxes that must/must not be covered,
    `maxOffset`, …) and write a one-line `note` saying what went wrong in the app.
 4. **Run** `pnpm eval <suite>`: the new case should FAIL. Record it as a known issue with `--update`

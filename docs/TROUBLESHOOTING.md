@@ -26,6 +26,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes once pg-boss notices the missed heartbeat (heartbeat every 15 s, supervisor pass every 60 s) and the retry delay passes (15 s, doubling per retry): expect a minute or two, not seconds. Each restart burns a retry. |
 | Upload stuck on "Downloading…" then fails after ~15 min | worker log `Not enough disk` / older `Gave up waiting 900s for resources before ingest` | Worker volume smaller than `MIN_FREE_DISK_MB` plus the file (a ~4.6 GB disk cannot hold a 2 GB upload and still keep 2 GB free). Ingest used to wait the full 900 s, then retry, and the UI labelled every ingest "Downloading". |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
+| Transcript filled with one looping word or the show's name list ("no no no…", "Chafing Dream Swag Bags…") | `reelsaw status` words around that time; many copies share one timestamp | Whisper decoder loop on a 10-minute chunk (often after a real short repeat, or the vocabulary `prompt` leaking at a chunk cut). Collapse keeps a short run; a repetitive chunk is retried without the prompt. Re-transcribe to recover the missing minutes. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under the run's gate (`candidates` artifact → `settings.gate`: rule, threshold, median, MAD). |
 | Face off-centre | Editor layout track; `reelsaw clip` → layout segments `cx` | Old render (pre-settle tracker) or detector found no face (`fit`). Drag the picture to re-centre. |
 | Split crop pans to the other speaker and back | `reelsaw faces <clipId> <range>` → extra boxes, `b` column jumping | Old render (pre-continuity pairing): re-render. |
@@ -84,7 +85,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
-| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
@@ -210,6 +211,10 @@ and list it in `SUPPORTED` in `language.ts`.
   falls outside its chunk. This silently discarded valid clips before it was caught.
 - Log what the model returned vs. what survived (`modelPicks`, `usable`, `dropped`): "the AI found nothing" was
   twice "the AI found three things we threw away".
+
+### Whisper decoder loops (issue report 218, 2026-10-24)
+
+whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no, no, no", and the previous chunk transcribed the vocabulary prompt (`Chafing Dream Swag Bags Flying Pig Project`) for ten minutes. OpenAI's local Whisper retries a window when zlib compression ratio > 2.4; the API does not. We collapse consecutive unigram runs longer than four copies and n-gram runs of three-plus copies with piled timestamps (`pipeline/asr-loops.ts`), and retry a repetitive chunk once without the prompt. Each collapse is an auto-applied transcript flag (↻ looping speech) over the as-heard words, so it shows up in review like a name fix; rejecting it puts the repeated copies back. Captions stay empty across the hole unless you type replacement text on that flag. Short emphasis (`no no no no`, `I think I think`) is kept. Re-transcribe to recover the minutes the loop replaced. Eval: `pnpm eval asr-loops`.
 
 ## 5. Lessons: operations
 
@@ -456,6 +461,6 @@ Next:
 
 ## 8. Evals and regression cases
 
-Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
 regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
 pull more data from: [EVALS.md](EVALS.md).

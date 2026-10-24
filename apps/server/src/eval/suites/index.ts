@@ -10,4 +10,5 @@ import { alignmentSuite } from "./alignment.js";
 import { speakersSuite } from "./speakers.js";
 import { selectionSuite, selectionModelSuite } from "./selection.js";
 import { disfluencySuite } from "./disfluency.js";
-export const suites: Suite[] = [selectionSuite, framingSuite, scenesSuite, pausesSuite, alignmentSuite, speakersSuite, overlaysSuite, cutsSuite, transcriptionSuite, disfluencySuite, selectionModelSuite];
+import { asrLoopsSuite } from "./asr-loops.js";
+export const suites: Suite[] = [selectionSuite, framingSuite, asrLoopsSuite, scenesSuite, pausesSuite, alignmentSuite, speakersSuite, overlaysSuite, cutsSuite, transcriptionSuite, disfluencySuite, selectionModelSuite];

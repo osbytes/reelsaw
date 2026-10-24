@@ -51,6 +51,20 @@ export interface TranscriptClip {
   diagnostics?: CutDiagnostics | null;
 }
 const cutKind = (f: TranscriptFlag) => (f.subkind === "manual" ? "your cut" : f.subkind === "repair" ? "false start" : (f.subkind ?? "filler"));
+const isCutFlag = (f: TranscriptFlag) => f.kind === "disfluency";
+const isLoopFlag = (f: TranscriptFlag) => f.kind === "loop";
+const flagGlyph = (f: TranscriptFlag) => (isCutFlag(f) ? "✂" : isLoopFlag(f) ? "↻" : "Aa");
+const flagGlyphClass = (f: TranscriptFlag) => (isCutFlag(f) ? "bg-sunk" : isLoopFlag(f) ? "bg-warn-soft" : "bg-acc-soft text-acc-text");
+const flagKindLabel = (f: TranscriptFlag) => (isCutFlag(f) ? cutKind(f) : isLoopFlag(f) ? "looping speech" : f.subkind === "manual" ? "your correction" : "name fix");
+const flagAriaKind = (f: TranscriptFlag) => (isCutFlag(f) ? "Filler cut" : isLoopFlag(f) ? "Collapsed looping speech" : "Name fix");
+const appliedReplacement = (f: TranscriptFlag) => {
+  if (f.status !== "auto" && f.status !== "accepted") return undefined;
+  if (f.kind === "entity") return f.replacement ?? f.suggested;
+  if (isLoopFlag(f) && f.replacement && f.replacement !== f.suggested) return f.replacement;
+  return undefined;
+};
+/** Never join hundreds of loop copies into the transcript line — one chip, short label. */
+const loopChipText = (f: TranscriptFlag) => appliedReplacement(f) ?? ((f.status === "auto" || f.status === "accepted") ? f.suggested : f.heard);
 interface CutPlan {
   flagId: string;
   cut: { start: number; end: number };
@@ -96,7 +110,8 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     if (!playback) return;
     setPinnedFlag(f.id);
     setOpenFlag(f.id);
-    const span = { key: f.id, start: Math.max(0, f.start - pad), end: f.end + pad };
+    const spanEnd = isLoopFlag(f) ? Math.min(f.end, f.start + 8) : f.end;
+    const span = { key: f.id, start: Math.max(0, f.start - pad), end: spanEnd + pad };
     if (v === "orig") return playback.startLoop(span);
     // with the cut: the server renders the window with the seam, played on repeat instead of the video
     const pl = plan ?? plans[f.id]?.plan ?? (await fetchPlan(f));
@@ -259,7 +274,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         const f = byIndex.get(wi);
         if (f) {
           const span = words.slice(wi, wi + f.span);
-          ws.push({ w: { text: span.map((x) => x.text).join(" "), start: w.start, end: span[span.length - 1]!.end }, flag: f });
+          const end = span[span.length - 1]!.end;
+          ws.push({
+            w: { text: isLoopFlag(f) ? loopChipText(f) : span.map((x) => x.text).join(" "), start: w.start, end: isLoopFlag(f) ? Math.max(end, f.end) : end },
+            flag: f,
+          });
           wi += f.span;
           continue;
         }
@@ -369,7 +388,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
     await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
   }
 
-  type Filter = "all" | "review" | "reviewed" | "entity" | "disfluency" | "deleted";
+  type Filter = "all" | "review" | "reviewed" | "entity" | "disfluency" | "loop" | "deleted";
   const [filter, setFilter] = useState<Filter>("all");
   const isReviewed = (f: TranscriptFlag) => !!decisions[f.id] || f.status === "accepted" || f.status === "rejected";
   const visibleFlag = (f: TranscriptFlag) =>
@@ -567,6 +586,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
             {filterBtn("reviewed", `Reviewed ${reviewedCount}`)}
             {filterBtn("entity", "Names")}
             {filterBtn("disfluency", "Cuts")}
+            {filterBtn("loop", "Loops")}
             {deletedFlags.length > 0 && filterBtn("deleted", `Deleted ${deletedFlags.length}`)}
           </div>
         )}
@@ -583,6 +603,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
         <div className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2 xl:flex">
           <span><b className="font-mono text-[10px] text-acc-text">Aa</b> name fix</span>
           <span><b className="font-mono text-[10px]">✂</b> cut</span>
+          <span><b className="font-mono text-[10px] text-warn">↻</b> looping speech</span>
           <span><b className="font-mono text-[10px] text-warn">?</b> review</span>
         </div>
       </div>
@@ -629,11 +650,11 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
               {filter === "deleted" &&
                 [...deletedFlags].reverse().map((f) => (
                   <li key={f.id} className="grid grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5">
-                    <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold opacity-60 ${f.kind === "disfluency" ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{f.kind === "disfluency" ? "✂" : "Aa"}</span>
+                    <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold opacity-60 ${flagGlyphClass(f)}`}>{flagGlyph(f)}</span>
                     <button className="min-w-0 text-left" onClick={() => onSeek(f.start)} title="Seek here">
-                      <span className="block truncate text-[13px] text-ink2">{f.kind === "disfluency" ? `“${f.heard}”` : `${f.heard} → ${f.replacement ?? f.suggested}`}</span>
+                      <span className="block truncate text-[13px] text-ink2">{isCutFlag(f) ? `“${f.heard}”` : isLoopFlag(f) ? `Collapsed ${f.heard}` : `${f.heard} → ${f.replacement ?? f.suggested}`}</span>
                       <span className="block text-[11px] text-ink3">
-                        <span className="font-mono">{formatTime(f.start)}</span> · {f.kind === "disfluency" ? cutKind(f) : f.subkind === "manual" ? "your correction" : "name fix"} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · deleted {new Date(f.deletedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                       </span>
                     </button>
                     <button className="btn-ghost px-2.5 py-1 text-xs" disabled={restore.isPending} onClick={() => void restoreOne(f.id)}>
@@ -645,7 +666,8 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                 if (!visibleFlag(f)) return null;
                 const d = decisions[f.id] as Decision | undefined;
                 const st = f.status;
-                const isCut = f.kind === "disfluency";
+                const isCut = isCutFlag(f);
+                const isLoop = isLoopFlag(f);
                 const rep = d?.replacement ?? f.replacement ?? f.suggested;
                 const rendered = isCut && (st === "auto" || st === "accepted") ? cutState(f, clips) : null;
                 const [label, tone] = d
@@ -664,11 +686,13 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                       onClick={() => jumpToFlag(i)}
                       className={`grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-1.5 text-left hover:bg-sunk ${pinnedFlag === f.id ? "bg-sunk" : ""}`}
                     >
-                      <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${isCut ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{isCut ? "✂" : "Aa"}</span>
+                      <span className={`grid h-[26px] w-[26px] place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(f)}`}>{flagGlyph(f)}</span>
                       <span className="min-w-0">
                         <span className="block truncate text-[13px]">
                           {isCut ? (
                             <>“<s>{f.heard}</s>”</>
+                          ) : isLoop ? (
+                            <>Collapsed {f.heard}</>
                           ) : (
                             <>
                               <s className="text-ink3">{f.heard}</s> → {rep}
@@ -676,7 +700,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
                           )}
                         </span>
                         <span className="block text-[11px] text-ink3">
-                          <span className="font-mono">{formatTime(f.start)}</span> · {isCut ? cutKind(f) : f.subkind === "manual" ? "your correction" : "name fix"} · {Math.round(f.confidence * 100)}%
+                          <span className="font-mono">{formatTime(f.start)}</span> · {flagKindLabel(f)} · {Math.round(f.confidence * 100)}%
                           {rendered && (
                             <span className={rendered.state === "applied" ? "" : "font-semibold text-warn"} title={cutStateTitle(rendered)}>
                               {" "}· {rendered.state === "applied" ? "cut in render" : rendered.state === "unverified" ? "▲ cut unverified" : "▲ kept in audio"}
@@ -836,8 +860,8 @@ const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: Tra
     >
       <div className="flex flex-col items-center gap-1 pt-0.5">
         {marks.slice(0, 3).map(({ flag }) => (
-          <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flag!.kind === "entity" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink"}`}>
-            {flag!.kind === "entity" ? "Aa" : "✂"}
+          <span key={flag!.id} className={`grid h-5 w-5 place-items-center rounded-[6px] font-mono text-[10px] font-semibold ${flagGlyphClass(flag!)}`}>
+            {flagGlyph(flag!)}
           </span>
         ))}
       </div>
@@ -863,7 +887,7 @@ const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: Tra
                     onClick={() => !window.getSelection()?.toString() && onSeek(w.start)}
                     className={`cursor-pointer rounded-[3px] ${spoken ? "bg-acc text-acc-ink" : inside ? "bg-acc-soft/70" : "hover:bg-sunk"}`}
                   >
-                    {flag && (flag.status === "auto" || flag.status === "accepted") && flag.kind === "entity" ? (flag.replacement ?? flag.suggested) : w.text}
+                    {flag ? (appliedReplacement(flag) ?? w.text) : w.text}
                   </span>{" "}
                 </span>
               );
@@ -878,7 +902,7 @@ const Line = memo(function Line({ s, ws, inClip, isActive, time, ctx }: { s: Tra
                 pinned={pinnedFlag === flag.id}
                 highlighted={orderedFlags[flagCursor]?.id === flag.id}
                 rendered={flag.kind === "disfluency" ? cutState(flag, clips) : null}
-                where={`${formatTime(flag.start)}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
+                where={`${formatTime(flag.start)}${isLoopFlag(flag) && flag.end - flag.start >= 1 ? `–${formatTime(flag.end)}` : ""}${clips.filter((c) => flag.start < c.endSec && flag.end > c.startSec).map((c) => ` · in clip ${c.index + 1}`).join("")}`}
                 position={`${(flagIndex.get(flag.id) ?? -1) + 1} of ${orderedFlags.length}`}
                 anchorRef={(el) => {
                   flagRefs.current[flag.id] = el;
@@ -979,7 +1003,8 @@ function FlagWord({
   const [text, setText] = useState(shown);
   const closeTimer = useRef<number | undefined>(undefined);
   const pct = Math.round(flag.confidence * 100);
-  const isDeletion = flag.kind === "disfluency";
+  const isDeletion = isCutFlag(flag);
+  const isLoop = isLoopFlag(flag);
   const [confirmDel, setConfirmDel] = useState(false);
   useEffect(() => {
     if (!open) setConfirmDel(false);
@@ -995,20 +1020,25 @@ function FlagWord({
   };
   const accept = () => {
     const t = text.trim();
+    if (isLoop) {
+      onDecide({ status: "accepted", replacement: !t || t === flag.suggested ? undefined : t });
+      return;
+    }
     if (!t && !isDeletion) return;
     onDecide({ status: "accepted", replacement: t === flag.suggested ? undefined : t });
   };
 
   const pending = status === "pending";
-  const glyph = (isDeletion ? "✂" : "Aa") + (pending ? "?" : status === "rejected" ? "✕" : status === "accepted" ? "✓" : "");
+  const glyph = flagGlyph(flag) + (pending ? "?" : status === "rejected" ? "✕" : status === "accepted" ? "✓" : "");
   const stateLabel = status === "auto" ? "Auto-applied" : pending ? "Needs review" : status === "accepted" ? "Accepted" : "Rejected";
   const stateTone = pending ? "bg-warn-soft" : applied ? "bg-ok-soft" : "bg-sunk";
   // the chip shapes from the component spec: dotted = auto, solid = accepted, dashed box = review, grey dotted = rejected
   let cls = "";
   if (pending) cls = "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn";
   else if (isDeletion) cls = applied ? "line-through text-ink3" : "border-b-2 border-dotted border-line2";
+  else if (isLoop) cls = pending ? "rounded-[5px] bg-warn-soft px-1 outline-[1.5px] outline-dashed -outline-offset-1 outline-warn" : applied ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-warn` : "border-b-2 border-dotted border-line2";
   else cls = applied ? `border-b-2 ${status === "auto" ? "border-dotted" : "border-solid"} border-acc` : "border-b-2 border-dotted border-line2";
-  const display = isDeletion || !applied ? word.text : shown;
+  const display = isLoop ? loopChipText(flag) : isDeletion || !applied ? word.text : shown;
 
   return (
     <Popover.Root open={open} onOpenChange={(o) => (o ? onOpenChange(true) : onPin(false))}>
@@ -1017,7 +1047,7 @@ function FlagWord({
           ref={anchorRef}
           role="button"
           tabIndex={0}
-          aria-label={`${isDeletion ? "Filler cut" : "Name fix"}, ${stateLabel}`}
+          aria-label={`${flagAriaKind(flag)}, ${stateLabel}`}
           data-s={word.start}
           data-e={word.end}
           onMouseEnter={hoverOpen}
@@ -1028,12 +1058,12 @@ function FlagWord({
           }}
           className={`cursor-pointer ${cls} ${highlighted || pinned ? "ring-2 ring-acc ring-offset-1 ring-offset-bg" : ""}`}
         >
-          {pending && !isDeletion && (
+          {pending && !isDeletion && !isLoop && (
             <>
               <s className="text-ink3">{word.text}</s> →{" "}
             </>
           )}
-          {pending && !isDeletion ? shown : display}
+          {pending && !isDeletion && !isLoop ? shown : display}
           <sup className={`ml-0.5 font-mono text-[9px] font-semibold ${pending ? "text-warn" : isDeletion ? "text-ink3" : "text-acc-text"}`}>{glyph}</sup>
         </span>
       </Popover.Trigger>{" "}
@@ -1057,9 +1087,9 @@ function FlagWord({
           <ScrollArea style={{ maxHeight: "var(--radix-popover-content-available-height)" }}>
           <div className="flex flex-col gap-3 p-3.5">
           <div className="flex items-center gap-2">
-            <span className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${isDeletion ? "bg-sunk" : "bg-acc-soft text-acc-text"}`}>{isDeletion ? "✂" : "Aa"}</span>
+            <span className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] font-mono text-[11px] font-semibold ${flagGlyphClass(flag)}`}>{flagGlyph(flag)}</span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : flag.subkind === "manual" ? "Your correction" : "Name / term fix"}</div>
+              <div className="text-sm font-bold">{isDeletion ? `Cut · ${cutKind(flag)}` : isLoop ? "Looping speech collapsed" : flag.subkind === "manual" ? "Your correction" : "Name / term fix"}</div>
               <div className="text-xs text-ink3">{where}</div>
             </div>
             <span className={`chip ${stateTone}`}>{stateLabel}</span>
@@ -1084,6 +1114,26 @@ function FlagWord({
               <span className="text-ink3">Cuts </span>
               <s>“{flag.heard}”</s>
               {rendered && <p className={`mt-1 whitespace-pre-line text-xs ${rendered.state === "applied" ? "text-ink3" : "text-warn"}`}>{rendered.state === "applied" ? "Cut in the last render." : cutStateTitle(rendered)}</p>}
+            </div>
+          ) : isLoop ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-[13px] leading-snug text-ink2">
+                The transcriber repeated <span className="font-medium text-ink">{flag.heard}</span>. We kept a short run in captions. Rejecting puts the repeated words back. Re-transcribe to recover what was actually said, or type caption text for this stretch.
+              </p>
+              <label className="text-xs text-ink3" htmlFor={`rep-${flag.id}`}>
+                Caption this stretch
+              </label>
+              <input
+                id={`rep-${flag.id}`}
+                className="input py-1.5"
+                placeholder="Leave blank to keep captions empty"
+                value={text === flag.suggested ? "" : text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") accept();
+                }}
+              />
             </div>
           ) : (
             <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
@@ -1168,7 +1218,7 @@ function FlagWord({
                 <button
                   className="btn-quiet px-2.5 py-1.5 text-xs text-ink2"
                   onClick={() => setConfirmDel(true)}
-                  title={flag.subkind === "manual" ? "Delete your cut; any automatic fixes it replaced come back as they were" : "Delete this fix; the words stay as heard"}
+                  title={flag.subkind === "manual" ? "Delete your cut; any automatic fixes it replaced come back as they were" : isLoop ? "Delete this fix; the repeated words come back" : "Delete this fix; the words stay as heard"}
                 >
                   <Trash2 className="h-3.5 w-3.5" /> Delete
                 </button>

@@ -42,7 +42,11 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     case "stage.completed": {
       const d = sec(p.durationSec);
       const exp = d !== null && o.expectedSec ? o.expectedSec(String(p.stage)) : null;
-      return { text: `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`, tone: "ok" };
+      const done = `${STAGE[String(p.stage)] ?? p.stage} finished${d !== null ? ` in ${formatTime(d)}${exp ? ` (expected ~${formatTime(exp)})` : ""}` : ""}`;
+      if (p.stage === "transcribe" && typeof p.loops === "number" && p.loops > 0) {
+        return { text: `${done}. Collapsed ${p.loops} looping stretch${p.loops === 1 ? "" : "es"} — review them on the transcript`, tone: "warn" };
+      }
+      return { text: done, tone: "ok" };
     }
     case "stage.failed":
       return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };

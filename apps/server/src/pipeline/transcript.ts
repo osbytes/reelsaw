@@ -1,4 +1,5 @@
 import type { Word, TranscriptSegment } from "@reelsaw/shared";
+import { collapseDecoderLoops } from "./asr-loops.js";
 
 export interface RawSegment {
   text: string;
@@ -15,26 +16,28 @@ export function looksWordLevel(segments: RawSegment[]): boolean {
   return singleTokens / segments.length > 0.8;
 }
 
-export function toWords(segments: RawSegment[]): Word[] {
+export function toWords(segments: RawSegment[], opts?: { collapseLoops?: boolean }): Word[] {
+  let words: Word[];
   if (looksWordLevel(segments)) {
-    return segments
+    words = segments
       .map((s) => ({ text: s.text.trim(), start: s.startSecond, end: Math.max(s.endSecond, s.startSecond) }))
       .filter((w) => w.text.length > 0);
-  }
-  const words: Word[] = [];
-  for (const seg of segments) {
-    const tokens = seg.text.trim().split(/\s+/).filter(Boolean);
-    if (!tokens.length) continue;
-    const dur = Math.max(0.05, seg.endSecond - seg.startSecond);
-    const totalChars = tokens.reduce((n, t) => n + t.length, 0) || 1;
-    let cursor = seg.startSecond;
-    for (const t of tokens) {
-      const share = (t.length / totalChars) * dur;
-      words.push({ text: t, start: cursor, end: cursor + share });
-      cursor += share;
+  } else {
+    words = [];
+    for (const seg of segments) {
+      const tokens = seg.text.trim().split(/\s+/).filter(Boolean);
+      if (!tokens.length) continue;
+      const dur = Math.max(0.05, seg.endSecond - seg.startSecond);
+      const totalChars = tokens.reduce((n, t) => n + t.length, 0) || 1;
+      let cursor = seg.startSecond;
+      for (const t of tokens) {
+        const share = (t.length / totalChars) * dur;
+        words.push({ text: t, start: cursor, end: cursor + share });
+        cursor += share;
+      }
     }
   }
-  return words;
+  return opts?.collapseLoops === false ? words : collapseDecoderLoops(words);
 }
 
 /** Group words into sentence-ish segments for the LLM and for boundary snapping. */

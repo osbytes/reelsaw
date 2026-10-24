@@ -114,11 +114,11 @@ export async function mergeRefine(
       incoming = incoming.filter((f) => !(t.deletedFlags ?? []).some((d) => d.kind === f.kind && d.wordIndex === f.wordIndex && d.span === f.span));
       // nothing the detector finds may overlap a fix the user made by hand
       incoming = incoming.filter((f) => !kept.some((k) => isManual(k) && overlaps(k, f)));
-      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => k.kind === "entity" && overlaps(k, f)));
+      if (kind === "disfluency") incoming = incoming.filter((f) => !kept.some((k) => (k.kind === "entity" || k.kind === "loop") && overlaps(k, f)));
       else {
-        // entity flags win: drop disfluency flags that overlap a new entity span
+        // entity flags win over detector cuts; loop collapses stay (rawWords still has the run)
         flags = kept.filter((k) => !(k.kind === "disfluency" && !isManual(k) && incoming.some((f) => overlaps(k, f))));
-        incoming = incoming;
+        incoming = incoming.filter((f) => !kept.some((k) => k.kind === "loop" && overlaps(k, f)));
       }
       flags = [...(kind === "entity" ? flags : kept), ...incoming].sort((a, b) => a.wordIndex - b.wordIndex);
     }
@@ -250,7 +250,7 @@ export async function refineDisfluency(ctx: StageContext) {
   const useLlm = opts.disfluencyLlm;
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
-  for (const f of t.flags) if (f.kind === "entity" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
+  for (const f of t.flags) if (f.kind === "entity" || f.kind === "loop" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const trace: DisfluencyTraceEntry[] = [];
   const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,

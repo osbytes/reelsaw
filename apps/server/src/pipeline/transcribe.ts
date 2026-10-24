@@ -2,11 +2,13 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { eq, asc } from "drizzle-orm";
 import type { JSONObject } from "@ai-sdk/provider";
+import type { TranscriptFlag, Word } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { StageContext, exists, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
-import { extractEntities, biasProviderOptions } from "./entities.js";
+import { extractEntities, biasProviderOptions, applyFlags } from "./entities.js";
+import { collapseDecoderLoopsWithStats, compressionRatio, flagsFromCollapse, preferLessRepetitive, shouldRetryWithoutPrompt, withoutPrompt, type LoopRun } from "./asr-loops.js";
 import { underlyingProvider } from "../ai/registry.js";
 import { enqueueRefine } from "./refine.js";
 
@@ -80,7 +82,27 @@ export async function transcribe(ctx: StageContext) {
       if (i === undefined) return;
       ctx.throwIfAborted();
       const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-      const result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
+      let result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
+      // whisper-1 has no temperature-fallback; a vocabulary `prompt` that leaked, or a 30 s
+      // internal window that started looping, poisons the rest of this 10-minute file. Retry once
+      // without the prompt (openai/whisper compression_ratio_threshold = 2.4).
+      const prompted = typeof (providerOptions[provider] as { prompt?: unknown } | undefined)?.prompt === "string";
+      if (shouldRetryWithoutPrompt(result.text, prompted)) {
+        ctx.log.warn({ chunk: i, compressionRatio: Number(compressionRatio(result.text).toFixed(2)), chars: result.text.length }, "chunk looks like a decoder loop; retrying without vocabulary prompt");
+        const retried = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions: withoutPrompt(providerOptions, provider), signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk-retry", telemetry: svc.otel.enabled });
+        const picked = preferLessRepetitive(result, retried);
+        ctx.log.info(
+          {
+            chunk: i,
+            kept: picked === retried ? "retry" : "original",
+            originalRatio: Number(compressionRatio(result.text).toFixed(2)),
+            retryRatio: Number(compressionRatio(retried.text).toFixed(2)),
+            retryChars: retried.text.length,
+          },
+          "chose less repetitive chunk transcript",
+        );
+        result = picked;
+      }
       await ctx.db
         .insert(schema.transcriptChunks)
         .values({
@@ -104,17 +126,32 @@ export async function transcribe(ctx: StageContext) {
   const chunks = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), orderBy: asc(schema.transcriptChunks.index) });
   if (chunks.length !== chunkFiles.length) throw new Error(`Expected ${chunkFiles.length} transcript chunks, have ${chunks.length}`);
 
-  const raw: RawSegment[] = chunks.flatMap((c) =>
-    offsetSegments(
+  // Collapse per chunk: decoder loops don't span API calls, and a cheer that happens to sit on a
+  // 10-minute cut must not be merged with the next chunk's first words. rawWords stay as-heard;
+  // applyFlags layers the collapse (rejecting a loop flag restores the repeated copies).
+  const rawWords: Word[] = [];
+  const flags: TranscriptFlag[] = [];
+  let dropped = 0;
+  const loopRuns: LoopRun[] = [];
+  for (const c of chunks) {
+    const segs: RawSegment[] = offsetSegments(
       c.segments.map((s) => ({ text: s.text, startSecond: s.start, endSecond: s.end })),
       c.offsetSec,
-    ),
-  );
-  const words = toWords(raw);
+    );
+    const heard = toWords(segs, { collapseLoops: false });
+    const collapsed = collapseDecoderLoopsWithStats(heard);
+    const offset = rawWords.length;
+    rawWords.push(...heard);
+    dropped += collapsed.dropped;
+    loopRuns.push(...collapsed.runs);
+    for (const f of flagsFromCollapse(heard, collapsed)) flags.push({ ...f, wordIndex: f.wordIndex + offset });
+  }
+  if (dropped) ctx.log.info({ dropped, runs: loopRuns.length, flags: flags.length, samples: loopRuns.slice(0, 8) }, "collapsed ASR decoder-loop repeats");
+  const words = applyFlags(rawWords, flags);
   if (!words.length) throw new Error("Transcription returned no words. Is the audio silent?");
   const sentences = toSentences(words);
 
-  await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length }, async (u) => {
+  await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length, loops: flags.length, loopDropped: dropped }, async (u) => {
   // which STT ran, so later expected-time estimates compare like with like (see pipeline/estimates.ts)
   await u.artifact(projectId, "transcribe", "models", { chunks: chunkFiles.length, words: words.length }, { ...modelsUsed(svc, "transcription", "align"), transcription: transcriptionModel });
   await u.db
@@ -122,10 +159,10 @@ export async function transcribe(ctx: StageContext) {
     .values({
       projectId,
       language: chunks.find((c) => c.language)?.language ?? null,
-      text: chunks.map((c) => c.text.trim()).join(" "),
+      text: words.map((w) => w.text).join(" "),
       words,
-      rawWords: words,
-      flags: [],
+      rawWords,
+      flags,
       entities,
       refine: {},
       segments: sentences,
