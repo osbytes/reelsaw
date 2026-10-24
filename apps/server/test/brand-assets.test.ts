@@ -71,6 +71,7 @@ describe("isSpaIndexPath", () => {
   it("serves the shell for client routes and 404s missing files", () => {
     assert.equal(isSpaIndexPath("/"), true);
     assert.equal(isSpaIndexPath("/signup"), true);
+    assert.equal(isSpaIndexPath("/reset-password"), true);
     assert.equal(isSpaIndexPath("/p/abc"), true);
     assert.equal(isSpaIndexPath("/favicon.ico"), false);
     assert.equal(isSpaIndexPath("/robots.txt"), false);

@@ -8,7 +8,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 
 type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
-type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage; /** the plan in force (hosted); null when this instance has no plans */ plan: string | null; /** abuse flags from the hourly pass (abuse.ts) */ flags: string[]; signupIp: string | null };
+type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage; /** the plan in force (hosted); null when this instance has no plans */ plan: string | null; /** abuse flags from the hourly pass (abuse.ts) */ flags: string[]; signupIp: string | null; mustChangePassword: boolean };
 const FLAG_HELP: Record<string, string> = {
   shared_ip: "Three or more accounts signed up from the same address in the last 7 days",
   signup_burst: "Five or more accounts from the same address within one hour",
@@ -211,6 +211,7 @@ export function AdminUsersPage() {
                           <div className="flex items-center gap-2">
                             <span className="min-w-0 truncate font-semibold">{r.name || r.email}</span>
                             {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
+                            {r.mustChangePassword && <span className="chip shrink-0 bg-warn-soft text-warn" title="reelsaw set-password --must-change: they pick a new password at next sign-in">must change password</span>}
                             {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
                             {r.flags.map((f) => (
                               <span key={f} className="chip shrink-0 bg-warn-soft text-warn" title={`${FLAG_HELP[f] ?? f}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}`}>

@@ -5,14 +5,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
-import { approveUser, banUser, removeUser, setUserLimits, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
+import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import { deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
 import { USER_ROLES } from "../db/schema.js";
 import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, PASSWORD_MAX_LENGTH, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -427,6 +427,7 @@ const headRouter = router({
         role: ctx.user.role,
         approved: !!ctx.user.approvedAt,
         blocked: ctx.who.blocked,
+        mustChangePassword: ctx.user.mustChangePassword,
         via: ctx.who.via,
         projectDefaults: ctx.who.blocked ? {} : await userDefaults(ctx.svc.database.db, ctx.user.id),
         builtInDefaults: defaultProjectSettings,
@@ -445,6 +446,22 @@ const headRouter = router({
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
       };
     }),
+    /**
+     * After `reelsaw set-password --must-change`: pick a new password without the current one.
+     * The session is the proof they knew the temporary password. Other devices stay signed out.
+     */
+    completePasswordChange: signedInProcedure
+      .input(z.object({ password: z.string().min(1).max(PASSWORD_MAX_LENGTH) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.who.via !== "session" || !ctx.who.session) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose the new password in the browser after signing in." });
+        }
+        return setUserPassword(ctx.svc, ctx.user.id, ctx.user.id, input.password, {
+          mustChange: false,
+          keepSessionId: ctx.who.session.session.id,
+          rejectReuse: true,
+        });
+      }),
     /** Replace the saved project defaults (the form sends the whole set; {} clears them). */
     updateProjectDefaults: protectedProcedure.input(userProjectDefaultsSchema).mutation(async ({ ctx, input }) => {
       const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`
@@ -783,6 +800,7 @@ const restRouter = router({
                   banReason: U.banReason,
                   flags: U.flags,
                   signupIp: U.signupIp,
+                  mustChangePassword: U.mustChangePassword,
                   createdAt: U.createdAt,
                   approved,
                   ts: sql<string>`${U.createdAt}::text`,

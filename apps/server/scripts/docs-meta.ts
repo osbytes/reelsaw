@@ -55,7 +55,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   MAX_REQUESTS_PER_HOUR: ["limits", "Changes an account may make per hour. 0 = unlimited."],
   TERMS_URL: ["accounts", "Terms of service link shown on the sign-up form when set."],
   PRIVACY_URL: ["accounts", "Privacy policy link shown on the sign-up form when set."],
-  CAPTCHA_PROVIDER: ["accounts", "Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below."],
+  CAPTCHA_PROVIDER: ["accounts", "Bot protection on sign-up, sign-in and password reset: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below."],
   CAPTCHA_SITE_KEY: ["accounts", "Public captcha key."],
   CAPTCHA_SECRET_KEY: ["accounts", "Secret captcha key."],
   MCP_OAUTH: ["accounts", "MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work."],

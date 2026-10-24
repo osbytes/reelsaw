@@ -39,6 +39,8 @@ export const user = pgTable("user", {
   signupIp: text("signup_ip"),
   /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
   flags: jsonb("flags").$type<string[]>().notNull().default([]),
+  /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
+  mustChangePassword: boolean("must_change_password").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 },
@@ -158,6 +160,7 @@ export const ADMIN_EVENT_TYPES = [
   "user.banned",
   "user.unbanned",
   "user.removed",
+  "user.password_set",
   "models.changed",
   "provider.changed",
   "settings.changed",

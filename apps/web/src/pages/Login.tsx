@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useNavigate, Navigate, useLocation } from "react-router";
+import { useNavigate, Navigate, useLocation, Link } from "react-router";
 import {
   CONFIRM_EMAIL_THEN_SIGN_IN,
   signupCreatedNotice,
@@ -7,6 +7,7 @@ import {
   INTERVAL_PARAM,
   PLAN_PARAM,
   REPO_URL,
+  resetPasswordPath,
   VERIFY_EMAIL_CALLBACK_PATH,
   VERIFY_EMAIL_EXPIRED_NOTICE,
   VERIFY_EMAIL_SENT_NOTICE,
@@ -172,6 +173,13 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+            {mode === "login" && (
+              <p className="mt-1.5 text-right">
+                <Link to={resetPasswordPath(email)} className="text-xs text-ink3 no-underline hover:text-ink">
+                  Forgot password?
+                </Link>
+              </p>
+            )}
           </div>
         )}
         {mode === "signup" && plan && <p className="text-xs leading-relaxed text-ink2">After you sign in, you pick up where you left off: the {plan} plan.</p>}

@@ -57,7 +57,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `BLOCK_DISPOSABLE_EMAILS` | `false` | Refuse sign-ups from known temporary-address domains. Runtime setting: admins can change it under Settings → System without a restart. |
 | `TERMS_URL` | unset | Terms of service link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
 | `PRIVACY_URL` | unset | Privacy policy link shown on the sign-up form when set. Runtime setting: admins can change it under Settings → System without a restart. |
-| `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up and sign-in: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Runtime setting: admins can change it under Settings → System without a restart. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
+| `CAPTCHA_PROVIDER` | unset | Bot protection on sign-up, sign-in and password reset: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below. Runtime setting: admins can change it under Settings → System without a restart. Values: `cloudflare-turnstile | google-recaptcha | hcaptcha`. |
 | `CAPTCHA_SITE_KEY` | unset | Public captcha key. Runtime setting: admins can change it under Settings → System without a restart. |
 | `CAPTCHA_SECRET_KEY` | unset | Secret captcha key. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MCP_OAUTH` | `false` | MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work. |

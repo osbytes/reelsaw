@@ -12,6 +12,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   users                                   list accounts: role, status, sign-up date
  *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
  *   make-admin <email>                      promote an account to admin (approves it first if needed)
+ *   set-password <email> [--must-change]    set an account's password from a prompt (or two stdin lines);
+ *                                           `--must-change` requires a new one at next sign-in. Do not put
+ *                                           the secret on the command line
  *   retention                               run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS)
  *   deleted                                 deleted projects that can still be restored, with their purge date
  *   restore <projectId>                     undo a project delete (same as projects.restore and the restore_project tool)
@@ -125,9 +128,10 @@ import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import fsSync from "node:fs";
+import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
-import { approveUser, setUserRole, setUserWatermark } from "./accounts.js";
+import { approveUser, setUserPassword, setUserRole, setUserWatermark } from "./accounts.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
@@ -222,7 +226,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
   async users(svc) {
     const rows = await svc.database.db.query.user.findMany({ orderBy: schema.user.createdAt });
-    table(rows.map((u) => ({ email: u.email, name: u.name, role: u.role, status: u.banned ? "suspended" : u.approvedAt ? "active" : "pending", created: u.createdAt.toISOString().slice(0, 10) })));
+    table(rows.map((u) => ({ email: u.email, name: u.name, role: u.role, status: u.banned ? "suspended" : !u.approvedAt ? "pending" : u.mustChangePassword ? "must-change" : "active", created: u.createdAt.toISOString().slice(0, 10) })));
   },
   async approve(svc) {
     const u = await userByEmail(svc, pos[0]);
@@ -352,6 +356,20 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!u.approvedAt) await approveUser(svc, null, u.id);
     const r = await setUserRole(svc, null, u.id, "admin");
     console.log(r.changed ? `${u.email} is now an admin` : `${u.email} was already an admin`);
+  },
+  /**
+   * Forgotten password on a box without email: hash a new secret (stdin, never argv), revoke
+   * sessions, optionally require they pick their own at next sign-in (`--must-change`).
+   */
+  "set-password": async (svc) => {
+    if (pos[1]) throw new Error("do not put the password on the command line; you will be prompted, or pipe it twice on stdin");
+    const u = await userByEmail(svc, pos[0]);
+    const mustChange = args.includes("--must-change");
+    const password = await readSecret("New password: ");
+    const confirm = await readSecret("Confirm password: ");
+    if (password !== confirm) throw new Error("passwords did not match");
+    await setUserPassword(svc, null, u.id, password, { mustChange });
+    console.log(mustChange ? `password set for ${u.email}; they must choose a new one at next sign-in` : `password set for ${u.email}`);
   },
   /** Usage per account over the last --days (default 30); stored bytes are all time. */
   async usage(svc) {
@@ -1249,12 +1267,64 @@ async function userByEmail(svc: Services, email: string | undefined) {
   return u;
 }
 
+/** Hidden when stdin is a TTY; one line when piped. Never log the value. */
+async function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    const line = await new Promise<string>((resolve) => {
+      rl.once("line", (l) => {
+        rl.close();
+        resolve(l);
+      });
+    });
+    const s = line.replace(/\r$/, "");
+    if (!s) throw new Error("password is empty");
+    return s;
+  }
+  process.stderr.write(prompt);
+  const stdin = process.stdin;
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf8");
+  let pw = "";
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onData = (chunk: string) => {
+        for (const ch of chunk) {
+          if (ch === "\n" || ch === "\r" || ch === "\u0004") {
+            stdin.off("data", onData);
+            resolve();
+            return;
+          }
+          if (ch === "\u0003") {
+            stdin.off("data", onData);
+            reject(new Error("cancelled"));
+            return;
+          }
+          if (ch === "\u007f" || ch === "\b") {
+            pw = pw.slice(0, -1);
+            continue;
+          }
+          if (ch >= " ") pw += ch;
+        }
+      };
+      stdin.on("data", onData);
+    });
+  } finally {
+    stdin.setRawMode(false);
+    stdin.pause();
+    process.stderr.write("\n");
+  }
+  if (!pw) throw new Error("password is empty");
+  return pw;
+}
+
 async function run() {
   // the stdio MCP bridge talks to a running instance over HTTP and must not open the database or models
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

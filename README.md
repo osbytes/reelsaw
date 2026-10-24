@@ -74,7 +74,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 **Agents and automation**
 
 - **MCP server** – `/api/mcp` (Streamable HTTP) lets Claude Code, Claude Desktop, Cursor or a script create projects, wait for them, read timed transcripts, edit, create and re-render clips, manage the intro/outro library and download the results. Authenticate with an API key from Settings, or with `MCP_OAUTH=true` so claude.ai and Claude Desktop connectors sign in through the browser.
-- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `bumpers`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
+- **Operator CLI** – `docker compose exec app reelsaw …` inspects and fixes a running instance: `status`, `events`, `clip`, `rerender`, `stuck`, `recover`, `logs`, `cuts`, `align`, `hear`, `flags`, `storage`, `retention`, `deleted`, `restore`, `purge`, `users`, `approve`, `make-admin`, `set-password`, `bumpers`, `import-report` and more (every command is in [Operator CLI](#operator-cli)).
 
 **Hosting and accounts**
 
@@ -277,13 +277,19 @@ form starts from them and can save its current values back. Admins also see the 
 with `HEALTH_DETAILS=true`).
 
 Suspending an account (Users page) ends its sessions and refuses its API keys at the next request;
-removing one deletes its projects, clips and files. Locked out? `docker compose exec app reelsaw
-make-admin you@example.com` promotes an account from the shell.
+removing one deletes its projects, clips and files. Locked out of the password? Sign-in has Forgot
+password when email is on. Without email, an operator sets a new one from the shell (`docker
+compose exec app reelsaw set-password you@example.com`); `--must-change` makes them pick their own
+at the next sign-in, without asking for the temporary password (the session is the proof they knew
+it). To promote an account from the shell: `docker compose exec app reelsaw make-admin
+you@example.com`.
 
 Email (`EMAIL_DRIVER=smtp|resend`, `EMAIL_FROM`, `SMTP_URL` or `RESEND_API_KEY`) turns on approval
 notices, password reset and, with `REQUIRE_EMAIL_VERIFICATION=true`, verification before the
-first sign-in. Confirmation links work for 24 hours and only once; an expired link lands on a page
-that sends a new one. Without email everything else works; approvals are handled on the Users page.
+first sign-in. Confirmation and reset links work for 24 hours and only once; an expired link lands
+on a page that sends a new one. Sign-in has **Forgot password?** when email is on; choosing a new
+password signs out other devices. Without email everything else works; approvals are handled on
+the Users page.
 
 ## Hosting for many people
 
@@ -309,7 +315,7 @@ them), so a single-user box stays as it is:
   `ADMIN_EVENT_RETENTION_DAYS` (365) delete old rows in batches once a day (0 keeps everything);
   a project's run skeleton (created, run started, done) is always kept.
 - **Bot protection**: `CAPTCHA_PROVIDER` (Cloudflare Turnstile, reCAPTCHA, hCaptcha) with site and
-  secret keys puts a widget on sign-up and sign-in.
+  secret keys puts a widget on sign-up, sign-in and password reset.
 - **Free-tier abuse** (all off unless set; `apps/server/src/abuse.ts`): `MAX_SIGNUPS_PER_IP_PER_DAY`
   caps accounts per network address (behind a proxy, `TRUST_PROXY` reads `CF-Connecting-IP`,
   `X-Real-IP`, `X-Forwarded-For`); `BLOCK_DISPOSABLE_EMAILS` refuses temporary-address domains; one
@@ -458,6 +464,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw users` | list accounts: role, status, sign-up date |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
+| `reelsaw set-password <email> [--must-change]` | set an account's password from a prompt (or two stdin lines); `--must-change` requires a new one at next sign-in. Do not put the secret on the command line |
 | `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
 | `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
 | `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |

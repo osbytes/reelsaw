@@ -7,7 +7,7 @@ import type { BetterAuthPlugin } from "better-auth";
 import { jwt } from "better-auth/plugins/jwt";
 import { mcp } from "@better-auth/mcp";
 import { eq, sql } from "drizzle-orm";
-import { PENDING_APPROVAL_MESSAGE, repeatSignUpMessage, unverifiedSignInMessage } from "@reelsaw/shared";
+import { MUST_CHANGE_PASSWORD_MESSAGE, PENDING_APPROVAL_MESSAGE, repeatSignUpMessage, unverifiedSignInMessage } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import type { Email } from "./email.js";
@@ -35,7 +35,18 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
     enabled: true,
     disableSignUp: mode() === "closed",
     requireEmailVerification: settings.get().REQUIRE_EMAIL_VERIFICATION,
-    sendResetPassword: email.enabled ? async ({ user, url }: { user: { email: string }; url: string }) => email.send({ to: user.email, ...templates.resetPassword(url) }) : undefined,
+    // same window as confirmation: a delayed mailbox still works; the reset page offers a resend if it has expired
+    resetPasswordTokenExpiresIn: EMAIL_VERIFY_EXPIRES_IN_SEC,
+    revokeSessionsOnPasswordReset: true,
+    // do not await: Better Auth only calls this when the account exists, so waiting on SMTP would leak that by timing
+    sendResetPassword: email.enabled
+      ? async ({ user, url }: { user: { email: string }; url: string }) => {
+          void email.send({ to: user.email, ...templates.resetPassword(url) });
+        }
+      : undefined,
+    onPasswordReset: async ({ user }: { user: { id: string } }) => {
+      log.info({ userId: user.id }, "password reset");
+    },
   };
   const emailVerification = email.enabled
     ? {
@@ -95,6 +106,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
         banReason: { type: "string", required: false, input: false },
         emailKey: { type: "string", required: false, input: false },
         signupIp: { type: "string", required: false, input: false },
+        mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
       },
     },
     databaseHooks: {
@@ -261,6 +273,18 @@ export function blockedReason(u: Pick<AuthUser, "approvedAt" | "banned" | "banRe
 }
 
 /**
+ * Why this requester cannot use the app. Pending/suspended always; a browser session (or MCP
+ * OAuth) also while they still owe a password after `reelsaw set-password --must-change`. API
+ * keys skip that gate so an agent keeps working while the person chooses theirs.
+ */
+export function cannotUseApp(user: AuthUser, via: Requester["via"] | "oauth"): string | null {
+  const blocked = blockedReason(user);
+  if (blocked) return blocked.reason;
+  if (via !== "apikey" && user.mustChangePassword) return MUST_CHANGE_PASSWORD_MESSAGE;
+  return null;
+}
+
+/**
  * Who is making this request: the browser session (cookie) or an API key (bearer header).
  * Every HTTP route that serves user data goes through here, so agents using a key can do what
  * the web app can: tRPC, MCP, uploads and media downloads. The user row is always read fresh, so
@@ -286,8 +310,8 @@ export async function requester(auth: Auth, db: Db, headers: Headers): Promise<R
   return { user, via, session, blocked: blockedReason(user) };
 }
 
-/** `requester`, but only for accounts allowed to use the app. Pending and suspended accounts get null. */
+/** `requester`, but only for accounts allowed to use the app. Pending, suspended, and must-change sessions get null. */
 export async function activeRequester(auth: Auth, db: Db, headers: Headers): Promise<Requester | null> {
   const r = await requester(auth, db, headers);
-  return r && !r.blocked ? r : null;
+  return r && !cannotUseApp(r.user, r.via) ? r : null;
 }

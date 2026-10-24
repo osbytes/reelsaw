@@ -4,9 +4,16 @@ import {
   ACCOUNT_EXISTS_MESSAGE,
   CONFIRM_EMAIL_THEN_SIGN_IN,
   looksLikeEmail,
+  MUST_CHANGE_PASSWORD_MESSAGE,
+  MUST_CHANGE_PASSWORD_REUSE,
+  passwordLengthError,
   PENDING_APPROVAL_MESSAGE,
   REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD,
   repeatSignUpMessage,
+  RESET_PASSWORD_CALLBACK_PATH,
+  resetLinkFailed,
+  resetPasswordFromSearch,
+  resetPasswordPath,
   shouldOfferResendVerification,
   signupCreatedNotice,
   unverifiedSignInMessage,
@@ -70,5 +77,37 @@ describe("expired confirmation link", () => {
     assert.equal(shouldOfferResendVerification({ errorCode: "EMAIL_NOT_VERIFIED", expiredLink: false, afterSignUp: false }), true);
     assert.equal(shouldOfferResendVerification({ errorCode: "ACCOUNT_PENDING", expiredLink: false, afterSignUp: false }), true);
     assert.equal(shouldOfferResendVerification({ errorCode: "INVALID_EMAIL_OR_PASSWORD", expiredLink: false, afterSignUp: false }), false);
+  });
+});
+
+describe("password reset link", () => {
+  it("reads the token, error and email Better Auth puts on /reset-password", () => {
+    assert.deepEqual(resetPasswordFromSearch("?token=abc.def.ghi"), { expired: false, token: "abc.def.ghi", email: null });
+    assert.deepEqual(resetPasswordFromSearch("?error=INVALID_TOKEN&email=Ada%40Example.com"), { expired: true, token: null, email: "ada@example.com" });
+    assert.deepEqual(resetPasswordFromSearch("?error=invalid_token"), { expired: true, token: null, email: null });
+    assert.equal(resetLinkFailed("INVALID_TOKEN"), true);
+    assert.equal(resetLinkFailed("TOKEN_EXPIRED"), true);
+    assert.equal(resetLinkFailed("INVALID_EMAIL_OR_PASSWORD"), false);
+  });
+
+  it("drops a token that arrived with an error, and a token with spaces", () => {
+    assert.deepEqual(resetPasswordFromSearch("?error=INVALID_TOKEN&token=still-here"), { expired: true, token: null, email: null });
+    assert.equal(resetPasswordFromSearch("?token=not a token").token, null);
+  });
+
+  it("prefills /reset-password from the sign-in address only when it looks like an email", () => {
+    assert.equal(resetPasswordPath("Ada@Example.com"), `${RESET_PASSWORD_CALLBACK_PATH}?email=ada%40example.com`);
+    assert.equal(resetPasswordPath("not-an-email"), RESET_PASSWORD_CALLBACK_PATH);
+    assert.equal(resetPasswordPath(), RESET_PASSWORD_CALLBACK_PATH);
+  });
+});
+
+describe("operator must-change password", () => {
+  it("uses the same 8–128 bounds Better Auth does, and names the reuse case", () => {
+    assert.equal(passwordLengthError("short"), "Use at least 8 characters.");
+    assert.equal(passwordLengthError("long-enough"), null);
+    assert.equal(passwordLengthError("x".repeat(129)), "Use at most 128 characters.");
+    assert.match(MUST_CHANGE_PASSWORD_MESSAGE, /Choose a new password/);
+    assert.match(MUST_CHANGE_PASSWORD_REUSE, /different password/);
   });
 });

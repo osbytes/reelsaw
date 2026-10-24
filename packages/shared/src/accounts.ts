@@ -21,6 +21,66 @@ export const VERIFY_EMAIL_EXPIRED_NOTICE = "This confirmation link has expired. 
 /** After /send-verification-email. Same sentence whether the address exists, so we do not leak accounts. */
 export const VERIFY_EMAIL_SENT_NOTICE = "If this address still needs confirming, we sent a new link. It works for 24 hours.";
 
+/** Where the reset-password email sends the browser (`redirectTo`); Better Auth adds `?token=` or `?error=INVALID_TOKEN`. */
+export const RESET_PASSWORD_CALLBACK_PATH = "/reset-password";
+
+/** Better Auth puts this on redirectTo when the reset token is expired or already used. */
+export const RESET_PASSWORD_ERROR_CODES = ["INVALID_TOKEN", "TOKEN_EXPIRED"] as const;
+
+/** After /request-password-reset. Same sentence whether the address exists, so we do not leak accounts. */
+export const RESET_PASSWORD_SENT_NOTICE = "If this address has an account, we sent a reset link. It works for 24 hours.";
+
+/** Expired or already-used reset link: the recovery page, not an error. */
+export const RESET_PASSWORD_EXPIRED_NOTICE = "This reset link has expired. Send a new one and we will email it. It works for 24 hours.";
+
+/** After a successful reset. Other sessions are revoked (`revokeSessionsOnPasswordReset`). */
+export const RESET_PASSWORD_DONE_NOTICE = "Your password is changed. Sign in with the new one; other devices are signed out.";
+
+/** Sign-in and the reset page when this instance has no email driver. */
+export const RESET_PASSWORD_UNAVAILABLE = "Password reset needs email on this instance. Ask an admin, or sign in if you still know the password.";
+
+/** Same bounds Better Auth uses for email/password (`minPasswordLength` / `maxPasswordLength`). */
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
+
+export function passwordLengthError(password: string): string | null {
+  if (password.length < PASSWORD_MIN_LENGTH) return "Use at least 8 characters.";
+  if (password.length > PASSWORD_MAX_LENGTH) return "Use at most 128 characters.";
+  return null;
+}
+
+/**
+ * Browser session while `user.mustChangePassword` is set: the only page they see, and the sentence
+ * every other route answers with. API keys still work (an agent should not be locked out with the person).
+ */
+export const MUST_CHANGE_PASSWORD_MESSAGE = "Choose a new password before using this account.";
+
+/** Body copy on that page: why there is no current-password field. */
+export const MUST_CHANGE_PASSWORD_COPY = "An operator set a temporary password. Choose yours to continue; you will not need the temporary one after this.";
+
+/** Completing must-change with the same secret the operator (or they) just set. */
+export const MUST_CHANGE_PASSWORD_REUSE = "Choose a different password from the temporary one.";
+
+export function resetLinkFailed(code: string | null | undefined): boolean {
+  return !!code && (RESET_PASSWORD_ERROR_CODES as readonly string[]).includes(code.toUpperCase());
+}
+
+/** `/reset-password`, with the address from the sign-in form when it looks like an email. */
+export function resetPasswordPath(email?: string): string {
+  const e = (email ?? "").trim().toLowerCase();
+  return looksLikeEmail(e) ? `${RESET_PASSWORD_CALLBACK_PATH}?email=${encodeURIComponent(e)}` : RESET_PASSWORD_CALLBACK_PATH;
+}
+
+/** Query string from the reset email redirect (`/reset-password?token=` or `?error=INVALID_TOKEN`). */
+export function resetPasswordFromSearch(search: string): { expired: boolean; token: string | null; email: string | null } {
+  const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const expired = resetLinkFailed(q.get("error"));
+  const rawToken = (q.get("token") ?? "").trim();
+  const token = !expired && rawToken.length > 0 && !rawToken.includes(" ") ? rawToken : null;
+  const raw = (q.get("email") ?? "").trim().toLowerCase();
+  return { expired, token, email: looksLikeEmail(raw) ? raw : null };
+}
+
 /** Sign-in codes that mean the password matched but the mailbox is not confirmed yet. */
 export const UNVERIFIED_SIGN_IN_CODES = ["EMAIL_NOT_VERIFIED", "ACCOUNT_PENDING"] as const;
 
