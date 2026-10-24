@@ -78,9 +78,10 @@ for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame ver
 (`probeTiles`, `webcam-tile.ts`; a frame without a face is probed around the last or next face seen). One more pass at 2 fps, 640x352, runs the PP-OCR text detector
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
 (`attachText`) and are the only text input the layout reads. Scene cuts (`scenes.ts`, adaptive
-threshold) come from the scenes refine step when the project ran it; otherwise the render detects them
-on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the layout always
-has the edits whatever the project opted into. The `layout resolved` log line says how many and from
+threshold) are detected once per project before clip selection (`ensureSceneCuts`, `analyze.ts`) and
+kept on the transcript; a project from before that, or an imported report, has none, and the render
+detects them on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the
+layout always has the edits. The `layout resolved` log line says how many and from
 where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion
 correlated with the audio envelope) runs only on `split` segments of 3 s or more. Static "faces"
 (posters, photos) are dropped first (`dropStaticFaces`).

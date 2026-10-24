@@ -2,7 +2,7 @@ import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
 import { lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
-import { schema, type Db } from "../db/index.js";
+import { schema, type Db, type Project } from "../db/index.js";
 import { StageContext, modelsUsed } from "./common.js";
 import { chunkTranscript, excludeRanges, mapChunk, mapLimit, needsSecondLook, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
 import { QUEUES } from "../queue/boss.js";
@@ -221,6 +221,24 @@ function textFor(c: ClipCandidate, segments: TranscriptSegment[]) {
     .slice(0, 2500);
 }
 
+/**
+ * The source's shot cuts, detected once per project and kept on the transcript: clip boundaries snap to
+ * them, the layout changes at them and the on-screen text scan reads shots from them. Cheap (ffmpeg scene
+ * scores on a 320 px decode, a few seconds for an hour of video), so every project gets them; the scenes
+ * refine step (opt-in) only adds the text scan on top. Null means never detected (an older project, an
+ * imported report): detect now. A failed detection is logged and comes back empty.
+ */
+export async function ensureSceneCuts(ctx: StageContext, project: Project, stored: number[] | null): Promise<number[]> {
+  if (stored) return stored;
+  if (!project.width || !project.sourceKey) return [];
+  await ctx.progress(0.01, "Detecting shot changes");
+  const sourcePath = await ctx.ensureSource(project);
+  const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, ctx.signal);
+  await ctx.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
+  ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
+  return cuts;
+}
+
 export async function analyze(ctx: StageContext) {
   const { svc, projectId, db } = ctx;
   const project = await ctx.project();
@@ -257,6 +275,7 @@ export async function analyze(ctx: StageContext) {
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   if (!transcript) throw new Error("Transcript missing; transcribe must run first");
   await ctx.start("analyzing");
+  const sceneCuts = await ensureSceneCuts(ctx, project, transcript.sceneCuts);
 
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
   const selfHosted = isSelfHostedModel({ AI_MODEL: svc.models.get().language, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
@@ -305,7 +324,7 @@ export async function analyze(ctx: StageContext) {
 
   // 3. pool: snap to sentences/scene cuts, enforce length, drop overlaps (keep the better first guess)
   const snappedIdx = candidates
-    .map((c, i) => ({ c: snapCandidate(c, segments, transcript.sceneCuts ?? [], settings, durationSec, { words: transcript.words, log }), i }))
+    .map((c, i) => ({ c: snapCandidate(c, segments, sceneCuts, settings, durationSec, { words: transcript.words, log }), i }))
     .filter((x): x is { c: ClipCandidate; i: number } => x.c !== null)
     .sort((a, b) => b.c.score - a.c.score);
   const snapped = snappedIdx.map((x) => x.c);
