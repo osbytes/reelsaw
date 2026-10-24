@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { schema } from "../src/db/index.js";
-import { deleteClip, restoreClip, updateProject } from "../src/projects/service.js";
+import { applyProjectFraming, deleteClip, restoreClip, updateProject } from "../src/projects/service.js";
 import { requestRender } from "../src/pipeline/lifecycle.js";
 
 const h = lifecycleHarness();
@@ -99,5 +99,51 @@ describe("updateProject", { skip: notReady ?? false }, () => {
     const stranger = await h.makeUser();
     await assert.rejects(updateProject(h.svc, { id: stranger, admin: false }, projectId, { title: "Mine" }), /No such project/);
     assert.equal((await projectRow(projectId)).title, "New title");
+  });
+});
+
+describe("applyProjectFraming", { skip: notReady ?? false }, () => {
+  let userId: string;
+  let projectId: string;
+  let done: string;
+  let own: string;
+  let rendering: string;
+  const tile = { x1: 0.869, y1: 0.083, x2: 1, y2: 0.217 };
+  before(async () => {
+    userId = await h.makeUser();
+    projectId = await h.makeProject(userId, "done");
+    done = await h.makeClip(projectId, 0, "done", { outputKey: "k0" });
+    own = await h.makeClip(projectId, 1, "done", { outputKey: "k1" });
+    rendering = await h.makeClip(projectId, 2, "rendering");
+    await h.pool.query(`update clips set layout_sections = '[{"start":0,"end":10,"mode":"face","offsetX":0.1}]'::jsonb, layout_override = 'face' where id = $1`, [own]);
+  });
+  const me = () => ({ id: userId, admin: false });
+
+  it("sets the project's framing, clears the clips' own, and re-renders the finished ones", async () => {
+    const r = await applyProjectFraming(h.svc, me(), projectId, { reframe: "stack", adjust: { crop: tile, offsetX: 0 } });
+    assert.deepEqual(r, { ok: true, reframe: "stack", adjust: { crop: tile }, cleared: 1, rerendered: 2 });
+    const p = await projectRow(projectId);
+    assert.equal(p.settings.reframe, "stack");
+    assert.deepEqual(p.settings.reframeAdjust, { crop: tile });
+    const ownRow = (await h.pool.query(`select layout_sections, layout_override from clips where id = $1`, [own])).rows[0];
+    assert.equal(ownRow.layout_sections, null);
+    assert.equal(ownRow.layout_override, null);
+    assert.equal((await clipRow(done)).status, "pending");
+    assert.equal((await clipRow(rendering)).status, "rendering");
+    assert.equal(await h.eventCount(projectId, "project.updated"), 1);
+  });
+
+  it("can leave the clips' own sections alone and skip the re-render", async () => {
+    await h.pool.query(`update clips set layout_sections = '[{"start":0,"end":10,"mode":"face"}]'::jsonb, status = 'done' where id = $1`, [own]);
+    const r = await applyProjectFraming(h.svc, me(), projectId, { reframe: "fit", keepOverrides: true, rerender: false });
+    assert.deepEqual(r, { ok: true, reframe: "fit", adjust: null, cleared: 0, rerendered: 0 });
+    assert.equal((await projectRow(projectId)).settings.reframeAdjust, null);
+    assert.notEqual((await h.pool.query(`select layout_sections from clips where id = $1`, [own])).rows[0].layout_sections, null);
+    assert.equal((await clipRow(own)).status, "done");
+  });
+
+  it("refuses other people's projects", async () => {
+    const stranger = await h.makeUser();
+    await assert.rejects(applyProjectFraming(h.svc, { id: stranger, admin: false }, projectId, { reframe: "fit" }), /No such project/);
   });
 });

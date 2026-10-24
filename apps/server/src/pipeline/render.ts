@@ -248,7 +248,8 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   // framing: user sections (absolute seconds) over a default mode (legacy clip/project override, else auto)
   const defaultMode = (clip.layoutOverride ?? settings.reframe ?? "auto") as TimelineMode;
   const sections = (clip.layoutSections ?? []).map((sc) => ({ ...sc, start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode }));
-  const timeline = coverTimeline(duration, sections, defaultMode);
+  // the project's adjustment (nudge or crop) goes with the project's mode, not with a legacy per-clip override
+  const timeline = coverTimeline(duration, sections, defaultMode, clip.layoutOverride ? undefined : (settings.reframeAdjust ?? undefined));
   log.debug({ defaultMode, sections: sections.length, timeline: timeline.map((pc) => ({ start: Number(pc.start.toFixed(2)), end: Number(pc.end.toFixed(2)), mode: pc.mode })) }, "framing requested");
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
   const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true, textProfile: true } });

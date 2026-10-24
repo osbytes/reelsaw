@@ -125,11 +125,8 @@ export const contentRegionSchema = z
   })
   .refine((r) => r.x2 - r.x1 >= 0.05 && r.y2 - r.y1 >= 0.05, { message: "A crop must be at least 5% of the source wide and tall" });
 
-/** A user-forced framing for part of a clip, in absolute source seconds (survives retrims). */
-export const layoutSectionSchema = z.object({
-  start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
-  end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
-  mode: sectionModeSchema,
+/** The per-pane fields of a section (offsets, subjects and fixed crops) plus the stack's top crop: what the user adjusted on top of the mode. */
+const sectionAdjustShape = {
   /** A fixed crop for the first pane: exactly this part of the source, instead of following a face. Fitted at its own aspect over a blurred copy when its shape differs from the pane's. */
   crop: contentRegionSchema.optional().describe("Show exactly this part of the source in the (top / only) pane, as fractions of the source size; replaces the automatic crop, the offset and the subject. A shape unlike the pane's is fitted over a blurred copy"),
   crop2: contentRegionSchema.optional().describe("Split only: a fixed crop for the bottom pane"),
@@ -143,10 +140,17 @@ export const layoutSectionSchema = z.object({
   /** Follow the person at this x instead of the detector's pick: the render re-assigns the pane's track to the face nearest it (no face there = a fixed crop at that x). */
   subjectX: z.number().min(0).max(1).optional().describe("Follow the person at this x (0-1 of the source width) in the top/only pane; the offset still applies on top"),
   subjectX2: z.number().min(0).max(1).optional().describe("Split only: follow the person at this x in the bottom pane"),
+};
+export const sectionAdjustSchema = z.object(sectionAdjustShape);
+export type SectionAdjustFields = z.infer<typeof sectionAdjustSchema>;
+/** A user-forced framing for part of a clip, in absolute source seconds (survives retrims). */
+export const layoutSectionSchema = z.object({
+  start: z.number().min(0).describe("Section start, seconds from the start of the source video"),
+  end: z.number().min(0).describe("Section end, seconds from the start of the source video"),
+  mode: sectionModeSchema,
+  ...sectionAdjustShape,
 });
 export type LayoutSection = z.infer<typeof layoutSectionSchema>;
-/** The per-pane fields of a section (offsets, subjects and fixed crops) plus the stack's top crop. */
-export type SectionAdjustFields = Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2" | "crop" | "crop2" | "contentCrop">;
 /** One pane's adjustment: pane 0 is the only pane or the top of a split, pane 1 the bottom of a split. A crop replaces the offset and the subject. */
 export interface PaneAdjust {
   offsetX?: number;
@@ -186,6 +190,27 @@ export const hasAdjust = (s: SectionAdjustFields) =>
 export function regionLabel(r: ContentRegion): string {
   const p = (v: number) => Math.round(v * 100);
   return `${p(r.x1)}–${p(r.x2)}% × ${p(r.y1)}–${p(r.y2)}%`;
+}
+/** The adjustment of a section on its own (no times, no mode, nothing unset), for the project's default framing; undefined when there is none. */
+export function adjustOf(s: SectionAdjustFields): SectionAdjustFields | undefined {
+  const out: SectionAdjustFields = {};
+  for (const k of Object.keys(sectionAdjustShape) as Array<keyof SectionAdjustFields>) {
+    const v = s[k];
+    if (v === undefined) continue;
+    if (typeof v === "number" && !k.startsWith("subject") && Math.abs(v) < 1e-4) continue;
+    Object.assign(out, { [k]: v });
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+/**
+ * The framing a clip without sections of its own gets from its project: the `reframe` mode (`none`, an original-aspect
+ * choice, has no section mode and shows the whole frame) with the `reframeAdjust` nudge or crop on top, as one section
+ * over `[start, end]`. Only `auto` with no adjustment is a plain automatic section.
+ */
+export function projectDefaultSection(settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null }, start: number, end: number): LayoutSection {
+  const reframe = settings.reframe ?? "auto";
+  const mode: SectionMode = reframe === "none" ? "fit" : reframe;
+  return { start, end, mode, ...(settings.reframeAdjust ? adjustOf(settings.reframeAdjust) : {}) };
 }
 
 /**
@@ -663,6 +688,12 @@ export const projectSettingsSchema = styleSchema.extend({
   sourceText: z.enum(["hide", "keep", "always"]).describe("Text already in the video: hide (blur captions/logos except in slide decks, default), always (blur even then), keep").default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
+  /**
+   * Nudge, subject or fixed crop applied with `reframe` to every clip that has no framing sections of its own
+   * (`apply_framing` sets both from one clip, for a recording whose layout never changes, such as a slide deck with a
+   * webcam tile). A clip's own sections replace it for their time range.
+   */
+  reframeAdjust: sectionAdjustSchema.nullable().optional().describe("Applied with reframe to clips without their own sections: offsetX/Y, offsetX2/Y2, subjectX/X2, crop, crop2, contentCrop as on a clip's section; null = none. apply_framing sets it from one clip"),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
   language: z.string().max(10).optional().describe("Spoken language code (e.g. en); unset = detected"),
@@ -747,7 +778,7 @@ function withoutDefaults<T = ProjectSettingsPatch>(shape: z.ZodRawShape): z.ZodT
 }
 export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.shape);
 /** Optional settings a project update can reset to their default (unset). */
-export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary"] as const;
+export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary", "reframeAdjust"] as const;
 export type ClearableSetting = (typeof CLEARABLE_SETTINGS)[number];
 
 export const createProjectInputSchema = z.object({

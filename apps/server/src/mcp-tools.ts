@@ -15,7 +15,7 @@ Workflow: create_project(sourceUrl) → wait_for_project (call again until done;
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
-- reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only
+- reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, remove_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, remove_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
@@ -170,7 +170,7 @@ export const TOOLS = {
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x; crop / crop2 fix a pane to exactly that part of the source ({ x1, y1, x2, y2 } as fractions; replaces the nudge and the subject) and contentCrop fixes what a stack shows on top. Returns the clip summary; poll get_clip until done.",
+    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. A section's offsetX/Y, subjectX, crop and contentCrop are described on layoutSections (a crop replaces the nudge and the subject). Returns the clip summary; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
@@ -353,6 +353,16 @@ export const TOOLS = {
     description: "Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). It does not become a default again. Returns the template.",
     inputSchema: { templateId: templateIdSchema },
     annotations: { idempotentHint: true },
+  },
+  apply_framing: {
+    title: "Apply framing to the project",
+    description: "Make one clip's framing the whole project's, for a recording whose layout never changes (a slide deck with a webcam tile, a fixed camera): the clip's section at `at` (else its first framed section) gives the mode and its nudge / subject / crop, which become the project's reframe and reframeAdjust; every clip's own sections are cleared (unless keepOverrides) and the finished clips re-render. New clips get it too. Returns { reframe, adjust, cleared, rerendered }.",
+    inputSchema: {
+      clipId: clipId("Clip whose framing to copy"),
+      at: z.number().min(0).optional().describe("Seconds from the start of the source: which section of the clip to copy (default: its first section that is not plain automatic)"),
+      keepOverrides: z.boolean().optional().describe("Leave other clips' own sections in place; they still win over the project's framing (default false: clear them)"),
+      rerender: z.boolean().optional().describe("Re-render the finished clips now (default true)"),
+    },
   },
   apply_layer_template: {
     title: "Apply layer template to clips",

@@ -91,6 +91,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           everything laid over or played under a clip, one list (source seconds, x/y/w/size as
  *                                           fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at
  *                                           full level, anything else music (ducked, faded, looped); with no change flag it lists them
+ *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
+ *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
+ *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
  *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
  *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
  *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
@@ -158,7 +161,7 @@ import { libraryProviders } from "./library/import.js";
 import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
-import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
+import { deleteClip, deletedProjects, framingOfClip, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
@@ -1139,6 +1142,20 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(rerender ? "re-render requested" : "saved; no re-render requested (pass --rerender to apply now)");
   },
 
+  /** One clip's framing for the whole project. Same procedure as the editor's "Use for all clips" and the apply_framing tool. */
+  async "apply-framing"(svc) {
+    const usage = "usage: reelsaw apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   [--user <email>]";
+    if (!pos[0]) throw new Error(usage);
+    const c = await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]), columns: { id: true, projectId: true, startSec: true, layoutSections: true, layoutOverride: true } });
+    if (!c) throw new Error("clip not found");
+    const at = flag("at") !== undefined ? Number(flag("at")) : undefined;
+    if (at !== undefined && !Number.isFinite(at)) throw new Error(`--at needs seconds\n${usage}`);
+    const { api } = await bumperApi(svc, c.projectId);
+    const t = framingOfClip(c, at);
+    const r = await api.projects.applyFraming({ id: c.projectId, ...t, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
+    console.log(`${c.projectId}: framing ${r.reframe}${r.adjust ? ` ${JSON.stringify(r.adjust)}` : ""}; ${r.cleared} clip(s) lost their own sections; queued ${r.rerendered} render(s)`);
+  },
+
   async templates(svc) {
     const { pos: p, rerender, addMode, layers } = bumperArgs();
     const usage =
@@ -1425,7 +1442,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

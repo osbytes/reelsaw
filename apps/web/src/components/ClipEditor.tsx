@@ -11,7 +11,7 @@ import { scrollWithin } from "../lib/scroll";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, safeZoneWarning, paneCrop, paneRect, paneAspect, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout, type PreviewAssetOverlay, type PaneHit } from "./VerticalPreview";
 import { CropDialog, type CropKey, type CropPaneOption } from "./CropDialog";
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type LayerBlock } from "./Timeline";
-import { Segmented, Modal, Kbd, Select } from "./ui";
+import { Segmented, Modal, Kbd, Select, ConfirmDialog } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
 import { ApplyTemplateDialog, SaveAsTemplateDialog, applyTemplateLocally, existingOnClip } from "./TemplatePicker";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
@@ -59,6 +59,8 @@ import {
   shiftRegion,
   regionLabel,
   layoutSectionSchema,
+  projectDefaultSection,
+  adjustOf,
   FULL_FRAME,
   type ContentRegion,
   type SectionMode,
@@ -207,8 +209,8 @@ const MODE_EXPLAIN: Record<string, string> = {
   center: "Static centre crop.",
 };
 
-/** Forced sections from the DB + auto in the gaps, covering the clip. */
-function initialSections(clip: EditorClip, range: [number, number]): EditorSection[] {
+/** Forced sections from the DB + auto in the gaps, covering the clip; a clip with none gets the project's framing. */
+function initialSections(clip: EditorClip, range: [number, number], settings: ProjectSettings): EditorSection[] {
   if (clip.layoutSections.length) {
     const forced = [...clip.layoutSections].sort((a, b) => a.start - b.start);
     const out: EditorSection[] = [];
@@ -221,8 +223,8 @@ function initialSections(clip: EditorClip, range: [number, number]): EditorSecti
     if (t < range[1] - 0.05) out.push({ start: t, end: range[1], mode: "auto" });
     return normalizeSections(out, range);
   }
-  const legacy = clip.layoutOverride && clip.layoutOverride !== "auto" ? (clip.layoutOverride === "none" ? "fit" : clip.layoutOverride) : "auto";
-  return [{ start: range[0], end: range[1], mode: legacy as SectionMode }];
+  if (clip.layoutOverride && clip.layoutOverride !== "auto") return [{ start: range[0], end: range[1], mode: (clip.layoutOverride === "none" ? "fit" : clip.layoutOverride) as SectionMode }];
+  return [projectDefaultSection(settings, range[0], range[1])];
 }
 
 function parseTime(v: string): number | null {
@@ -491,7 +493,7 @@ export function ClipEditor(props: Props) {
   const projectStyle = useMemo(() => resolveStyle(settings), [settings]);
   const history = useHistory<EditorDoc>(() => ({
     range: [clip.startSec, clip.endSec],
-    sections: initialSections(clip, [clip.startSec, clip.endSec]),
+    sections: initialSections(clip, [clip.startSec, clip.endSec], settings),
     title: clip.title,
     hook: clip.hook,
     caption: clip.caption,
@@ -506,6 +508,8 @@ export function ClipEditor(props: Props) {
   const [bumpersDialog, setBumpersDialog] = useState(false);
   /** the crop dialog: which section and which of its crops it opened on */
   const [cropDialog, setCropDialog] = useState<{ section: number; key: CropKey } | null>(null);
+  /** the section whose framing is about to become the project's (confirm first: every clip re-renders) */
+  const [applyAll, setApplyAll] = useState<number | null>(null);
   const [selectedLayer, setSelectedLayerRaw] = useState<string | null>(null);
   const [selectedBumper, setSelectedBumperRaw] = useState<BumperSlot | null>(null);
   // the text-overlay fonts, from the server image, so the preview shows the real faces
@@ -636,6 +640,7 @@ export function ClipEditor(props: Props) {
   const update = useMutation(trpc.clips.update.mutationOptions());
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
   const updateStyle = useMutation(trpc.projects.updateStyle.mutationOptions());
+  const applyFraming = useMutation(trpc.projects.applyFraming.mutationOptions());
 
   const setRange = (r: [number, number], key?: string) => {
     const a = Math.max(0, Number(r[0].toFixed(2)));
@@ -742,10 +747,14 @@ export function ClipEditor(props: Props) {
     setSections(next);
   };
   const setMode = (i: number, mode: SectionMode) => setSections(sections.map((s, j) => (j === i ? { ...s, mode } : s)));
+  /** Back to what the project gives every clip (automatic, unless a framing was applied to the project). */
   const resetLayout = () => {
-    setSections([{ start: range[0], end: range[1], mode: "auto" }]);
+    setSections([projectDefaultSection(settings, range[0], range[1])]);
     setSelected(null);
   };
+  /** The project's framing as this clip would show it: the baseline a clip without sections of its own compares against. */
+  const projectDefault = projectDefaultSection(settings, range[0], range[1]);
+  const projectFramed = projectDefault.mode !== "auto" || hasAdjust(projectDefault);
 
   // framing at the playhead: forced section → that layout; auto → what the last render detected there.
   const secIdx = Math.max(0, sections.findLastIndex((s) => current >= s.start - 0.02));
@@ -1146,7 +1155,10 @@ export function ClipEditor(props: Props) {
     for (const k of SECTION_FIELDS) if (extra[k] !== undefined) Object.assign(out, { [k]: extra[k] });
     return out;
   };
-  const forcedSections = sections.filter((s) => s.mode !== "auto" || hasAdjust(s)).map(toSaved);
+  const forced = (list: EditorSection[]) => list.filter((s) => s.mode !== "auto" || hasAdjust(s)).map(toSaved);
+  // a timeline that is just the project's framing is stored as no sections at all, so the clip keeps following the project
+  const followsProject = JSON.stringify(forced(sections)) === JSON.stringify(forced([projectDefault]));
+  const forcedSections = followsProject ? [] : forced(sections);
   const sectionsChanged = JSON.stringify(forcedSections) !== JSON.stringify(clip.layoutSections.map(toSaved)) || (!!clip.layoutOverride && !forcedSections.length && clip.layoutOverride !== "auto");
   const styleOverride: StyleOverride = useMemo(() => {
     const o: Record<string, unknown> = {};
@@ -1206,7 +1218,7 @@ export function ClipEditor(props: Props) {
       return false;
     }
   }
-  const busy = update.isPending || updateStyle.isPending;
+  const busy = update.isPending || updateStyle.isPending || applyFraming.isPending;
   const requestExit = () => (changed ? setGuard(true) : onExit());
 
   useUnsavedFlag("clip-editor", changed);
@@ -1507,9 +1519,19 @@ export function ClipEditor(props: Props) {
         <button className="btn-ghost text-xs" disabled={selected === null || selected <= 0} onClick={() => selected !== null && mergeSection(selected, "left")}>
           Merge with previous
         </button>
-        {(sections.length > 1 || sections[0]?.mode !== "auto" || sections[0]?.offsetX) && (
-          <button className="btn-quiet text-xs" onClick={resetLayout}>
-            Reset all to auto
+        {!followsProject && (
+          <button className="btn-quiet text-xs" onClick={resetLayout} title={projectFramed ? "Back to the framing every clip of this project gets" : "Back to automatic framing"}>
+            {projectFramed ? "Use the project framing" : "Reset all to auto"}
+          </button>
+        )}
+        {clipCount > 1 && (
+          <button
+            className="btn-ghost text-xs"
+            disabled={busy}
+            title="Give every clip of this project the framing of the section under the playhead (and new clips too); re-renders them all"
+            onClick={() => setApplyAll(secIdx)}
+          >
+            Use for all {clipCount} clips…
           </button>
         )}
       </div>
@@ -2192,6 +2214,32 @@ export function ClipEditor(props: Props) {
       )}
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
+      <ConfirmDialog
+        open={applyAll !== null}
+        onOpenChange={(o) => !o && setApplyAll(null)}
+        title={`Use this framing for all ${clipCount} clips?`}
+        body={(() => {
+          const s = applyAll !== null ? sections[applyAll] : undefined;
+          const what = s ? `${MODE_LABEL[s.mode] ?? s.mode}${hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}` : "";
+          return `“${what}” becomes the framing of every clip in “${projectTitle}”, replacing any framing set on other clips, and of every clip added later. All ${clipCount} clips re-render.`;
+        })()}
+        confirm="Use for all clips"
+        onConfirm={async () => {
+          const s = applyAll !== null ? sections[applyAll] : undefined;
+          setApplyAll(null);
+          if (!s) return;
+          try {
+            const r = await applyFraming.mutateAsync({ id: projectId, reframe: s.mode, adjust: adjustOf(s) });
+            // this clip now follows the project too: its timeline becomes the one section the project gives it
+            edit({ sections: [{ start: range[0], end: range[1], mode: r.reframe as SectionMode, ...(r.adjust ?? {}) }] });
+            setSelected(null);
+            await qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
+            toast(`Framing set for all ${clipCount} clips · re-rendering`);
+          } catch (err) {
+            toast.error((err as Error).message);
+          }
+        }}
+      />
       {cropDialog && sections[cropDialog.section] && (
         <CropDialog open onOpenChange={(o) => !o && setCropDialog(null)} source={videoEl} srcW={srcW} srcH={srcH} panes={cropPanesFor(cropDialog.section)} initial={cropDialog.key} onApply={(key, region) => applyCrop(cropDialog.section, key, region)} />
       )}

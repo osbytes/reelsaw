@@ -608,10 +608,12 @@ export interface TimelinePiece {
  * Cover [0, duration] with the user's sections (clip-relative) and the default mode in the gaps.
  * Later sections win where they overlap; slivers under 0.1 s are dropped.
  */
-export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode): TimelinePiece[] {
+export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode, defaultAdjust?: SectionAdjust): TimelinePiece[] {
   const clean = sections
     .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), mode: s.mode, adjust: cleanAdjust(s) }))
     .filter((s) => s.end - s.start >= 0.1);
+  // the project's framing (mode and adjustment) covers the time no section claims
+  const fallbackAdjust = cleanAdjust(defaultAdjust);
   const edges = [...new Set([0, duration, ...clean.flatMap((s) => [s.start, s.end])])].sort((a, b) => a - b);
   const out: TimelinePiece[] = [];
   for (let i = 0; i + 1 < edges.length; i++) {
@@ -622,12 +624,12 @@ export function coverTimeline(duration: number, sections: Array<{ start: number;
     const hit = [...clean].reverse().find((s) => s.start <= mid && s.end >= mid);
     const mode = hit?.mode ?? defaultMode;
     const manual = !!hit && hit.mode !== "auto";
-    const adjust = hit?.adjust;
+    const adjust = hit ? hit.adjust : fallbackAdjust;
     const last = out[out.length - 1];
     if (last && last.mode === mode && last.manual === manual && sameAdjust(last.adjust, adjust)) last.end = b;
     else out.push({ start: a, end: b, mode, manual, ...(adjust ? { adjust } : {}) });
   }
-  return out.length ? out : [{ start: 0, end: duration, mode: defaultMode, manual: false }];
+  return out.length ? out : [{ start: 0, end: duration, mode: defaultMode, manual: false, ...(fallbackAdjust ? { adjust: fallbackAdjust } : {}) }];
 }
 
 /**

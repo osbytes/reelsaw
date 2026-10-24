@@ -20,7 +20,7 @@ import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from 
 import { assetVisibleTo } from "./library/visible.js";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 import { listReleasesResult } from "./releases.js";
-import { restorableFor } from "./projects/service.js";
+import { framingOfClip, restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
 
@@ -359,6 +359,14 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("remove_layer_template", TOOLS.remove_layer_template, ({ templateId }) => run(() => api.layerTemplates.remove({ id: templateId })));
   server.registerTool("restore_layer_template", TOOLS.restore_layer_template, ({ templateId }) => run(() => api.layerTemplates.restore({ id: templateId })));
   server.registerTool("apply_layer_template", TOOLS.apply_layer_template, (input) => run(() => api.layerTemplates.applyToClips(input)));
+  server.registerTool("apply_framing", TOOLS.apply_framing, ({ clipId, at, keepOverrides, rerender }) =>
+    run(async () => {
+      // the project procedure checks ownership; the clip is only read for its framing
+      const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId), columns: { projectId: true, startSec: true, layoutSections: true, layoutOverride: true } });
+      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+      return api.projects.applyFraming({ id: c.projectId, ...framingOfClip(c, at), keepOverrides, rerender });
+    }),
+  );
 
   server.registerTool(
     "set_default_bumper",

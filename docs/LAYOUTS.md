@@ -62,6 +62,14 @@ menu (Set crop…: a box over the whole source frame to drag, resize or draw, st
 the numbers beside it; afterwards a drag on the pane moves the fixed crop), the timeline's section menu
 and the section's Crop… button. See [specs/editor-tracks.md](specs/editor-tracks.md).
 
+The same fields exist once per project: `settings.reframe` (the mode) and `settings.reframeAdjust` (the nudge,
+subject or crop). `coverTimeline` gives them to every stretch of a clip no section of its own claims, and the
+editor shows a clip without sections as that one section. "Use for all N clips…" on the Framing tab
+(`projects.applyFraming`, `apply_framing`, `reelsaw apply-framing`) copies one section there, clears the other
+clips' own sections and re-renders them: the way to frame a slide deck with a webcam tile once for the whole
+video. Editing the timeline of such a clip stores the clip's own sections again; "Use the project framing" takes
+them back.
+
 ## 2. How the decision is made
 
 **Sampling** (all in `renderClip`, `render.ts`). One ffmpeg pass decodes the clip at 4 fps, 320x240,
