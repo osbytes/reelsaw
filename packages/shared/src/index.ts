@@ -3,6 +3,10 @@ import { z } from "zod";
 /** Canonical source repository (app UI, emails, update checks). */
 export const REPO_URL = "https://github.com/osbytes/reelsaw";
 
+/** Marketing site; the changelog lives at `CHANGELOG_URL`. */
+export const SITE_URL = "https://reelsaw.com";
+export const CHANGELOG_URL = `${SITE_URL}/releases`;
+
 // ---------- Project lifecycle ----------
 
 export const PROJECT_STATUSES = [
@@ -1151,3 +1155,4 @@ export * from "./tokens.js";
 export * from "./billing.js";
 export * from "./accounts.js";
 export * from "./captions-format.js";
+export * from "./releases.js";

@@ -37,6 +37,7 @@ stay the same animation.
 
 ## SEO
 
+- `/releases` is the changelog: GitHub releases plus a 90-day commit heatmap (ISR hourly). `/releases/feed.xml` is the RSS. Footer, the home-page "Latest release" button, and the app's What's new / version links open this page.
 - `app/layout.tsx`: title template, description, keywords, canonical, Open Graph and Twitter cards,
   robots directives. `NEXT_PUBLIC_SITE_URL` (default `https://reelsaw.com`) is the `metadataBase`.
 - Open Graph images (Next.js file convention, built with `next/og` via `lib/og.tsx`):

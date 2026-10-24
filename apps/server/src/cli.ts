@@ -9,6 +9,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
+ *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
  *   users                                   list accounts: role, status, sign-up date
  *   approve <email>                         approve a waiting account (when email is off or the admin is locked out)
  *   make-admin <email>                      promote an account to admin (approves it first if needed)
@@ -156,6 +157,7 @@ import { backfillAssetRefs } from "./library/refs.js";
 import { libraryProviders } from "./library/import.js";
 import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
+import { listReleasesResult } from "./releases.js";
 import { deleteClip, deletedProjects, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
@@ -227,6 +229,25 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (s.available === null) console.log(`\nNot a release build, so the two cannot be compared. To update: ${s.upgrade.command}`);
     else if (s.available) console.log(`\nUpdate available. ${s.upgrade.note}\n  ${s.upgrade.command}\nSee ${s.upgrade.docsUrl}`);
     else console.log("\nUp to date.");
+  },
+  /** Published versions from GitHub (releases.ts / list_releases). */
+  async releases(svc) {
+    const limitRaw = flag("limit");
+    const limit = limitRaw ? Number(limitRaw) : 20;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("--limit must be an integer 1-100");
+    const s = await svc.releases.get();
+    const listed = listReleasesResult(s, { limit });
+    if (args.includes("--json")) return void console.log(JSON.stringify(listed, null, 2));
+    if (listed.error && !listed.releases.length) return void console.log(`releases  unknown: ${listed.error}`);
+    console.log(`${listed.total} published  ·  ${listed.commits ?? 0} commits in ${listed.windowDays ?? 90} days${listed.truncated ? "  (truncated)" : ""}${listed.error ? `  (stale: ${listed.error})` : ""}`);
+    table(
+      listed.releases.map((r) => ({
+        version: r.version,
+        date: r.publishedAt.slice(0, 10),
+        kind: r.kinds.join(",") || (r.prerelease ? "pre" : ""),
+        summary: r.summary,
+      })),
+    );
   },
   /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
   async users(svc) {
@@ -1402,7 +1423,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

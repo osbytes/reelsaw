@@ -193,7 +193,7 @@ export default function HomePage() {
                 <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-primary h-10 px-4 text-sm">
                   <GitHubMark /> Star on GitHub
                 </a>
-                <a href={SITE.releases} target="_blank" rel="noreferrer" className="btn-ghost h-10 px-4 text-sm">
+                <a href={SITE.changelog} className="btn-ghost h-10 px-4 text-sm">
                   Latest release <ArrowRight className="h-4 w-4" aria-hidden />
                 </a>
               </div>

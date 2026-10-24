@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -13,7 +13,7 @@ import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { ResetPasswordPage } from "./pages/ResetPassword";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
 import { initOtel } from "./lib/otel";
-import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
+import { BILLING_PATH, CHANGELOG_URL, REPO_URL } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
@@ -96,6 +96,11 @@ function Avatar() {
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
             <SettingsIcon className="h-4 w-4" /> Settings
             <UpdateMenuHint />
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" asChild>
+            <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">
+              <Sparkles className="h-4 w-4" /> What's new
+            </a>
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item sm:hidden" onSelect={toggleTheme}>
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />} {theme === "dark" ? "Light theme" : "Dark theme"}

@@ -16,7 +16,7 @@ import { ago } from "../lib/time";
 import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
-import { formatTime } from "@reelsaw/shared";
+import { CHANGELOG_URL, formatTime } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -355,6 +355,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       { key: "a-templates", group: "Actions", icon: <Layers className="h-4 w-4" />, label: "Go to templates", hint: "layer templates for any clip length", run: go(() => nav("/templates")) },
       { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
+      { key: "a-releases", group: "Actions", icon: <Sparkles className="h-4 w-4" />, label: "What's new", hint: "reelsaw.com/releases", run: go(() => window.open(CHANGELOG_URL, "_blank", "noopener,noreferrer")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
     ];

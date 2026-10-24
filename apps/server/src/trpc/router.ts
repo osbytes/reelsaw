@@ -344,6 +344,14 @@ const headRouter = router({
     }),
   }),
 
+  /**
+   * GitHub releases and the 90-day commit heatmap (releases.ts). Signed-in; `list_releases` and
+   * `reelsaw releases` share this. The app UI links to reelsaw.com/releases. Cached for an hour.
+   */
+  releases: router({
+    get: protectedProcedure.query(({ ctx }) => ctx.svc.releases.get()),
+  }),
+
   /** The signed-in account, also while waiting for approval or suspended. */
   me: router({
     get: signedInProcedure.query(async ({ ctx }) => {

@@ -8,7 +8,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
     links: [
       ...(SITE.hosted ? [{ href: "/pricing", label: "Pricing" }] : []),
       { href: SITE.github, label: "Source on GitHub" },
-      { href: SITE.releases, label: "Releases" },
+      { href: SITE.changelog, label: "Releases" },
       { href: SITE.docker, label: "Docker image (GHCR)" },
       { href: SITE.license, label: "License (AGPL-3.0)" },
     ],

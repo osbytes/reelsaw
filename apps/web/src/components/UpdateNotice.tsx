@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { CHANGELOG_URL } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { ago } from "../lib/time";
@@ -87,8 +88,11 @@ export function UpdateBanner() {
       <div className="flex flex-wrap items-baseline gap-x-2">
         <b>Reelsaw {u.latest.version} is available</b>
         <span className="text-ink2">you run {u.current}</span>
+        <a href={`${CHANGELOG_URL}#${u.latest.version.startsWith("v") ? u.latest.version : `v${u.latest.version}`}`} target="_blank" rel="noreferrer" className="text-acc-text">
+          What's new
+        </a>
         <a href={u.latest.url} target="_blank" rel="noreferrer" className="text-acc-text">
-          Release notes ↗
+          GitHub ↗
         </a>
       </div>
       <p className="mt-1 text-ink2">{u.upgrade.note}</p>

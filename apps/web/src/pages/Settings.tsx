@@ -15,7 +15,7 @@ import { LogLevelSection } from "../components/LogLevelSection";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { UpdateBanner, UpdateStatusLine } from "../components/UpdateNotice";
 import { ACCESS_FIELDS, InstanceSettingsGroup, LIBRARY_FIELDS, LIMIT_FIELDS, OPERATIONS_FIELDS, PIPELINE_FIELDS, RETENTION_FIELDS } from "../components/InstanceSettings";
-import { BILLING_PATH, REPO_URL } from "@reelsaw/shared";
+import { BILLING_PATH, CHANGELOG_URL, REPO_URL } from "@reelsaw/shared";
 
 // enterprise edition (src/ee, its own licence): the chunk is only requested when me.get says billing runs here
 const BillingSection = lazy(() => import("../ee/billing/BillingSection"));
@@ -63,7 +63,9 @@ export function SettingsPage() {
               <span className="min-h-5 font-mono text-xs text-ink3">
                 {status.data ? (
                   <>
-                    Reelsaw {status.data.version}
+                    <a href={CHANGELOG_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
+                      Reelsaw {status.data.version}
+                    </a>
                     {" · "}
                     <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-ink3 no-underline hover:text-acc-text">
                       github.com/osbytes/reelsaw

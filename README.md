@@ -439,6 +439,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
+| `list_releases` | Published Reelsaw versions from GitHub (reelsaw.com/releases): tag, date, a short summary and the change notes. |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, disk (free/total MB; -1 free means unmeasurable), GPU, render slots, the queues it listens on, and the jobs it last reported. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
@@ -467,6 +468,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | Command | What it does |
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
+| `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
 | `reelsaw users` | list accounts: role, status, sign-up date |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |

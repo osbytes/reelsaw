@@ -13,7 +13,7 @@ import { settingsPatchSchema } from "./instance-settings.js";
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
-- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
+- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
@@ -381,6 +381,16 @@ export const TOOLS = {
     title: "Check for update",
     description: "Admins only: is a newer Reelsaw published? Returns { current, latest: { version, url, publishedAt }, available, checkedAt, error, upgrade: { command, note, docsUrl } }; available is null when the running build is not a release (from source). The server checks every few hours; refresh: true asks GitHub again now.",
     inputSchema: { refresh: z.boolean().default(false).describe("true = ask GitHub now instead of returning the last answer (at most once a minute)") },
+    annotations: { readOnlyHint: true },
+  },
+  list_releases: {
+    title: "List releases",
+    description:
+      "Published Reelsaw versions from GitHub (reelsaw.com/releases): tag, date, a short summary and the change notes. Returns { releases, total, windowDays, commits, commitDays, releaseDays, truncated, fetchedAt, sourceUrl, error }; pass tag for one version. Cached for an hour.",
+    inputSchema: {
+      limit: z.number().int().min(1).max(100).default(20).describe("How many releases to return (1-100, default 20, newest first)"),
+      tag: z.string().min(1).max(40).optional().describe("Only this tag or version (v0.19.1 or 0.19.1)"),
+    },
     annotations: { readOnlyHint: true },
   },
   get_instance_settings: {
