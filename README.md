@@ -500,7 +500,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
-| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies) with status |
+| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
@@ -692,7 +692,7 @@ Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay d
 
 ### Eval
 
-Regression evals live in one runner with pluggable suites (<!-- generated:suite-names -->`selection`, `framing`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
+Regression evals live in one runner with pluggable suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->); fixtures are small and in git, large media is fetched into a gitignored cache, baselines are versioned and a run fails on regressions. See [docs/EVALS.md](docs/EVALS.md), including how to turn a new bug into a case.
 
 ```bash
 pnpm eval                 # all suites

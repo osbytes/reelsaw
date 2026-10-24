@@ -59,7 +59,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           regression case for `pnpm eval:cuts`
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
- *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies) with status
+ *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status
  *   storage [sweep [--dry-run]]            disk use: unique, scratch-only, duplicate-source, expired-but-present bytes;
  *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems

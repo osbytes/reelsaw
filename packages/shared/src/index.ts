@@ -807,8 +807,8 @@ export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 
 export const transcriptFlagSchema = z.object({
   id: z.string(),
-  /** entity = misheard name; disfluency = filler / repetition / false start to delete */
-  kind: z.enum(["entity", "disfluency"]).default("entity"),
+  /** entity = misheard name; disfluency = filler / repetition / false start to delete; loop = ASR decoder-loop collapse */
+  kind: z.enum(["entity", "disfluency", "loop"]).default("entity"),
   /** for disfluencies: which class the detector assigned */
   /** manual = the user marked these words to cut from the transcript */
   subkind: z.enum(["filler", "repetition", "repair", "manual"]).optional(),

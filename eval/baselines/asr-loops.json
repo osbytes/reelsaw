@@ -1,0 +1,16 @@
+{
+  "updatedAt": "2026-10-24T19:04:20.560Z",
+  "cases": {
+    "whisper-no-loop": true,
+    "whisper-prompt-loop": true,
+    "keep-emphatic-no": true,
+    "keep-think-think": true,
+    "keep-had-had": true,
+    "keep-come-on-x3": true,
+    "thank-you-timestamp-pile": true,
+    "phrase-segment-no-loop": true,
+    "keep-emphatic-yes": true,
+    "phrase-segment-prompt-loop": true
+  },
+  "metrics": {}
+}
