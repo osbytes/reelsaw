@@ -425,16 +425,16 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `update_asset` | Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). |
 | `remove_asset` | Remove one of your uploads from the library and from your defaults. |
 | `restore_asset` | Bring one of your removed library items back (the id from remove_asset or `reelsaw library list`); restoring an item that is not removed changes nothing. |
-| `asset_usage` | The projects and clips that use a library item, as intro, outro, overlay or music (clips a re-analyze replaced are left out), and the layer templates that name it. |
-| `list_layer_templates` | Your layer templates: sets of layers whose timing fits any clip length (head, tail, fill or relative). |
-| `save_layer_template` | Create a template from a clip's layers (`clipId`) or from layers with timings (`layers`). |
-| `update_layer_template` | Rename a template and/or replace its layers. |
-| `remove_layer_template` | Remove a template (restorable for 30 days); it also leaves your project defaults. |
-| `restore_layer_template` | Bring back a template removed in the last 30 days. |
-| `apply_layer_template` | Write a template's layers onto clips of a project (replace or add), optionally re-rendering them. Clips keep their own copy afterwards. |
+| `asset_usage` | Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. |
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
 | `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
 | `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
+| `list_layer_templates` | Your layer templates (sets of layers that fit any clip length). |
+| `save_layer_template` | Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge) or layers (each with a timing, see list_layer_templates). |
+| `update_layer_template` | Rename a layer template and/or replace its layers (the whole list, each with a timing); a field left out is untouched. |
+| `remove_layer_template` | Remove a template and drop it from your project defaults; clips that already got its layers keep them. |
+| `restore_layer_template` | Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). |
+| `apply_layer_template` | Write a template's layers onto clips of one project (up to 200 clipIds, or all), fitted to each clip's length. |
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. |
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. |
@@ -509,7 +509,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw clip-layers <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop\|--no-loop] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] \| --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck\|--no-duck] [--loop\|--no-loop] \| --remove <layerId> \| --clear] [--rerender]` | everything laid over or played under a clip, one list (source seconds, x/y/w/size as fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at full level, anything else music (ducked, faded, looped); with no change flag it lists them |
-| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| remove <id> \| restore <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers timed from the start, the end, the whole clip or as fractions, so they fit any clip length; `save` builds one from a clip, `apply` writes it onto clips (all of the project's without clip ids; `--add` keeps their own layers, default replaces; `--rerender` re-renders finished ones) |
+| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| remove <id> \| restore <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative); `save` builds one from a clip's layers, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
