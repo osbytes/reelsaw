@@ -141,7 +141,7 @@ the long forms.
 | place | what | why there |
 |---|---|---|
 | canvas header (above the preview) | framing mode of the section under the playhead (with what Auto chose), crop status + Reset, safe zones / platform / burned-in text | they describe or change the frame being looked at (OpusClip's `Layout: Fit · Tracker: OFF` strip) |
-| on the preview | drag a pane, drag / resize a layer, drag the caption or hook | direct manipulation of what is drawn |
+| on the preview | drag a pane, drag / resize a layer, drag the caption or hook; double-click a text layer to retype it in place; right-click a layer for its menu (edit text, centre, whole clip, front / back, copy, duplicate, remove) | direct manipulation of what is drawn |
 | timeline bar | Split (`⌘B`), Remove (`Delete`) on the left; transport, time, `[ In` / `Out ]` in the centre; snap toggle (`S`), zoom, Fit on the right | they act on the tracks or the playhead; nothing additive, nothing about the view |
 | on the lanes | `+` on the Layers lane (image or video / text / sound / browse library), double-click the lane, right-click; intro / outro blocks and ghost chips on the clip lane; the clip block's length label opens the in / out editor (fields, ±1 s, ±0.1 s) | things are added and edited where they will show |
 | inspector tabs | Captions, Framing (per section, per pane), Layers (per item), Details (title, hook, post caption, hashtags), Cuts, Transcript | long forms, lists, explanations |

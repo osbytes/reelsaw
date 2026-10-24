@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import { textFontFamily } from "../lib/fonts";
 import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
 
@@ -118,8 +119,16 @@ interface Props {
   assetOverlays?: PreviewAssetOverlay[];
   selectedOverlay?: string | null;
   onOverlaySelect?: (id: string | null) => void;
-  /** drag / resize of the selected overlay (`w` for an asset, `size` for text); `key` groups one gesture into one undo step */
-  onOverlayChange?: (id: string, patch: { x?: number; y?: number; w?: number; size?: number }, key: string) => void;
+  /**
+   * drag / resize of the selected overlay (`w` for an asset, `size` for text), or its words retyped on the canvas
+   * (double-click a text layer); `key` groups one gesture into one undo step
+   */
+  onOverlayChange?: (id: string, patch: { x?: number; y?: number; w?: number; size?: number; text?: string }, key: string) => void;
+  /**
+   * the right-click menu of an overlay: the editor's actions as `OverlayMenuItem`s; `editText` opens the inline text
+   * editor on a text layer (right-clicking selects the layer first)
+   */
+  overlayMenu?: (o: PreviewAssetOverlay, ctx: { editText: () => void }) => ReactNode;
   /** pause overlay videos with the clip (GIFs as <img> keep looping) */
   playing?: boolean;
   /** a still shown instead of the video (the intro/outro poster while its block is selected) with its tag */
@@ -155,8 +164,70 @@ function OverlayVideo({ src, loop, offsetSec, playing, onSize }: { src: string; 
   return <video ref={ref} src={src} muted playsInline autoPlay={loop} loop={loop} draggable={false} className="pointer-events-none h-full w-full object-contain" onLoadedMetadata={(e) => onSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)} />;
 }
 
+/** One row of an overlay's right-click menu (the editor supplies them through `overlayMenu`). */
+export function OverlayMenuItem({ icon, label, kbd, disabled, onSelect }: { icon?: ReactNode; label: ReactNode; kbd?: string; disabled?: boolean; onSelect: () => void }) {
+  return (
+    <ContextMenu.Item className="menu-item" disabled={disabled} onSelect={onSelect}>
+      {icon}
+      {label}
+      {kbd && <span className="kbd ml-auto">{kbd}</span>}
+    </ContextMenu.Item>
+  );
+}
+export function OverlayMenuSeparator() {
+  return <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />;
+}
+
+/** A text layer's words, edited in place on the canvas: Enter or clicking away keeps them, Escape puts the old ones back. */
+function InlineText({ text, onDone }: { text: string; onDone: (next: string | null) => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const done = useRef(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+  }, []);
+  const finish = (next: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(next);
+  };
+  return (
+    <span
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      data-native-undo
+      className="cursor-text outline-none"
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(ref.current?.textContent ?? null);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(null);
+        }
+      }}
+      onBlur={() => finish(ref.current?.textContent ?? null)}
+    >
+      {text}
+    </span>
+  );
+}
+
 const FONT = `"DejaVu Sans", Verdana, system-ui, sans-serif`;
 const SNAP = 0.03;
+/** a text layer's line, like the schema: one line, 1–120 characters */
+const TEXT_MAX = 120;
 
 export type Platform = "tiktok" | "shorts" | "reels";
 export const PLATFORM_NAME: Record<Platform, string> = { tiktok: "TikTok", shorts: "Shorts", reels: "Reels" };
@@ -181,10 +252,17 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
+  /** the text layer being retyped on the canvas */
+  const [editing, setEditing] = useState<string | null>(null);
+  /** the last overlay pressed and when, to tell a double-click apart (see onOverlayStart) */
+  const lastDown = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  useEffect(() => {
+    if (editing && !assetOverlays.some((o) => o.id === editing)) setEditing(null);
+  }, [editing, assetOverlays]);
   const [naturalAspect, setNaturalAspect] = useState<Record<string, number>>({});
   const [drag, setDrag] = useState<null | "caption" | "hook" | { pan: 0 | 1 } | { overlay: string; mode: "move" | "size"; key: string; grab: { x: number; y: number }; orig: { x: number; y: number; w: number }; text: boolean }>(null);
   const panX = useRef(0);
@@ -259,9 +337,17 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
     setDrag({ pan: pane });
   }
   function onOverlayStart(o: PreviewAssetOverlay, mode: "move" | "size", e: React.PointerEvent) {
-    if (!onOverlayChange || e.button !== 0 || !boxRef.current) return;
+    if (!onOverlayChange || e.button !== 0 || !boxRef.current || editing === o.id) return;
     e.preventDefault();
     e.stopPropagation();
+    // preventDefault on pointerdown stops the browser's click / dblclick events, so a double-click is counted here
+    if (mode === "move" && o.kind === "text" && lastDown.current.id === o.id && e.timeStamp - lastDown.current.at < 400) {
+      lastDown.current = { id: "", at: 0 };
+      onOverlaySelect?.(o.id);
+      setEditing(o.id);
+      return;
+    }
+    lastDown.current = { id: o.id, at: e.timeStamp };
     boxRef.current.setPointerCapture(e.pointerId);
     onOverlaySelect?.(o.id);
     const r = boxRef.current.getBoundingClientRect();
@@ -339,14 +425,31 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
       {assetOverlays.map((o) => {
         const sel = o.id === selectedOverlay;
         const name = o.kind === "text" ? `“${o.text}”` : o.name;
-        const handle = sel && onOverlayChange && (
+        const isEditing = editing === o.id;
+        const handle = sel && onOverlayChange && !isEditing && (
           <span className="absolute bottom-0.5 right-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc" onPointerDown={(e) => onOverlayStart(o, "size", e)} aria-label={`Resize ${name}`} />
         );
-        const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
+        const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${isEditing ? "cursor-text" : onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
+        const hint = onOverlayChange ? `${name} · drag to move, corner to resize${o.kind === "text" ? ", double-click to edit" : ""}${overlayMenu ? ", right-click for more" : ""}` : name;
+        // the editor's right-click menu around the block; right-clicking selects the layer first
+        const withMenu = (node: ReactNode) =>
+          overlayMenu ? (
+            <ContextMenu.Root key={o.id} modal={false}>
+              <ContextMenu.Trigger asChild>{node}</ContextMenu.Trigger>
+              <ContextMenu.Portal>
+                <ContextMenu.Content className="menu z-[60] w-[220px]" collisionPadding={8}>
+                  <ContextMenu.Label className="truncate px-2.5 py-1 text-[11px] font-semibold text-ink3">{name}</ContextMenu.Label>
+                  {overlayMenu(o, { editText: () => o.kind === "text" && !!onOverlayChange && setEditing(o.id) })}
+                </ContextMenu.Content>
+              </ContextMenu.Portal>
+            </ContextMenu.Root>
+          ) : (
+            node
+          );
         if (o.kind === "text") {
           // same font and plate as the captions, so the preview matches the ASS event the renderer writes
           const px = h * o.size;
-          return (
+          return withMenu(
             <div
               key={o.id}
               className={`${frame} whitespace-nowrap text-center font-bold leading-tight`}
@@ -361,11 +464,23 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
                 ...(o.box ? { background: "rgba(0,0,0,0.63)", padding: `${px * 0.12}px ${px * 0.25}px` } : { WebkitTextStroke: `${Math.max(1, px * 0.06)}px #000`, paintOrder: "stroke fill", textShadow: `0 ${px * 0.04}px ${px * 0.06}px rgba(0,0,0,0.5)` }),
               }}
               onPointerDown={(e) => onOverlayStart(o, "move", e)}
-              title={onOverlayChange ? `${name} · drag to move, corner to resize` : name}
+              onContextMenu={() => onOverlaySelect?.(o.id)}
+              title={isEditing ? undefined : hint}
             >
-              {o.text}
+              {isEditing ? (
+                <InlineText
+                  text={o.text}
+                  onDone={(next) => {
+                    setEditing(null);
+                    const t = next?.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
+                    if (t && t !== o.text) onOverlayChange?.(o.id, { text: t }, `ov-text:${o.id}:${Date.now()}`);
+                  }}
+                />
+              ) : (
+                o.text
+              )}
               {handle}
-            </div>
+            </div>,
           );
         }
         const aspect = o.aspect > 0.05 ? o.aspect : (naturalAspect[o.id] ?? 1);
@@ -376,15 +491,15 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
           const next = w / h;
           setNaturalAspect((cur) => (Math.abs((cur[o.id] ?? 0) - next) < 0.01 ? cur : { ...cur, [o.id]: next }));
         };
-        return (
-          <div key={o.id} className={frame} style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }} onPointerDown={(e) => onOverlayStart(o, "move", e)} title={onOverlayChange ? `${name} · drag to move, corner to resize` : name}>
+        return withMenu(
+          <div key={o.id} className={frame} style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }} onPointerDown={(e) => onOverlayStart(o, "move", e)} onContextMenu={() => onOverlaySelect?.(o.id)} title={hint}>
             {o.video ? (
               <OverlayVideo src={o.url} loop={!!o.loop} offsetSec={o.offsetSec ?? 0} playing={playing && !still} onSize={noteSize} />
             ) : (
               <img src={o.url} alt="" draggable={false} className="pointer-events-none h-full w-full object-contain" onLoad={(e) => noteSize(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />
             )}
             {handle}
-          </div>
+          </div>,
         );
       })}
       {still && (
