@@ -1,11 +1,11 @@
 {
   "kind": "content",
-  "note": "\"Step 3: Everday Spending=Real Dollars\" card on the left for 12.8 s (source 1:56-2:09), then the speaker alone, then a full-screen dark app table with no face (from 2:17). Real render (clip 3059ac7e): the vote dropped for 6.75-10 s (share 0.00, divider still at x 0.495 with share 1.00, text none), so the card flickered stack/face/stack, and 24.5-30.75 s (the table) came out as a left-31% stack. Expected: one continuous stack 0-12.8, face to 21.2, then fit. The committed samples reproduce the render's gap by hand (my host decode did not lose the text): text removed and the divider softened to 0.35 for 6.75-10 s.",
+  "note": "\"Step 3: Everday Spending=Real Dollars\" card on the left for 12.8 s (source 1:56-2:09), then the speaker alone, then a full-screen dark app table with no face (from 2:17). Real render (clip 3059ac7e): the vote dropped for 6.75-10 s (share 0.00, divider still at x 0.495 with share 1.00, text none), so the card flickered stack/face/stack, and 24.5-30.75 s (the table) came out as a left-31% stack. Expected: one continuous stack 0-12.8, face to 21.2, then fit, then the speaker back full-frame for the last 1.1 s after the cut at 40.66 (a detected cut bounds a piece down to MIN_SHOT_SEC). The committed samples reproduce the render's gap by hand (my host decode did not lose the text): text removed and the divider softened to 0.35 for 6.75-10 s.",
   "source": { "id": "budgeting-116-158", "url": "https://www.youtube.com/watch?v=2RWHmPYsAvs", "start": 116.37, "end": 158.16, "sha256": "82e3876c91a0c3967860ce9e8bee78f32d3e84929ac2b0b0051d7737ce508608", "localPath": "/data/projects/0d8a64e2-ad5f-445f-8408-d0eddb3d2714/source.mp4" },
   "start": 0,
   "end": 41.79,
   "srcW": 1920,
   "srcH": 1080,
   "sceneCuts": [12.8, 21.16, 40.66],
-  "expect": { "layout": "stack", "content": { "side": "left", "minWidth": 0.25 }, "segments": ["stack", "face", "fit"], "edges": [12.8, 21.2] }
+  "expect": { "layout": "stack", "content": { "side": "left", "minWidth": 0.25 }, "segments": ["stack", "face", "fit", "face"], "edges": [12.8, 21.2, 40.7] }
 }

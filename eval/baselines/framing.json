@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-24T19:17:46.822Z",
+  "updatedAt": "2026-10-24T19:45:52.619Z",
   "acceptedRegressions": [
     {
       "metric": "passRate",
@@ -20,7 +20,7 @@
     "shots-4x3-interview-cutaways": true,
     "shots-couch-multicam": true,
     "shots-pov-hands-no-face": false,
-    "shots-screencast-corner-webcam": false,
+    "shots-screencast-corner-webcam": true,
     "shots-vertical-source": true,
     "split-couch-two-shot": true,
     "track-4x3-interview": true,
@@ -30,7 +30,7 @@
   },
   "metrics": {
     "worstSpeakerOffset": {
-      "value": 0.088,
+      "value": 0.082,
       "better": "lower",
       "tolerance": 0.03
     },
@@ -40,11 +40,11 @@
       "tolerance": 6
     },
     "passRate": {
-      "value": 0.89,
+      "value": 0.95,
       "better": "higher"
     },
     "worstShotAgreement": {
-      "value": 0.796,
+      "value": 0.77,
       "better": "higher",
       "tolerance": 0.05
     },

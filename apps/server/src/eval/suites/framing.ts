@@ -267,7 +267,8 @@ export const framingSuite: Suite = {
         continue;
       }
       if (c.kind === "split") {
-        const d = decideLayout(samples, lcfg, []);
+        // as in a render: a printed face on the wall is not a third person
+        const d = decideLayout(dropStaticFaces(samples).samples, lcfg, []);
         const halfAspect = 1080 / 960;
         const checks: Record<string, number | string> = { layout: d.layout };
         const fails: string[] = [];
