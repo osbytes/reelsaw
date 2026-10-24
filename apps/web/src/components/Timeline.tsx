@@ -62,7 +62,7 @@ export function packLayerRows(blocks: LayerBlock[]): Map<string, number> {
 
 export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"). */
-export const layoutLabel = (d: { layout: string; content?: ContentRegion }) => (d.layout === "stack" ? contentLabel(d.content) : MODE_LABEL[d.layout]);
+export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion }) => (d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[d.layout]);
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;

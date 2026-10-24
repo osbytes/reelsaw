@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { textFontFamily } from "../lib/fonts";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -16,6 +16,8 @@ export interface Framing {
   size2?: number;
   /** "stack": the region shown on top (absent = the whole frame) */
   content?: ContentRegion;
+  /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone */
+  tile?: ContentRegion;
 }
 export interface PreviewWord {
   text: string;
@@ -77,6 +79,11 @@ export function paneAt(f: Framing, srcW: number, srcH: number, yFrac: number): 0
 /** The crop window of a pane as fractions of the source: how far the picture moves per unit of drag, and how far a face can be nudged before it leaves the pane. */
 export function paneCrop(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { w: number; h: number } {
   const halfAspect = 9 / 8; // a split / stack half is 1080x960
+  if (f.layout === "stack" && f.tile) {
+    // the pane is the tile itself: a drag has nothing to move
+    const c = tileCrop(srcW, srcH, f.tile);
+    return { w: c.w / srcW, h: c.h / srcH };
+  }
   if (f.layout === "split") {
     const c = speakerCrop(srcW, srcH, halfAspect, pane === 0 ? { cy: f.cy, size: f.size ?? 0.3 } : { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 });
     return { w: c.w / srcW, h: c.h / srcH };
@@ -671,22 +678,29 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       return;
     }
     case "stack": {
+      // a source rectangle fitted at its own aspect over a blurred copy of itself, inside a pane (mirrors FIT_CHAIN / tilePane)
+      const fitted = (c: { x: number; y: number; w: number; h: number }, py: number, ph: number) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, py, W, ph);
+        ctx.clip();
+        const cover = Math.max(W / c.w, ph / c.h);
+        ctx.filter = "blur(14px)";
+        draw(c.x, c.y, c.w, c.h, (W - c.w * cover) / 2, py + (ph - c.h * cover) / 2, c.w * cover, c.h * cover);
+        ctx.filter = "none";
+        const fit = Math.min(W / c.w, ph / c.h);
+        draw(c.x, c.y, c.w, c.h, (W - c.w * fit) / 2, py + (ph - c.h * fit) / 2, c.w * fit, c.h * fit);
+        ctx.restore();
+      };
       if (!isFullFrame(f.content)) {
         // mirrors layoutFilter: the content region fitted over a blurred copy of itself on top, speaker below
         const halfH = H / 2;
         const g = contentStackGeometry(srcW, srcH, f.content!, { cy: f.cy, size: f.size ?? 0.3 }, W / halfH, avoid);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, W, halfH);
-        ctx.clip();
-        const c = g.content;
-        const cover = Math.max(W / c.w, halfH / c.h);
-        ctx.filter = "blur(14px)";
-        draw(c.x, c.y, c.w, c.h, (W - c.w * cover) / 2, (halfH - c.h * cover) / 2, c.w * cover, c.h * cover);
-        ctx.filter = "none";
-        const fit = Math.min(W / c.w, halfH / c.h);
-        draw(c.x, c.y, c.w, c.h, (W - c.w * fit) / 2, (halfH - c.h * fit) / 2, c.w * fit, c.h * fit);
-        ctx.restore();
+        fitted(g.content, 0, halfH);
+        if (f.tile) {
+          fitted(tileCrop(srcW, srcH, f.tile), halfH, halfH);
+          return;
+        }
         const zx = clamp(f.cx * srcW - g.zoom.w / 2, g.free.lo, g.free.hi - g.zoom.w);
         draw(zx, g.zoom.y, g.zoom.w, g.zoom.h, 0, halfH, W, halfH);
         return;
@@ -694,6 +708,11 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       const topH = (W * srcH) / srcW;
       const botH = H - topH;
       draw(0, 0, srcW, srcH, 0, 0, W, topH);
+      if (f.tile) {
+        // a webcam tile: the bottom pane is the tile alone, not a face-sized crop that would reach past it
+        fitted(tileCrop(srcW, srcH, f.tile), topH, botH);
+        return;
+      }
       const z = speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }, avoid);
       draw(cropX(srcW, z.w, f.cx), z.y, z.w, z.h, 0, topH, W, botH);
       return;

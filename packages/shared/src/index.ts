@@ -558,6 +558,8 @@ export interface DetectedSegment {
   track2?: Array<[number, number]>;
   /** "stack" only: the part of the frame shown on top (absent = the whole frame) */
   content?: ContentRegion;
+  /** "stack" only: the speaker is a webcam tile at these bounds, and the bottom pane shows just the tile (`tileCrop`) */
+  tile?: ContentRegion;
 }
 
 /**
@@ -1051,10 +1053,36 @@ export function contentSide(c: ContentRegion): "left" | "right" | null {
   return null;
 }
 /** "Stack" for the whole frame, "Stack · content left 50%" for a region. */
-export function contentLabel(c: ContentRegion | undefined | null): string {
-  if (isFullFrame(c)) return "Stack";
+export function contentLabel(c: ContentRegion | undefined | null, tile?: ContentRegion | null): string {
+  const cam = tile ? " · webcam" : "";
+  if (isFullFrame(c)) return `Stack${cam}`;
   const side = contentSide(c!);
-  return `Stack · content ${side ?? "inset"} ${Math.round((c!.x2 - c!.x1) * 100)}%`;
+  return `Stack · content ${side ?? "inset"} ${Math.round((c!.x2 - c!.x1) * 100)}%${cam}`;
+}
+
+/**
+ * The speaker pane of a stack when the speaker is a webcam tile (a picture-in-picture box over a
+ * screen share or in a meeting layout): the crop is the tile itself, nothing around it, and the pane
+ * shows it at its own aspect over a blurred copy (the way `fit` and a content region are shown).
+ * The tile is small, so a crop sized to the face (`speakerCrop`) would reach past it into the slide,
+ * the black band or a name plate; a tile a quarter of the frame wide upscaled four times is soft,
+ * but it is the speaker only. Source pixels, even sizes, kept inside the frame.
+ */
+/** `r` moved by (dx, dy) (normalized), as far as it stays inside the frame: a nudge of a tile pane. */
+export function shiftRegion(r: ContentRegion, dx: number, dy: number): ContentRegion {
+  const r3 = (v: number) => Number(v.toFixed(3));
+  const mx = Math.max(-r.x1, Math.min(1 - r.x2, dx));
+  const my = Math.max(-r.y1, Math.min(1 - r.y2, dy));
+  return { x1: r3(r.x1 + mx), y1: r3(r.y1 + my), x2: r3(r.x2 + mx), y2: r3(r.y2 + my) };
+}
+
+export function tileCrop(srcW: number, srcH: number, tile: ContentRegion): { x: number; y: number; w: number; h: number } {
+  const even = (v: number) => Math.max(2, Math.floor(v / 2) * 2);
+  const x = Math.max(0, Math.floor(tile.x1 * srcW));
+  const y = Math.max(0, Math.floor(tile.y1 * srcH));
+  const w = even(Math.min(srcW - x, Math.ceil((tile.x2 - tile.x1) * srcW)));
+  const h = even(Math.min(srcH - y, Math.ceil((tile.y2 - tile.y1) * srcH)));
+  return { x, y, w, h };
 }
 
 /**

@@ -20,6 +20,7 @@
   "expect": {
     "minAgreement": 0.9,
     "faceTol": 0.08,
+    "tile": { "box": [0.6, 0.667, 1, 1], "tol": 0.04 },
     "windows": [
       {
         "from": 0,

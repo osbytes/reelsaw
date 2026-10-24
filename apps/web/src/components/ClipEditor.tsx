@@ -55,6 +55,7 @@ import {
   type LayoutSection,
   type PaneAdjust,
   type ProjectSettings,
+  shiftRegion,
   type SectionMode,
   type SourceOverlay,
   type Style,
@@ -786,8 +787,11 @@ export function ClipEditor(props: Props) {
       cy2: c2?.y,
       size: det?.size,
       size2: det?.size2,
-      // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top
-      ...(sec.mode === "auto" && det && !det.manual && det.content ? { content: det.content } : {}),
+      // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top,
+      // unless the speaker is a webcam tile in a band: the tile and its band are the speaker's own bounds and apply to a forced stack too
+      ...(lay === "stack" && det?.content && (det.tile || (sec.mode === "auto" && !det.manual)) ? { content: det.content } : {}),
+      // the tile is stored as detected; the pane's nudge moves its window, as in the render
+      ...(lay === "stack" && det?.tile ? { tile: shiftRegion(det.tile, paneOf(sec, 0).offsetX ?? 0, paneOf(sec, 0).offsetY ?? 0) } : {}),
     };
   }, [sections, clip.layoutSegments, clip.layout]);
   const framing = useMemo(() => framingAt(current), [framingAt, current]);

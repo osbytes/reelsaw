@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import type { VideoEncoder } from "../media.js";
@@ -50,6 +50,23 @@ export interface FrameGeometry {
   avoid?: Array<{ y1: number; y2: number }>;
   /** "stack": the region of the frame shown on top (absent or the whole frame = the classic stack) */
   content?: ContentRegion;
+  /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone (`tileCrop`) */
+  tile?: ContentRegion;
+}
+
+/**
+ * The speaker pane of a stack when the speaker is a webcam tile: the tile cropped out and fitted at
+ * its own aspect over a blurred copy of itself (the way `fit` shows a frame). Reads `[in]`, writes `[out]`.
+ */
+function tilePane(srcW: number, srcH: number, tile: ContentRegion, paneW: number, paneH: number, inLabel: string, outLabel: string): string {
+  const c = tileCrop(srcW, srcH, tile);
+  const blur = "boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2";
+  return (
+    `[${inLabel}]crop=${c.w}:${c.h}:${c.x}:${c.y},split=2[tbg][tfg];` +
+    `[tbg]scale=${paneW}:${paneH}:force_original_aspect_ratio=increase,crop=${paneW}:${paneH},${blur}[tbgb];` +
+    `[tfg]scale=${paneW}:${paneH}:force_original_aspect_ratio=decrease:flags=lanczos[tfgs];` +
+    `[tbgb][tfgs]overlay=(W-w)/2:(H-h)/2[${outLabel}];`
+  );
 }
 
 export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: LayoutDecision["track"] = [], track2: LayoutDecision["track"] = [], geo: FrameGeometry = {}): { chain: string; width: number; height: number } {
@@ -104,6 +121,7 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
     const zx = track.map((tp) => ({ t: tp.t, v: Math.max(free.lo, Math.min(free.hi - zoomW, tp.x * srcW - zoomW / 2)) }));
     const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `${Math.round((free.lo + free.hi - zoomW) / 2)}`;
     const blur = "boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2";
+    const bots = geo.tile ? tilePane(srcW, srcH, geo.tile, OUT_W, halfH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${zoomY},scale=${OUT_W}:${halfH}:flags=lanczos[bots];`;
     return {
       chain:
         `[0:v]split=2[psrc][bot];` +
@@ -111,7 +129,7 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
         `[pbg]scale=${OUT_W}:${halfH}:force_original_aspect_ratio=increase,crop=${OUT_W}:${halfH},${blur}[pbgb];` +
         `[pfg]scale=${OUT_W}:${halfH}:force_original_aspect_ratio=decrease:flags=lanczos[pfgs];` +
         `[pbgb][pfgs]overlay=(W-w)/2:(H-h)/2[tops];` +
-        `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${zoomY},scale=${OUT_W}:${halfH}:flags=lanczos[bots];` +
+        bots +
         `[tops][bots]vstack,setsar=1`,
       width: OUT_W,
       height: OUT_H,
@@ -126,11 +144,13 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
     const zoomH = even(c.h);
     const zx = track.map((p) => ({ t: p.t, v: cropX(srcW, zoomW, p.x) }));
     const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `(iw-${zoomW})/2`;
+    // a webcam tile: the bottom pane is the tile alone, not a face-sized crop that would reach past it
+    const bots = geo.tile ? tilePane(srcW, srcH, geo.tile, OUT_W, botH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${c.y},scale=${OUT_W}:${botH}:flags=lanczos[bots];`;
     return {
       chain:
         `[0:v]split=2[top][bot];` +
         `[top]scale=${OUT_W}:${topH}:flags=lanczos[tops];` +
-        `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${c.y},scale=${OUT_W}:${botH}:flags=lanczos[bots];` +
+        bots +
         `[tops][bots]vstack,setsar=1`,
       width: OUT_W,
       height: OUT_H,
@@ -242,12 +262,13 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   // keep speaker crops clear only of text that is on screen for much of the clip; brief text is just blurred
   let avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
-  const geoOf = (d: LayoutDecision): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid, ...(d.content ? { content: d.content } : {}) });
+  // a webcam tile is stored as detected; the pane's nudge moves its window here (and in the editor preview), kept inside the frame
+  const geoOf = (d: LayoutDecision, adjust?: { offsetX?: number; offsetY?: number }): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid, ...(d.content ? { content: d.content } : {}), ...(d.tile ? { tile: shiftRegion(d.tile, adjust?.offsetX ?? 0, adjust?.offsetY ?? 0) } : {}) });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
     await ctx.progress(0.02, `Detecting faces for clip ${clip.index + 1}`, { clipId });
-    samples = await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: sourcePath, startSec: clip.startSec, durationSec: duration, signal: ctx.signal, sampleFps: 4 });
+    samples = await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source: sourcePath, startSec: clip.startSec, durationSec: duration, signal: ctx.signal, sampleFps: 4, srcAspect: srcW / srcH });
     const filtered = dropStaticFaces(samples);
     if (filtered.dropped.length) log.info({ dropped: filtered.dropped }, "ignoring static faces (posters/photos)");
     // text boxes seen by the per-clip scan (one pass, no extra decode) tell a content region beside the speaker from a plain talking head
@@ -330,7 +351,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const first = segments[0]!;
   const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
   log.info({ layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount }, "layout resolved");
-  log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount, ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}) })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
+  log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount, ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}), ...(sg.decision.tile ? { tile: sg.decision.tile } : {}) })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
   const detected: DetectedSegment[] = segments.map((sg) => {
     const c1 = trackCenter(sg.decision.track);
     const c2 = sg.decision.track2 ? trackCenter(sg.decision.track2) : undefined;
@@ -356,6 +377,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       ...(sg.adjust?.subjectX !== undefined ? { subjectX: sg.adjust.subjectX } : {}),
       ...(sg.adjust?.subjectX2 !== undefined ? { subjectX2: sg.adjust.subjectX2 } : {}),
       ...(sg.decision.layout === "stack" && sg.decision.content ? { content: sg.decision.content } : {}),
+      ...(sg.decision.layout === "stack" && sg.decision.tile ? { tile: sg.decision.tile } : {}),
     };
   });
   await db
@@ -366,7 +388,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       layoutInfo: { reason: segments.length > 1 ? summary : first.decision.reason, faceRatio: first.decision.faceRatio, faceSize: first.decision.faceSize },
     })
     .where(eq(schema.clips.id, clipId));
-  const { chain, width, height } = layoutFilter(first.decision.layout, srcW, srcH, first.decision.track, first.decision.track2 ?? [], geoOf(first.decision));
+  const { chain, width, height } = layoutFilter(first.decision.layout, srcW, srcH, first.decision.track, first.decision.track2 ?? [], geoOf(first.decision, first.adjust));
 
   const transcript = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId) });
   // optional jump cuts for accepted disfluencies; everything downstream works in post-cut time
@@ -512,7 +534,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const src = sourceVideo(overlays, srcW, srcH, pieces.length);
     const parts = pieces.map((pc, i) => {
       const d = pc.seg.decision;
-      const chainI = suffixLabels(layoutFilter(d.layout === "none" ? "fit" : d.layout, srcW, srcH, localTrack(d.track, pc.start, pc.end), d.track2 ? localTrack(d.track2, pc.start, pc.end) : [], geoOf(d)).chain, `s${i}`, `[t${i}]`);
+      const chainI = suffixLabels(layoutFilter(d.layout === "none" ? "fit" : d.layout, srcW, srcH, localTrack(d.track, pc.start, pc.end), d.track2 ? localTrack(d.track2, pc.start, pc.end) : [], geoOf(d, pc.seg.adjust)).chain, `s${i}`, `[t${i}]`);
       const aEnd = i < pieces.length - 1 ? Math.min(duration, pc.end + XF) : pc.end;
       return (
         `${src.labels[i]}trim=start=${pc.start.toFixed(3)}:end=${pc.end.toFixed(3)},setpts=PTS-STARTPTS[t${i}];${chainI}[v${i}];` +

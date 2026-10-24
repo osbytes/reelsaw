@@ -680,9 +680,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!c) throw new Error("clip not found");
     const [from, to] = (pos[1] ?? `0-${c.endSec - c.startSec}`).split("-").map(Number) as [number, number];
     const source = await sourcePath(svc, c.projectId);
+    const project = await svc.database.db.query.projects.findFirst({ where: eq(schema.projects.id, c.projectId) });
     // exactly what a render feeds the layout: static faces dropped, the per-clip text scan (2 fps) attached
-    // to the nearest face sample, the divider probe (`divider.s` is its strength, 0..1) from the same frames
-    let samples = dropStaticFaces(await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source, startSec: c.startSec + from, durationSec: to - from, sampleFps: 4 })).samples;
+    // to the nearest face sample, the divider probe (`divider.s` is its strength, 0..1) and the webcam tile
+    // rectangles (`tiles`) from the same frames
+    let samples = dropStaticFaces(await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source, startSec: c.startSec + from, durationSec: to - from, sampleFps: 4, srcAspect: (project?.width ?? 1920) / (project?.height ?? 1080) })).samples;
     if (svc.text) {
       const frames = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH }, source, c.startSec + from, to - from);
       samples = attachText(samples, frames.map((f) => ({ t: f.t, all: f.all })));
