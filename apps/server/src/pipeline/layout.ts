@@ -30,9 +30,10 @@ const MIN_SECOND_FACE = 0.08;
  * face presence, which needs `minSeg`), and television cuts every 3-4 s on average with plenty of 1-2 s
  * shots, so the layout must be free to change at every edit: a multi-camera talk show that alternates a
  * close-up with a wide shot every 2 s is otherwise framed as one shot (AutoFlip likewise decides per
- * scene and resets at each shot boundary).
+ * scene and resets at each shot boundary). Half a second: the cut detector already merges cuts closer
+ * than that, and a 0.7 s close-up before a two-shot framed as the two-shot is the reported defect.
  */
-export const MIN_SHOT_SEC = 1;
+export const MIN_SHOT_SEC = 0.5;
 
 /**
  * A frame with three or more people of comparable size: a 9:16 crop cannot hold them and a split shows

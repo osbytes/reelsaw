@@ -58,6 +58,12 @@ describe("segmentLayouts at scene cuts", () => {
     const segs = segmentLayouts(s, config, [4], 6);
     assert.deepEqual(layouts(segs), ["split 0-4", "face 4-6"]);
   });
+
+  it("keeps a sub-second close-up before a cut as its own piece instead of framing it as the two-shot", () => {
+    const s = [...shot(0, 0.75, closeUp), ...shot(0.75, 4, twoShot)];
+    const segs = segmentLayouts(s, config, [0.75], 4);
+    assert.deepEqual(layouts(segs), ["face 0-0.75", "split 0.75-4"]);
+  });
 });
 
 describe("fitTextHeavy keeps one-shot pieces", () => {

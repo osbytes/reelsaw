@@ -100,7 +100,7 @@ correlated with the audio envelope) runs only on `split` segments of 3 s or more
 states are smoothed over 2 samples either side within the same shot (split holds across a missed
 second face for 3 s, never across a cut and never over a crowd), boundaries snap to a scene cut
 within 1 s, and pieces under 2.5 s fold into a neighbour unless a detected cut bounds them: a shot
-change is a real edge, so a piece between cuts may be as short as `MIN_SHOT_SEC` (1 s). Television
+change is a real edge, so a piece between cuts may be as short as `MIN_SHOT_SEC` (0.5 s; the cut detector merges cuts closer than that). Television
 cuts every 3-4 s on average with many 1-2 s shots, and a multi-camera talk show alternating a
 close-up with a wide shot every 2 s must change layout at every edit (AutoFlip likewise decides per
 scene and resets at each shot boundary). Each piece runs `decideLayout` on its own samples, and
