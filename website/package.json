@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start -p 3200",
     "typecheck": "next typegen && tsc --noEmit -p tsconfig.json",
-    "render:film": "node scripts/render-pipeline-film.mjs"
+    "render:pipeline-film": "node scripts/render-pipeline-film.mjs",
+    "render:film": "node scripts/render-film.mjs"
   },
   "dependencies": {
     "@radix-ui/react-scroll-area": "^1.4.0",
