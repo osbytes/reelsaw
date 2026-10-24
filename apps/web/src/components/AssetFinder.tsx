@@ -298,7 +298,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const showCatalog = !source || source === "catalog";
   const empty = !q.trim();
   const typeToSearch = empty && !!source && source !== "library" && source !== "catalog";
-  const activeProviders = empty ? [] : remoteProviders.filter((p) => (source ? source === p.id : providerFits(p)));
+  // gate on the debounced query: mounting SourceTiles on the first keystroke would fire with dq still ""
+  const activeProviders = !dq ? [] : remoteProviders.filter((p) => (source ? source === p.id : providerFits(p)));
   const activeIds = [...(showCatalog ? ["catalog"] : []), ...activeProviders.map((p) => p.id)];
   const libraryResolved = !showLibrary || (!list.isPending && rows.length === 0);
   const allResolved = activeIds.every((id) => states[id] && !states[id].pending && states[id].count === 0 && !states[id].notice);
@@ -469,7 +470,13 @@ function SourceTiles({
   const search = useInfiniteQuery(
     trpc.library.search.infiniteQueryOptions(
       { ...(provider ? { source: provider } : {}), q, kind, limit: PAGE, ...(license ? { license } : {}) },
-      { enabled, getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, staleTime: 60_000 },
+      {
+        // a remote provider with an empty q 400s (Iconify) or burns quota; the catalog lists everything
+        enabled: enabled && (!provider || !!q),
+        getNextPageParam: (last) => last.nextCursor ?? undefined,
+        placeholderData: keepPreviousData,
+        staleTime: 60_000,
+      },
     ),
   );
   const items = (search.data?.pages.flatMap((p) => p.items) ?? []).filter((i) => kindOk(i.kind));

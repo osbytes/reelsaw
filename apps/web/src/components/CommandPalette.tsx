@@ -2,6 +2,7 @@ import { createContext, lazy, Suspense, useContext, useEffect, useState, type Re
 import { useShortcut } from "../lib/shortcuts";
 import { useSession } from "../lib/auth";
 import { isOnlyUrls } from "../lib/links";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
 const oneLine = (s: string) => s.trim().split(/\s+/).join(" ");
@@ -54,9 +55,11 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={show}>
       {children}
       {session && (open || loaded) && (
-        <Suspense fallback={null}>
-          <Palette open={open} onOpenChange={setOpen} q={q} setQ={setQ} />
-        </Suspense>
+        <ErrorBoundary quiet>
+          <Suspense fallback={null}>
+            <Palette open={open} onOpenChange={setOpen} q={q} setQ={setQ} />
+          </Suspense>
+        </ErrorBoundary>
       )}
     </Ctx.Provider>
   );

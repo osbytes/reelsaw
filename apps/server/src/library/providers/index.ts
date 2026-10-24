@@ -88,15 +88,18 @@ export function createProviderRegistry(deps: { settings: () => RuntimeSettings; 
     has: (id) => active().some((p) => p.id === id),
     async search(id, q, opts = {}) {
       const p = get(id);
+      const query = q.trim();
+      // remote APIs reject or waste a quota hit on an empty string (Iconify 400); the catalog lists everything
+      if (!query && id !== "reelsaw") return { items: [] };
       const o: SearchOptions = { kind: opts.kind, cursor: opts.cursor, limit: opts.limit ?? DEFAULT_LIMIT, license: opts.license };
       // the catalog is local and cheap; its manifest can change under the cache, so it is never cached
-      const key = `${id}|${q.trim().toLowerCase()}|${o.kind ?? ""}|${o.cursor ?? ""}|${o.limit}|${o.license ?? ""}`;
+      const key = `${id}|${query.toLowerCase()}|${o.kind ?? ""}|${o.cursor ?? ""}|${o.limit}|${o.license ?? ""}`;
       if (id !== "reelsaw") {
         const hit = cacheGet(key);
         if (hit) return hit;
       }
       try {
-        const res = await p.search(q.trim(), o);
+        const res = await p.search(query, o);
         if (id !== "reelsaw") cacheSet(key, res);
         return res;
       } catch (err) {

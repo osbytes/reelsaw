@@ -7,8 +7,10 @@ import { App } from "./App";
 import "./index.css";
 import { installDiagnostics } from "./lib/diagnostics";
 import { bootOtel } from "./lib/otel";
+import { installStaleChunkHandler } from "./lib/stale-chunk";
 
 installDiagnostics();
+installStaleChunkHandler();
 
 async function main() {
   // Tracing is on before the first tRPC call, including system.status. The /api/otel fetch
