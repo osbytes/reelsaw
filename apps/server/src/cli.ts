@@ -90,6 +90,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           everything laid over or played under a clip, one list (source seconds, x/y/w/size as
  *                                           fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at
  *                                           full level, anything else music (ducked, faded, looped); with no change flag it lists them
+ *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
+ *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
+ *                                           (all of them without clip ids; --add keeps the clip's own layers, default replaces);
+ *                                           --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
@@ -143,7 +148,7 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer } from "@reelsaw/shared";
+import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall, uploadLocalFile } from "./library/service.js";
@@ -969,7 +974,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const lib = await libraryView(svc, api, user.id);
       const q = o.q?.toLowerCase();
       const keep = (x: (typeof lib.assets)[number]) => (!o.kind || x.kind === o.kind) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
-      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", owner: x.owner, tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips });
+      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", owner: x.owner, tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips, templates: x.usedByTemplates });
       table(lib.assets.filter(keep).map(row));
       const removed = lib.removed.filter(keep);
       if (removed.length) {
@@ -986,11 +991,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`${r.duplicate ? (r.restored ? "restored existing" : "already exists") : "added"} ${r.id}  ${r.name}  (${r.kind})`);
     } else if (sub === "usage" && a) {
       const u = await api.library.usage({ id: a });
-      if (!u.projects.length) console.log("(not used)");
+      if (!u.projects.length && !u.templates.length) console.log("(not used)");
       for (const p of u.projects) {
         console.log(`${p.title}  ${p.id}  project slots: ${p.slots.join(",") || "-"}`);
         for (const c of p.clips) console.log(`  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay×${c.overlays}` : s === "music" && c.music > 1 ? `music×${c.music}` : s)).join(",")} via ${c.via}`);
       }
+      for (const t of u.templates) console.log(`template ${t.name}  ${t.id}  (${t.layers} layer(s))`);
     } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
       await api.library.setDefault({ slot: a, assetId: b === "none" ? null : b });
       console.log(b === "none" ? `cleared default ${a}` : `default ${a} is now ${b}`);
@@ -1110,6 +1116,73 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(rerender ? "re-render requested" : "saved; no re-render requested (pass --rerender to apply now)");
   },
 
+  async templates(svc) {
+    const { pos: p, rerender, addMode, layers } = bumperArgs();
+    const usage =
+      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+    const [sub, a, b] = p;
+    if (!sub) throw new Error(usage);
+    const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
+    const show = (t: { id: string; name: string; layerCount: number }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s))`);
+    if (sub === "list") {
+      const r = await api.layerTemplates.list();
+      if (!r.templates.length) console.log("no layer templates");
+      else table(r.templates.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
+      if (r.deleted.length) {
+        console.log("removed in the last 30 days (reelsaw templates restore <id>):");
+        table(r.deleted.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, removed: t.deletedAt })));
+      }
+    } else if (sub === "show") {
+      if (!a) throw new Error(usage);
+      const t = await api.layerTemplates.get({ id: a });
+      show(t);
+      if (!t.layers.length) console.log("no layers");
+      else
+        table(
+          t.layers.map((l) => ({
+            id: l.id,
+            kind: l.kind,
+            what: l.kind === "text" ? `“${l.text}”` : l.assetId,
+            timing: timingText(l.timing),
+            position: l.kind === "audio" ? "" : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
+            sound: l.kind === "audio" ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}` : "",
+          })),
+        );
+    } else if (sub === "save") {
+      if (p.length < 4) throw new Error(usage);
+      const t = await api.layerTemplates.fromClip({ clipId: b!, name: p.slice(3).join(" ") });
+      console.log("saved:");
+      show(t);
+    } else if (sub === "rename") {
+      if (p.length < 3) throw new Error(usage);
+      const t = await api.layerTemplates.update({ id: a!, name: p.slice(2).join(" ") });
+      console.log("renamed:");
+      show(t);
+    } else if (sub === "set") {
+      if (!a || layers === undefined) throw new Error(usage);
+      const parsed = z.array(templateLayerSchema).safeParse(JSON.parse(layers));
+      if (!parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      const t = await api.layerTemplates.update({ id: a, layers: parsed.data });
+      console.log("updated:");
+      show(t);
+    } else if (sub === "remove") {
+      if (!a) throw new Error(usage);
+      const r = await api.layerTemplates.remove({ id: a });
+      console.log(`removed (restorable for 30 days: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`);
+    } else if (sub === "restore") {
+      if (!a) throw new Error(usage);
+      console.log("restored:");
+      show(await api.layerTemplates.restore({ id: a }));
+    } else if (sub === "apply") {
+      if (!a || !b) throw new Error(usage);
+      const clipIds = p.slice(3);
+      const r = await api.layerTemplates.applyToClips({ templateId: a, projectId: b, ...(clipIds.length ? { clipIds } : {}), mode: addMode ? "add" : "replace", rerender });
+      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+      if (r.layersSkipped) console.log(`${r.layersSkipped} template layer(s) had no room on their clip and were left out`);
+      for (const s of r.skipped) console.log(`skipped clip ${s.clipId}: ${s.reason}`);
+    } else throw new Error(usage);
+  },
+
   async overlays(svc) {
     const id = pos[0]!;
     const db = svc.database.db;
@@ -1147,6 +1220,9 @@ function bumperArgs() {
   const out = {
     pos: [] as string[],
     rerender: false,
+    // templates: --add is a switch there (add to the clip's layers instead of replacing them)
+    addMode: false,
+    layers: undefined as string | undefined,
     clear: false,
     user: undefined as string | undefined,
     intro: undefined as string | undefined,
@@ -1197,6 +1273,8 @@ function bumperArgs() {
     if (a === "--rerender") out.rerender = true;
     else if (a === "--clear") out.clear = true;
     else if (a === "--set") out.set = val();
+    else if (a === "--add" && cmd === "templates") out.addMode = true;
+    else if (a === "--layers") out.layers = val();
     else if (a === "--add") out.add = val();
     else if (a === "--add-text") out.addText = val();
     else if (a === "--size") out.size = Number(val());
@@ -1324,7 +1402,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

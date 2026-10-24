@@ -8,11 +8,12 @@ import { useMe } from "../lib/account";
 import { Link } from "react-router";
 import { useBumperLibrary } from "./BumperField";
 import { RefineDefaultsFields } from "./RefineToggles";
+import { TemplateSelect } from "./TemplatePicker";
 
 type RefineForm = { refineEntities: "" | "yes" | "no"; refineDisfluency: "" | "yes" | "no"; disfluencyLlm: "" | "yes" | "no"; refineScenes: "" | "yes" | "no" };
-type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no" } & RefineForm;
+type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no"; layerTemplateId: string } & RefineForm;
 
-const EMPTY: Form = { language: "", vocabulary: "", instructions: "", focus: "", pauses: "", sourceText: "", minClipSeconds: "", maxClipSeconds: "", maxClips: "", highlightColor: "", wordsPerLine: "", uppercase: "", refineEntities: "", refineDisfluency: "", disfluencyLlm: "", refineScenes: "" };
+const EMPTY: Form = { language: "", vocabulary: "", instructions: "", focus: "", pauses: "", sourceText: "", minClipSeconds: "", maxClipSeconds: "", maxClips: "", highlightColor: "", wordsPerLine: "", uppercase: "", layerTemplateId: "", refineEntities: "", refineDisfluency: "", disfluencyLlm: "", refineScenes: "" };
 
 const yn = (v: boolean | undefined): "" | "yes" | "no" => (v === undefined ? "" : v ? "yes" : "no");
 const fromYn = (v: "" | "yes" | "no") => (v === "" ? undefined : v === "yes");
@@ -32,6 +33,7 @@ function fromSaved(d: UserProjectDefaults): Form {
     highlightColor: d.highlightColor ?? "",
     wordsPerLine: d.wordsPerLine?.toString() ?? "",
     uppercase: d.uppercase === undefined ? "" : d.uppercase ? "yes" : "no",
+    layerTemplateId: d.layerTemplateId ?? "",
     refineEntities: yn(d.refineEntities),
     refineDisfluency: yn(d.refineDisfluency),
     disfluencyLlm: yn(d.disfluencyLlm),
@@ -54,6 +56,7 @@ function toSaved(f: Form): UserProjectDefaults {
     highlightColor: f.highlightColor.trim() || undefined,
     wordsPerLine: num(f.wordsPerLine),
     uppercase: f.uppercase === "" ? undefined : f.uppercase === "yes",
+    layerTemplateId: f.layerTemplateId || undefined,
     refineEntities: fromYn(f.refineEntities),
     refineDisfluency: fromYn(f.refineDisfluency),
     disfluencyLlm: fromYn(f.disfluencyLlm),
@@ -161,6 +164,13 @@ export function ProjectDefaultsSection() {
           builtIn={b}
           onChange={(key, v) => setF((p) => ({ ...p, [key]: yn(v) }))}
         />
+        <div className="flex flex-col gap-1 text-xs text-ink2 sm:col-span-2">
+          <span>Layer template</span>
+          <div className="sm:max-w-[calc(50%-0.375rem)]">
+            <TemplateSelect value={f.layerTemplateId} onChange={pick("layerTemplateId")} />
+          </div>
+          <span className="text-xs text-ink3">Applies to the clips of new projects. Existing clips: select them in a project and choose Template…</span>
+        </div>
         <div className="flex items-center gap-2 sm:col-span-2">
           <button className="btn-ink min-w-[8rem]" type="submit" disabled={!dirty || save.isPending}>
             {save.isPending ? "Saving…" : "Save defaults"}

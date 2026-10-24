@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music } from "lucide-react";
+import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, LayoutTemplate } from "lucide-react";
 import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -20,7 +20,8 @@ export interface LayerBlock {
   kind: "video" | "image" | "text" | "audio";
   thumbnailUrl?: string;
 }
-export type LayerAddKind = "asset" | "text" | "audio";
+/** what the lane's + adds: one layer of a kind, or a whole template of them */
+export type LayerAddKind = "asset" | "text" | "audio" | "template";
 /** The intro or outro a clip will render with, as a block on the clip lane. */
 export interface BumperBlock {
   name: string;
@@ -126,6 +127,8 @@ interface Props {
   onLayerSelect?: (id: string | null) => void;
   onLayerChange?: (id: string, range: [number, number], key?: string) => void;
   onLayerAdd?: (t: number, kind: LayerAddKind) => void;
+  /** a whole template of layers (the + menu's last item; left out where templates do not apply, e.g. the template editor) */
+  onLayerTemplate?: () => void;
   onLayerRemove?: (id: string) => void;
   /** the in/out editor (fields and nudges), shown in a popover from the clip block's length label */
   renderClipEditor?: () => ReactNode;
@@ -154,7 +157,7 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerTemplate, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const lyRows = useMemo(() => packLayerRows(layers), [layers]);
@@ -495,6 +498,11 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
                     <DropdownMenu.Item className="menu-item" onSelect={() => onLayerAdd(inClip(current) ? current : range[0], "audio")}>
                       <Music className="h-3.5 w-3.5" /> Sound…
                     </DropdownMenu.Item>
+                    {onLayerTemplate && (
+                      <DropdownMenu.Item className="menu-item" onSelect={onLayerTemplate}>
+                        <LayoutTemplate className="h-3.5 w-3.5" /> Template…
+                      </DropdownMenu.Item>
+                    )}
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
@@ -724,6 +732,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             canRedo={canRedo}
             layer={menuAt?.layer ? (layers.find((o) => o.id === menuAt.layer) ?? null) : null}
             onLayerAdd={onLayerAdd && ((t, kind) => inClip(t) && onLayerAdd(t, kind))}
+            onLayerTemplate={onLayerTemplate}
             onLayerRemove={onLayerRemove}
           />
         </ContextMenu.Portal>
@@ -756,6 +765,7 @@ function TimelineMenu(p: {
   at: { t: number; lane: string; section: number; layer: string | null } | null;
   layer: LayerBlock | null;
   onLayerAdd?: (t: number, kind: LayerAddKind) => void;
+  onLayerTemplate?: () => void;
   onLayerRemove?: (id: string) => void;
   sections: EditorSection[];
   detected: DetectedSegment[];
@@ -802,6 +812,11 @@ function TimelineMenu(p: {
           </ContextMenu.Item>
         </>
       ) : null}
+      {p.onLayerTemplate && (
+        <ContextMenu.Item className={item} onSelect={p.onLayerTemplate}>
+          <LayoutTemplate className="h-3.5 w-3.5" /> Template…
+        </ContextMenu.Item>
+      )}
       {sec && (
         <>
           <ContextMenu.Separator className="mx-1.5 my-1 h-px bg-line" />

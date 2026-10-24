@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, TemplateLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -358,6 +358,30 @@ export const assetRefs = pgTable(
   (t) => [index("asset_refs_asset_idx").on(t.assetId), index("asset_refs_project_idx").on(t.projectId), index("asset_refs_clip_idx").on(t.clipId)],
 );
 export type AssetRef = typeof assetRefs.$inferSelect;
+
+/**
+ * Layer templates: a named set of layers whose windows are placed by a timing mode (head / tail / fill /
+ * relative) instead of absolute seconds, so one template fits a 15 s clip and a 90 s clip (docs/specs/layer-templates.md).
+ * Applying one materialises ordinary `clips.layers`; the template itself is never read at render time.
+ * Removal is a soft delete, restorable from the Templates page or `restore_layer_template`.
+ */
+export const layerTemplates = pgTable(
+  "layer_templates",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** the layers with their timing (TemplateLayer[], max MAX_CLIP_LAYERS) */
+    layers: jsonb("layers").$type<TemplateLayer[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("layer_templates_user_idx").on(t.userId, t.updatedAt)],
+);
+export type LayerTemplate = typeof layerTemplates.$inferSelect;
 
 export const projects = pgTable(
   "projects",

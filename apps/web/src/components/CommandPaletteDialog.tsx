@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFuzzy, Highlight, type Fuzzy, type FuseResultMatch } from "../lib/fuzzy";
 import { useNavigate } from "react-router";
-import { ChevronLeft, Download, Ban, ExternalLink, Film, FolderOpen, Images, Star, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, Download, Ban, ExternalLink, Film, FolderOpen, Images, Layers, Star, LifeBuoy, Link2, MoreHorizontal, Moon, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Sparkles, Trash2, Upload } from "lucide-react";
 import { openReportHere } from "../lib/report";
 import { useTRPC } from "../lib/trpc";
 import { useSession } from "../lib/auth";
@@ -352,6 +352,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       { key: "a-upload", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Upload videos…", hint: "several start a project each", run: () => fileRef.current?.click() },
       { key: "a-projects", group: "Actions", icon: <FolderOpen className="h-4 w-4" />, label: "Go to projects", run: go(() => nav("/")) },
       { key: "a-library", group: "Actions", icon: <Images className="h-4 w-4" />, label: "Go to library", hint: "intros, outros, images, audio", run: go(() => nav("/library")) },
+      { key: "a-templates", group: "Actions", icon: <Layers className="h-4 w-4" />, label: "Go to templates", hint: "layer templates for any clip length", run: go(() => nav("/templates")) },
       { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },

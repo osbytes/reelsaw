@@ -290,6 +290,151 @@ export function layersToLegacy(layers: ClipLayer[]): { overlays: ClipOverlay[]; 
   return { overlays, audio };
 }
 
+// ── layer templates: a set of layers that fits a clip of any length ──────────
+
+/** Shortest a layer may be: pictures and text 0.1 s, sounds 0.5 s (the lane, the server and templates agree). */
+export const layerMinSeconds = (kind: ClipLayer["kind"]): number => (kind === "audio" ? 0.5 : 0.1);
+/** A fresh layer id (`ly-xxxx`), the shape the editor, the CLI and templates all use. */
+export const newLayerId = (): string => `ly-${Math.random().toString(36).slice(2, 6).padEnd(4, "0")}`;
+
+/**
+ * Where a template layer sits on a clip of any length (docs/specs/layer-templates.md). Head and tail keep real
+ * seconds: a viewer reads a hook or a call to action at the same speed whether the clip is 15 s or 90 s (After
+ * Effects' protected regions, Final Cut's build in / build out). Only "hold" content stretches.
+ * - head: `start` / `end` are seconds after the clip starts (a logo pop in the first 3 s: start 0, end 3).
+ * - tail: `start` / `end` are seconds before the clip ends, start above end (a CTA in the last 4 s: start 4, end 0).
+ * - fill: the whole clip (a watermark, a progress bar, a music bed).
+ * - relative: `start` / `end` are fractions 0-1 of the clip length, the window then held between `minSec` / `maxSec`.
+ */
+export const layerTimingSchema = z
+  .discriminatedUnion("mode", [
+    z.object({ mode: z.literal("head"), start: z.number().min(0).describe("Seconds after the clip starts"), end: z.number().min(0).describe("Seconds after the clip starts (above start)") }),
+    z.object({ mode: z.literal("tail"), start: z.number().min(0).describe("Seconds before the clip ends (above end)"), end: z.number().min(0).describe("Seconds before the clip ends (0 = the very end)") }),
+    z.object({ mode: z.literal("fill") }),
+    z.object({
+      mode: z.literal("relative"),
+      start: z.number().min(0).max(1).describe("Fraction of the clip length (0-1)"),
+      end: z.number().min(0).max(1).describe("Fraction of the clip length (0-1, above start)"),
+      minSec: z.number().min(0).max(600).optional().describe("Never shorter than this many seconds"),
+      maxSec: z.number().min(0).max(600).optional().describe("Never longer than this many seconds"),
+    }),
+  ])
+  .refine((t) => t.mode === "fill" || (t.mode === "tail" ? t.start > t.end : t.end > t.start), { message: "the window must have a length: head and relative need end above start, tail needs start above end" });
+export type LayerTiming = z.infer<typeof layerTimingSchema>;
+export const LAYER_TIMING_MODES = ["head", "tail", "fill", "relative"] as const;
+export const LAYER_TIMING_LABEL: Record<LayerTiming["mode"], string> = { head: "From the start", tail: "Before the end", fill: "Whole clip", relative: "Proportional" };
+
+const timingField = { timing: layerTimingSchema.describe("Where the layer sits on a clip of any length") };
+/** A clip layer without its absolute `start` / `end`, placed by `timing` instead. */
+export const templateAssetLayerSchema = assetLayerSchema.omit({ start: true, end: true }).extend(timingField);
+export const templateTextLayerSchema = textLayerSchema.omit({ start: true, end: true }).extend(timingField);
+export const templateAudioLayerSchema = audioLayerSchema.omit({ start: true, end: true }).extend(timingField);
+export const templateLayerSchema = z.discriminatedUnion("kind", [templateAssetLayerSchema, templateTextLayerSchema, templateAudioLayerSchema]);
+export type TemplateLayer = z.infer<typeof templateLayerSchema>;
+export const layerTemplateNameSchema = z.string().trim().min(1).max(120).describe("Template name (1-120 chars)");
+export const layerTemplateLayersSchema = z.array(templateLayerSchema).max(MAX_CLIP_LAYERS).describe(`The template's layers, each with a timing (max ${MAX_CLIP_LAYERS})`);
+/** Clip lengths the template editor previews at; the default is the middle of the usual short. */
+export const TEMPLATE_PREVIEW_SECONDS = [15, 30, 45, 60, 90] as const;
+export const DEFAULT_TEMPLATE_PREVIEW_SEC = 30;
+
+const r2 = (n: number) => Number(n.toFixed(2));
+
+/**
+ * The window one template layer gets on a clip `len` seconds long, as seconds from the clip start, clamped to the
+ * clip; null when there is no room for it (a tail layer on a clip shorter than its lead, a relative window under the
+ * minimum length). Overlapping head and tail windows on a very short clip are both kept: overlapping layers are
+ * allowed on the lane and the user sees them.
+ */
+export function templateWindow(timing: LayerTiming, len: number, kind: ClipLayer["kind"]): [number, number] | null {
+  let a: number;
+  let b: number;
+  switch (timing.mode) {
+    case "fill":
+      a = 0;
+      b = len;
+      break;
+    case "head":
+      a = timing.start;
+      b = timing.end;
+      break;
+    case "tail":
+      a = len - timing.start;
+      b = len - timing.end;
+      break;
+    case "relative": {
+      a = timing.start * len;
+      b = timing.end * len;
+      const want = b - a;
+      const held = Math.min(timing.maxSec ?? Infinity, Math.max(timing.minSec ?? 0, want));
+      if (held !== want) {
+        const mid = (a + b) / 2;
+        a = mid - held / 2;
+        b = mid + held / 2;
+      }
+      break;
+    }
+  }
+  a = Math.max(0, a);
+  b = Math.min(len, b);
+  return b - a >= layerMinSeconds(kind) - 1e-6 ? [r2(a), r2(b)] : null;
+}
+
+/**
+ * The template materialised on one clip: every layer that fits gets a fresh id and absolute source seconds; the
+ * rest are left out (returned in `skipped` with their template ids). Position, size and sound settings are copied.
+ */
+export function resolveTemplateLayers(layers: TemplateLayer[], clip: { startSec: number; endSec: number }, idOf: (l: TemplateLayer) => string = () => newLayerId()): { layers: ClipLayer[]; skipped: string[] } {
+  const len = clip.endSec - clip.startSec;
+  const out: ClipLayer[] = [];
+  const skipped: string[] = [];
+  for (const l of layers) {
+    const w = templateWindow(l.timing, len, l.kind);
+    if (!w) {
+      skipped.push(l.id);
+      continue;
+    }
+    const { timing: _t, ...rest } = l;
+    out.push({ ...rest, id: idOf(l), start: r2(clip.startSec + w[0]), end: r2(clip.startSec + w[1]) });
+  }
+  return { layers: out, skipped };
+}
+
+/**
+ * A template from a clip's layers. A layer that spans the clip fills; one that touches the start is head; one
+ * that touches the end is tail; anything else is anchored to the nearer edge with the same length (a sticker
+ * three seconds in stays three seconds in), never stretched: proportional is a choice the user makes afterwards.
+ */
+export function templateFromLayers(layers: ClipLayer[], clip: { startSec: number; endSec: number }): TemplateLayer[] {
+  const eps = 0.25;
+  const len = clip.endSec - clip.startSec;
+  return layers.map((l) => {
+    const { start, end, ...rest } = l;
+    const a = Math.max(0, start - clip.startSec);
+    const b = Math.min(len, end - clip.startSec);
+    const atStart = a <= eps;
+    const atEnd = len - b <= eps;
+    const timing: LayerTiming = atStart && atEnd ? { mode: "fill" } : atStart || (!atEnd && (a + b) / 2 < len / 2) ? { mode: "head", start: r2(a), end: r2(b) } : { mode: "tail", start: r2(len - a), end: r2(len - b) };
+    return { ...rest, timing };
+  });
+}
+
+/** "First 0–3 s", "Last 4 s", "Whole clip", "20–40% of the clip": the timing as a label. */
+export function timingText(t: LayerTiming): string {
+  const s = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  switch (t.mode) {
+    case "fill":
+      return "Whole clip";
+    case "head":
+      return t.start === 0 ? `First ${s(t.end)} s` : `${s(t.start)}–${s(t.end)} s from the start`;
+    case "tail":
+      return t.end === 0 ? `Last ${s(t.start)} s` : `${s(t.start)}–${s(t.end)} s before the end`;
+    case "relative": {
+      const hold = [t.minSec !== undefined ? `at least ${s(t.minSec)} s` : "", t.maxSec !== undefined ? `at most ${s(t.maxSec)} s` : ""].filter(Boolean).join(", ");
+      return `${Math.round(t.start * 100)}–${Math.round(t.end * 100)}% of the clip${hold ? ` (${hold})` : ""}`;
+    }
+  }
+}
+
 // ── library assets ───────────────────────────────────────────────────────────
 
 /** Coarse type the renderer and the pickers branch on; the exact format is the asset's `mime`. */
@@ -508,6 +653,12 @@ export const projectSettingsSchema = styleSchema.extend({
   /** How long an image intro / outro lasts in this project, overriding the library item's own length. */
   introSec: bumperSecondsSchema.optional(),
   outroSec: bumperSecondsSchema.optional(),
+  /**
+   * Layer template applied to every clip this project creates from now on (analyze picks, manual clips), snapshotted
+   * from the user's defaults when the project is created. Existing clips are untouched: apply_layer_template does those.
+   * Unset or null = none.
+   */
+  layerTemplateId: z.string().max(100).nullable().optional().describe("Layer template id (list_layer_templates) applied to each new clip of this project; null = none. Existing clips: apply_layer_template"),
 });
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});
@@ -537,6 +688,8 @@ export const userProjectDefaultsSchema = z
     /** Intro / outro (bumper_assets ids). Changed only through `bumpers.*`, never by the defaults form. */
     introAssetId: z.string().max(100),
     outroAssetId: z.string().max(100),
+    /** Layer template every new project starts with (its new clips get it). */
+    layerTemplateId: z.string().max(100),
   })
   .partial(); // no defaults here: an unset field means "use the built-in default"
 export type UserProjectDefaults = z.infer<typeof userProjectDefaultsSchema>;

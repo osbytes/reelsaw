@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon, Music as MusicIcon } from "lucide-react";
+import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon, Music as MusicIcon, LayoutTemplate, PencilLine, AlignCenterHorizontal, AlignCenterVertical, BringToFront, SendToBack, Copy, Maximize2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
@@ -8,10 +8,11 @@ import { toast } from "sonner";
 import { readHash, writeHash, linkWith, fmtSec } from "../lib/hash";
 import { ScrollArea } from "./scroll-area";
 import { scrollWithin } from "../lib/scroll";
-import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout, type PreviewAssetOverlay } from "./VerticalPreview";
+import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing, type Platform, type PreviewLayout, type PreviewAssetOverlay } from "./VerticalPreview";
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type LayerBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
+import { ApplyTemplateDialog, SaveAsTemplateDialog, applyTemplateLocally, existingOnClip } from "./TemplatePicker";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
 import { loadTextFonts } from "../lib/fonts";
@@ -137,6 +138,7 @@ function layerAssetFromPick(a: PickedAsset): LibraryAsset {
     thumbnailUrl: a.thumbnailUrl ?? (a.kind === "audio" ? "" : `/media/assets/${a.id}/thumb.jpg`),
     usedBy: 0,
     usedByClips: 0,
+    usedByTemplates: 0,
     tags: [],
     provenance: null,
     system: false,
@@ -506,6 +508,9 @@ export function ClipEditor(props: Props) {
   }, [selectedLayer]);
   /** the asset or sound picker: what is being added and where the playhead was when it was asked for */
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
+  // templates: a set of layers laid onto this clip (into the document, undoable), or this clip's layers saved as one
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const library = useBumperLibrary();
   const [imported, setImported] = useState<LibraryAsset[]>([]);
   const ownAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
@@ -863,6 +868,49 @@ export function ClipEditor(props: Props) {
     setLayers(layers.filter((l) => l.id !== id));
     if (selectedLayer === id) setSelectedLayerRaw(null);
   };
+  /** a copy right after the original, nudged so both show on the canvas */
+  const duplicateLayer = (id: string) => {
+    const i = layers.findIndex((l) => l.id === id);
+    const l = layers[i];
+    if (!l) return;
+    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
+    const copy: ClipLayer = l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
+    setLayers([...layers.slice(0, i + 1), copy, ...layers.slice(i + 1)]);
+    setSelectedLayer(copy.id);
+    toast("Duplicated");
+  };
+  /** layers are drawn in list order: last on top */
+  const orderLayer = (id: string, where: "front" | "back") => {
+    const l = layers.find((x) => x.id === id);
+    if (!l) return;
+    const rest = layers.filter((x) => x.id !== id);
+    setLayers(where === "front" ? [...rest, l] : [l, ...rest]);
+  };
+  /** the canvas's right-click menu on a layer (the layer is selected by then) */
+  const overlayMenu = (o: PreviewAssetOverlay, ctx: { editText: () => void }) => {
+    const l = layers.find((x) => x.id === o.id);
+    if (!l || l.kind === "audio") return null;
+    const whole = l.start <= range[0] + 0.01 && l.end >= range[1] - 0.01;
+    return (
+      <>
+        {o.kind === "text" && <OverlayMenuItem icon={<PencilLine className="h-3.5 w-3.5" />} label="Edit text" kbd="dbl-click" onSelect={ctx.editText} />}
+        <OverlayMenuItem icon={<AlignCenterHorizontal className="h-3.5 w-3.5" />} label="Centre left / right" disabled={l.x === 0.5} onSelect={() => patchLayer(l.id, { x: 0.5 })} />
+        <OverlayMenuItem icon={<AlignCenterVertical className="h-3.5 w-3.5" />} label="Centre up / down" disabled={l.y === 0.5} onSelect={() => patchLayer(l.id, { y: 0.5 })} />
+        <OverlayMenuItem icon={<Maximize2 className="h-3.5 w-3.5" />} label="Show for the whole clip" disabled={whole} onSelect={() => patchLayer(l.id, { start: range[0], end: range[1] })} />
+        {o.kind === "asset" && (
+          <>
+            <OverlayMenuSeparator />
+            <OverlayMenuItem icon={<BringToFront className="h-3.5 w-3.5" />} label="Bring to front" disabled={layers[layers.length - 1]?.id === l.id} onSelect={() => orderLayer(l.id, "front")} />
+            <OverlayMenuItem icon={<SendToBack className="h-3.5 w-3.5" />} label="Send to back" disabled={layers[0]?.id === l.id} onSelect={() => orderLayer(l.id, "back")} />
+          </>
+        )}
+        <OverlayMenuSeparator />
+        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Copy" kbd="⌘C" onSelect={() => copyLayer(l)} />
+        <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="⌫" onSelect={() => removeLayer(l.id)} />
+      </>
+    );
+  };
   const layerBlocks: LayerBlock[] = useMemo(
     () =>
       layers.map((l) => {
@@ -929,7 +977,9 @@ export function ClipEditor(props: Props) {
   // ----- copy / paste of the selected layer (⌘C / ⌘V), also across clips of this browser -----
   const copySelection = () => {
     const l = selectedLayer ? layers.find((x) => x.id === selectedLayer) : undefined;
-    if (!l) return false;
+    return l ? copyLayer(l) : false;
+  };
+  const copyLayer = (l: ClipLayer) => {
     try {
       localStorage.setItem(CLIP_KEY, JSON.stringify({ kind: "layer", value: l }));
     } catch {
@@ -1431,11 +1481,14 @@ export function ClipEditor(props: Props) {
         <button className="btn-ghost text-xs" disabled={layers.length >= MAX_CLIP_LAYERS} onClick={() => setPicker({ kind: "audio", t: current })} title="Music or a sound effect from the playhead">
           <MusicIcon className="h-3.5 w-3.5" /> Sound
         </button>
+        <button className="btn-ghost text-xs" onClick={() => setTemplateOpen(true)} title="A saved set of layers, fitted to this clip's length">
+          <LayoutTemplate className="h-3.5 w-3.5" /> Template
+        </button>
         <span className="ml-auto text-[11px] text-ink3" title="Layers on this clip">
           {layers.length}/{MAX_CLIP_LAYERS}
         </span>
       </div>
-      {layers.length === 0 && <p className="text-xs leading-snug text-ink2">A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead. Captions stay on top of images and video.</p>}
+      {layers.length === 0 && <p className="text-xs leading-snug text-ink2">A logo, a sticker, a piece of b-roll, a line of text, music or a sound effect from your library, placed on the clip from the playhead, or a whole template of them fitted to the clip. Captions stay on top of images and video.</p>}
       {[...layers]
         .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
         .map((l) => (
@@ -1455,9 +1508,27 @@ export function ClipEditor(props: Props) {
             onRemove={() => removeLayer(l.id)}
           />
         ))}
+      {layers.length > 0 && (
+        <button className="btn-ghost self-start text-xs" onClick={() => setSaveTemplateOpen(true)} title="Save these layers as a template to use on other clips, whatever their length">
+          <LayoutTemplate className="h-3.5 w-3.5" /> Save as template…
+        </button>
+      )}
       <p className="text-[11px] leading-snug text-ink3">Drag a picture or text on the preview to move it, its corner to resize it. On the timeline: drag a block to move it, its edges to trim it, double-click the lane to add one.</p>
     </div>
   );
+  /** A template into the document (one undo step): the first new layer is selected and shown. */
+  const applyTemplate = (template: Parameters<typeof applyTemplateLocally>[0], mode: Parameters<typeof applyTemplateLocally>[1]) => {
+    const r = applyTemplateLocally(template, mode, layers, range);
+    if (!r) return;
+    setLayers(r.next);
+    const first = r.added[0];
+    if (first) {
+      setSelectedLayer(first.id);
+      if (current < first.start || current > first.end) seek(first.start);
+    }
+    if (tab !== "layers" && tab !== "transcript") setTab("layers");
+    setTemplateOpen(false);
+  };
 
   const textTab = (
     <div className="flex flex-col gap-4">
@@ -1626,6 +1697,7 @@ export function ClipEditor(props: Props) {
           selectedOverlay={selectedLayer}
           onOverlaySelect={setSelectedLayer}
           onOverlayChange={(id, patch, key) => patchLayer(id, patch, key)}
+          overlayMenu={overlayMenu}
           still={still}
           alwaysShowHook={activeTab === "captions" && !playing}
           onStyleChange={(p) => setStyle(p, "drag-text")}
@@ -1832,10 +1904,12 @@ export function ClipEditor(props: Props) {
       }}
       onLayerChange={(id, r, key) => patchLayer(id, { start: r[0], end: r[1] }, key)}
       onLayerAdd={(t, kind) => {
+        if (kind === "template") return setTemplateOpen(true);
         seek(t);
         if (kind === "text") addTextLayer(t);
         else setPicker({ kind, t });
       }}
+      onLayerTemplate={() => setTemplateOpen(true)}
       onLayerRemove={removeLayer}
       renderClipEditor={clipRangeEditor}
       bumpers={bumperBlocks}
@@ -1969,6 +2043,27 @@ export function ClipEditor(props: Props) {
       )}
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
+      <ApplyTemplateDialog
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+        title="Apply a template to this clip"
+        existing={existingOnClip(layers.length)}
+        actions={[{ label: "Apply", primary: true, title: "The layers join this clip; save the clip to render them", run: applyTemplate }]}
+        emptyExtra={
+          layers.length > 0 ? (
+            <button
+              className="text-xs font-semibold text-acc-text"
+              onClick={() => {
+                setTemplateOpen(false);
+                setSaveTemplateOpen(true);
+              }}
+            >
+              or save this clip’s layers as one
+            </button>
+          ) : undefined
+        }
+      />
+      <SaveAsTemplateDialog open={saveTemplateOpen} onOpenChange={setSaveTemplateOpen} layers={layers} range={range} defaultName={title} />
 
       <AssetFinderDialog
         open={picker?.kind === "asset"}

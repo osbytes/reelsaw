@@ -226,11 +226,11 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     setLeaving((s) => new Set(s).add(a.id));
     window.setTimeout(() => void actions.remove(a).then(() => setLeaving((s) => (s.delete(a.id), new Set(s)))), 160);
   };
-  const remove = (a: LibraryAsset) => (a.usedBy ? setRemoving(a) : fadeOut(a));
+  const remove = (a: LibraryAsset) => (a.usedBy || a.usedByTemplates ? setRemoving(a) : fadeOut(a));
   const select = (a: LibraryAsset) => nav({ pathname: loc.pathname, search: loc.search, hash: selected === a.id ? "" : `#asset=${a.id}` }, { replace: true });
   const viewing = list.data?.assets.find((a) => a.id === viewingId) ?? null;
 
-  const usageText = (r: LibraryAsset) => (r.usedByClips > 0 ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}` : r.usedBy > 0 ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}` : undefined);
+  const usageText = (r: LibraryAsset) => (r.usedByClips > 0 ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}` : r.usedBy > 0 ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}` : r.usedByTemplates > 0 ? `${r.usedByTemplates} template${r.usedByTemplates === 1 ? "" : "s"}` : undefined);
   const libTile = (r: LibraryAsset): TileModel => ({
     key: `lib:${r.id}`,
     kind: r.kind,

@@ -9,6 +9,7 @@ import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { ClipBumpersDialog } from "./BumperField";
+import { ApplyTemplateToClipsDialog } from "./TemplatePicker";
 import { useMe } from "../lib/account";
 import { clipMeta, clipText } from "../lib/clipMeta";
 import { summarizeError } from "../lib/errors";
@@ -36,6 +37,8 @@ export interface ClipView {
   scores?: ClipScores | null;
   diagnostics?: ClipDiagnostics | null;
   bumpers?: ClipBumpers | null;
+  /** the clip's layers (the template dialog asks Replace / Keep when there are any) */
+  layers?: unknown[] | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
   /** the last render stored its captions: SRT / VTT can be downloaded */
@@ -87,6 +90,7 @@ export function ClipCard({
   const [bdOpen, setBd] = useState(false);
   const [postOpen, setPost] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const isAdmin = useMe().data?.role === "admin";
   const done = clip.status === "done";
   const working = clip.status === "rendering" || clip.status === "preparing";
@@ -245,6 +249,9 @@ export function ClipCard({
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setBumpersOpen(true)}>
                 Intro / outro…
               </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setTemplateOpen(true)}>
+                Layer template…
+              </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" onSelect={() => setPost(true)}>
                 Caption &amp; hashtags…
               </DropdownMenu.Item>
@@ -277,6 +284,7 @@ export function ClipCard({
         </div>
       </Modal>
       <ClipBumpersDialog open={bumpersOpen} onOpenChange={setBumpersOpen} clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
+      <ApplyTemplateToClipsDialog open={templateOpen} onOpenChange={setTemplateOpen} projectId={projectId} clipIds={[clip.id]} withLayers={clip.layers?.length ?? 0} rerenderable={clip.status === "done" || clip.status === "failed" ? 1 : 0} />
     </article>
   );
 }

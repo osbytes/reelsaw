@@ -12,7 +12,7 @@ import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/failures.js";
 import { schema, type Db } from "../db/index.js";
-import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, PASSWORD_MAX_LENGTH, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, createProjectInputSchema, projectSettingsSchema, projectSettingsPatchSchema, defaultProjectSettings, PASSWORD_MAX_LENGTH, userProjectDefaultsSchema, clipBumpersSchema, bumperSecondsSchema, reframeModeSchema, styleOverrideSchema, layoutSectionSchema, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipAudioList, TEXT_FONTS, styleSchema, clipLayerSchema, MAX_CLIP_LAYERS, clipLayers, layersToLegacy, assetTagsSchema, assetProvenanceSchema, SFX_MAX_SEC, layerTemplateNameSchema, layerTemplateLayersSchema, type ClipLayer, type ClipOverlay, type ClipAudio, type EventsReplayed, type ProjectEvent, type TranscriptFlag, type Word } from "@reelsaw/shared";
 import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } from "../transcript-limits.js";
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
@@ -24,6 +24,8 @@ import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload } from "../library/service.js";
 import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
+import { cleanLayers } from "../library/layers.js";
+import { applyLayerTemplate, applyLayerTemplateInput, createLayerTemplate, getLayerTemplate, layerTemplateFromClip, listLayerTemplates, publicTemplate, removeLayerTemplate, restoreLayerTemplate, templateIdSchema, updateLayerTemplate } from "../library/templates.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
@@ -249,80 +251,6 @@ async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | nu
   if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
 }
 
-/** Overlays as stored: ordered by start, ids unique, windows at least 0.1 s, numbers rounded. */
-function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: { startSec: number; endSec: number }): ClipOverlay[] | null {
-  if (!list?.length) return null;
-  const seen = new Set<string>();
-  const out: ClipOverlay[] = [];
-  for (const o of list) {
-    if (seen.has(o.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay id “${o.id}” is used twice` });
-    seen.add(o.id);
-    const start = Math.max(clip.startSec, o.start);
-    const end = Math.min(clip.endSec, o.end);
-    if (end - start < 0.1) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay “${o.id}” lies outside the clip or lasts under 0.1 s` });
-    const r3 = (n: number) => Number(n.toFixed(3));
-    const kind = overlayKind(o);
-    const base = { id: o.id, kind, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), x: r3(o.x), y: r3(o.y), ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: r3(o.opacity) } : {}) };
-    if (kind === "text") out.push({ ...base, text: o.text!, size: r3(o.size ?? TEXT_OVERLAY_DEFAULTS.size), color: (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(), ...(o.box ? { box: true } : {}), ...(o.font && o.font !== TEXT_FONTS[0].family ? { font: o.font } : {}) });
-    else out.push({ ...base, assetId: o.assetId!, w: r3(o.w ?? ASSET_OVERLAY_DEFAULT_W) });
-  }
-  return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
-}
-
-/**
- * Layers as stored: asset and text layers cleaned like overlays (plus `loop`), audio layers like music tracks,
- * one id space, ordered by start; null when empty.
- */
-function cleanLayers(list: ClipLayer[] | null | undefined, clip: { startSec: number; endSec: number }): ClipLayer[] | null {
-  if (!list?.length) return null;
-  if (list.length > MAX_CLIP_LAYERS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can have at most ${MAX_CLIP_LAYERS} layers` });
-  const ids = new Set<string>();
-  for (const l of list) {
-    if (ids.has(l.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Layer id “${l.id}” is used twice` });
-    ids.add(l.id);
-  }
-  const { overlays, audio } = layersToLegacy(list);
-  const loops = new Map(list.flatMap((l) => (l.kind === "asset" && l.loop !== undefined ? [[l.id, l.loop] as const] : [])));
-  const visual: ClipLayer[] = (cleanOverlays(overlays, clip) ?? []).map((o) => {
-    if (overlayKind(o) === "text") {
-      const { assetId: _a, w: _w, kind: _k, ...rest } = o;
-      return { ...rest, kind: "text" as const, text: o.text! };
-    }
-    const { text: _t, size: _s, color: _c, box: _b, font: _f, kind: _k, ...rest } = o;
-    const loop = loops.get(o.id);
-    return { ...rest, kind: "asset" as const, assetId: o.assetId!, ...(loop !== undefined ? { loop } : {}) };
-  });
-  const sounds: ClipLayer[] = (cleanAudio(audio, clip) ?? []).map((a) => ({ ...a, kind: "audio" as const }));
-  return [...visual, ...sounds].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
-}
-
-/** Music tracks as stored: ordered by start, ids unique, clamped to the clip, defaults left out, numbers rounded; null when empty. */
-function cleanAudio(list: ClipAudio[] | null | undefined, clip: { startSec: number; endSec: number }): ClipAudio[] | null {
-  if (!list?.length) return null;
-  const seen = new Set<string>();
-  const r2 = (n: number) => Number(n.toFixed(2));
-  const out: ClipAudio[] = [];
-  for (const a of list) {
-    if (seen.has(a.id)) throw new TRPCError({ code: "BAD_REQUEST", message: `Music track id “${a.id}” is used twice` });
-    seen.add(a.id);
-    const start = Math.max(clip.startSec, a.start);
-    const end = Math.min(clip.endSec, a.end);
-    if (end - start < 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: `Music track “${a.id}” lies outside the clip or lasts under 0.5 s` });
-    out.push({
-      id: a.id,
-      assetId: a.assetId,
-      start: r2(start),
-      end: r2(end),
-      ...(a.offset ? { offset: r2(a.offset) } : {}),
-      ...(a.volume !== undefined && Math.abs(a.volume - CLIP_AUDIO_DEFAULTS.volume) > 1e-3 ? { volume: r2(a.volume) } : {}),
-      ...(a.duck === false ? { duck: false } : {}),
-      ...(a.fade !== undefined && Math.abs(a.fade - CLIP_AUDIO_DEFAULTS.fade) > 1e-3 ? { fade: r2(a.fade) } : {}),
-      ...(a.loop === false ? { loop: false } : {}),
-    });
-  }
-  return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
-}
-
 /**
  * The user's project, or NOT_FOUND. A mutation calls it with `u.db` inside the unit of work that writes, so ownership
  * is checked in the same transaction as the write (a check made before the transaction can be stale at commit).
@@ -467,6 +395,8 @@ const headRouter = router({
       const { introAssetId: _i, outroAssetId: _o,...rest } = input; // intro/outro change only through `bumpers.*`
       const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== ""));
       return ctx.svc.tx(async (u) => {
+        // the default layer template must be one of the user's live templates
+        if (typeof clean.layerTemplateId === "string") await getLayerTemplate(u.db, ctx.user.id, clean.layerTemplateId);
         const [cur] = await u.db.select({ d: schema.userSettings.projectDefaults }).from(schema.userSettings).where(eq(schema.userSettings.userId, ctx.user.id)).for("update");
         const keep = Object.fromEntries((["introAssetId", "outroAssetId"] as const).filter((k) => cur?.d?.[k]).map((k) => [k, cur!.d[k]]));
         const next = { ...clean, ...keep };
@@ -511,6 +441,8 @@ function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts,
     thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
     usedBy: usage.get(r.id)?.projects ?? 0,
     usedByClips: usage.get(r.id)?.clips ?? 0,
+    /** live layer templates with a layer that names it (a removal keeps the template's layer; it is skipped at apply) */
+    usedByTemplates: usage.get(r.id)?.templates ?? 0,
     mime: r.mime,
     tags: r.tags,
     provenance: r.provenance,
@@ -1628,5 +1560,23 @@ const restRouter = router({
   }),
 });
 
-export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter }), restRouter);
+/**
+ * Layer templates (docs/specs/layer-templates.md): sets of layers placed by timing (head / tail / fill / relative) so one
+ * template fits a clip of any length. `apply` materialises them into `clips.layers`; `fromClip` builds one from a clip.
+ * Same service functions as the `*_layer_template` MCP tools and `reelsaw templates`.
+ */
+const layerTemplatesRouter = router({
+  list: protectedProcedure.query(({ ctx }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id)),
+  get: protectedProcedure.input(z.object({ id: templateIdSchema })).query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
+  create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
+  update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
+  remove: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  /** A new template from one clip's layers: a layer that spans the clip fills, the rest anchor to the nearer edge with their length. */
+  fromClip: protectedProcedure.input(z.object({ clipId: z.string(), name: layerTemplateNameSchema })).mutation(({ ctx, input }) => layerTemplateFromClip(ctx.svc, ctx.user.id, input)),
+  /** Materialise a template on clips of one project (all of them, or `clipIds`), replacing or adding to their layers. (`apply` is a word tRPC reserves.) */
+  applyToClips: protectedProcedure.input(z.object(applyLayerTemplateInput)).mutation(({ ctx, input }) => applyLayerTemplate(ctx.svc, ctx.user.id, input)),
+});
+
+export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter, layerTemplates: layerTemplatesRouter }), restRouter);
 export type AppRouter = typeof appRouter;
