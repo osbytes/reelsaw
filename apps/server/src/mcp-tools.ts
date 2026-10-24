@@ -257,7 +257,7 @@ export const TOOLS = {
   search_assets: {
     title: "Search library, catalog and providers",
     description:
-      "Find assets. source \"library\" = your own library (name and tags; empty q lists all, replacing a list call; ids go into update_clip layers, set_project_bumpers, set_default_bumper); omitted or \"catalog\" = the Reelsaw catalog (CC0, works offline); or a provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy) an admin enabled. Returns { provider, items: [{ provider, externalId, name, kind, license, durationSec }], nextCursor }. Adds nothing: give a hit's provider + externalId to add_asset.",
+      "Find assets. source \"library\" = your own uploads (name and tags; empty q lists all); omitted or \"catalog\" = the Reelsaw catalog (CC0, works offline); or a provider an admin enabled. Returns { provider, items: [{ provider, externalId, name, kind, license, durationSec }], nextCursor }. Adds nothing: a catalog / provider hit's provider + externalId go to add_asset.",
     inputSchema: {
       q: z.string().max(200).default("").describe("What to look for, e.g. \"whoosh\", \"arrow\", \"city at night\"; empty lists everything in the source"),
       source: z.string().min(1).max(40).optional().describe("library, catalog (default), pexels, pixabay, freesound, iconify, openverse, giphy or klipy"),
@@ -271,7 +271,7 @@ export const TOOLS = {
   },
   add_asset: {
     title: "Add library asset",
-    description: "Add to your library from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound), or a search_assets catalog / provider hit (provider + externalId: checksum verified, license and credit recorded, one shared copy per instance). Returns { id, name, kind, mime, durationSec, duplicate, restored, owner, saved } (the same file twice returns the existing item). setDefault makes it your default intro/outro for NEW projects only.",
+    description: "Add from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound) becomes one of your library uploads; a search_assets catalog / provider hit (provider + externalId) materializes one instance-shared copy (checksum verified, license recorded; not listed in your library). Returns { id, name, kind, mime, durationSec, duplicate, restored, owner } (the same file twice returns the existing item). setDefault on an upload makes it your default intro/outro for NEW projects only.",
     inputSchema: addAssetInput,
   },
   update_asset: {
@@ -287,7 +287,7 @@ export const TOOLS = {
   },
   remove_asset: {
     title: "Remove library asset",
-    description: "Remove an item from your library and from your defaults (a shared catalog or provider item is only unsaved). Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
+    description: "Remove one of your uploads from the library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { destructiveHint: true },
   },

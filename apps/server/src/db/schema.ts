@@ -339,21 +339,6 @@ export type Asset = typeof assets.$inferSelect;
 /** @deprecated use Asset */
 export type LibraryAsset = Asset;
 
-/** An instance-shared asset a user keeps in their library ("Add" on a catalog or provider item); removing it unsaves. */
-export const assetSaves = pgTable(
-  "asset_saves",
-  {
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    assetId: text("asset_id")
-      .notNull()
-      .references(() => assets.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.userId, t.assetId] }), index("asset_saves_asset_idx").on(t.assetId)],
-);
-
 /**
  * Which library assets a project or clip uses, and how, maintained in the same transaction as the write
  * that changed `clips.layers`, `clips.bumpers` or the project's intro/outro settings. "Used by N", the

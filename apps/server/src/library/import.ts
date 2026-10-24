@@ -5,7 +5,8 @@
  * An import resolves the item, brings the file in as an upload (download through the SSRF-guarded
  * `downloadAsUpload`, or copy for files bundled with the install), verifies the catalog's sha256 and creates the
  * library row through `createAsset`, so limits, dedupe and probing are the ones every upload gets. The row is
- * instance-shared (`user_id` null), one per (provider, externalId, colour); the importing account gets a `asset_saves` row.
+ * instance-shared (`user_id` null), one per (provider, externalId, colour); clips that name it keep it, the sweep
+ * drops it once nothing does.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -76,7 +77,7 @@ export interface ImportedAsset {
   kind: string;
   mime?: string | null;
   durationSec: number;
-  /** the shared row already existed (another import, possibly by another account): this call only saved it */
+  /** the shared row already existed (another import, possibly by another account): this call reused it */
   duplicate: boolean;
   restored: boolean;
 }
@@ -92,31 +93,28 @@ async function localAsUpload(svc: Services, userId: string, file: string, name: 
 }
 
 type SharedKey = { provider: string; externalId: string; variant: string };
-/** The shared row for a source item, if it exists: saved into the account's library in the same transaction. */
-async function saveExistingShared(svc: Services, userId: string, key: SharedKey): Promise<ImportedAsset | null> {
-  return svc.tx(async (u) => {
-    const [row] = await u.db.select().from(schema.assets).where(sharedSourceWhere(key)).limit(1);
-    if (!row) return null;
-    await u.db.insert(schema.assetSaves).values({ userId, assetId: row.id }).onConflictDoNothing();
-    return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, duplicate: true, restored: false };
-  });
+/** The shared row for a source item, if this instance already imported it. */
+async function existingShared(svc: Services, key: SharedKey): Promise<ImportedAsset | null> {
+  const [row] = await svc.database.db.select().from(schema.assets).where(sharedSourceWhere(key)).limit(1);
+  if (!row) return null;
+  return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, duplicate: true, restored: false };
 }
 
 /** `shared` replaces the database-backed steps (tests); the defaults are the real ones. */
 export interface ImportDeps extends FetchDeps {
-  shared?: { saveExisting: typeof saveExistingShared; create: typeof createAsset };
+  shared?: { existing: typeof existingShared; create: typeof createAsset };
 }
 
 export async function importAsset(svc: Services, userId: string, input: ImportInput, deps: ImportDeps = {}): Promise<ImportedAsset> {
-  const shared = deps.shared ?? { saveExisting: saveExistingShared, create: createAsset };
+  const shared = deps.shared ?? { existing: existingShared, create: createAsset };
   try {
     const r = await libraryProviders(svc).registry.resolve(input.provider, input.externalId, { color: input.color });
     const variant = r.provenance.variant ?? "";
     const provenance = { ...r.provenance, variant };
     const key = { provider: provenance.provider, externalId: provenance.externalId ?? input.externalId, variant };
-    // already on the instance: nothing to download, the account just saves it
-    const existing = await shared.saveExisting(svc, userId, key);
-    if (existing) return existing;
+    // already on the instance: reuse the row, nothing to download
+    const already = await shared.existing(svc, key);
+    if (already) return already;
     let upload: { uploadId: string; filename: string };
     if (r.localPath) {
       if (r.sha256 && (await sha256File(r.localPath)) !== r.sha256) throw new ProviderError("The bundled file does not match the catalog (corrupted install?).");
@@ -138,7 +136,7 @@ export async function importAsset(svc: Services, userId: string, input: ImportIn
       }
     }
     const tags = [...new Set([...(r.tags ?? []), ...(input.tags ?? [])].map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 30);
-    return await shared.create(svc, { userId: null, actorId: userId, uploadId: upload.uploadId, name: r.name.slice(0, 120), tags, provenance, system: input.provider === "reelsaw", saveFor: userId });
+    return await shared.create(svc, { userId: null, actorId: userId, uploadId: upload.uploadId, name: r.name.slice(0, 120), tags, provenance, system: input.provider === "reelsaw" });
   } catch (err) {
     return asTrpc(err);
   }

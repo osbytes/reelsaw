@@ -831,7 +831,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
-      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) (removed over 30 days ago, or shared and saved by nobody) and used nowhere`);
+      console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) (removed over 30 days ago, or shared and unused) and used nowhere`);
       const del = await purgeDeleted(svc, { dryRun: dry });
       console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
       return;
@@ -983,7 +983,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const r = hit
         ? await api.library.add({ provider: hit[1]!, externalId: hit[2]!, ...(o.color ? { color: o.color } : {}), ...(tagList ? { tags: tagList } : {}) })
         : await api.library.add({ ...common, ...(/^https?:\/\//i.test(a) ? { url: a } : { uploadId: (await uploadLocalFile(svc, user.id, a)).uploadId }) });
-      console.log(`${r.duplicate ? (r.restored ? "restored existing" : "already in the library") : "added"} ${r.id}  ${r.name}  (${r.kind})`);
+      console.log(`${r.duplicate ? (r.restored ? "restored existing" : "already exists") : "added"} ${r.id}  ${r.name}  (${r.kind})`);
     } else if (sub === "usage" && a) {
       const u = await api.library.usage({ id: a });
       if (!u.projects.length) console.log("(not used)");

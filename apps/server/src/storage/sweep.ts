@@ -304,16 +304,16 @@ export const BUMPER_PURGE_MS = 30 * 24 * 60 * 60_000;
 /**
  * A removed asset is purgeable once it has been gone for 30 days and no project setting or clip names it. An
  * instance-shared row (`userId` null) is never removed by anyone: it is purgeable once it is over 30 days old and
- * nothing references it and no account has it saved.
+ * nothing references it.
  */
-export function bumperPurgeable(a: { deletedAt: Date | null; userId?: string | null; createdAt?: Date }, referenced: boolean, now: number, saved = false): boolean {
-  if (a.userId === null) return !!a.createdAt && !referenced && !saved && now - a.createdAt.getTime() > BUMPER_PURGE_MS;
+export function bumperPurgeable(a: { deletedAt: Date | null; userId?: string | null; createdAt?: Date }, referenced: boolean, now: number): boolean {
+  if (a.userId === null) return !!a.createdAt && !referenced && now - a.createdAt.getTime() > BUMPER_PURGE_MS;
   return !!a.deletedAt && !referenced && now - a.deletedAt.getTime() > BUMPER_PURGE_MS;
 }
 
 /**
  * Hard-deletes library assets removed over 30 days ago that nothing references, and instance-shared rows that nothing
- * references or has saved (see bumperPurgeable), then drops their
+ * references (see bumperPurgeable), then drops their
  * storage objects (`bumpers/<id>/…`) and local cache. The row delete commits first; the files go after.
  */
 export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean; now?: number } = {}): Promise<string[]> {
@@ -348,7 +348,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       await purgeBatch(rows.map((r) => r.id));
     },
   });
-  // instance-shared rows (catalog / provider imports) that no account saved and no project uses, over 30 days old
+  // instance-shared rows (catalog / provider imports) that no project uses, over 30 days old
   await keysetLoop<{ id: string; at: string }, Cur>({
     size: PURGE_BATCH,
     deadline: deadlineIn(PURGE_BUDGET_MS),
@@ -359,7 +359,6 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
         where a.user_id is null and a.created_at < ${cutoff.toISOString()}::timestamptz
           ${cur ? sql`and (a.created_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           and not exists (select 1 from asset_refs r where r.asset_id = a.id)
-          and not exists (select 1 from asset_saves s where s.asset_id = a.id)
         order by a.created_at, a.id limit ${size}`);
       return res.rows as Array<{ id: string; at: string }>;
     },
@@ -383,10 +382,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       // refs are written in the transaction that points at the asset (library/refs.ts), after taking the same row lock
       const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${id}) as used`);
       const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
-      // a save is written in the transaction that names the row; asset_saves cascades with it
-      const sv = await u.db.execute(sql`select exists (select 1 from asset_saves where asset_id = ${id}) as saved`);
-      const saved = !!(sv.rows[0] as { saved: boolean } | undefined)?.saved;
-      if (!bumperPurgeable(a, used, now, saved)) return false;
+      if (!bumperPurgeable(a, used, now)) return false;
       await u.db.delete(schema.assets).where(eq(schema.assets.id, id));
       u.afterCommit(async () => {
         try {

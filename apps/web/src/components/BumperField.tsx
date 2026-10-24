@@ -137,7 +137,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
   const remove = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(a.owner === "me" ? `Removed ${a.name}` : `Removed ${a.name} from your library`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
+      () => (refresh(), toast(`Removed ${a.name}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
       (e) => (fail(e), false),
     );
   /** Image length; resolves true when saved. */
@@ -401,9 +401,9 @@ function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withL
     <div className="grid grid-cols-3 gap-1">
       {slotBtn("intro", introId === a.id)}
       {slotBtn("outro", outroId === a.id)}
-      <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${withLabels && a.owner !== "me" ? "col-span-full" : ""}`} disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
         <Trash2 className="h-3.5 w-3.5" />
-        {withLabels && (a.owner === "me" ? "Remove" : "Remove from your library")}
+        {withLabels && "Remove"}
       </button>
     </div>
   );
@@ -486,7 +486,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
             <>
               <div className="flex items-center gap-2">
                 <Dialog.Title className="min-w-0 flex-1 truncate font-bold">{a.name}</Dialog.Title>
-                {a.owner === "me" && <RenamePopover asset={a} busy={busy} onRename={onRename} />}
+                <RenamePopover asset={a} busy={busy} onRename={onRename} />
                 <Dialog.Close className="text-ink2 hover:text-ink" aria-label="Close">
                   <X className="h-4 w-4" />
                 </Dialog.Close>
@@ -510,22 +510,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                 {a.kind === "audio" ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}` : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
-              <div className="flex items-center gap-2">
-                {a.system && <span className="rounded-full bg-sunk px-2 py-0.5 text-[11px] font-semibold text-ink2">Catalog</span>}
-              </div>
-              {a.owner === "me" ? (
-                <TagEditor asset={a} busy={busy} onTags={onTags} />
-              ) : (
-                a.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1" aria-label="Tags">
-                    {a.tags.map((t) => (
-                      <span key={t} className="rounded-full bg-sunk px-2 py-0.5 text-[11px] text-ink2">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )
-              )}
+              <TagEditor asset={a} busy={busy} onTags={onTags} />
               {a.provenance && (
                 <div className="flex items-center gap-2">
                   <LicenseBadge provenance={a.provenance} wrap className="min-w-0 flex-1 whitespace-normal" />
@@ -534,7 +519,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               {(a.usedBy > 0 || a.usedByClips > 0) && (
                 <div className="rounded-[12px] border border-line p-3">
                   <b className="text-xs">Where it’s used</b>
-                  {a.owner === "me" ? <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" /> : <p className="mt-1 text-xs text-ink2">Used by {a.usedBy} project{a.usedBy === 1 ? "" : "s"}{a.usedByClips ? ` · ${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""}</p>}
+                  <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
                 </div>
               )}
               <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />

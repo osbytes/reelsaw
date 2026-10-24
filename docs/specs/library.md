@@ -2,7 +2,7 @@
 
 Status: implemented Oct 2026 on `feat/library` (phases 0 to 3b; the reelsaw.com catalog publish and the `suggest_layers` tool are still open). Consolidates `bumper_assets` + `clips.overlays` + `clips.audio` into one
 library and one per-clip layer list, and adds system assets (a curated Reelsaw catalog) plus remote
-providers (Pexels, Pixabay, Freesound, Iconify, Openverse) that import into the library.
+providers (Pexels, Pixabay, Freesound, Iconify, Openverse) that materialize as instance-shared rows when a clip uses them.
 Builds on [bumpers.md](bumpers.md) and [editor-tracks.md](editor-tracks.md); nothing about the render
 graph's shape changes.
 
@@ -26,14 +26,14 @@ without leaving the editor or finding files on my disk.
 ## Decisions
 
 1. **One table, `assets`.** `bumper_assets` is renamed (migration 0039, hand-written rename lines:
-   drizzle-kit can only record a rename through a terminal prompt); `asset_saves` and `asset_refs` sit
+   drizzle-kit can only record a rename through a terminal prompt); `asset_refs` sits
    beside it. Rows, ids and storage keys are kept (they are stored in full in
    `source_key` / `thumbnail_key`, so old `bumpers/<id>/…` objects stay where they are and new rows
    write `assets/<id>/…`; derived caches use `keys.assetDir(source_key)`).
    Columns added: `mime` (exact type: `image/svg+xml`, `image/gif`, `image/webp`, `audio/mpeg`…),
    `tags text[]`, `provenance jsonb` (`{ provider, externalId, variant, url,
    license: { id, name, url }, attribution, importedAt }`, null for uploads), `system boolean`
-   (came from the Reelsaw catalog; shown with a badge, same row otherwise). `kind` stays coarse
+   (came from the Reelsaw catalog; the tile source line says Catalog). `kind` stays coarse
    (video / image / audio): it is what the renderer and the pickers branch on, and the only classification:
    there are no categories (a sound of 8 s or less gets one-shot layer defaults, longer is music; that is
    a default, not a label). Search is by name, tags and credit. Animated GIF / WebP are
@@ -106,13 +106,12 @@ without leaving the editor or finding files on my disk.
    the existing `downloadAsUpload` → `createAsset` path (SSRF guard, size and duration limits, sha256
    dedupe), with `provenance` filled. **Imports are instance-shared rows**: one `assets` row with
    `user_id` null per `(provider, externalId, variant)` (variant = the Iconify colour; a unique partial
-   index and a lock keyed on it make two accounts importing at once converge), plus a `library_saves` row
-   for the importing account. Any signed-in account may use a shared row (media routes, project and clip
-   pickers, renders); only the accounts that saved it see it in their library, it never counts toward a
+   index and a lock keyed on it make two accounts importing at once converge). Any signed-in account may
+   use a shared row (media routes, project and clip pickers, renders); it never counts toward a
    storage quota, and it cannot be renamed or retagged ("Shared items keep the name they came with").
-   Removing one deletes the account's save, never the row. The hourly sweep (`purgeBumperAssets`) hard
-   deletes a shared row, its files and its cache once it is over 30 days old, no `asset_refs` row
-   names it and no account has it saved (`reelsaw storage sweep --dry-run` lists them). Renders only ever read the library. Pixabay forbids permanent
+   The hourly sweep (`purgeBumperAssets`) hard
+   deletes a shared row, its files and its cache once it is over 30 days old and no `asset_refs` row
+   names it (`reelsaw storage sweep --dry-run` lists them). Renders only ever read the library. Pixabay forbids permanent
    hotlinking and requires a 24 h cache of search results; Pexels wants a visible "Photos provided by
    Pexels" link and photographer credit; both are satisfied by the Browse panel's footer and the
    stored attribution, not by anything at render time. Self-hosted instances with no keys still get
@@ -157,7 +156,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 | provider | gives | key | limits (as documented Oct 2026) | license posture | notes |
 |---|---|---|---|---|---|
-| **Reelsaw catalog** | sfx, icons, stickers, transitions | none | none (static files) | CC0 / permissive, vetted | default tab; works offline with the starter pack |
+| **Reelsaw catalog** | sfx, icons, stickers, transitions | none | none (static files) | CC0 / permissive, vetted | listed on an empty search; works offline with the starter pack |
 | **Pexels** | photos, **portrait videos** (b-roll) | free, `PEXELS_API_KEY` | 200 req/h, 20k/month; more on request | Pexels License: free commercial use; show a Pexels link; no standalone redistribution, no competing service | `videos/search?orientation=portrait&size=medium` fits 9:16; store photographer + photo url |
 | **Pixabay** | photos, illustrations, **vectors**, videos | free, `PIXABAY_API_KEY` | 100 req/min; search results must be cached 24 h | Pixabay Content License: no attribution needed, show source in results; must download, never hotlink | API has no music / sfx; full-resolution URLs need approval, the standard `largeImageURL` / video sizes are enough |
 | **Freesound** | sound effects, loops | free, `FREESOUND_API_KEY` | per-app quota | per-sound CC0 / CC-BY / CC-BY-NC; filter CC0 by default, allow CC-BY with attribution, never NC | original downloads need per-user OAuth2; import the HQ preview (`previews.preview-hq-mp3`, 128 kbps), fine under speech |
@@ -170,37 +169,32 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 ## What the user sees
 
-- **Library page** (`/library`): the title with the item count and one short line. Row 1 is the search
-  box ("Search your library, the catalog and providers…") and an **Upload** button (files can also be
-  dropped anywhere on the page); row 2 is kind chips (All / Video / Image / Audio), a thin divider and
-  source chips (All / Yours / Catalog / one per enabled provider). Upload progress is a compact row
+- **Library page** (`/library`): the title and one short line. Row 1 is the search
+  box ("Search uploads, the catalog and providers…") and an **Upload** button (files can also be
+  dropped anywhere on the page); row 2 is kind chips (All / Video / Image / Audio). Upload progress is a compact row
   under the chips, only while there are jobs. Below is **one grid** of identical tiles (`AssetTile`),
-  no section headers: in-library items first (own uploads and saved shared items, fuzzy search over
-  name, tags and source), then catalog results (everything on an empty search), then provider results
-  (only with a query; each provider's query starts when its first slot scrolls into view or its chip
-  is selected). A catalog / provider result that is already in your library is not drawn twice. Skeleton
+  no section headers: your uploads first (fuzzy search over name and tags), then catalog results
+  (everything on an empty search), then provider results
+  (only with a query; each provider's query starts when its first slot scrolls into view). Skeleton
   tiles trail the grid while a source loads; "Nothing matches" shows only once every active source came
   back empty; one "Show more" loads the next page of the first source that has one. Attribution lines
   (Pexels, Pixabay, Giphy) are one muted footer under the grid. A tile shows the thumbnail or preview,
   a one-line name and one muted meta line `kind · length or size · source · license` (source is
   Yours, Catalog or the provider; audio and video show their length, an image shows its pixel size and
-  never a length, since an image's stored duration is only how long it shows as an intro / outro). Items
-  in your library that are in use carry a small muted badge at the thumbnail's bottom-left ("2 clips" or
-  "1 project"). There is no in-library badge: the only control is a small round "+" button on the
-  thumbnail's top-right corner for a catalog / provider result that is not in your library (shown on
-  hover / focus on desktop, always on touch; "Adding..." becomes a spinner; `library.add`; an item
-  already on the instance is only saved, nothing is downloaded again; the tile then becomes the
-  in-library tile in place). Clicking an in-library tile opens the viewer, which keeps rename, tags,
-  usage, remove / "Remove from your library" and "Used by N". Deep links: `#asset=<id>`,
-  `?kind=&source=&q=`.
+  never a length, since an image's stored duration is only how long it shows as an intro / outro). Uploads
+  that are in use carry a small muted badge at the thumbnail's bottom-left ("2 clips" or
+  "1 project"). Catalog and provider results have no add control on this page (they are imported when a
+  clip uses them). Clicking an upload opens the viewer, which keeps rename, tags,
+  usage, remove and "Used by N". Deep links: `#asset=<id>`,
+  `?kind=&q=`.
 - **Editor**: the Layers lane; `+` -> Image or video... / Text / Sound.... Image or video ("Add to
   clip") and Sound ("Add a sound") open the same single-grid finder in a dialog
   (`AssetFinderDialog`, kinds preset, kind chips hidden when limited to one kind, no Upload button).
-  When limited to kinds, the source chips list only providers that serve those kinds (no Iconify in
+  When limited to kinds, only providers that serve those kinds are queried (no Iconify in
   the sound dialog) and results of other kinds are dropped. Every tile has one primary "Add to clip"
-  button on the thumbnail's top-right corner (clicking the thumbnail does the same): on a
-  library tile it adds the layer at the playhead the dialog was opened at; on a catalog / provider
-  result it imports it into the library first ("Adding..." on the tile), then adds the layer. Overlay
+  button on the thumbnail's top-right corner (clicking the thumbnail does the same): on an
+  upload it adds the layer at the playhead the dialog was opened at; on a catalog / provider
+  result it materializes the instance-shared file first ("Adding..." on the tile), then adds the layer. Overlay
   stacking rules in [UI.md](../UI.md).
 - **Project settings**: intro / outro pickers unchanged, filtered to video / image.
 
@@ -217,8 +211,8 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 | clip layers | `clips.update { layers }` | `update_clip { layers }`, `get_clip` | `reelsaw clip-layers <p> <c> --set '<json>' \| --add <assetId> … \| --add-text … \| --add-sound <assetId> … \| --remove <id> \| --clear [--rerender]` |
 | catalog ops | admin: `catalog.refresh`, `catalog.status` | `get_instance_settings` shows catalog version | `reelsaw catalog refresh\|status` |
 
-`library.remove` on a shared row only unsaves it and `library.restore` saves it again, so there is no
-separate save / unsave. "Bumper" stays the name of the intro / outro slot (`set_default_bumper`,
+`library.list` is this account's uploads. Catalog and provider files are instance-shared (`user_id` null)
+and stay as long as a clip or project names them. "Bumper" stays the name of the intro / outro slot (`set_default_bumper`,
 `set_project_bumpers`, `set_clip_bumpers`, `project-bumpers`, `clip-bumpers`).
 
 All surfaces call `apps/server/src/library/service.ts` (renamed from `bumpers/service.ts`), per the

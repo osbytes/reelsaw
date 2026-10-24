@@ -421,9 +421,9 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
 | `search_assets` | Find assets. |
-| `add_asset` | Add to your library from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound), or a search_assets catalog / provider hit (provider + externalId: checksum verified, license and credit recorded, one shared copy per instance). |
+| `add_asset` | Add from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound) becomes one of your library uploads; a search_assets catalog / provider hit (provider + externalId) materializes one instance-shared copy (checksum verified, license recorded; not listed in your library). |
 | `update_asset` | Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). |
-| `remove_asset` | Remove an item from your library and from your defaults (a shared catalog or provider item is only unsaved). |
+| `remove_asset` | Remove one of your uploads from the library and from your defaults. |
 | `restore_asset` | Bring one of your removed library items back (the id from remove_asset or `reelsaw library list`); restoring an item that is not removed changes nothing. |
 | `asset_usage` | The projects and clips that use a library item, as intro, outro, overlay or music (clips a re-analyze replaced are left out). |
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |

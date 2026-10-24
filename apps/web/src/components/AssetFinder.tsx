@@ -1,9 +1,9 @@
 /**
- * The one finder: your library, the Reelsaw catalog and every enabled provider behind one search box and ONE grid of
- * identical tiles: in-library items first, then catalog results, then provider results (a result already in your
- * library is not drawn twice). One "Show more", one attribution footer.
- * `mode="library"` is the Library page body (filters live in the URL: ?kind=&source=&q=, #asset=<id>);
- * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button).
+ * The one finder: your uploads, the Reelsaw catalog and every enabled provider behind one search box and ONE grid of
+ * identical tiles: uploads first, then catalog results, then provider results. One "Show more", one attribution footer.
+ * `mode="library"` is the Library page body (filters live in the URL: ?kind=&q=, #asset=<id>);
+ * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button that imports a
+ * catalog / provider result first).
  * Server: `library.list / search / providers / add / remove / restore` (same services as the MCP tools).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,7 +20,7 @@ import { createFuzzy } from "../lib/fuzzy";
 import { KIND_FILTERS, SEARCH_KEYS, searchable, type LibraryKind } from "../lib/library";
 import { AssetLightbox, RemoveDialog, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
 import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
-import { Modal, Notice, Skeleton } from "./ui";
+import { Modal, Notice } from "./ui";
 
 type Out = inferRouterOutputs<AppRouter>;
 type RemoteItem = Out["library"]["search"]["items"][number];
@@ -70,23 +70,22 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 interface Filters {
   kind: LibraryKind | "";
   q: string;
-  /** "" = all sources, "library" (Yours), "catalog" or a provider id */
-  source: string;
 }
 
 /** Filters in the URL (library page, shareable) or in state (the dialog). Both hooks always run; one is used. */
 function useFilters(mode: "library" | "picker"): [Filters, (patch: Partial<Filters>) => void] {
   const nav = useNavigate();
   const loc = useLocation();
-  const [local, setLocal] = useState<Filters>({ kind: "", q: "", source: "" });
+  const [local, setLocal] = useState<Filters>({ kind: "", q: "" });
   if (mode === "picker") return [local, (p) => setLocal((f) => ({ ...f, ...p }))];
   const params = new URLSearchParams(loc.search);
   const k = params.get("kind");
-  const f: Filters = { kind: k === "video" || k === "image" || k === "audio" ? k : "", q: params.get("q") ?? "", source: params.get("source") ?? "" };
+  const f: Filters = { kind: k === "video" || k === "image" || k === "audio" ? k : "", q: params.get("q") ?? "" };
   return [
     f,
     (patch) => {
       const next = new URLSearchParams(loc.search);
+      next.delete("source");
       for (const [key, v] of Object.entries(patch)) (v ? next.set(key, v) : next.delete(key));
       const search = next.toString();
       nav({ pathname: loc.pathname, search: search ? `?${search}` : "", hash: loc.hash }, { replace: true });
@@ -104,7 +103,7 @@ export interface AssetFinderProps {
   /** shorthand for `kinds={[kind]}` */
   kind?: LibraryKind;
   mode?: "library" | "picker";
-  /** picker: called with the library asset once it is in the library (imported / saved first when it was not) */
+  /** picker: called with the asset once it is ready (a catalog / provider result is imported first) */
   onPick?: (asset: PickedAsset) => void | Promise<void>;
   /** library mode: the page's actions (uploads share them) */
   actions?: ReturnType<typeof useBumperActions>;
@@ -137,13 +136,10 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const providers = useQuery(trpc.library.providers.queryOptions());
   const defaults = useMe().data?.projectDefaults;
   const selected = useHashParams().get("asset");
-  const [license, setLicense] = useState<"cc0" | "by">("cc0");
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<LibraryAsset | null>(null);
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
-  /** results added to the library in this view keep their place in the grid until the filters change */
-  const [stay, setStay] = useState<Set<string>>(new Set());
   const [states, setStates] = useState<Record<string, SourceState>>({});
   const fetchers = useRef<Record<string, () => void>>({});
   const register = useCallback((id: string, st: SourceState, fetchNext: () => void) => {
@@ -160,21 +156,15 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     });
   }, []);
 
-  const { kind, q, source } = filters;
+  const { kind, q } = filters;
   const dq = useDebounced(q.trim());
   const all = useMemo(() => (list.data?.assets ?? []).filter((a) => !allowed || allowed.includes(a.kind)), [list.data, allowed]);
-  const byRemote = useMemo(() => {
-    const m = new Map<string, LibraryAsset>();
-    for (const a of list.data?.assets ?? []) if (a.provenance?.externalId) m.set(rowKey(a.provenance.provider, a.provenance.externalId), a);
-    return m;
-  }, [list.data]);
 
   const fuse = useMemo(() => createFuzzy(all.map(searchable), SEARCH_KEYS), [all]);
   const rows = useMemo(() => {
     const ranked = q.trim() ? fuse.filter(q).map((a) => all.find((x) => x.id === a.id)!) : all;
-    return ranked.filter((a) => (!kind || a.kind === kind) && !(a.provenance?.externalId && stay.has(rowKey(a.provenance.provider, a.provenance.externalId))));
-  }, [all, fuse, q, kind, stay]);
-  const renderedIds = useMemo(() => new Set(rows.map((a) => a.id)), [rows]);
+    return ranked.filter((a) => !kind || a.kind === kind);
+  }, [all, fuse, q, kind]);
   const kindChips = allowed?.length === 1 ? [] : KIND_FILTERS.filter((k) => !allowed || allowed.includes(k.id));
   // a single allowed kind is the filter; otherwise the chip decides
   const searchKind = kind || (allowed?.length === 1 ? allowed[0] : undefined);
@@ -187,15 +177,6 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw" && providerServes(p));
   const kindOk = (k: string) => !allowed || (allowed as readonly string[]).includes(k);
   const providerLabel = (id: string) => (id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1)));
-
-  useEffect(() => setStay(new Set()), [dq, kind, source]);
-
-  // an unknown / switched-off source falls back to All
-  useEffect(() => {
-    if (!source || source === "library" || source === "catalog" || !providers.data) return;
-    if (!remoteProviders.some((p) => p.id === source)) setFilters({ source: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers.data, source]);
 
   // #asset=<id> scrolls its tile into view once the list is there
   useEffect(() => {
@@ -220,8 +201,6 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   };
   const importItem = async (i: RemoteItem): Promise<PickedAsset> => {
     const a = await importM.mutateAsync({ provider: i.provider, externalId: i.externalId });
-    toast(a.duplicate ? `${a.name} is already in your library${a.restored ? " (restored)" : ""}.` : `Added ${a.name} to your library.`);
-    if (source !== "library") setStay((s) => new Set(s).add(rowKey(i.provider, i.externalId)));
     refreshList();
     return { id: a.id, name: a.name, kind: a.kind as LibraryKind, durationSec: a.durationSec };
   };
@@ -244,7 +223,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     durationSec: r.durationSec,
     width: r.width,
     height: r.height,
-    source: r.provenance ? providerLabel(r.provenance.provider) : r.system ? "Catalog" : r.owner === "me" ? "Yours" : "Shared",
+    source: "Yours",
     license: r.provenance?.license?.name,
     thumbUrl: r.kind === "audio" ? undefined : r.thumbnailUrl,
     previewUrl: r.kind === "image" ? undefined : `/media/assets/${r.id}`,
@@ -279,37 +258,28 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
       pending={pending.has(`lib:${a.id}`)}
       highlighted={mode === "library" && selected === a.id}
       leaving={leaving.has(a.id)}
-      onAdd={() => {}}
       onOpen={mode === "library" ? () => setViewingId(a.id) : undefined}
       onSelect={mode === "library" ? () => select(a) : undefined}
       onPick={() => pick(`lib:${a.id}`, () => Promise.resolve(pickedFromRow(a)))}
       pickLabel={pickLabel}
     />
   );
-  /** a catalog / provider result: nothing when your library tile already stands for it, that tile when it matched a row the filters hid */
   const remoteNode = (i: RemoteItem) => {
-    const row = byRemote.get(rowKey(i.provider, i.externalId));
-    if (row) return renderedIds.has(row.id) ? null : libraryTile(row);
     const t = remoteTile(i);
-    return <AssetTile key={t.key} tile={t} mode={mode} pending={pending.has(t.key)} onAdd={() => void run(t.key, async () => void (await importItem(i)))} onPick={() => pick(t.key, () => importItem(i))} pickLabel={pickLabel} />;
+    return <AssetTile key={t.key} tile={t} mode={mode} pending={pending.has(t.key)} onPick={() => pick(t.key, () => importItem(i))} pickLabel={pickLabel} />;
   };
 
-  const showLibrary = !source || source === "library";
-  const showCatalog = !source || source === "catalog";
-  const empty = !q.trim();
-  const typeToSearch = empty && !!source && source !== "library" && source !== "catalog";
   // gate on the debounced query: mounting SourceTiles on the first keystroke would fire with dq still ""
-  const activeProviders = !dq ? [] : remoteProviders.filter((p) => (source ? source === p.id : providerFits(p)));
-  const activeIds = [...(showCatalog ? ["catalog"] : []), ...activeProviders.map((p) => p.id)];
-  const libraryResolved = !showLibrary || (!list.isPending && rows.length === 0);
+  const activeProviders = !dq ? [] : remoteProviders.filter(providerFits);
+  const activeIds = ["catalog", ...activeProviders.map((p) => p.id)];
+  const libraryResolved = !list.isPending && rows.length === 0;
   const allResolved = activeIds.every((id) => states[id] && !states[id].pending && states[id].count === 0 && !states[id].notice);
-  const nothing = libraryResolved && allResolved && !typeToSearch;
+  const nothing = libraryResolved && allResolved;
   const nextId = activeIds.find((id) => states[id]?.hasNext);
   const fetchingMore = activeIds.some((id) => states[id]?.fetching);
   // one muted line: every provider that has tiles in the grid
   const attribution = (() => {
     const ids = new Set<string>();
-    if (showLibrary) for (const a of rows) if (a.provenance) ids.add(a.provenance.provider);
     for (const id of activeIds) if (states[id]?.count) ids.add(id === "catalog" ? "reelsaw" : id);
     const lines = (providers.data ?? []).filter((p) => ids.has(p.id) && p.attributionLine).map((p) => p.attributionLine as string);
     return [...new Set(lines)].join(" · ");
@@ -321,7 +291,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           <div className="relative min-w-0 flex-1 basis-full sm:basis-auto">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
-            <input className="input h-[38px] w-full pl-9 pr-9" type="search" value={q} placeholder="Search your library, the catalog and providers…" aria-label="Search your library, the catalog and providers" onChange={(e) => setFilters({ q: e.target.value })} />
+            <input className="input h-[38px] w-full pl-9 pr-9" type="search" value={q} placeholder="Search uploads, the catalog and providers…" aria-label="Search uploads, the catalog and providers" onChange={(e) => setFilters({ q: e.target.value })} />
             {q && (
               <button type="button" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink" aria-label="Clear search" onClick={() => setFilters({ q: "" })}>
                 <X className="h-3.5 w-3.5" />
@@ -340,67 +310,31 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
             </button>
           )}
         </div>
-        <div className="flex min-h-7 flex-wrap items-center gap-1.5">
-          {kindChips.length > 0 && (
-            <>
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
-                <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
-                  All
-                </Chip>
-                {kindChips.map((k) => (
-                  <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
-                    {k.label}
-                  </Chip>
-                ))}
-              </div>
-              <span className="mx-1 h-4 w-px shrink-0 bg-line" aria-hidden />
-            </>
-          )}
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by source">
-            <Chip on={source === ""} onClick={() => setFilters({ source: "" })}>
+        {kindChips.length > 0 && (
+          <div className="flex min-h-7 flex-wrap items-center gap-1.5" role="group" aria-label="Filter by kind">
+            <Chip on={kind === ""} onClick={() => setFilters({ kind: "" })}>
               All
             </Chip>
-            <Chip on={source === "library"} onClick={() => setFilters({ source: "library" })}>
-              Yours
-            </Chip>
-            <Chip on={source === "catalog"} onClick={() => setFilters({ source: "catalog" })}>
-              Catalog
-            </Chip>
-            {providers.isPending ? (
-              <Skeleton className="h-7 w-40 rounded-full" />
-            ) : (
-              remoteProviders.map((p) => (
-                <button key={p.id} type="button" aria-pressed={source === p.id} title={p.available ? p.attributionLine : "Rate limited; try again in a minute"} onClick={() => setFilters({ source: p.id })} className={`inline-flex h-7 shrink-0 items-center rounded-full border px-3 text-xs font-semibold transition ${source === p.id ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink2 hover:text-ink"}`}>
-                  {p.experimental ? `${p.label} (beta)` : p.label}
-                </button>
-              ))
-            )}
+            {kindChips.map((k) => (
+              <Chip key={k.id} on={kind === k.id} onClick={() => setFilters({ kind: kind === k.id ? "" : k.id })}>
+                {k.label}
+              </Chip>
+            ))}
           </div>
-          {source === "freesound" && (
-            <div className="flex gap-1" role="group" aria-label="License">
-              <Chip on={license === "cc0"} onClick={() => setLicense("cc0")}>
-                CC0
-              </Chip>
-              <Chip on={license === "by"} onClick={() => setLicense("by")}>
-                CC0 + BY
-              </Chip>
-            </div>
-          )}
-        </div>
+        )}
         {mode === "library" && actions.jobs.length > 0 && <UploadJobs jobs={actions.jobs} onDismiss={actions.dismiss} />}
       </div>
 
       <div className={`flex min-w-0 flex-col gap-3 ${mode === "picker" ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}`}>
         <ul className={gridClass(mode)} aria-label="Library, catalog and provider results">
-          {showLibrary && list.isPending && Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />)}
-          {showLibrary && rows.map(libraryTile)}
-          {showCatalog && <SourceTiles key="catalog" sid="catalog" q={dq} kind={searchKind} forced={source === "catalog"} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />}
+          {list.isPending && Array.from({ length: 4 }, (_, i) => <AssetTileSkeleton key={`s${i}`} i={i} />)}
+          {rows.map(libraryTile)}
+          <SourceTiles key="catalog" sid="catalog" q={dq} kind={searchKind} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
           {activeProviders.map((p) => (
-            <SourceTiles key={p.id} sid={p.id} provider={p.id} q={dq} kind={searchKind} license={p.id === "freesound" ? license : undefined} forced={source === p.id} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
+            <SourceTiles key={p.id} sid={p.id} provider={p.id} q={dq} kind={searchKind} license={p.id === "freesound" ? "cc0" : undefined} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
           ))}
         </ul>
-        {typeToSearch && <p className="py-10 text-center text-sm text-ink3">Type to search {remoteProviders.find((p) => p.id === source)?.label ?? "this provider"}.</p>}
-        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `Nothing matches “${q.trim()}”.` : kind || source ? "Nothing matches these filters." : "Nothing here yet. Upload a file, or add something from the catalog."}</p>}
+        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `Nothing matches “${q.trim()}”.` : kind ? "Nothing matches this kind." : "Nothing here yet. Upload a file."}</p>}
         {nextId && (
           <div className="flex justify-center py-1">
             <button type="button" className="btn-ghost" disabled={fetchingMore} onClick={() => fetchers.current[nextId]?.()}>
@@ -438,7 +372,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
 
 /**
  * The catalog (no provider) or one provider, drawn straight into the finder's grid (its tiles are this fragment).
- * Its query starts when its first slot (one skeleton tile) scrolls into view, or at once when its chip is selected.
+ * Its query starts when its first slot (one skeleton tile) scrolls into view.
  */
 function SourceTiles({
   sid,
@@ -446,7 +380,6 @@ function SourceTiles({
   q,
   kind,
   license,
-  forced,
   kindOk,
   node,
   register,
@@ -457,7 +390,6 @@ function SourceTiles({
   q: string;
   kind?: LibraryKind;
   license?: "cc0" | "by";
-  forced: boolean;
   kindOk: (k: string) => boolean;
   node: (i: RemoteItem) => React.ReactNode;
   register: (id: string, st: SourceState, fetchNext: () => void) => void;
@@ -466,7 +398,7 @@ function SourceTiles({
   const trpc = useTRPC();
   const slot = useRef<HTMLLIElement>(null);
   const seen = useSeen(slot);
-  const enabled = forced || seen;
+  const enabled = seen;
   const search = useInfiniteQuery(
     trpc.library.search.infiniteQueryOptions(
       { ...(provider ? { source: provider } : {}), q, kind, limit: PAGE, ...(license ? { license } : {}) },
