@@ -33,6 +33,22 @@ export const VIDEO_HOSTS = ["youtube.com", "youtu.be", "vimeo.com", "x.com", "tw
 
 export class ImportError extends Error {}
 
+/**
+ * Timestamps travel in the zip as ISO strings; Drizzle's timestamp columns want Date (a string is
+ * `value.toISOString is not a function` at insert). Only the named keys change; null and absent stay.
+ */
+export function withDates<T extends Record<string, unknown>>(row: T, keys: readonly string[]): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const k of keys) {
+    const v = out[k];
+    if (typeof v !== "string") continue;
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) throw new ImportError(`${k} is not a date: ${v.slice(0, 40)}`);
+    out[k] = d;
+  }
+  return out as T;
+}
+
 const manifestSchema = z.object({
   format: z.number().int().positive(),
   app: z.object({ version: z.string(), commit: z.string(), builtAt: z.string() }),
@@ -350,7 +366,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       const rendered = !!mp4 && c.status === "done";
       const { id: _old, projectId: _p, createdAt: _c, updatedAt: _u, renderGen: _g, outputKey: _o, thumbnailKey: _t, ...rest } = c as Record<string, unknown> & typeof c;
       clipRows.push({
-        ...(remap(rest) as typeof rest),
+        ...withDates(remap(rest) as Record<string, unknown>, ["editedAt", "deletedAt"]),
         id,
         projectId,
         renderGen: 0,
@@ -368,7 +384,7 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
     await svc.tx(async (u) => {
       const { id: _id, ownerHash: _o, createdAt: _c, updatedAt: _u, sourceKey: _k, stageProgress: _sp, ...p } = project as Record<string, unknown> & typeof project;
       await u.db.insert(schema.projects).values({
-        ...(p as typeof project),
+        ...withDates(p as Record<string, unknown>, ["runStartedAt", "stageStartedAt", "sourceExpiredAt", "deletedAt"]),
         id: projectId,
         userId: owner.id,
         title: `${project.title} (report ${day})`.slice(0, 500),
