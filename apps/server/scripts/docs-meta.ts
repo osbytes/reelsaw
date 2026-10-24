@@ -115,7 +115,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   TRANSCRIPT_AUTO_FIX_CONFIDENCE: ["pipeline", "Corrections at or above this model confidence are applied automatically; the rest wait for the user."],
   DISFLUENCY_REMOVAL: ["pipeline", "Detect fillers, repetitions and false starts and cut them from captions. Off by default. Instance ceiling: projects opt in via `refineDisfluency` when this is on."],
   DISFLUENCY_LLM: ["pipeline", "Add a model pass to the rule-based disfluency pass. Off by default. Instance ceiling: projects opt in via `disfluencyLlm` when this is on."],
-  REFINE_SCENES: ["pipeline", "Detect scene cuts and on-screen text during refine. Off by default. Instance ceiling: projects opt in via `refineScenes` when this is on."],
+  REFINE_SCENES: ["pipeline", "Detect scene cuts and on-screen text over the whole video during refine (timeline snapping, project-wide text regions). Off by default. Instance ceiling: projects opt in via `refineScenes` when this is on. Framing does not depend on it: a render detects the cuts on each clip when the project has none."],
   RENDER_CONCURRENCY: ["pipeline", "Parallel renders per worker. `auto` follows CPUs and free memory (see the resource governor); a number pins it."],
   FACE_DETECTION: ["pipeline", "Face detection for automatic layout (follow crop, stacked webcam). false = fit only."],
   LAYOUT_MIN_FACE_RATIO: ["pipeline", "Share of sampled frames that must contain a face before a clip gets a face-following layout."],
