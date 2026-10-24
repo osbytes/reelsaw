@@ -1,4 +1,4 @@
-# zizmor (workflow security lint, run by security.yml and the pre-push hook). Each exception says why.
+# zizmor (lint for workflows and dependabot.yml, run by security.yml and the pre-push hook). Each exception says why.
 rules:
   artipacked:
     ignore:

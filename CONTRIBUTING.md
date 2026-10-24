@@ -9,7 +9,7 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 - Everyday commands (typecheck, build, deploy, evals, tests) are listed in `AGENTS.md`.
 - Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
 - `pnpm install` sets up the Git hooks in `lefthook.yml`: a gitleaks scan of staged changes before
-  each commit, the DCO sign-off below, and a zizmor lint of `.github/workflows` before a push. The
+  each commit, the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push. The
   scans need `gitleaks` and `zizmor` on your PATH (`brew install gitleaks zizmor`) and are skipped
   with a note without them. CI runs the same checks (`security` workflow) either way.
 - Pipeline behaviour (selection, cuts, framing, transcription) changes only with an eval run

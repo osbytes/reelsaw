@@ -21,7 +21,7 @@ commit-msg:
 pre-push:
   commands:
     workflows:
-      glob: ".github/**/*.{yml,yaml}"
+      glob: ".github/**/*.{yml,yaml}" # workflows, actions, dependabot.yml
       run: |
-        command -v zizmor >/dev/null || { echo "zizmor not installed (brew install zizmor): workflows not linted"; exit 0; }
-        zizmor --offline --no-progress .github/workflows
+        command -v zizmor >/dev/null || { echo "zizmor not installed (brew install zizmor): GitHub config not linted"; exit 0; }
+        zizmor --offline --no-progress .
