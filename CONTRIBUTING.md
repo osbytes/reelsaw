@@ -8,6 +8,10 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
   change follows. Agent instructions live in `AGENTS.md` (the only agent file; see the process principles).
 - Everyday commands (typecheck, build, deploy, evals, tests) are listed in `AGENTS.md`.
 - Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
+- `pnpm install` sets up the Git hooks in `lefthook.yml`: a gitleaks scan of staged changes before
+  each commit, the DCO sign-off below, and a zizmor lint of `.github/workflows` before a push. The
+  scans need `gitleaks` and `zizmor` on your PATH (`brew install gitleaks zizmor`) and are skipped
+  with a note without them. CI runs the same checks (`security` workflow) either way.
 - Pipeline behaviour (selection, cuts, framing, transcription) changes only with an eval run
   (`docs/EVALS.md`). Add a fixture for the failure you are fixing.
 
@@ -53,7 +57,8 @@ git commit -s -m "Describe the change"
 ```
 
 This adds a `Signed-off-by: Your Name <you@example.com>` trailer; the email must be the commit's
-author email. Forgot? `git rebase --signoff origin/main && git push --force-with-lease`.
+author email. The commit-msg hook from `pnpm install` adds the same trailer to every commit, so with
+the hooks installed, committing is the certification. Forgot? `git rebase --signoff origin/main && git push --force-with-lease`.
 
 Contributions to `apps/server/src/ee` and `apps/web/src/ee` are accepted under the Reelsaw
 Enterprise License in those folders; everything else is AGPL.

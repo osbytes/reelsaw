@@ -1,0 +1,9 @@
+# zizmor (workflow security lint, run by security.yml and the pre-push hook). Each exception says why.
+rules:
+  artipacked:
+    ignore:
+      # changesets/action and `pnpm release:tag` push with the credentials checkout leaves in .git/config
+      - version.yml
+  superfluous-actions:
+    # softprops/action-gh-release is pinned and does what `gh release` would; not a security finding
+    disable: true

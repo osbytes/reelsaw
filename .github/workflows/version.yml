@@ -24,6 +24,7 @@ jobs:
       contents: write       # the Release PR branch and the version tag (through RELEASE_TOKEN)
       pull-requests: write  # open and update the Release PR
     steps:
+      # credentials stay in .git/config on purpose: changesets/action and release:tag push with them
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

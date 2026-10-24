@@ -10,7 +10,7 @@
 name: dependabot-changeset
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] never checks the PR out; see above
     types: [opened, reopened, synchronize]
 
 permissions:
@@ -18,7 +18,8 @@ permissions:
 
 jobs:
   changeset:
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    # the PR's author, not github.actor: a re-run or a comment by someone else changes the actor
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -12,8 +12,9 @@ Radix), `packages/shared` (zod schemas, shared geometry/caption helpers; rebuild
 `pnpm --filter @reelsaw/shared build` after changing it).
 `website/` is reelsaw.com (Next.js, own lockfile, outside the pnpm workspace; see `website/README.md`).
 
-Every `git commit` uses `-s` so the DCO trailer is on the commit (`CONTRIBUTING.md`). There is
-no Git config that does this; forgot on a pushed branch: `git rebase --signoff origin/main &&
+Every `git commit` uses `-s` so the DCO trailer is on the commit (`CONTRIBUTING.md`); the
+lefthook commit-msg hook (`lefthook.yml`, installed by `pnpm install`) adds it too. Forgot on a
+pushed branch: `git rebase --signoff origin/main &&
 git push --force-with-lease`.
 
 Everyday commands:
