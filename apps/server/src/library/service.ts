@@ -425,6 +425,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     system: a.system,
     usedBy: a.usedBy,
     usedByClips: a.usedByClips,
+    usedByTemplates: a.usedByTemplates,
     thumbnailUrl: abs(a.thumbnailUrl),
     /** the file itself (play the music, view the image or video); same auth as this server */
     url: abs(`/media/assets/${a.id}`),
@@ -482,7 +483,7 @@ export async function projectBumperSummaries(
  * (its own intro / outro or a layer; a clip that merely inherits the project's intro is counted through the project).
  * Deleted projects and clips a re-analyze replaced are left out.
  */
-export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>> {
+export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<string, { projects: number; clips: number; templates: number; roles: Array<"intro" | "outro" | "layer" | "template"> }>> {
   const res = await db.execute(sql`
     select r.asset_id as asset_id, count(distinct r.project_id)::int as projects, count(distinct r.clip_id)::int as clips, array_agg(distinct r.role) as roles
     from asset_refs r
@@ -490,7 +491,35 @@ export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<str
     left join clips c on c.id = r.clip_id
     where r.clip_id is null or c.deleted_at is null
     group by r.asset_id`);
-  return new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips, roles: r.roles ?? [] }]));
+  const out = new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips, templates: 0, roles: [...(r.roles ?? [])] as Array<"intro" | "outro" | "layer" | "template"> }]));
+  // the user's live layer templates name assets in their jsonb layers (a small per-user table; see docs/specs/layer-templates.md)
+  const tpl = await db.execute<{ asset_id: string; templates: number }>(sql`
+    select l->>'assetId' as asset_id, count(distinct t.id)::int as templates
+    from layer_templates t, jsonb_array_elements(t.layers) l
+    where t.user_id = ${userId} and t.deleted_at is null and l->>'assetId' is not null
+    group by l->>'assetId'`);
+  for (const r of tpl.rows) {
+    const cur = out.get(r.asset_id) ?? { projects: 0, clips: 0, templates: 0, roles: [] };
+    cur.templates = r.templates;
+    cur.roles.push("template");
+    out.set(r.asset_id, cur);
+  }
+  return out;
+}
+
+/** A live layer template that names the asset; `layers` = how many of its layers do. */
+export type AssetUsageTemplate = { id: string; name: string; layers: number };
+
+/** The user's live layer templates that name an asset, with how many layers do. */
+export async function templateAssetUsage(db: Db, userId: string, assetId: string): Promise<AssetUsageTemplate[]> {
+  const res = await db.execute<AssetUsageTemplate>(sql`
+    select t.id as id, t.name as name, count(*)::int as layers
+    from layer_templates t, jsonb_array_elements(t.layers) l
+    where t.user_id = ${userId} and t.deleted_at is null and l->>'assetId' = ${assetId}
+    group by t.id, t.name, t.updated_at
+    order by t.updated_at desc
+    limit 200`);
+  return res.rows;
 }
 
 export interface AssetUsageClip {
@@ -517,7 +546,8 @@ export interface AssetUsageProject {
  * still keep the asset from being purged until the clip itself is purged). A layer counts as `overlays` for image /
  * video / text layers and as `music` for audio layers.
  */
-export async function bumperAssetUsage(db: Db, userId: string, assetId: string): Promise<{ projects: AssetUsageProject[] }> {
+export async function bumperAssetUsage(db: Db, userId: string, assetId: string): Promise<{ projects: AssetUsageProject[]; templates: AssetUsageTemplate[] }> {
+  const templates = await templateAssetUsage(db, userId, assetId);
   const slots = ["intro", "outro"] as const;
   const key = { intro: "introAssetId", outro: "outroAssetId" } as const;
   const refs = await db
@@ -534,7 +564,7 @@ export async function bumperAssetUsage(db: Db, userId: string, assetId: string):
     if (r.clipId) clipIds.add(r.clipId);
     else projectLevel.add(r.projectId);
   }
-  if (!projects.size) return { projects: [] };
+  if (!projects.size) return { projects: [], templates };
   const cols = { id: schema.clips.id, projectId: schema.clips.projectId, index: schema.clips.index, title: schema.clips.title, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio };
   const where = [clipIds.size ? inArray(schema.clips.id, [...clipIds]) : undefined, projectLevel.size ? inArray(schema.clips.projectId, [...projectLevel]) : undefined].filter((x) => x !== undefined);
   const clipRows = await db.select(cols).from(schema.clips).where(and(isNull(schema.clips.deletedAt), sql`(${sql.join(where, sql` or `)})`)).orderBy(schema.clips.index).limit(5000);
@@ -559,5 +589,5 @@ export async function bumperAssetUsage(db: Db, userId: string, assetId: string):
   }
   // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
   for (const [id, p] of out) if (!p.clips.length && hasClips.has(id)) out.delete(id);
-  return { projects: [...out.values()] };
+  return { projects: [...out.values()], templates };
 }

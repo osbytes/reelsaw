@@ -5,7 +5,8 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS } from "@reelsaw/shared";
+import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
@@ -14,8 +15,10 @@ Workflow: create_project(sourceUrl) → wait_for_project (call again until done;
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
+- reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, remove_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
+Layer templates (list_layer_templates, save_layer_template, update_layer_template, remove_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
@@ -299,7 +302,7 @@ export const TOOLS = {
   },
   asset_usage: {
     title: "Where a library asset is used",
-    description: "The projects and clips that use a library item, as intro, outro, overlay or music (clips a re-analyze replaced are left out). Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }] }: slots are the roles on that clip, via says whether through the project or the clip. Check before removing one.",
+    description: "Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }], templates: [{ id, name, layers }] }. A removed asset's layer is skipped when a template is applied. Check before removing one.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },
@@ -321,6 +324,40 @@ export const TOOLS = {
     title: "Set clips' intro/outro",
     description: "Override the intro and/or outro of up to 200 clips of one project: \"inherit\" (follow the project), \"none\", or a library asset id; a slot left out is untouched. rerender: true re-renders only these clips. Returns { updated, rerendered }.",
     inputSchema: setClipBumpersInput,
+  },
+  list_layer_templates: {
+    title: "List layer templates",
+    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = removed within 30 days). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  save_layer_template: {
+    title: "Save layer template",
+    description: "Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge) or layers (each with a timing, see list_layer_templates). Returns the template { id, name, layerCount, layers }. Use apply_layer_template to put it on clips",
+    inputSchema: saveLayerTemplateInput,
+  },
+  update_layer_template: {
+    title: "Update layer template",
+    description: "Rename a layer template and/or replace its layers (the whole list, each with a timing); a field left out is untouched. Clips that already got the template keep the layers they have; apply_layer_template again to refresh them. Returns the template.",
+    inputSchema: { templateId: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() },
+    annotations: { idempotentHint: true },
+  },
+  remove_layer_template: {
+    title: "Remove layer template",
+    description: "Remove a template and drop it from your project defaults; clips that already got its layers keep them. Restorable for 30 days (restore_layer_template). Returns { ok, clearedDefault } (it was your default and no longer is)",
+    inputSchema: { templateId: templateIdSchema },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  restore_layer_template: {
+    title: "Restore layer template",
+    description: "Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). It does not become a default again. Returns the template.",
+    inputSchema: { templateId: templateIdSchema },
+    annotations: { idempotentHint: true },
+  },
+  apply_layer_template: {
+    title: "Apply layer template to clips",
+    description: "Write a template's layers onto clips of one project (up to 200 clipIds, or all), fitted to each clip's length. Clips keep the layers as their own; the template is not linked. mode replace (default) swaps their layers, add keeps them and adds. rerender true re-renders finished clips now, else the next render shows them. update_project settings.layerTemplateId only affects clips created later. Returns { updated, rerendered, skipped: [{ clipId, reason }], layersSkipped }",
+    inputSchema: applyLayerTemplateInput,
   },
   delete_project: {
     title: "Delete project",

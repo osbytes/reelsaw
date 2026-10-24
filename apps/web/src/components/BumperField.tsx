@@ -450,11 +450,11 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
 export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
-  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "", a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   return (
     <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
       {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
-      {a.usedBy || a.usedByClips ? (
+      {a.usedBy || a.usedByClips || a.usedByTemplates ? (
         <Popover.Root>
           <Popover.Trigger asChild>
             <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
@@ -516,7 +516,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                   <LicenseBadge provenance={a.provenance} wrap className="min-w-0 flex-1 whitespace-normal" />
                 </div>
               )}
-              {(a.usedBy > 0 || a.usedByClips > 0) && (
+              {(a.usedBy > 0 || a.usedByClips > 0 || a.usedByTemplates > 0) && (
                 <div className="rounded-[12px] border border-line p-3">
                   <b className="text-xs">Where it’s used</b>
                   <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
@@ -546,6 +546,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
   const trpc = useTRPC();
   const q = useQuery(trpc.library.usage.queryOptions({ id }));
   const projects = q.data?.projects ?? [];
+  const templates = q.data?.templates ?? [];
   return (
     <ScrollArea className={className}>
       <div className="flex min-h-[3rem] flex-col gap-2.5 pr-2 text-xs">
@@ -560,7 +561,15 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
           </SkeletonRegion>
         )}
         {q.error && <span className="text-err">{q.error.message}</span>}
-        {q.data && projects.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
+        {q.data && projects.length === 0 && templates.length === 0 && <span className="text-ink3">Nothing uses it right now.</span>}
+        {templates.map((t) => (
+          <div key={t.id} className="flex items-baseline gap-2">
+            <Link to={`/templates/${t.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
+              {t.name}
+            </Link>
+            <span className="shrink-0 text-ink3">{t.layers > 1 ? `layer ×${t.layers}` : "layer"} · template</span>
+          </div>
+        ))}
         {projects.map((p) => (
           <div key={p.id} className="flex flex-col gap-1">
             <div className="flex items-baseline gap-2">
@@ -594,10 +603,12 @@ export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsse
         <>
           <p className="text-sm leading-relaxed text-ink2">
             {asset.usedBy
-              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another. You can restore it for 30 days.`
-              : `“${asset.name}” will be removed. You can restore it for 30 days.`}
+              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} You can restore it for 30 days.`
+              : asset.usedByTemplates
+                ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. You can restore it for 30 days.`
+                : `“${asset.name}” will be removed. You can restore it for 30 days.`}
           </p>
-          {asset.usedBy > 0 && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
+          {(asset.usedBy > 0 || asset.usedByTemplates > 0) && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
           <div className="mt-1 flex justify-end gap-2">
             <button className="btn-ghost" onClick={onClose}>
               Cancel

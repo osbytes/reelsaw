@@ -22,6 +22,7 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine } from "../pipeline/refine.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
+import { getLayerTemplate } from "../library/templates.js";
 
 const STAGE_QUEUES = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes, QUEUES.analyze] as const;
 const WORKING = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"] as const;
@@ -253,6 +254,8 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
     const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
     const bumperKeys = Object.keys(patch).filter((k) => BUMPER_KEYS.has(k));
     if (bumperKeys.length) throw new TRPCError({ code: "BAD_REQUEST", message: `${bumperKeys.join(", ")}: set the intro/outro with set_project_bumpers` });
+    // the template new clips get must be one of the owner's live templates (null = none)
+    if (typeof patch.layerTemplateId === "string") await getLayerTemplate(u.db, p.userId, patch.layerTemplateId);
     const clear = [...new Set(input.clear ?? [])].filter((k) => !(k in patch));
     const next: Record<string, unknown> = { ...p.settings, ...patch };
     for (const k of clear) delete next[k];

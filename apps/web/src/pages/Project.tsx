@@ -19,6 +19,7 @@ import { ShortcutSheet } from "../components/ShortcutSheet";
 import { useShortcut, useShortcuts, useSheetKey } from "../lib/shortcuts";
 import { ClipCard, type ClipView } from "../components/ClipCard";
 import { ProjectBumpersModal } from "../components/BumperField";
+import { ProjectTemplateModal } from "../components/TemplatePicker";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
 import { BatchBar } from "../components/BatchBar";
 import { TranscriptPanel } from "../components/TranscriptPanel";
@@ -74,6 +75,7 @@ export function ProjectPage() {
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
   const [actOpen, setActOpen] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [drawer, setDrawer] = useState(true);
   const [preview, setPreview] = useState<ClipView | null>(null);
@@ -527,6 +529,10 @@ export function ProjectPage() {
                 Intro and outro
                 <div className="text-xs text-ink3">Default, none or a library item</div>
               </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item block" onSelect={() => setTemplateOpen(true)}>
+                Layer template…
+                <div className="text-xs text-ink3">What new clips start with</div>
+              </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => setFilesOpen(true)}>
                 Transcript files…
                 <div className="text-xs text-ink3">Download or import SRT / VTT</div>
@@ -969,6 +975,7 @@ export function ProjectPage() {
         canImport={["done", "failed", "queued", "ingesting"].includes(p.status)}
         whyNot={`The project is ${p.status} right now. Import a transcript when it is done or failed, or right after you create it.`}
       />
+      <ProjectTemplateModal open={templateOpen} onOpenChange={setTemplateOpen} projectId={p.id} templateId={p.settings.layerTemplateId} />
       <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} introSec={p.settings.introSec} outroSec={p.settings.outroSec} />
     </div>
   );

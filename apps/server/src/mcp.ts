@@ -348,6 +348,17 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("restore_asset", TOOLS.restore_asset, ({ assetId }) => run(() => api.library.restore({ id: assetId })));
   server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
 
+  // ── layer templates ──────────────────────────────────────────────────────
+  server.registerTool("list_layer_templates", TOOLS.list_layer_templates, () => run(() => api.layerTemplates.list()));
+  server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers }) => {
+    if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers) or layers (the template's layers with timings)."));
+    return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers! })));
+  });
+  server.registerTool("update_layer_template", TOOLS.update_layer_template, ({ templateId, ...patch }) => run(() => api.layerTemplates.update({ id: templateId, ...patch })));
+  server.registerTool("remove_layer_template", TOOLS.remove_layer_template, ({ templateId }) => run(() => api.layerTemplates.remove({ id: templateId })));
+  server.registerTool("restore_layer_template", TOOLS.restore_layer_template, ({ templateId }) => run(() => api.layerTemplates.restore({ id: templateId })));
+  server.registerTool("apply_layer_template", TOOLS.apply_layer_template, (input) => run(() => api.layerTemplates.applyToClips(input)));
+
   server.registerTool(
     "set_default_bumper",
     TOOLS.set_default_bumper,

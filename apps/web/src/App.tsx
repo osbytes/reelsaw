@@ -18,6 +18,8 @@ import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
 const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default: m.LibraryPage })));
+const TemplatesPage = lazy(() => import("./pages/Templates").then((m) => ({ default: m.TemplatesPage })));
+const TemplateEditorPage = lazy(() => import("./pages/TemplateEditor").then((m) => ({ default: m.TemplateEditorPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 import { UpdateDot, UpdateMenuHint } from "./components/UpdateNotice";
 import { HeaderAlerts } from "./components/HeaderAlerts";
@@ -155,6 +157,9 @@ export function TopBar() {
         </NavLink>
         <NavLink to="/library" className={nav}>
           Library
+        </NavLink>
+        <NavLink to="/templates" className={nav}>
+          Templates
         </NavLink>
         <UsersLink nav={nav} />
       </nav>
@@ -308,6 +313,8 @@ export function App() {
       <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
+      <Route path="/templates" element={<Protected><TemplatesPage /></Protected>} />
+      <Route path="/templates/:id" element={<Protected bare><TemplateEditorPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
       <Route path={BILLING_PATH} element={<Protected><SettingsPage /></Protected>} />
       <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />

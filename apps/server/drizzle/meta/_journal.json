@@ -295,6 +295,13 @@
       "when": 1792807642001,
       "tag": "0041_drop-asset-saves",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792852334135,
+      "tag": "0042_layer_templates",
+      "breakpoints": true
     }
   ]
 }

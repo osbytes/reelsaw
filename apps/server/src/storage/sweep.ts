@@ -329,6 +329,8 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
   // Keyset over (deleted_at, id), 200 per batch. Still-referenced assets are excluded in SQL (`not exists`), so
   // they neither consume the batch nor starve the assets behind them. The timestamp travels as text to keep
   // microseconds: a JS Date would round the cursor and re-read or skip rows.
+  // A live layer template that names the asset keeps it too (a small per-user table, so the jsonb walk is cheap).
+  const templateUsesAsset = sql`select 1 from layer_templates t, jsonb_array_elements(t.layers) l where t.deleted_at is null and l->>'assetId' = a.id`;
   type Cur = { at: string; id: string };
   await keysetLoop<{ id: string; at: string }, Cur>({
     size: PURGE_BATCH,
@@ -340,6 +342,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
         where a.deleted_at is not null and a.deleted_at < ${cutoff.toISOString()}::timestamptz
           ${cur ? sql`and (a.deleted_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           and not exists (select 1 from asset_refs r where r.asset_id = a.id)
+          and not exists (${templateUsesAsset})
         order by a.deleted_at, a.id limit ${size}`);
       return res.rows as Array<{ id: string; at: string }>;
     },
@@ -359,6 +362,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
         where a.user_id is null and a.created_at < ${cutoff.toISOString()}::timestamptz
           ${cur ? sql`and (a.created_at, a.id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           and not exists (select 1 from asset_refs r where r.asset_id = a.id)
+          and not exists (${templateUsesAsset})
         order by a.created_at, a.id limit ${size}`);
       return res.rows as Array<{ id: string; at: string }>;
     },

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
 import { BulkBumpersPopover } from "./BumperField";
+import { BulkTemplateButton } from "./TemplatePicker";
 
 interface BatchClip {
   id: string;
@@ -10,12 +11,14 @@ interface BatchClip {
   caption: string;
   hashtags: string[];
   status: "preparing" | "pending" | "rendering" | "done" | "failed";
+  /** the clip's layers (only the count matters here: the template dialog asks Replace / Keep when some clip has any) */
+  layers?: unknown[] | null;
 }
 
 const slot = "inline-flex h-8 min-w-0 items-center justify-center truncate rounded-[8px] px-1.5 text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
- * The selection's actions, sticky at the bottom of the clips list. Two fixed lines (a status line, then four button
+ * The selection's actions, sticky at the bottom of the clips list. Two fixed lines (a status line, then five button
  * slots) so it is the same height at every width and whatever the selection holds. A button that does not apply stays
  * in its slot, disabled, with a title that says why.
  */
@@ -65,7 +68,7 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
           Clear
         </button>
       </div>
-      <div className="grid h-8 grid-cols-[1fr_1fr_1fr_1.35fr] gap-1.5">
+      <div className="grid h-8 grid-cols-[1fr_0.8fr_1fr_1.35fr_1.15fr] gap-1">
         <button className={btn} disabled={!renderable.length || many.isPending} title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"} aria-label={`Re-render ${n(renderable.length)}`} onClick={() => run(renderable, "Re-rendering")}>
           Re-render
         </button>
@@ -82,6 +85,7 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
           Copy text
         </button>
         <BulkBumpersPopover projectId={projectId} clipIds={selected.map((c) => c.id)} rerenderable={renderable.length} projectIntroId={introId} projectOutroId={outroId} onDone={onChanged} className={btn} />
+        <BulkTemplateButton projectId={projectId} clips={selected} rerenderable={renderable.length} onDone={onChanged} className={btn} />
       </div>
     </div>
   );

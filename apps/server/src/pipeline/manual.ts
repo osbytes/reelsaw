@@ -17,7 +17,9 @@ import type { StageContext } from "./common.js";
 import { snapCandidate } from "./analyze.js";
 import { extractJson, mapChunk, normalizeCandidate, scoreCandidates, type LlmOpts, type SelectContext, type Chunk } from "./select.js";
 import { fmtTs } from "./transcript.js";
-import type { ClipCandidate, TranscriptSegment } from "@reelsaw/shared";
+import { clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
+import { layersForNewClip, templateForNewClips } from "../library/templates.js";
+import { syncClipsRefs } from "../library/refs.js";
 
 const describeSchema = z.object({
   title: z.string(),
@@ -129,6 +131,9 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const sc: SelectContext = { title: project.title, durationSec, minSec: 1, maxSec: 9999, focus: settings.focus };
   const scored = (await scoreCandidates(o, [{ id: 0, durationSec: pick.endSec - pick.startSec, text }], sc, 1, 1)).get(0);
 
+  // the project's layer template, placed against the final bounds; a clip that already has layers keeps them
+  const bounds = { startSec: Number(pick.startSec.toFixed(2)), endSec: Number(pick.endSec.toFixed(2)) };
+  const layers = clipLayers(clip).length ? null : layersForNewClip(await templateForNewClips(db, project.userId, settings.layerTemplateId, log), bounds);
   // packaging written, announced and the render queued in one commit
   await svc.tx(async (u) => {
     await requestRender(svc, u, projectId, clipId, {
@@ -136,13 +141,14 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
       hook: pick.hook.slice(0, 80),
       caption: (pick.caption ?? "").slice(0, 300),
       hashtags: pick.hashtags.map((h) => h.replace(/^#/, "")).slice(0, 8),
-      startSec: Number(pick.startSec.toFixed(2)),
-      endSec: Number(pick.endSec.toFixed(2)),
+      ...bounds,
       score: scored?.total ?? 50,
       scores: scored?.scores ?? null,
       emphasis: scored?.emphasis.length ? scored.emphasis : null,
       reasoning: note.slice(0, 1000),
+      ...(layers ? { layers } : {}),
     });
+    if (layers) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: clip.bumpers, layers }]);
     await u.emit(projectId, "clip.created", { clipId, index: clip.index, title: pick.title });
   });
   void db;
