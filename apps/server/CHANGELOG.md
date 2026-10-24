@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.20.0
+
+### Minor Changes
+
+- [#153](https://github.com/osbytes/reelsaw/pull/153) [`90ef339`](https://github.com/osbytes/reelsaw/commit/90ef3393e0417df2fd0c66ea3f34543895887fdf) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Layers on the editor's 9:16 preview have a right-click menu (edit text, centre, show for the whole clip, bring to front / send to back, copy, duplicate, remove) and a text layer can be retyped in place with a double-click. The Layers lane's right-click menu gained Template…, and applying a template keeps a clip's existing layers unless Replace is chosen.
+
+- [#153](https://github.com/osbytes/reelsaw/pull/153) [`d64e671`](https://github.com/osbytes/reelsaw/commit/d64e6712b49fbc9061b1a7b2d57ccaecea0a4a9e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Layer templates: save a look once (a logo pop in the first seconds, a follow card at the end, a watermark or a music bed) and put it on any clip whatever its length. Template layers are timed from the start, from the end, over the whole clip or as a share of the clip, so they stretch and contract with each clip. Build one from a clip's layers or in the template editor, apply it to selected clips (replacing or adding to their layers, with an optional re-render) or set it on a project so every new clip gets it. Also available as the `list_layer_templates`, `save_layer_template`, `update_layer_template`, `remove_layer_template`, `restore_layer_template` and `apply_layer_template` MCP tools and the `reelsaw templates` command.
+
 ## 0.19.1
 
 ### Patch Changes
