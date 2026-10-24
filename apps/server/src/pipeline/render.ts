@@ -287,7 +287,16 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     ...(adjust?.crop ? { crop: adjust.crop } : {}),
     ...(adjust?.crop2 ? { crop2: adjust.crop2 } : {}),
   });
-  const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
+  // Shot changes, on the clip's clock: from the scenes refine step when it ran for this project, else
+  // detected on the clip itself (one 320 px decode of the clip, seconds next to the render). The layout
+  // needs them whatever the project opted into: without cuts a multi-camera source holds a layout
+  // across edits and pans inside a shot (a split pane on an empty seat, the crop sliding to another
+  // person) instead of segmenting per shot and snapping at the cut.
+  const cutsFrom: "project" | "clip" | "none" = transcriptMeta?.sceneCuts ? "project" : needsFaces && svc.faces ? "clip" : "none";
+  const sceneCuts =
+    cutsFrom === "clip"
+      ? (await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration })).filter((c) => c > 0 && c < duration)
+      : (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
     await ctx.progress(0.02, `Detecting faces for clip ${clip.index + 1}`, { clipId });
@@ -373,7 +382,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   if (segments.length > 1) segments = segments.map((sg) => (sg.decision.layout === "none" ? { ...sg, decision: { ...sg.decision, layout: "fit" as const } } : sg));
   const first = segments[0]!;
   const summary = segments.map((sg) => `${sg.decision.layout}${sg.manual ? "*" : ""} ${sg.start.toFixed(0)}–${sg.end.toFixed(0)}s`).join(", ");
-  log.info({ layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount }, "layout resolved");
+  log.info({ layout: summary, reason: first.decision.reason, facesPerFrame: first.decision.faceCount, sceneCuts: { n: sceneCuts.length, from: cutsFrom } }, "layout resolved");
   log.debug({ sections: segments.map((sg) => ({ start: Number(sg.start.toFixed(2)), end: Number(sg.end.toFixed(2)), layout: sg.decision.layout, manual: sg.manual, reason: sg.decision.reason, faces: sg.decision.faceCount, ...(sg.decision.contentSignals ? { contentRegion: sg.decision.contentSignals } : {}), ...(sg.decision.tile ? { tile: sg.decision.tile } : {}) })), faceSamples: samples.length, sceneCuts: sceneCuts.length }, "layout per section");
   const detected: DetectedSegment[] = segments.map((sg) => {
     const c1 = trackCenter(sg.decision.track);

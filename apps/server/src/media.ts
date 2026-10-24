@@ -97,7 +97,11 @@ export interface MediaTools {
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
   segmentAudio(input: string, outPattern: string, chunkSeconds: number, signal?: AbortSignal): Promise<void>;
   /** Shot cuts (seconds). `floor` = minimum scene score; cuts must also stand out from local motion. */
-  detectScenes(input: string, floor?: number, signal?: AbortSignal): Promise<number[]>;
+  /**
+   * Shot-cut times in seconds. With `range`, only that stretch is decoded and the times are relative to
+   * `range.start` (a clip's cuts on its own clock). Never throws: a failed detection is an empty list.
+   */
+  detectScenes(input: string, floor?: number, signal?: AbortSignal, range?: { start: number; duration: number }): Promise<number[]>;
   /** Verifies every binary executes. */
   check(): Promise<void>;
 }
@@ -250,14 +254,16 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       await ffmpeg(["-i", input, "-f", "segment", "-segment_time", String(chunkSeconds), "-c", "copy", "-reset_timestamps", "1", outPattern], { signal });
     },
 
-    async detectScenes(input, floor = 0.1, signal) {
+    async detectScenes(input, floor = 0.1, signal, range) {
       // per-frame scene scores on a small copy (fast, and plenty for shot changes), then adaptive
-      // peak picking: fixed thresholds miss every cut in dark or low-contrast footage (see scenes.ts)
+      // peak picking: fixed thresholds miss every cut in dark or low-contrast footage (see scenes.ts).
+      // Input seeking (-ss before -i) restarts the output clock at 0, so a range's times are range-relative.
       const lines: string[] = [];
+      const seek = range ? ["-ss", range.start.toFixed(3), "-t", range.duration.toFixed(3)] : [];
       try {
         await run(
           config.FFMPEG_PATH,
-          ["-hide_banner", "-nostdin", "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
+          ["-hide_banner", "-nostdin", ...seek, "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
           {
             signal,
             onStderr: (line) => {
