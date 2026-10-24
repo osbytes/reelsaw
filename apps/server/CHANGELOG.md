@@ -1,5 +1,19 @@
 # @reelsaw/server
 
+## 0.22.0
+
+### Minor Changes
+
+- [#157](https://github.com/osbytes/reelsaw/pull/157) [`88481f0`](https://github.com/osbytes/reelsaw/commit/88481f053a1c602b7902e224bba9644c66527bd9) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Crops can be set by hand on top of what framing decides. Right-click the picture in the editor (or a section on the timeline, or the Crop… button on a section) for Set crop…, which fixes the pane under the pointer to an exact part of the source: a box to drag, resize or draw over the whole source frame, with the numbers beside it, starting from what shows now; a split's two panes, a stack's screen and speaker, and a fitted frame each take their own. A crop shaped like the pane fills it, any other shape is fitted over a blurred copy like a webcam tile, and dragging the picture moves a fixed crop. Over MCP, `update_clip` sections take `crop`, `crop2` and `contentCrop`. The hook on the preview has the same right-click menu as a text layer: edit it in place (or double-click it), centre it, reset its position, or hide it.
+
+- [#157](https://github.com/osbytes/reelsaw/pull/157) [`c1501c1`](https://github.com/osbytes/reelsaw/commit/c1501c164a0d4b39fd20d2d08d65d4254e0d04c8) Thanks [@dillonstreator](https://github.com/dillonstreator)! - One clip's framing for the whole project. For a recording whose layout never changes (a slide deck with a webcam tile, a fixed camera), set the framing on one clip and pick "Use for all N clips…" on its Framing tab: the section's mode and its nudge, subject or crop become the project's framing (`reframe` and the new `reframeAdjust` setting), every clip's own sections are cleared, the finished clips re-render, and clips added later get it too. A clip without framing of its own now shows and renders the project's framing; editing it makes the clip's own, and "Use the project framing" takes it back. Over MCP `apply_framing` does the same from a clip id, `reframeAdjust` is a project setting like the others, and the CLI has `apply-framing`.
+
+- [#157](https://github.com/osbytes/reelsaw/pull/157) [`6735b9a`](https://github.com/osbytes/reelsaw/commit/6735b9a99b096bce13a402e5530a1caae9614cbc) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Screen + speaker framing finds the webcam tile (the picture-in-picture box of a Zoom, Teams, Meet or OBS recording) around the speaker's face and shows just that tile in the speaker pane, instead of a face-sized crop that reached into the slides, the black column or the name plate. A tile in a flat band along a frame edge drops that band from the top pane, so the speaker is not shown twice, and a webcam too small for the face detector most of the time is still framed as a stack when its tile stands steady. A forced Screen + speaker section gets the same tile, and a drag on the speaker pane still nudges it. The framing eval gained `tile` cases for a webinar recording and a corner-webcam screencast.
+
+### Patch Changes
+
+- [#157](https://github.com/osbytes/reelsaw/pull/157) [`d75a456`](https://github.com/osbytes/reelsaw/commit/d75a456f3b66441e6453959fe4432f64043176fd) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A re-rendered clip plays at once. The clip's video and thumbnail are served at a URL that never changes, with an hour-long cache, so after a re-render the project page and the clip preview could replay the previous render for up to an hour (a moved caption or a new crop looked as if it had not been applied). The clip media now carries an ETag and asks the browser to check before replaying, so an unchanged file still costs one small request and a re-rendered one is fetched anew.
+
 ## 0.21.0
 
 ### Minor Changes
