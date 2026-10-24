@@ -494,31 +494,37 @@ const headRouter = router({
   }),
 });
 
+type UsageCounts = Awaited<ReturnType<typeof bumperUsageCounts>>;
+
+/** One library row as the screens read it. `owner` is "shared" for catalog / provider imports (`user_id` null). */
+function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts, me: string) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    name: r.name,
+    durationSec: r.durationSec,
+    width: r.width,
+    height: r.height,
+    hasAudio: r.hasAudio,
+    sizeBytes: r.sizeBytes,
+    createdAt: r.createdAt.toISOString(),
+    thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
+    usedBy: usage.get(r.id)?.projects ?? 0,
+    usedByClips: usage.get(r.id)?.clips ?? 0,
+    mime: r.mime,
+    tags: r.tags,
+    provenance: r.provenance,
+    system: r.system,
+    owner: (r.userId === me ? "me" : "shared") as "me" | "shared",
+  };
+}
+
 /** The library as the screens and tools list it: the account's own uploads, with usage, and the removals of the last 30 days. Catalog / provider files are instance-shared and listed by search, not here. */
 async function listLibrary(svc: Services, userId: string) {
     const db = svc.database.db;
     const rows = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId)).orderBy(desc(schema.assets.createdAt));
     const usage = await bumperUsageCounts(db, userId);
-    // audio has no thumbnail: the pickers draw a music glyph instead
-    const pub = (r: (typeof rows)[number]) => ({
-      id: r.id,
-      kind: r.kind,
-      name: r.name,
-      durationSec: r.durationSec,
-      width: r.width,
-      height: r.height,
-      hasAudio: r.hasAudio,
-      sizeBytes: r.sizeBytes,
-      createdAt: r.createdAt.toISOString(),
-      thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg`,
-      usedBy: usage.get(r.id)?.projects ?? 0,
-      usedByClips: usage.get(r.id)?.clips ?? 0,
-      mime: r.mime,
-      tags: r.tags,
-      provenance: r.provenance,
-      system: r.system,
-      owner: "me" as const,
-    });
+    const pub = (r: (typeof rows)[number]) => toLibraryItem(r, usage, userId);
     // old rows have no content_hash (no backfill; see docs/specs/bumpers.md), so only new uploads are checked for duplicates
     const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
     return {
@@ -527,6 +533,18 @@ async function listLibrary(svc: Services, userId: string) {
     };
 }
 type LibraryRow = Awaited<ReturnType<typeof listLibrary>>["assets"][number];
+
+const LIBRARY_GET_MAX = 40;
+
+/** Own uploads (removed ones too, so a clip that still names them has a name), plus instance-shared catalog / provider rows. Missing or foreign ids are omitted. */
+async function getLibraryAssets(svc: Services, userId: string, ids: string[]) {
+  const want = [...new Set(ids.filter(Boolean))].slice(0, LIBRARY_GET_MAX);
+  if (!want.length) return { assets: [] as LibraryRow[] };
+  const db = svc.database.db;
+  const rows = await db.select().from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId)));
+  const usage = await bumperUsageCounts(db, userId);
+  return { assets: rows.map((r) => toLibraryItem(r, usage, userId)) };
+}
 
 /** A library row in the shape of a search hit, so one picker lists catalog, provider and own items alike. */
 function libraryHit(r: LibraryRow) {
@@ -551,12 +569,23 @@ function libraryHit(r: LibraryRow) {
 interface AddedAsset extends ImportedAsset {
   mime: string | null;
   owner: "me" | "shared";
+  thumbnailUrl: string;
+}
+
+function addedAsset(r: ImportedAsset, owner: "me" | "shared"): AddedAsset {
+  return { ...r, mime: r.mime ?? null, owner, thumbnailUrl: r.kind === "audio" ? "" : `/media/assets/${r.id}/thumb.jpg` };
 }
 
 /** The user's library (docs/specs/library.md; started as intro/outro videos and images). Files arrive through POST /api/upload first. */
 const libraryRouter = router({
     /** Live assets with how many projects use each, and the ones removed in the last 30 days (restorable). */
     list: protectedProcedure.query(({ ctx }) => listLibrary(ctx.svc, ctx.user.id)),
+    /**
+     * Rows these ids name that this account may read: its own uploads (removed ones included, so a clip that still
+     * uses them has a name), and instance-shared catalog / provider imports. `library.list` does not include shared
+     * rows; the editor looks them up here. Missing or foreign ids are omitted. At most 40 ids.
+     */
+    get: protectedProcedure.input(z.object({ ids: z.array(z.string().min(1).max(100)).max(LIBRARY_GET_MAX) })).query(({ ctx, input }) => getLibraryAssets(ctx.svc, ctx.user.id, input.ids)),
     /**
      * Every project and clip that uses an asset, and why: the project's default or override, or the clip's own
      * choice or layer. Reads `asset_refs` (indexed), then the few matched clips; clips a re-analyze replaced are skipped.
@@ -601,11 +630,11 @@ const libraryRouter = router({
         if (input.provider) {
           if (input.setDefault || input.imageSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "setDefault and imageSeconds apply to your own files; add the item first, then use setDefault" });
           const r = await importAsset(ctx.svc, ctx.user.id, { provider: input.provider, externalId: input.externalId!, color: input.color, tags: input.tags });
-          return { ...r, mime: r.mime ?? null, owner: "shared" };
+          return addedAsset(r, "shared");
         }
         const uploadId = input.uploadId ?? (await downloadAsUpload(ctx.svc, ctx.user.id, input.url!, { name: input.name }).then((d) => d.uploadId, (err) => asTrpc(err)));
         const created = await createAsset(ctx.svc, { uploadId, imageSeconds: input.imageSeconds, setDefault: input.setDefault, name: input.name, tags: input.tags, userId: ctx.user.id, actorId: ctx.user.id });
-        return { ...created, owner: "me" };
+        return addedAsset(created, "me");
       }),
     /**
      * Find things to add or use. `source` "library" = your own library (name and tags, empty q = everything); omitted or

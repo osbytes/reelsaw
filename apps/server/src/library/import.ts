@@ -77,6 +77,9 @@ export interface ImportedAsset {
   kind: string;
   mime?: string | null;
   durationSec: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
   /** the shared row already existed (another import, possibly by another account): this call reused it */
   duplicate: boolean;
   restored: boolean;
@@ -97,7 +100,7 @@ type SharedKey = { provider: string; externalId: string; variant: string };
 async function existingShared(svc: Services, key: SharedKey): Promise<ImportedAsset | null> {
   const [row] = await svc.database.db.select().from(schema.assets).where(sharedSourceWhere(key)).limit(1);
   if (!row) return null;
-  return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, duplicate: true, restored: false };
+  return { id: row.id, name: row.name, kind: row.kind, mime: row.mime, durationSec: row.durationSec, width: row.width, height: row.height, hasAudio: row.hasAudio, duplicate: true, restored: false };
 }
 
 /** `shared` replaces the database-backed steps (tests); the defaults are the real ones. */

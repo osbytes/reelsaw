@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Undo2, Redo2, Keyboard, PanelLeft, Loader2, X, Link2, Plus, Trash2, Scissors, Eye, Type, Image as ImageIcon, Music as MusicIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import * as Popover from "@radix-ui/react-popover";
@@ -12,7 +12,7 @@ import { VerticalPreview, safeZoneWarning, paneCrop, PLATFORM_NAME, type Framing
 import { Timeline, normalizeSections, adjustLabel, MODE_LABEL, layoutLabel, SPLIT_SHORTCUT, type EditorSection, type BumperBlock, type BumperSlot, type LayerBlock } from "./Timeline";
 import { Segmented, Modal, Kbd, Select } from "./ui";
 import { BumperSelects, ProjectBumpersModal, choicesFrom, clipBumpersFrom, useBumperLibrary, effectiveAsset, effectiveSeconds, type LibraryAsset } from "./BumperField";
-import { AssetFinderDialog } from "./AssetFinder";
+import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { BumperCombobox, Thumb, clockText } from "./BumperCombobox";
 import { loadTextFonts } from "../lib/fonts";
 import { z } from "zod";
@@ -38,6 +38,8 @@ import {
   CLIP_AUDIO_DEFAULTS,
   SFX_AUDIO_DEFAULTS,
   audioLayerDefaultsFor,
+  assetLayerDefaultsFor,
+  isStickerAsset,
   clipLayers,
   clipLayerSchema,
   isVisualLayer,
@@ -119,6 +121,28 @@ const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
 const layerMin = (l: Pick<ClipLayer, "kind">) => (l.kind === "audio" ? 0.5 : 0.1);
 /** a library row as the editor reads it: the list also carries the mime type */
 type LayerAsset = LibraryAsset;
+/** Catalog / provider imports are instance-shared and missing from `library.list`; seed from the pick until `library.get` returns. */
+function layerAssetFromPick(a: PickedAsset): LibraryAsset {
+  return {
+    id: a.id,
+    name: a.name,
+    kind: a.kind,
+    durationSec: a.durationSec,
+    mime: a.mime ?? null,
+    width: a.width ?? 0,
+    height: a.height ?? 0,
+    hasAudio: a.hasAudio ?? a.kind === "audio",
+    sizeBytes: 0,
+    createdAt: new Date().toISOString(),
+    thumbnailUrl: a.thumbnailUrl ?? (a.kind === "audio" ? "" : `/media/assets/${a.id}/thumb.jpg`),
+    usedBy: 0,
+    usedByClips: 0,
+    tags: [],
+    provenance: null,
+    system: false,
+    owner: "shared",
+  };
+}
 /** GIF / animated WebP / video: a picture that moves, so it can repeat inside its window */
 const isAnimatedAsset = (a: LayerAsset | undefined) => !!a && (a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp");
 /** a short or sfx-tagged sound gets the one-shot treatment */
@@ -394,7 +418,7 @@ function LayerCard({ layer: l, asset, selected, rangeStart, rangeEnd, loading, o
             </Field>
             {opacityField("Layer opacity")}
           </div>
-          {isAnimatedAsset(asset) && <Switch checked={l.loop ?? asset?.kind !== "video"} onChange={(v) => onPatch({ loop: v })} label="Repeat while it shows" />}
+          {isAnimatedAsset(asset) && <Switch checked={l.loop ?? isStickerAsset(asset!)} onChange={(v) => onPatch({ loop: v })} label="Repeat while it shows" />}
         </div>
       )}
       {l.kind === "audio" && (
@@ -436,11 +460,11 @@ function LiveTimeline({ clock, ...props }: Omit<ComponentProps<typeof Timeline>,
 }
 
 /** The 9:16 preview, re-rendered per frame on its own (framing and caption time follow the clock). */
-function LivePreview({ clock, framingAt, assetOverlaysAt, rangeStart, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays"> & { clock: Clock; framingAt: (t: number) => Framing; assetOverlaysAt: (t: number) => PreviewAssetOverlay[]; rangeStart: number }) {
+function LivePreview({ clock, framingAt, assetOverlaysAt, rangeStart, playing, ...props }: Omit<ComponentProps<typeof VerticalPreview>, "framing" | "time" | "assetOverlays"> & { clock: Clock; framingAt: (t: number) => Framing; assetOverlaysAt: (t: number) => PreviewAssetOverlay[]; rangeStart: number; playing: boolean }) {
   const t = useClock(clock);
   const framing = useMemo(() => framingAt(t), [framingAt, t]);
   const assetOverlays = useMemo(() => assetOverlaysAt(t), [assetOverlaysAt, t]);
-  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} />;
+  return <VerticalPreview {...props} framing={framing} assetOverlays={assetOverlays} time={t - rangeStart} playing={playing} />;
 }
 
 /**
@@ -483,8 +507,23 @@ export function ClipEditor(props: Props) {
   /** the asset or sound picker: what is being added and where the playhead was when it was asked for */
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
   const library = useBumperLibrary();
-  const libraryAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
+  const [imported, setImported] = useState<LibraryAsset[]>([]);
+  const ownAssets = useMemo(() => [...(library.data?.assets ?? []), ...(library.data?.deleted ?? [])], [library.data]);
+  const wantedIds = useMemo(() => {
+    const ids = [...layers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), effectiveAsset(bumpers.intro, settings.introAssetId), effectiveAsset(bumpers.outro, settings.outroAssetId)].filter((id): id is string => !!id);
+    return [...new Set(ids)];
+  }, [layers, bumpers, settings.introAssetId, settings.outroAssetId]);
+  const haveIds = useMemo(() => new Set([...ownAssets, ...imported].map((a) => a.id)), [ownAssets, imported]);
+  const missingIds = useMemo(() => wantedIds.filter((id) => !haveIds.has(id)).sort(), [wantedIds, haveIds]);
+  const extra = useQuery({ ...trpc.library.get.queryOptions({ ids: missingIds }), enabled: missingIds.length > 0 });
+  const libraryAssets = useMemo(() => {
+    const map = new Map<string, LibraryAsset>();
+    for (const a of [...ownAssets, ...imported, ...(extra.data?.assets ?? [])]) map.set(a.id, a);
+    return [...map.values()];
+  }, [ownAssets, imported, extra.data]);
   const assetById = (id: string | null | undefined): LibraryAsset | undefined => (id ? libraryAssets.find((a) => a.id === id) : undefined);
+  const assetsLoading = library.isPending || (missingIds.length > 0 && extra.isPending);
+  const rememberPick = (a: PickedAsset) => setImported((prev) => (prev.some((x) => x.id === a.id) ? prev : [...prev, layerAssetFromPick(a)]));
   const edit = (patch: Partial<EditorDoc> | ((d: EditorDoc) => Partial<EditorDoc>), key?: string) => history.set((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }), key);
   const setStyle = (patch: Partial<Style>, key?: string) => edit((d) => ({ style: { ...d.style, ...patch } }), key);
   const [selected, setSelectedRaw] = useState<number | null>(null);
@@ -803,11 +842,11 @@ export function ClipEditor(props: Props) {
     if (tab !== "layers" && tab !== "transcript") setTab("layers");
     toast(note);
   };
-  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec">;
+  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null; hasAudio?: boolean };
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
-    const video = asset.kind === "video";
-    const [start, end] = layerWindow(t, video ? Math.max(1, Math.min(asset.durationSec, range[1] - t)) : 4);
-    pushLayer({ id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: video ? 0.5 : 0.18, w: video ? 1 : ASSET_OVERLAY_DEFAULT_W }, `${asset.name} added ${video ? "as b-roll" : "as an overlay"} · drag it on the preview`);
+    const d = assetLayerDefaultsFor(asset);
+    const [start, end] = layerWindow(t, Math.min(d.windowSec, range[1] - t));
+    pushLayer({ id: newLayerId(), kind: "asset", assetId: asset.id, start, end, x: 0.5, y: d.y, w: d.w, ...(d.loop ? { loop: true } : {}) }, `${asset.name} added ${isStickerAsset(asset) ? "as an overlay" : "as b-roll"} · drag it on the preview`);
   };
   const addTextLayer = (t: number) => {
     const [start, end] = layerWindow(t, 4);
@@ -829,12 +868,12 @@ export function ClipEditor(props: Props) {
       layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = assetById(l.assetId);
-        const name = a?.name ?? (library.isPending ? "…" : "removed");
+        const name = a?.name ?? (assetsLoading ? "…" : "removed");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name, kind: "audio" as const };
         return { id: l.id, start: l.start, end: l.end, name, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layers, libraryAssets, library.isPending],
+    [layers, libraryAssets, assetsLoading],
   );
   const previewOverlaysAt = (t: number): PreviewAssetOverlay[] =>
     layers
@@ -844,8 +883,9 @@ export function ClipEditor(props: Props) {
         if (l.kind === "text") return [{ kind: "text", id: l.id, text: l.text, x: l.x, y: l.y, size: l.size ?? TEXT_OVERLAY_DEFAULTS.size, color: l.color ?? TEXT_OVERLAY_DEFAULTS.color, box: !!l.box, opacity: l.opacity ?? 1, ...(l.font ? { font: l.font } : {}) }];
         const a = assetById(l.assetId);
         if (!a) return [];
-        // an image, GIF or WebP is drawn as the file itself (browsers loop GIFs natively); a video shows its poster
-        return [{ kind: "asset", id: l.id, url: a.kind === "image" ? `/media/assets/${a.id}` : a.thumbnailUrl, name: a.name, aspect: a.width / Math.max(1, a.height), x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1 }];
+        // the file itself: a GIF/WebP as <img> (browsers loop them), a video (including Giphy GIF-as-mp4) as <video>
+        const aspect = a.width > 0 && a.height > 0 ? a.width / a.height : 0;
+        return [{ kind: "asset", id: l.id, url: `/media/assets/${a.id}`, name: a.name, aspect, x: l.x, y: l.y, w: l.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: l.opacity ?? 1, video: a.kind === "video", loop: l.loop ?? isStickerAsset(a), offsetSec: t - l.start }];
       });
 
   // the audio layers play along in the preview: one <audio> element per layer following the clock inside its window (no ducking)
@@ -1406,7 +1446,7 @@ export function ClipEditor(props: Props) {
             selected={l.id === selectedLayer}
             rangeStart={range[0]}
             rangeEnd={range[1]}
-            loading={library.isPending}
+            loading={assetsLoading}
             onSelect={() => {
               setSelectedLayer(l.id);
               if (current < l.start || current > l.end) seek(l.start);
@@ -1569,6 +1609,7 @@ export function ClipEditor(props: Props) {
       <div className={`relative flex w-full justify-center ${compact ? "h-[min(62dvh,520px)]" : "min-h-0 flex-1"}`}>
         <LivePreview
           clock={clock}
+          playing={playing}
           framingAt={framingAt}
           rangeStart={range[0]}
           source={videoEl}
@@ -1935,6 +1976,7 @@ export function ClipEditor(props: Props) {
         title="Add to clip"
         kinds={["video", "image"]}
         onPick={(a) => {
+          rememberPick(a);
           const t = picker?.t ?? current;
           addAssetLayer(a, t);
         }}
@@ -1945,6 +1987,7 @@ export function ClipEditor(props: Props) {
         title="Add a sound"
         kind="audio"
         onPick={(a) => {
+          rememberPick(a);
           const t = picker?.t ?? current;
           addSoundLayer(a, t);
         }}

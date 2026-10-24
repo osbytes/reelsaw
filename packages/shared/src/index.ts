@@ -310,11 +310,22 @@ export const assetProvenanceSchema = z.object({
 });
 export type AssetProvenance = z.infer<typeof assetProvenanceSchema>;
 
-/** Sound effects are short; anything longer is music. */
+/** Sound effects are short; anything longer is music. The same cutoff treats a short video as a sticker (Giphy GIF-as-mp4, dummy audio included) instead of full-frame b-roll. */
 export const SFX_MAX_SEC = 8;
 
 /** The treatment a sound gets when it lands on the lane: a short file is a one-shot effect, a long one is music. */
 export const audioLayerDefaultsFor = (asset: { durationSec: number }) => (asset.durationSec <= SFX_MAX_SEC ? SFX_AUDIO_DEFAULTS : CLIP_AUDIO_DEFAULTS);
+
+/**
+ * A picture, GIF, or short video is a sticker overlay; a longer video is b-roll.
+ * Giphy stores GIFs as mp4 and often attaches a silent AAC track, so "has audio" is not a
+ * reliable split — anything under SFX_MAX_SEC sits small and loops, including a dummy track.
+ */
+export function isStickerAsset(a: { kind: string; mime?: string | null; hasAudio?: boolean; durationSec?: number | null }) {
+  if (a.kind === "image" || a.mime === "image/gif" || a.mime === "image/webp") return true;
+  if (a.kind !== "video") return false;
+  return (a.durationSec ?? 0) < SFX_MAX_SEC;
+}
 
 /**
  * Fonts a text overlay can use: installed in the server image (Dockerfile) and served to the editor
@@ -352,6 +363,18 @@ export interface RenderedCaptions {
 export const overlayKind = (o: Pick<ClipOverlay, "kind">): "asset" | "text" => o.kind ?? "asset";
 export const TEXT_OVERLAY_DEFAULTS = { size: 0.045, color: "#FFFFFF" } as const;
 export const ASSET_OVERLAY_DEFAULT_W = 0.3;
+
+/** Placement and loop when an asset is dropped on a clip. Stickers sit small near the top and repeat; b-roll fills the frame and plays once. */
+export function assetLayerDefaultsFor(a: { kind: string; mime?: string | null; hasAudio?: boolean; durationSec?: number | null }) {
+  const sticker = isStickerAsset(a);
+  const animated = a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp";
+  return {
+    y: sticker ? 0.18 : 0.5,
+    w: sticker ? ASSET_OVERLAY_DEFAULT_W : 1,
+    loop: animated && sticker ? true : undefined,
+    windowSec: sticker ? 4 : Math.max(1, a.durationSec || 4),
+  };
+}
 
 /** What the renderer actually used for each piece of a clip, absolute source seconds. */
 export interface DetectedSegment {

@@ -8,7 +8,7 @@ import { coverTimeline, adjustDecision, subjectTrack, type FaceSample, type Layo
 import { overlayChain, overlayInputArgs, textOverlayEvents, musicMix, type LoadedOverlay, type LoadedMusic } from "../src/pipeline/render.js";
 import { bumperProblem } from "../src/pipeline/bumpers.js";
 import { buildAss, WATERMARK_LOGO, watermarkTextY } from "../src/pipeline/captions.js";
-import { resolveStyle } from "@reelsaw/shared";
+import { resolveStyle, isStickerAsset, assetLayerDefaultsFor, ASSET_OVERLAY_DEFAULT_W } from "@reelsaw/shared";
 
 const face = (cx: number) => ({ x1: cx - 0.06, x2: cx + 0.06, y1: 0.2, y2: 0.45, score: 0.9 });
 const twoFaces = (n = 40): FaceSample[] =>
@@ -231,5 +231,30 @@ describe("text overlays", () => {
     const logoBottom = WATERMARK_LOGO.y + (WATERMARK_LOGO.w * (9 / 16)) / WATERMARK_LOGO.aspect / 2;
     assert.ok(watermarkTextY() - WATERMARK_LOGO.textSize / 2 > logoBottom && watermarkTextY() - WATERMARK_LOGO.textSize / 2 - logoBottom < 0.01);
     assert.ok(line(alone).includes("\\pos(540,1747)}reelsaw.com"), line(alone));
+  });
+});
+
+describe("assetLayerDefaultsFor", () => {
+  it("treats a silent short video (Giphy GIF-as-mp4) as a looping sticker, not full-frame b-roll", () => {
+    assert.equal(isStickerAsset({ kind: "video", mime: "video/mp4", hasAudio: false, durationSec: 1.4 }), true);
+    const d = assetLayerDefaultsFor({ kind: "video", mime: "video/mp4", hasAudio: false, durationSec: 1.4 });
+    assert.equal(d.w, ASSET_OVERLAY_DEFAULT_W);
+    assert.equal(d.y, 0.18);
+    assert.equal(d.loop, true);
+    assert.equal(d.windowSec, 4);
+  });
+  it("treats a short video with a dummy audio track (Giphy mp4) as a sticker, and a longer clip as b-roll", () => {
+    assert.equal(isStickerAsset({ kind: "video", hasAudio: true, durationSec: 2 }), true);
+    assert.equal(isStickerAsset({ kind: "video", hasAudio: false, durationSec: 12 }), false);
+    const d = assetLayerDefaultsFor({ kind: "video", hasAudio: true, durationSec: 8 });
+    assert.equal(d.w, 1);
+    assert.equal(d.y, 0.5);
+    assert.equal(d.loop, undefined);
+  });
+  it("treats stills and GIF stickers as overlays", () => {
+    assert.equal(isStickerAsset({ kind: "image", mime: "image/png" }), true);
+    assert.equal(isStickerAsset({ kind: "image", mime: "image/gif" }), true);
+    assert.equal(assetLayerDefaultsFor({ kind: "image", mime: "image/gif" }).loop, true);
+    assert.equal(assetLayerDefaultsFor({ kind: "image", mime: "image/png" }).loop, undefined);
   });
 });

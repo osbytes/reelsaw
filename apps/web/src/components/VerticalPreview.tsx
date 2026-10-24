@@ -28,15 +28,21 @@ export type PreviewAssetOverlay =
   | {
       kind: "asset";
       id: string;
-      /** image to draw (the asset itself, or a video's poster) */
+      /** the library file (`/media/assets/:id`); GIFs as img, video (including GIF-as-mp4) as video */
       url: string;
       name: string;
-      /** asset width / height, so the box keeps the file's shape like the renderer's scale=w:-2 */
+      /** asset width / height, so the box keeps the file's shape like the renderer's scale=w:-2; 0 = measure from the file */
       aspect: number;
       x: number;
       y: number;
       w: number;
       opacity: number;
+      /** true = <video> (muted); false / absent = <img>, which loops GIFs natively */
+      video?: boolean;
+      /** looping sticker; a one-shot b-roll follows `offsetSec` instead */
+      loop?: boolean;
+      /** seconds into the overlay file when the clip is at the current time (b-roll) */
+      offsetSec?: number;
     }
   | {
       kind: "text";
@@ -114,6 +120,8 @@ interface Props {
   onOverlaySelect?: (id: string | null) => void;
   /** drag / resize of the selected overlay (`w` for an asset, `size` for text); `key` groups one gesture into one undo step */
   onOverlayChange?: (id: string, patch: { x?: number; y?: number; w?: number; size?: number }, key: string) => void;
+  /** pause overlay videos with the clip (GIFs as <img> keep looping) */
+  playing?: boolean;
   /** a still shown instead of the video (the intro/outro poster while its block is selected) with its tag */
   still?: { url: string; tag: string } | null;
   showSafeZones?: boolean;
@@ -123,6 +131,28 @@ interface Props {
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
   className?: string;
+}
+
+/** A muted overlay video: looping stickers play on their own even while the clip is paused; b-roll follows the clip clock. */
+function OverlayVideo({ src, loop, offsetSec, playing, onSize }: { src: string; loop: boolean; offsetSec: number; playing: boolean; onSize: (w: number, h: number) => void }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const follow = loop ? -1 : offsetSec;
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    if (loop) {
+      if (v.paused) void v.play().catch(() => {});
+      return;
+    }
+    if (!playing) {
+      v.pause();
+      if (follow >= 0 && Math.abs(v.currentTime - follow) > 0.15) v.currentTime = Math.max(0, follow);
+      return;
+    }
+    if (follow >= 0 && Math.abs(v.currentTime - follow) > 0.3) v.currentTime = Math.max(0, follow);
+    if (v.paused) void v.play().catch(() => {});
+  }, [playing, follow, src, loop]);
+  return <video ref={ref} src={src} muted playsInline autoPlay={loop} loop={loop} draggable={false} className="pointer-events-none h-full w-full object-contain" onLoadedMetadata={(e) => onSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)} />;
 }
 
 const FONT = `"DejaVu Sans", Verdana, system-ui, sans-serif`;
@@ -151,10 +181,11 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
+  const [naturalAspect, setNaturalAspect] = useState<Record<string, number>>({});
   const [drag, setDrag] = useState<null | "caption" | "hook" | { pan: 0 | 1 } | { overlay: string; mode: "move" | "size"; key: string; grab: { x: number; y: number }; orig: { x: number; y: number; w: number }; text: boolean }>(null);
   const panX = useRef(0);
   const panY = useRef(0);
@@ -260,7 +291,13 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
       const r3 = (n: number) => Math.round(n * 1000) / 1000;
       if (drag.mode === "move") onOverlayChange(drag.overlay, { x: r3(Math.max(0, Math.min(1, drag.orig.x + px - drag.grab.x))), y: r3(Math.max(0, Math.min(1, drag.orig.y + py - drag.grab.y))) }, drag.key);
       else if (drag.text) onOverlayChange(drag.overlay, { size: r3(Math.max(0.02, Math.min(0.12, drag.orig.w + (py - drag.grab.y) * 0.5))) }, drag.key);
-      else onOverlayChange(drag.overlay, { w: r3(Math.max(0.05, Math.min(1, drag.orig.w + 2 * (px - drag.grab.x)))) }, drag.key);
+      else {
+        // width-only in the file (the renderer is scale=w:-2); grow from either axis so a downward corner drag still scales
+        const dwx = 2 * (px - drag.grab.x);
+        const dwy = 2 * (py - drag.grab.y);
+        const dw = Math.abs(dwx) >= Math.abs(dwy) ? dwx : dwy;
+        onOverlayChange(drag.overlay, { w: r3(Math.max(0.05, Math.min(1, drag.orig.w + dw))) }, drag.key);
+      }
       return;
     }
     if (!drag || typeof drag !== "string" || !boxRef.current || !onStyleChange) return;
@@ -303,7 +340,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
         const sel = o.id === selectedOverlay;
         const name = o.kind === "text" ? `“${o.text}”` : o.name;
         const handle = sel && onOverlayChange && (
-          <span className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc" onPointerDown={(e) => onOverlayStart(o, "size", e)} aria-label={`Resize ${name}`} />
+          <span className="absolute bottom-0.5 right-0.5 z-[1] h-3.5 w-3.5 cursor-nwse-resize rounded-[3px] border border-white bg-acc" onPointerDown={(e) => onOverlayStart(o, "size", e)} aria-label={`Resize ${name}`} />
         );
         const frame = `absolute -translate-x-1/2 -translate-y-1/2 ${onOverlayChange ? "cursor-move" : ""} ${sel ? "outline outline-2 outline-acc" : onOverlayChange ? "hover:outline hover:outline-1 hover:outline-dashed hover:outline-white/60" : ""}`;
         if (o.kind === "text") {
@@ -331,11 +368,21 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
             </div>
           );
         }
+        const aspect = o.aspect > 0.05 ? o.aspect : (naturalAspect[o.id] ?? 1);
         const wPx = o.w * width;
-        const hPx = wPx / Math.max(0.05, o.aspect);
+        const hPx = wPx / aspect;
+        const noteSize = (w: number, h: number) => {
+          if (!w || !h || o.aspect > 0.05) return;
+          const next = w / h;
+          setNaturalAspect((cur) => (Math.abs((cur[o.id] ?? 0) - next) < 0.01 ? cur : { ...cur, [o.id]: next }));
+        };
         return (
           <div key={o.id} className={frame} style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }} onPointerDown={(e) => onOverlayStart(o, "move", e)} title={onOverlayChange ? `${name} · drag to move, corner to resize` : name}>
-            <img src={o.url} alt="" draggable={false} className="h-full w-full object-cover" />
+            {o.video ? (
+              <OverlayVideo src={o.url} loop={!!o.loop} offsetSec={o.offsetSec ?? 0} playing={playing && !still} onSize={noteSize} />
+            ) : (
+              <img src={o.url} alt="" draggable={false} className="pointer-events-none h-full w-full object-contain" onLoad={(e) => noteSize(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />
+            )}
             {handle}
           </div>
         );
