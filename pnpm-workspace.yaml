@@ -5,6 +5,8 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   onnxruntime-node: true
+  # postinstall runs `lefthook install` (git hooks, lefthook.yml); it does nothing when CI is set
+  lefthook: true
   # pulled in by posthog-js; its postinstall only prints a funding notice
   core-js: false
 minimumReleaseAgeExclude:

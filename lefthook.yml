@@ -1,0 +1,27 @@
+# Git hooks (https://lefthook.dev), installed by `pnpm install`. Fast checks only; CI (ci.yml,
+# security.yml, contributors.yml) is the gate. Skip once with `LEFTHOOK=0 git commit …`.
+# The secret and workflow scans need gitleaks and zizmor on PATH (`brew install gitleaks zizmor`);
+# without them the hook says so and lets the commit through.
+
+pre-commit:
+  commands:
+    secrets:
+      run: |
+        command -v gitleaks >/dev/null || { echo "gitleaks not installed (brew install gitleaks): staged changes not scanned for secrets"; exit 0; }
+        gitleaks git --pre-commit --staged --redact --no-banner .
+
+commit-msg:
+  commands:
+    # the DCO sign-off every commit needs (CONTRIBUTING.md), the same trailer `git commit -s` writes
+    signoff:
+      run: |
+        git interpret-trailers --in-place --if-exists addIfDifferent \
+          --trailer "Signed-off-by: $(git config user.name) <$(git config user.email)>" {1}
+
+pre-push:
+  commands:
+    workflows:
+      glob: ".github/**/*.{yml,yaml}" # workflows, actions, dependabot.yml
+      run: |
+        command -v zizmor >/dev/null || { echo "zizmor not installed (brew install zizmor): GitHub config not linted"; exit 0; }
+        zizmor --offline --no-progress .

@@ -1,0 +1,85 @@
+# Security checks that complement CodeQL (default setup) and Scorecard (scorecard.yml):
+#   dependencies  a PR may not add a dependency with a known moderate+ vulnerability
+#   workflows     zizmor lints .github/workflows (template injection, credential persistence,
+#                 dangerous triggers, …); exceptions live in .github/zizmor.yml with a reason each
+#   secrets       gitleaks over the whole history (GitHub push protection only knows provider tokens)
+#   image         Grype scans the published :latest image once a week, because new CVEs land in
+#                 Debian and ffmpeg after a release; results go to the Security tab
+# None of the PR jobs write anything, so they work the same on fork PRs.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "43 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          # fork PRs get a read-only token; the verdict is in the job log and summary
+          comment-summary-in-pr: never
+
+  workflows:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          # findings fail the job and show as annotations; no SARIF upload, so no write scope
+          advanced-security: false
+          annotations: true
+
+  secrets:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every commit, not just the tip: a secret removed in a later commit is still leaked
+          persist-credentials: false
+      # the gitleaks binary, pinned by release and sha256 (gitleaks-action needs a paid licence for
+      # organisations). To bump: take the linux_x64 line of the release's gitleaks_<v>_checksums.txt.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          curl -fsSL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz -C "$RUNNER_TEMP" gitleaks
+          rm gitleaks.tar.gz
+      - run: '"$RUNNER_TEMP/gitleaks" git --redact --no-banner .'
+
+  image:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF to code scanning
+    steps:
+      - id: scan
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/reelsaw:latest
+          output-format: sarif
+          only-fixed: true # only what a base-image or package bump can fix
+          fail-build: false # findings are alerts in the Security tab, not a red run
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: grype-image

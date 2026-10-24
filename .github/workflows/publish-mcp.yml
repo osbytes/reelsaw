@@ -28,6 +28,8 @@ jobs:
       id-token: write # OIDC login to the registry
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Version
         id: v
@@ -56,9 +58,17 @@ jobs:
             | jq -e '[.. | objects | select(has("config")) | .config.Labels["io.modelcontextprotocol.server.name"]?] | any(. == "io.github.osbytes/reelsaw")' >/dev/null \
             || { echo "ghcr.io/osbytes/reelsaw:$VERSION has no io.modelcontextprotocol.server.name label"; exit 1; }
 
+      # pinned by release and sha256 (this job holds an OIDC token the registry trusts). To bump: pick
+      # a release from https://github.com/modelcontextprotocol/registry/releases and take the
+      # mcp-publisher_linux_amd64.tar.gz line of its registry_<version>_checksums.txt.
       - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          curl -fsSL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz"
+          echo "$MCP_PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
           ./mcp-publisher --help | head -1
 
       - name: Log in with GitHub OIDC

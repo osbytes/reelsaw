@@ -64,11 +64,32 @@ changelog and version stay ahead.
 
 ## Setup (once per repository)
 
-- `secrets.RELEASE_TOKEN`: fine-grained PAT or GitHub App token with `contents: write` and
-  `pull-requests: write`. Required: tags pushed with the default `GITHUB_TOKEN` do not trigger
-  `release.yml`.
-- Settings → Actions → "Allow GitHub Actions to create and approve pull requests".
-- Branch protection on `main`: require `ci` to pass; the release PR is merged like any other.
+Repository settings live outside the code, so this list is the record of them; change it with the
+setting.
+
+- `secrets.RELEASE_TOKEN`: a fine-grained PAT of `dillonstreator` with `contents: write` and
+  `pull-requests: write`. It is required because tags pushed with the default `GITHUB_TOKEN` do
+  not trigger `release.yml`. changesets/action (the Release PR), `pnpm release:tag` and the
+  Dependabot changeset job all use it, never `GITHUB_TOKEN`. The tag ruleset below lets only that
+  user create `v*` tags, so the PAT must be theirs: a token from anyone else, or a GitHub App
+  token, cannot push the release tag.
+- Settings → Actions → General:
+  - "Workflow permissions": **Read repository contents**, and "Allow GitHub Actions to create and
+    approve pull requests" **off**. Every workflow declares its own `permissions:`, so the default
+    only catches a workflow that forgets to. Nothing creates PRs with `GITHUB_TOKEN`.
+  - "Require actions to be pinned to a full-length commit SHA": **on**. Every `uses:` is a SHA with a
+    `# vX.Y.Z` comment. Dependabot bumps them monthly.
+- Settings → Branches → `main`: require the `check` and `site` checks (`ci`), `DCO` and `CLA`
+  (`contributors`), and `dependencies`, `workflows` and `secrets` (`security`), with branches up to
+  date before merging. The Release PR is merged like any other. Settings → Rules → the `main`
+  ruleset also blocks force pushes and deletion.
+- Settings → Rules → tag ruleset `v*`: restricts creation, update, deletion and force pushes, with
+  only `dillonstreator` on the bypass list. A `v*` tag push publishes a signed image (`release.yml`),
+  so only the release flow may create one, and a published version can never be moved to another
+  commit.
+- Settings → Advanced Security: Dependabot security updates, secret scanning and push protection
+  are on. CodeQL runs as the default setup (actions and JS/TS, weekly). Private vulnerability
+  reporting is on (`SECURITY.md`).
 
 The installers (`deploy/install.sh`, `deploy/install.ps1`) are served from `main` via
 raw.githubusercontent.com, so the scripts on `main` must always work against the `:latest` image.

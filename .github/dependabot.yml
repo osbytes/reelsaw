@@ -2,7 +2,9 @@
 # bumps on purpose (pnpm update, a changeset, an eval run). Security updates stay on and arrive as
 # one PR per manifest instead of one per advisory. The dependabot-changeset workflow adds the
 # changeset CI requires. Actions and base-image digests still get a monthly, grouped bump, because
-# SHA pins and digests go stale and carry no behavioural risk.
+# SHA pins and digests go stale and carry no behavioural risk. Version bumps wait 7 days after a
+# release (cooldown), so a hijacked release is usually pulled before Dependabot proposes it;
+# security updates skip the cooldown.
 version: 2
 updates:
   # the pnpm workspace (apps/server, apps/web, packages/shared share the root lockfile):
@@ -10,6 +12,8 @@ updates:
   # settings in force for security updates
   - package-ecosystem: npm
     directory: /
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 0
@@ -26,6 +30,8 @@ updates:
   # reelsaw.com, own lockfile outside the workspace: same policy
   - package-ecosystem: npm
     directory: /website
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 0
@@ -37,6 +43,8 @@ updates:
   # actions are pinned by commit SHA with a version comment; one grouped PR a month keeps them current
   - package-ecosystem: github-actions
     directory: /
+    cooldown:
+      default-days: 7
     schedule:
       interval: monthly
     groups:
@@ -51,6 +59,8 @@ updates:
   # The compose files pull by tag on purpose so operators get Postgres and Speaches patches directly.
   - package-ecosystem: docker
     directory: /
+    cooldown:
+      default-days: 7
     schedule:
       interval: monthly
     ignore:

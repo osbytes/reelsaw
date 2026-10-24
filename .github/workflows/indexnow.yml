@@ -33,6 +33,7 @@ jobs:
         with:
           sparse-checkout: website/public/indexnow-key.txt
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Check the key is live
         run: |
@@ -48,9 +49,11 @@ jobs:
           fi
 
       - name: Collect URLs
+        env:
+          URLS: ${{ inputs.urls }}
         run: |
-          if [ -n "${{ inputs.urls }}" ]; then
-            printf '%s\n' "${{ inputs.urls }}" | sed '/^[[:space:]]*$/d' > urls.txt
+          if [ -n "$URLS" ]; then
+            printf '%s\n' "$URLS" | sed '/^[[:space:]]*$/d' > urls.txt
           else
             curl -fsSL --max-time 20 "$SITE_URL/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's#</\?loc>##g' > urls.txt
           fi
