@@ -58,6 +58,7 @@ import {
   type ProjectSettings,
   shiftRegion,
   regionLabel,
+  layoutSectionSchema,
   FULL_FRAME,
   type ContentRegion,
   type SectionMode,
@@ -122,6 +123,8 @@ const MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"]
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 type Tab = "captions" | "framing" | "layers" | "text" | "cuts" | "transcript";
 const PANE_NAME = ["Top", "Bottom"] as const;
+/** every optional field of a layout section, from the schema: the saved form and the change check cover them all */
+const SECTION_FIELDS = (Object.keys(layoutSectionSchema.shape) as Array<keyof LayoutSection>).filter((k): k is Exclude<keyof LayoutSection, "start" | "end" | "mode"> => k !== "start" && k !== "end" && k !== "mode");
 const newLayerId = () => `ly-${Math.random().toString(36).slice(2, 6)}`;
 /** shortest a layer may be: pictures and text 0.1 s, sounds 0.5 s */
 const layerMin = (l: Pick<ClipLayer, "kind">) => (l.kind === "audio" ? 0.5 : 0.1);
@@ -1119,12 +1122,28 @@ export function ClipEditor(props: Props) {
   const cutSpans = useMemo(() => flags.filter((f) => f.kind === "disfluency" && (f.status === "auto" || f.status === "accepted")).map((f) => ({ start: f.start, end: f.end })), [flags]);
 
   // ----- dirty tracking + save -----
+  /**
+   * A section as it is stored and compared: times to 1/100 s, offsets to 4 places, subjects and crops to 3,
+   * fields that do nothing left out. Every field of `layoutSectionSchema` goes through here, so a new one is
+   * saved and counts as a change (compared with `SECTION_FIELDS`).
+   */
   const toSaved = (s: LayoutSection): LayoutSection => {
     const r4 = (n: number | undefined) => (n ? Number(n.toFixed(4)) : undefined);
     const r3 = (n: number | undefined) => (n === undefined ? undefined : Number(n.toFixed(3)));
+    const region = (r: ContentRegion | undefined): ContentRegion | undefined => (r ? { x1: r3(r.x1)!, y1: r3(r.y1)!, x2: r3(r.x2)!, y2: r3(r.y2)! } : undefined);
     const out: LayoutSection = { start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)), mode: s.mode };
-    const extra: Partial<LayoutSection> = { offsetX: r4(s.offsetX), offsetY: r4(s.offsetY), offsetX2: r4(s.offsetX2), offsetY2: r4(s.offsetY2), subjectX: r3(s.subjectX), subjectX2: r3(s.subjectX2) };
-    for (const k of Object.keys(extra) as Array<keyof typeof extra>) if (extra[k] !== undefined) Object.assign(out, { [k]: extra[k] });
+    const extra: Omit<LayoutSection, "start" | "end" | "mode"> = {
+      offsetX: r4(s.offsetX),
+      offsetY: r4(s.offsetY),
+      offsetX2: r4(s.offsetX2),
+      offsetY2: r4(s.offsetY2),
+      subjectX: r3(s.subjectX),
+      subjectX2: r3(s.subjectX2),
+      crop: region(s.crop),
+      crop2: region(s.crop2),
+      contentCrop: region(s.contentCrop),
+    };
+    for (const k of SECTION_FIELDS) if (extra[k] !== undefined) Object.assign(out, { [k]: extra[k] });
     return out;
   };
   const forcedSections = sections.filter((s) => s.mode !== "auto" || hasAdjust(s)).map(toSaved);
