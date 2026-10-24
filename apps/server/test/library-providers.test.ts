@@ -188,7 +188,7 @@ describe("openverse", () => {
 });
 
 describe("giphy", () => {
-  const gif = { id: "abc", title: "wow", url: "https://giphy.com/gifs/abc", username: "u", images: { original: { url: "https://media.giphy.com/o.gif", mp4: "https://media.giphy.com/o.mp4", width: "480", height: "270" }, fixed_width: { url: "https://media.giphy.com/fw.gif" } } };
+  const gif = { id: "abc", title: "wow", url: "https://giphy.com/gifs/abc", username: "u", images: { original: { url: "https://media.giphy.com/o.gif", mp4: "https://media.giphy.com/o.mp4", width: "480", height: "270" }, fixed_width: { url: "https://media.giphy.com/fw.gif", mp4: "https://media.giphy.com/fw.mp4" }, fixed_width_small_still: { url: "https://media.giphy.com/still.gif" } } };
   it("imports gifs as mp4 video and stickers as the transparent gif", async () => {
     const { registry } = setup(() => json({ data: gif }));
     const g = await registry.resolve("giphy", "gif:abc");
@@ -202,6 +202,12 @@ describe("giphy", () => {
     assert.deepEqual(calls.map((c) => c.url.pathname).sort(), ["/v1/gifs/search", "/v1/stickers/search"]);
     assert.equal(r.items.length, 2);
     assert.equal(r.nextCursor, "1");
+    const video = r.items.find((i) => i.kind === "video")!;
+    const sticker = r.items.find((i) => i.kind === "image")!;
+    assert.equal(video.previewUrl, "https://media.giphy.com/fw.mp4", "the panel can play the mp4");
+    assert.equal(video.thumbUrl, "https://media.giphy.com/fw.gif", "the tile loops the gif without a play click");
+    assert.equal(sticker.previewUrl, "https://media.giphy.com/fw.gif");
+    assert.equal(sticker.thumbUrl, "https://media.giphy.com/fw.gif", "stickers animate in the tile");
   });
 });
 
@@ -211,6 +217,8 @@ describe("klipy (experimental)", () => {
     const r = await registry.search("klipy", "hey");
     assert.equal(calls[0]!.url.pathname, "/api/v1/kl-key/gifs/search");
     assert.deepEqual(r.items.map((i) => [i.externalId, i.kind]), [["k1", "video"]]);
+    assert.equal(r.items[0]!.previewUrl, "https://static.klipy.com/a.mp4", "the panel plays the mp4, not the tinygif thumb");
+    assert.equal(r.items[0]!.thumbUrl, "https://static.klipy.com/t.gif");
     const res = await registry.resolve("klipy", "k1");
     assert.deepEqual([res.url, res.ext], ["https://static.klipy.com/a.mp4", "mp4"]);
   });

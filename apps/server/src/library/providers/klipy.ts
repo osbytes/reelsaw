@@ -41,7 +41,7 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
     const id = str(g.id) ?? str(g.slug);
     const f = formats(g);
     if (!id || !f.thumb || !(f.mp4 || f.gif)) return null;
-    return { provider: "klipy", externalId: id, kind: "video", mime: f.mp4 ? "video/mp4" : "image/gif", name: clip(str(g.title) ?? str(g.content_description) ?? `GIF ${id}`, 120), previewUrl: f.thumb, thumbUrl: f.thumb, width: f.width, height: f.height, license: LICENSE, attribution: "GIFs via Klipy", url: httpsUrl(g.itemurl) ?? httpsUrl(g.url) };
+    return { provider: "klipy", externalId: id, kind: "video", mime: f.mp4 ? "video/mp4" : "image/gif", name: clip(str(g.title) ?? str(g.content_description) ?? `GIF ${id}`, 120), previewUrl: f.mp4 ?? f.gif ?? f.thumb, thumbUrl: f.thumb, width: f.width, height: f.height, license: LICENSE, attribution: "GIFs via Klipy", url: httpsUrl(g.itemurl) ?? httpsUrl(g.url) };
   };
   return {
     id: "klipy",

@@ -144,6 +144,9 @@ export interface CreatedAsset {
   kind: string;
   mime: string | null;
   durationSec: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
   duplicate: boolean;
   restored: boolean;
 }
@@ -249,7 +252,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     });
     if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
     const a = row.asset;
-    return { id: a.id, name: a.name, kind: a.kind, mime: a.mime, durationSec: a.durationSec, duplicate: row.duplicate, restored: row.restored };
+    return { id: a.id, name: a.name, kind: a.kind, mime: a.mime, durationSec: a.durationSec, width: a.width, height: a.height, hasAudio: a.hasAudio, duplicate: row.duplicate, restored: row.restored };
   } catch (err) {
     await fs.rm(local, { force: true }).catch(() => {});
     throw err;

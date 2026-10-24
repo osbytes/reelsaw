@@ -94,8 +94,9 @@ without leaving the editor or finding files on my disk.
      `<text>` falls back to resvg's defaults; convert text to paths for exact type. An SVG that links to
      other files (`<image>`, `<use>`, `<feImage>` with an href that is not `#id` or `data:`) is refused
      at upload and at render, so an uploaded file cannot make the server open paths.
-   - **GIF / animated WebP**: fed to the overlay chain with `loop` on by default (`layer.loop ?? mime is
-     gif or webp`; videos default off, stills never loop). A looped input is always finite: GIF gets
+   - **GIF / animated WebP**: fed to the overlay chain with `loop` on by default (`layer.loop ?? isStickerAsset`:
+     gif/webp mime, or a video under 8 s — Giphy stores GIFs as mp4, often with a silent AAC track, so duration
+     is the split, not `hasAudio`; longer video is b-roll and defaults off; stills never loop). A looped input is always finite: GIF gets
      `-ignore_loop 0`, any looped input gets `-stream_loop N` with N = `ceil(window / assetDuration)`
      (never -1) and `-t window`, and the chain trims it to the window (`trim=duration`) before
      `setpts`, with `eof_action=repeat`; a video that plays once keeps `eof_action=pass`. `format=rgba`
@@ -203,6 +204,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 | action | tRPC | MCP | CLI |
 |---|---|---|---|
 | list own library | `library.list` | `search_assets { source: "library" }` (empty `q` = everything) | `reelsaw library list [--kind] [--q]` |
+| resolve ids (own, shared, removed-in-use) | `library.get { ids }` | `get_clip` / `get_project` already resolve names | |
 | search library, catalog, providers | `library.search { q, source?: "library" \| "catalog" \| <providerId>, kind?, cursor?, limit?, license? }`, `library.providers` | `search_assets` | `reelsaw library search <q> [--source] [--kind] [--license]` |
 | add (upload, URL, catalog / provider hit) | `library.add { uploadId \| url \| provider + externalId, name?, tags?, imageSeconds?, setDefault?, color? }` (exactly one source) | `add_asset` | `reelsaw library add <file\|url\|provider:externalId>` |
 | rename, tag, remove, restore, usage | `library.update / remove / restore / usage` | `update_asset`, `remove_asset`, `restore_asset`, `asset_usage` | `reelsaw library rename\|update\|remove\|restore\|usage` |

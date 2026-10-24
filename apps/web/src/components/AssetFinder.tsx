@@ -4,7 +4,7 @@
  * `mode="library"` is the Library page body (filters live in the URL: ?kind=&q=, #asset=<id>);
  * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button that imports a
  * catalog / provider result first).
- * Server: `library.list / search / providers / add / remove / restore` (same services as the MCP tools).
+ * Server: `library.list / search / get / providers / add / remove / restore` (same services as the MCP tools).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,12 +26,17 @@ type Out = inferRouterOutputs<AppRouter>;
 type RemoteItem = Out["library"]["search"]["items"][number];
 type Provider = Out["library"]["providers"][number];
 
-/** What a pick hands back: the fields the editor's layer helpers need. */
+/** What a pick hands back: enough for the editor to name, size and preview the layer before `library.get` returns. */
 export interface PickedAsset {
   id: string;
   name: string;
   kind: LibraryKind;
   durationSec: number;
+  mime?: string | null;
+  width?: number;
+  height?: number;
+  hasAudio?: boolean;
+  thumbnailUrl?: string;
 }
 
 const PAGE = 24;
@@ -199,12 +204,23 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
       setPending((s) => (s.delete(key), new Set(s)));
     }
   };
+  const asPicked = (a: { id: string; name: string; kind: string; durationSec: number; mime?: string | null; width?: number; height?: number; hasAudio?: boolean; thumbnailUrl?: string }): PickedAsset => ({
+    id: a.id,
+    name: a.name,
+    kind: a.kind as LibraryKind,
+    durationSec: a.durationSec,
+    mime: a.mime,
+    width: a.width,
+    height: a.height,
+    hasAudio: a.hasAudio,
+    thumbnailUrl: a.thumbnailUrl ?? (a.kind === "audio" ? "" : `/media/assets/${a.id}/thumb.jpg`),
+  });
   const importItem = async (i: RemoteItem): Promise<PickedAsset> => {
     const a = await importM.mutateAsync({ provider: i.provider, externalId: i.externalId });
     refreshList();
-    return { id: a.id, name: a.name, kind: a.kind as LibraryKind, durationSec: a.durationSec };
+    return asPicked(a);
   };
-  const pickedFromRow = (r: LibraryAsset): PickedAsset => ({ id: r.id, name: r.name, kind: r.kind, durationSec: r.durationSec });
+  const pickedFromRow = (r: LibraryAsset): PickedAsset => asPicked(r);
 
   const fadeOut = (a: LibraryAsset) => {
     setLeaving((s) => new Set(s).add(a.id));
@@ -225,8 +241,9 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     height: r.height,
     source: "Yours",
     license: r.provenance?.license?.name,
-    thumbUrl: r.kind === "audio" ? undefined : r.thumbnailUrl,
-    previewUrl: r.kind === "image" ? undefined : `/media/assets/${r.id}`,
+    hasAudio: r.hasAudio,
+    thumbUrl: r.kind === "audio" ? undefined : r.mime === "image/gif" || r.mime === "image/webp" ? `/media/assets/${r.id}` : r.thumbnailUrl,
+    previewUrl: r.kind === "image" ? (r.mime === "image/gif" || r.mime === "image/webp" ? `/media/assets/${r.id}` : undefined) : `/media/assets/${r.id}`,
     row: r,
     usage: usageText(r),
   });
@@ -240,6 +257,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
     height: i.height,
     source: providerLabel(i.provider),
     license: i.license.name,
+    hasAudio: i.kind === "audio" ? true : i.kind === "video" ? undefined : false,
     thumbUrl: i.thumbUrl ?? (i.kind === "image" ? i.previewUrl : undefined),
     previewUrl: i.previewUrl,
   });

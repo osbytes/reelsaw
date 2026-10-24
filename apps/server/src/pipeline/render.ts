@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import type { VideoEncoder } from "../media.js";
@@ -799,9 +799,8 @@ async function loadOverlays(ctx: StageContext, userId: string, overlays: AssetLa
       await fs.mkdir(dir, { recursive: true });
       // an SVG is composited from its PNG (resvg), rendered once at the output width and cached
       const file = isSvgAsset(asset) ? await ensureRaster({ storage: svc.storage, dir: path.join(svc.paths.root, "bumpers") }, asset, RASTER_WIDTH) : await svc.storage.ensureLocal(asset.sourceKey, path.join(dir, path.posix.basename(asset.sourceKey)));
-      const gifOrWebp = asset.mime === "image/gif" || asset.mime === "image/webp";
-      // only something that moves can loop: a GIF / animated WebP by default, a video when the layer says so
-      const loop = asset.kind === "video" && (o.loop ?? gifOrWebp);
+      // only something that moves can loop: a GIF / silent short video (Giphy) by default, a longer video when the layer says so
+      const loop = asset.kind === "video" && (o.loop ?? isStickerAsset(asset));
       out.items.push({ id: o.id, assetId: o.assetId, path: file, kind: asset.kind, loop, ...(loop ? { gif: asset.mime === "image/gif", durationSec: asset.durationSec } : {}), start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), x: o.x, y: o.y, w: o.w ?? ASSET_OVERLAY_DEFAULT_W, opacity: o.opacity ?? 1 });
     } catch (err) {
       if (ctx.signal.aborted) throw err;

@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { AudioLines, Film, Image as ImageIcon, Loader2, Pause, Play, Plus } from "lucide-react";
+import { isStickerAsset } from "@reelsaw/shared";
 import { formatTag } from "../lib/library";
 import { lengthText, type LibraryAsset } from "./BumperField";
 
@@ -20,6 +21,7 @@ export interface TileModel {
   durationSec?: number | null;
   width?: number | null;
   height?: number | null;
+  hasAudio?: boolean;
   thumbUrl?: string;
   /** what plays in place (video / audio) */
   previewUrl?: string;
@@ -75,16 +77,14 @@ export function AssetTile({
     },
     [],
   );
-  useEffect(() => {
-    const v = video.current;
-    if (playing && v) void v.play().catch(() => setPlaying(false));
-  }, [playing]);
   const toggle = () => {
     if (playing) return stop();
     stopPrevious?.();
     stopPrevious = () => stopRef.current();
     if (t.kind === "audio" && t.previewUrl) {
-      const a = new Audio(t.previewUrl);
+      const a = new Audio();
+      if (/^https?:\/\//i.test(t.previewUrl)) a.setAttribute("referrerpolicy", "no-referrer");
+      a.src = t.previewUrl;
       a.onended = () => setPlaying(false);
       audio.current = a;
       void a.play().catch(() => setPlaying(false));
@@ -94,8 +94,22 @@ export function AssetTile({
   const row = t.row;
   const picker = mode === "picker";
   const fmt = formatTag(t.mime);
-  const thumb = !failed && (t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined));
-  const playable = t.kind !== "image" && !!t.previewUrl;
+  const remote = (url?: string) => !!url && /^https?:\/\//i.test(url);
+  // CDNs (Giphy, Pexels, …) often refuse a localhost Referer; same-origin /media needs the cookie, not this.
+  const referrerPolicy = remote(t.previewUrl) || remote(t.thumbUrl) ? ("no-referrer" as const) : undefined;
+  const gifLike = (url?: string) => !!url && /\.gif(\?|#|$)/i.test(url);
+  // a GIF URL is not a <video> source (Giphy/Klipy used to send one); draw it as an img so it still loops
+  const previewIsImage = t.kind === "image" || !!t.mime?.startsWith("image/") || gifLike(t.previewUrl);
+  const thumb = failed ? undefined : (gifLike(t.previewUrl) ? t.previewUrl : undefined) || t.thumbUrl || (t.kind === "image" ? t.previewUrl : undefined);
+  const idleAnimates = gifLike(thumb);
+  // imported GIF-as-mp4 loops in the tile like a GIF; remote results already have an animated gif thumb (don't fetch every mp4)
+  const stickerVideo = t.kind === "video" && !!t.previewUrl && !previewIsImage && !idleAnimates && isStickerAsset(t);
+  const showVideo = (playing || stickerVideo) && t.kind === "video" && !!t.previewUrl && !previewIsImage;
+  const playable = t.kind !== "image" && !!t.previewUrl && !previewIsImage && !idleAnimates && !stickerVideo;
+  useEffect(() => {
+    const v = video.current;
+    if ((playing || stickerVideo) && v) void v.play().catch(() => { if (playing) setPlaying(false); });
+  }, [playing, stickerVideo]);
   const chip = "inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white";
   // an image's stored duration is only how long it shows as an intro / outro, never a media length
   const size = t.kind === "image" ? (t.width && t.height ? `${t.width}×${t.height}` : "") : t.durationSec ? lengthText({ durationSec: t.durationSec }) : "";
@@ -105,10 +119,22 @@ export function AssetTile({
   return (
     <li id={row ? `asset-${row.id}` : undefined} className={`group flex min-w-0 flex-col gap-2 rounded-[14px] border bg-panel p-2 transition-opacity duration-150 ${leaving ? "pointer-events-none opacity-0" : ""} ${highlighted ? "border-acc ring-2 ring-acc" : "border-line"}`}>
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[10px] border border-line bg-sunk min-[480px]:aspect-[3/4]">
-        {t.kind === "video" && playing && t.previewUrl ? (
-          <video ref={video} src={t.previewUrl} poster={t.thumbUrl} muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />
+        {showVideo ? (
+          <video
+            ref={(el) => {
+              video.current = el;
+              if (el && referrerPolicy) el.setAttribute("referrerpolicy", referrerPolicy);
+            }}
+            src={t.previewUrl}
+            poster={t.thumbUrl}
+            muted
+            loop
+            autoPlay={stickerVideo}
+            playsInline
+            className="absolute inset-0 h-full w-full object-contain"
+          />
         ) : thumb ? (
-          <img src={thumb} alt="" loading="lazy" className={`absolute inset-0 h-full w-full ${t.mime === "image/svg+xml" ? "object-contain p-3" : "object-cover"}`} onError={() => setFailed(true)} />
+          <img src={thumb} alt="" loading="lazy" referrerPolicy={referrerPolicy} className={`absolute inset-0 h-full w-full ${t.mime === "image/svg+xml" || idleAnimates ? "object-contain p-1" : "object-cover"}`} onError={() => setFailed(true)} />
         ) : t.kind === "audio" ? (
           <AudioLines className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 text-ink3" aria-hidden />
         ) : null}
@@ -122,7 +148,7 @@ export function AssetTile({
           {fmt && <span>{fmt}</span>}
         </span>
         {playable && (
-          <button type="button" onClick={toggle} aria-label={playing ? `Pause ${t.name}` : `Play ${t.name}`} aria-pressed={playing} className="absolute bottom-1.5 right-1.5 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop hover:bg-white">
+          <button type="button" onClick={toggle} aria-label={playing ? `Pause ${t.name}` : `Play ${t.name}`} aria-pressed={playing} className="absolute bottom-1.5 right-1.5 z-[1] grid h-8 w-8 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop hover:bg-white">
             {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="translate-x-px" />}
           </button>
         )}
@@ -138,7 +164,7 @@ export function AssetTile({
             onClick={onPick}
             aria-label={pending ? "Adding…" : addLabel}
             title={pickLabel}
-            className="absolute right-1.5 top-1.5 inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
+            className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 items-center gap-1 rounded-full bg-white/90 px-2 text-xs font-semibold text-film-ink opacity-0 shadow-pop transition-opacity duration-150 hover:bg-white focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100 disabled:opacity-100"
           >
             {pending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}
             {picker && !pending && <span>Add</span>}

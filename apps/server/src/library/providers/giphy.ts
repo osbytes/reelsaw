@@ -20,10 +20,15 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
   const item = (g: Record<string, unknown>, sticker: boolean): ProviderItem | null => {
     const img = obj(g.images);
     const orig = obj(img.original);
-    const still = httpsUrl(obj(img.fixed_width).url) ?? httpsUrl(obj(img.fixed_width_still).url);
-    if (!str(g.id) || !still) return null;
+    const fw = obj(img.fixed_width);
+    // GIFs import as mp4; the panel must preview that file, not the .gif (a <video> will not play a GIF).
+    const gif = httpsUrl(fw.url) ?? httpsUrl(orig.url);
+    const mp4 = httpsUrl(fw.mp4) ?? httpsUrl(orig.mp4) ?? httpsUrl(obj(img.preview).mp4);
+    const still = httpsUrl(obj(img.fixed_width_small_still).url) ?? httpsUrl(obj(img.fixed_width_still).url) ?? gif;
+    const preview = sticker ? gif : (mp4 ?? gif);
+    if (!str(g.id) || !preview) return null;
     const user = str(obj(g.user).display_name) ?? str(g.username);
-    return { provider: "giphy", externalId: `${sticker ? "sticker" : "gif"}:${g.id}`, kind: sticker ? "image" : "video", mime: sticker ? "image/gif" : "video/mp4", name: clip(str(g.title) ?? `GIF ${g.id}`, 120), previewUrl: still, thumbUrl: httpsUrl(obj(img.fixed_width_small_still).url) ?? still, width: num(orig.width), height: num(orig.height), license: LICENSE, attribution: user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", url: httpsUrl(g.url) };
+    return { provider: "giphy", externalId: `${sticker ? "sticker" : "gif"}:${g.id}`, kind: sticker ? "image" : "video", mime: sticker ? "image/gif" : "video/mp4", name: clip(str(g.title) ?? `GIF ${g.id}`, 120), previewUrl: preview, thumbUrl: sticker ? preview : (gif ?? still ?? preview), width: num(orig.width), height: num(orig.height), license: LICENSE, attribution: user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", url: httpsUrl(g.url) };
   };
   const file = (g: Record<string, unknown>, sticker: boolean) => {
     const orig = obj(obj(g.images).original);
