@@ -170,7 +170,7 @@ export const TOOLS = {
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x. Returns the clip summary; poll get_clip until done.",
+    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. Section fields: offsetX/Y nudge the (top) crop relative to the followed face, offsetX2/Y2 the bottom crop of a split, subjectX/X2 follow the person at that x; crop / crop2 fix a pane to exactly that part of the source ({ x1, y1, x2, y2 } as fractions; replaces the nudge and the subject) and contentCrop fixes what a stack shows on top. Returns the clip summary; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),

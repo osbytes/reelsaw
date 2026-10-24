@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { textFontFamily } from "../lib/fonts";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, defaultStyle, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -18,7 +18,13 @@ export interface Framing {
   content?: ContentRegion;
   /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone */
   tile?: ContentRegion;
+  /** a crop the user fixed on the first pane (the only pane, the top of a split, the speaker of a stack): shown at its own shape over a blurred copy */
+  crop?: ContentRegion;
+  /** a crop the user fixed on the bottom pane of a split */
+  crop2?: ContentRegion;
 }
+/** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
+export type PaneHit = 0 | 1 | "top";
 export interface PreviewWord {
   text: string;
   /** seconds relative to the clip start */
@@ -67,6 +73,8 @@ export function paneBands(f: Framing, srcW: number, srcH: number): Array<[number
   if (f.layout === "split") return [[0, 0.5], [0.5, 1]];
   if (f.layout === "stack") return [[isFullFrame(f.content) ? Math.min(0.9, (1080 * srcH) / srcW / 1920) : 0.5, 1]];
   if (f.layout === "face" || f.layout === "center") return [[0, 1]];
+  // a fitted frame has nothing to pan, unless the user fixed a crop on it (then the crop's window moves)
+  if (f.layout === "fit" && f.crop) return [[0, 1]];
   return [];
 }
 /** Which crop pane the pointer is over at a frame position: 0 = the only pane or the top of a split, 1 = the bottom of a split. */
@@ -75,31 +83,54 @@ export function paneAt(f: Framing, srcW: number, srcH: number, yFrac: number): 0
   const i = bands.findIndex(([a, b]) => yFrac >= a && yFrac < b);
   return i === 0 ? 0 : i === 1 ? 1 : null;
 }
+/** What a right-click at a frame position is about: a crop pane, the top of a stack, or the whole fitted frame (pane 0); nothing on `none`. */
+export function paneHitAt(f: Framing, srcW: number, srcH: number, yFrac: number): PaneHit | null {
+  if (f.layout === "none") return null;
+  const pane = paneAt(f, srcW, srcH, yFrac);
+  if (pane !== null) return pane;
+  return f.layout === "stack" ? "top" : 0;
+}
 
-/** The crop window of a pane as fractions of the source: how far the picture moves per unit of drag, and how far a face can be nudged before it leaves the pane. */
-export function paneCrop(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { w: number; h: number } {
-  const halfAspect = 9 / 8; // a split / stack half is 1080x960
-  if (f.layout === "stack" && f.tile) {
-    // the pane is the tile itself: a drag has nothing to move
-    const c = tileCrop(srcW, srcH, f.tile);
-    return { w: c.w / srcW, h: c.h / srcH };
+/** The shape of a pane in the 9:16 output (width / height), for a crop that should fill it exactly. */
+export function paneAspect(f: Framing, srcW: number, srcH: number, hit: PaneHit): number {
+  if (f.layout === "split") return 9 / 8;
+  if (f.layout === "stack") {
+    if (!isFullFrame(f.content)) return 9 / 8;
+    const topH = (1080 * srcH) / srcW;
+    return hit === "top" ? srcW / srcH : 1080 / Math.max(1, 1920 - topH);
   }
+  return 9 / 16;
+}
+
+/** The window of the source a pane shows, in source pixels: the same geometry `paint` draws (a fixed crop, a tile, or the face-sized / full-height window). */
+export function paneRect(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { x: number; y: number; w: number; h: number } {
+  const halfAspect = 9 / 8; // a split / stack half is 1080x960
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const fixed = pane === 0 ? f.crop : f.crop2;
+  if (fixed) return tileCrop(srcW, srcH, fixed);
+  if (f.layout === "stack" && f.tile) return tileCrop(srcW, srcH, f.tile);
   if (f.layout === "split") {
     const c = speakerCrop(srcW, srcH, halfAspect, pane === 0 ? { cy: f.cy, size: f.size ?? 0.3 } : { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 });
-    return { w: c.w / srcW, h: c.h / srcH };
+    return { x: cropX(srcW, c.w, pane === 0 ? f.cx : (f.cx2 ?? 1 - f.cx)), y: c.y, w: c.w, h: c.h };
   }
   if (f.layout === "stack" && !isFullFrame(f.content)) {
     const g = contentStackGeometry(srcW, srcH, f.content!, { cy: f.cy, size: f.size ?? 0.3 }, halfAspect);
-    return { w: g.zoom.w / srcW, h: g.zoom.h / srcH };
+    return { x: clamp(f.cx * srcW - g.zoom.w / 2, g.free.lo, g.free.hi - g.zoom.w), y: g.zoom.y, w: g.zoom.w, h: g.zoom.h };
   }
   if (f.layout === "stack") {
     const topH = (1080 * srcH) / srcW;
     const botH = Math.max(1, 1920 - topH);
     const c = speakerCrop(srcW, srcH, 1080 / botH, { cy: f.cy, size: f.size ?? 0.17 });
-    return { w: c.w / srcW, h: c.h / srcH };
+    return { x: cropX(srcW, c.w, f.cx), y: c.y, w: c.w, h: c.h };
   }
+  if (f.layout === "fit" || f.layout === "none") return { x: 0, y: 0, w: srcW, h: srcH };
   const v = verticalCrop(srcW, srcH);
-  return { w: v.w / srcW, h: v.h / srcH };
+  return { x: clamp(f.cx * srcW - v.w / 2, 0, srcW - v.w), y: (srcH - v.h) / 2, w: v.w, h: v.h };
+}
+/** The crop window of a pane as fractions of the source: how far the picture moves per unit of drag, and how far a face can be nudged before it leaves the pane. */
+export function paneCrop(f: Framing, srcW: number, srcH: number, pane: 0 | 1): { w: number; h: number } {
+  const r = paneRect(f, srcW, srcH, pane);
+  return { w: r.w / srcW, h: r.h / srcH };
 }
 
 interface Props {
@@ -136,6 +167,10 @@ interface Props {
    * editor on a text layer (right-clicking selects the layer first)
    */
   overlayMenu?: (o: PreviewAssetOverlay, ctx: { editText: () => void }) => ReactNode;
+  /** the right-click menu of the picture itself: the editor's actions for the pane under the pointer (fix its crop, reset it) */
+  paneMenu?: (hit: PaneHit) => ReactNode;
+  /** the hook's words retyped on the canvas (double-click it, or Edit text in its right-click menu) */
+  onHookChange?: (text: string) => void;
   /** pause overlay videos with the clip (GIFs as <img> keep looping) */
   playing?: boolean;
   /** a still shown instead of the video (the intro/outro poster while its block is selected) with its tag */
@@ -235,6 +270,8 @@ const FONT = `"DejaVu Sans", Verdana, system-ui, sans-serif`;
 const SNAP = 0.03;
 /** a text layer's line, like the schema: one line, 1–120 characters */
 const TEXT_MAX = 120;
+/** the hook, like the clip schema: at most 80 characters */
+const HOOK_MAX = 80;
 
 export type Platform = "tiktok" | "shorts" | "reels";
 export const PLATFORM_NAME: Record<Platform, string> = { tiktok: "TikTok", shorts: "Shorts", reels: "Reels" };
@@ -259,12 +296,16 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, paneMenu, onHookChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
   /** the text layer being retyped on the canvas */
   const [editing, setEditing] = useState<string | null>(null);
+  /** the hook being retyped on the canvas */
+  const [editingHook, setEditingHook] = useState(false);
+  /** what the picture's right-click menu is about (set as the menu opens) */
+  const [menuHit, setMenuHit] = useState<PaneHit | null>(null);
   /** the last overlay pressed and when, to tell a double-click apart (see onOverlayStart) */
   const lastDown = useRef<{ id: string; at: number }>({ id: "", at: 0 });
   useEffect(() => {
@@ -320,17 +361,17 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   const line = lineIdx >= 0 ? lines[lineIdx] : alwaysShowHook ? lines[0] : undefined;
   const em = useMemo(() => new Set(style.emphasis ? (emphasis ?? []).map(emphasisKey) : []), [emphasis, style.emphasis]);
   const activeIdx = line ? line.findIndex((w, i) => time >= (i === 0 ? line[0]!.start : w.start) && time < (i === line.length - 1 ? line[line.length - 1]!.end : line[i + 1]!.start)) : -1;
-  const showHook = style.showHook && !!hook && (alwaysShowHook || time < style.hookSeconds);
+  const showHook = style.showHook && !!hook && (alwaysShowHook || editingHook || time < style.hookSeconds);
   const width = (h * 9) / 16;
 
   function onPointerDown(kind: "caption" | "hook", e: React.PointerEvent) {
-    if (!onStyleChange) return;
+    if (!onStyleChange || (kind === "hook" && editingHook)) return;
     e.preventDefault();
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setDrag(kind);
   }
-  const pannable = !!onPan && framing.layout !== "fit" && framing.layout !== "none";
+  const pannable = !!onPan && paneBands(framing, srcW, srcH).length > 0;
   function onPanStart(e: React.PointerEvent) {
     if (!pannable || e.button !== 0 || !boxRef.current) return;
     const r = boxRef.current.getBoundingClientRect();
@@ -420,13 +461,45 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   const capPx = h * CAPTION_FONT_FRAC * style.captionSize;
   const hookPx = h * HOOK_FONT_FRAC;
   const draggable = !!onStyleChange;
+  const hookHint = draggable ? `Drag to move the hook${onHookChange ? ", double-click to edit" : ""}, right-click for more` : undefined;
+  /** the hook's right-click menu: retype it, put it back in the middle, or hide it (the editor's style keeps the change) */
+  const hookMenu = (
+    <>
+      {onHookChange && <OverlayMenuItem label="Edit text" kbd="dbl-click" onSelect={() => setEditingHook(true)} />}
+      <OverlayMenuItem label="Centre left / right" disabled={style.hookX === 0.5} onSelect={() => onStyleChange?.({ hookX: 0.5 })} />
+      <OverlayMenuItem label="Reset position" disabled={style.hookX === defaultStyle.hookX && style.hookY === defaultStyle.hookY} onSelect={() => onStyleChange?.({ hookX: defaultStyle.hookX, hookY: defaultStyle.hookY })} />
+      <OverlayMenuSeparator />
+      <OverlayMenuItem label="Hide the hook" onSelect={() => onStyleChange?.({ showHook: false })} />
+    </>
+  );
+  /** the picture's right-click menu wraps the frame; a layer or the hook under the pointer opens its own menu instead (they stop the event) */
+  const withPaneMenu = (node: ReactNode) =>
+    paneMenu ? (
+      <ContextMenu.Root modal={false} onOpenChange={(o) => !o && setMenuHit(null)}>
+        <ContextMenu.Trigger asChild>{node}</ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content className="menu z-[60] w-[220px]" collisionPadding={8}>
+            {menuHit !== null && paneMenu(menuHit)}
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
+    ) : (
+      node
+    );
 
-  return (
+  return withPaneMenu(
     <div
       ref={boxRef}
       className={`relative mx-auto aspect-[9/16] h-full max-w-full touch-none select-none overflow-hidden rounded-[14px] bg-black shadow-pop ${pannable ? (panning ? "cursor-grabbing" : "cursor-grab") : ""} ${className}`}
-      title={pannable ? (framing.layout === "split" ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them" : "Drag the picture to re-centre the crop") : undefined}
+      title={pannable ? (framing.layout === "split" ? "Drag either speaker to re-centre that pane; drop it on someone else to follow them" : framing.crop ? "Drag the picture to move the crop; right-click to set it exactly" : "Drag the picture to re-centre the crop; right-click to set it exactly") : paneMenu ? "Right-click to fix the crop" : undefined}
       onPointerDown={onPanStart}
+      onContextMenu={(e) => {
+        if (!paneMenu || !boxRef.current) return;
+        const r = boxRef.current.getBoundingClientRect();
+        const hit = paneHitAt(framingRef.current, srcW, srcH, (e.clientY - r.top) / r.height);
+        if (hit === null) e.preventDefault();
+        setMenuHit(hit);
+      }}
       onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
       {assetOverlays.map((o) => {
@@ -471,7 +544,10 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
                 ...(o.box ? { background: "rgba(0,0,0,0.63)", padding: `${px * 0.12}px ${px * 0.25}px` } : { WebkitTextStroke: `${Math.max(1, px * 0.06)}px #000`, paintOrder: "stroke fill", textShadow: `0 ${px * 0.04}px ${px * 0.06}px rgba(0,0,0,0.5)` }),
               }}
               onPointerDown={(e) => onOverlayStart(o, "move", e)}
-              onContextMenu={() => onOverlaySelect?.(o.id)}
+              onContextMenu={(e) => {
+                e.stopPropagation();
+                onOverlaySelect?.(o.id);
+              }}
               title={isEditing ? undefined : hint}
             >
               {isEditing ? (
@@ -499,7 +575,17 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
           setNaturalAspect((cur) => (Math.abs((cur[o.id] ?? 0) - next) < 0.01 ? cur : { ...cur, [o.id]: next }));
         };
         return withMenu(
-          <div key={o.id} className={frame} style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }} onPointerDown={(e) => onOverlayStart(o, "move", e)} onContextMenu={() => onOverlaySelect?.(o.id)} title={hint}>
+          <div
+            key={o.id}
+            className={frame}
+            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: wPx, height: hPx, opacity: o.opacity }}
+            onPointerDown={(e) => onOverlayStart(o, "move", e)}
+            onContextMenu={(e) => {
+              e.stopPropagation();
+              onOverlaySelect?.(o.id);
+            }}
+            title={hint}
+          >
             {o.video ? (
               <OverlayVideo src={o.url} loop={!!o.loop} offsetSec={o.offsetSec ?? 0} playing={playing && !still} onSize={noteSize} />
             ) : (
@@ -530,16 +616,46 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
         </>
       ) : null}
 
-      {showHook && !still && (
-        <div
-          className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
-          style={{ left: `${style.hookX * 100}%`, top: `${style.hookY * 100}%`, fontFamily: FONT, fontSize: hookPx, maxWidth: width * 0.88, width: "max-content", background: "#fff", color: "#000", padding: `${hookPx * 0.2}px ${hookPx * 0.3}px` }}
-          onPointerDown={(e) => onPointerDown("hook", e)}
-          title={draggable ? "Drag to move the hook" : undefined}
-        >
-          {hook!.toUpperCase()}
-        </div>
-      )}
+      {showHook &&
+        !still &&
+        (() => {
+          const node = (
+            <div
+              className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${editingHook ? "cursor-text" : draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "hook" || editingHook ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
+              style={{ left: `${style.hookX * 100}%`, top: `${style.hookY * 100}%`, fontFamily: FONT, fontSize: hookPx, maxWidth: width * 0.88, width: "max-content", background: "#fff", color: "#000", padding: `${hookPx * 0.2}px ${hookPx * 0.3}px` }}
+              onPointerDown={(e) => onPointerDown("hook", e)}
+              onDoubleClick={() => onHookChange && setEditingHook(true)}
+              onContextMenu={(e) => e.stopPropagation()}
+              title={editingHook ? undefined : hookHint}
+            >
+              {editingHook ? (
+                <InlineText
+                  text={hook!}
+                  onDone={(next) => {
+                    setEditingHook(false);
+                    const t = next?.replace(/\s+/g, " ").trim().slice(0, HOOK_MAX);
+                    if (t && t !== hook) onHookChange?.(t);
+                  }}
+                />
+              ) : (
+                hook!.toUpperCase()
+              )}
+            </div>
+          );
+          return draggable ? (
+            <ContextMenu.Root modal={false}>
+              <ContextMenu.Trigger asChild>{node}</ContextMenu.Trigger>
+              <ContextMenu.Portal>
+                <ContextMenu.Content className="menu z-[60] w-[220px]" collisionPadding={8}>
+                  <ContextMenu.Label className="truncate px-2.5 py-1 text-[11px] font-semibold text-ink3">Hook</ContextMenu.Label>
+                  {hookMenu}
+                </ContextMenu.Content>
+              </ContextMenu.Portal>
+            </ContextMenu.Root>
+          ) : (
+            node
+          );
+        })()}
 
       {style.captions !== "none" && line && !still && (
         <div
@@ -651,6 +767,25 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
     ctx.filter = prevFilter;
   };
   const avoid = overlays.map((o) => ({ y1: o.y1, y2: o.y2 }));
+  // a source rectangle fitted at its own aspect over a blurred copy of itself, inside a pane (mirrors FIT_CHAIN / fitPane)
+  const fitted = (c: { x: number; y: number; w: number; h: number }, py: number, ph: number) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, py, W, ph);
+    ctx.clip();
+    const cover = Math.max(W / c.w, ph / c.h);
+    ctx.filter = "blur(14px)";
+    draw(c.x, c.y, c.w, c.h, (W - c.w * cover) / 2, py + (ph - c.h * cover) / 2, c.w * cover, c.h * cover);
+    ctx.filter = "none";
+    const fit = Math.min(W / c.w, ph / c.h);
+    draw(c.x, c.y, c.w, c.h, (W - c.w * fit) / 2, py + (ph - c.h * fit) / 2, c.w * fit, c.h * fit);
+    ctx.restore();
+  };
+  // a crop the user fixed on a whole-frame pane: that part of the source, at its own shape over a blurred copy
+  if (f.crop && f.layout !== "split" && f.layout !== "stack" && f.layout !== "none") {
+    fitted(tileCrop(srcW, srcH, f.crop), 0, H);
+    return;
+  }
 
   switch (f.layout) {
     case "fit":
@@ -671,34 +806,25 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       const halfH = H / 2;
       const a = speakerCrop(srcW, srcH, W / halfH, { cy: f.cy, size: f.size ?? 0.3 }, avoid);
       const b = speakerCrop(srcW, srcH, W / halfH, { cy: f.cy2 ?? f.cy, size: f.size2 ?? f.size ?? 0.3 }, avoid);
-      draw(cropX(srcW, a.w, f.cx), a.y, a.w, a.h, 0, 0, W, halfH);
-      draw(cropX(srcW, b.w, f.cx2 ?? 1 - f.cx), b.y, b.w, b.h, 0, halfH, W, halfH);
+      // a pane the user fixed to a part of the source shows just that
+      if (f.crop) fitted(tileCrop(srcW, srcH, f.crop), 0, halfH);
+      else draw(cropX(srcW, a.w, f.cx), a.y, a.w, a.h, 0, 0, W, halfH);
+      if (f.crop2) fitted(tileCrop(srcW, srcH, f.crop2), halfH, halfH);
+      else draw(cropX(srcW, b.w, f.cx2 ?? 1 - f.cx), b.y, b.w, b.h, 0, halfH, W, halfH);
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fillRect(0, halfH - 0.5, W, 1);
       return;
     }
     case "stack": {
-      // a source rectangle fitted at its own aspect over a blurred copy of itself, inside a pane (mirrors FIT_CHAIN / tilePane)
-      const fitted = (c: { x: number; y: number; w: number; h: number }, py: number, ph: number) => {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, py, W, ph);
-        ctx.clip();
-        const cover = Math.max(W / c.w, ph / c.h);
-        ctx.filter = "blur(14px)";
-        draw(c.x, c.y, c.w, c.h, (W - c.w * cover) / 2, py + (ph - c.h * cover) / 2, c.w * cover, c.h * cover);
-        ctx.filter = "none";
-        const fit = Math.min(W / c.w, ph / c.h);
-        draw(c.x, c.y, c.w, c.h, (W - c.w * fit) / 2, py + (ph - c.h * fit) / 2, c.w * fit, c.h * fit);
-        ctx.restore();
-      };
+      // the speaker pane is a webcam tile, or a crop the user fixed: that alone, not a face-sized window
+      const fixed = f.crop ?? f.tile;
       if (!isFullFrame(f.content)) {
         // mirrors layoutFilter: the content region fitted over a blurred copy of itself on top, speaker below
         const halfH = H / 2;
         const g = contentStackGeometry(srcW, srcH, f.content!, { cy: f.cy, size: f.size ?? 0.3 }, W / halfH, avoid);
         fitted(g.content, 0, halfH);
-        if (f.tile) {
-          fitted(tileCrop(srcW, srcH, f.tile), halfH, halfH);
+        if (fixed) {
+          fitted(tileCrop(srcW, srcH, fixed), halfH, halfH);
           return;
         }
         const zx = clamp(f.cx * srcW - g.zoom.w / 2, g.free.lo, g.free.hi - g.zoom.w);
@@ -708,9 +834,8 @@ function paint(ctx: CanvasRenderingContext2D, W: number, H: number, src: HTMLVid
       const topH = (W * srcH) / srcW;
       const botH = H - topH;
       draw(0, 0, srcW, srcH, 0, 0, W, topH);
-      if (f.tile) {
-        // a webcam tile: the bottom pane is the tile alone, not a face-sized crop that would reach past it
-        fitted(tileCrop(srcW, srcH, f.tile), topH, botH);
+      if (fixed) {
+        fitted(tileCrop(srcW, srcH, fixed), topH, botH);
         return;
       }
       const z = speakerCrop(srcW, srcH, W / Math.max(1, botH), { cy: f.cy, size: f.size ?? 0.17 }, avoid);

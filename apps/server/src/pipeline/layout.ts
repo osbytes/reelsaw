@@ -570,16 +570,26 @@ export interface SectionAdjust {
   offsetY2?: number;
   subjectX?: number;
   subjectX2?: number;
+  /** a fixed crop for pane 1 / pane 2: exactly this part of the source, instead of a face-sized crop around the followed face */
+  crop?: ContentRegion;
+  crop2?: ContentRegion;
+  /** stack: the part of the frame shown on top, instead of the whole frame or the detected content region */
+  contentCrop?: ContentRegion;
 }
-const ADJUST_KEYS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
+const ADJUST_NUMBERS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
+const ADJUST_REGIONS = ["crop", "crop2", "contentCrop"] as const;
 /** Only the adjustment fields that do something, or undefined when there are none. */
 export function cleanAdjust(a: SectionAdjust | undefined): SectionAdjust | undefined {
   if (!a) return undefined;
   const out: SectionAdjust = {};
-  for (const k of ADJUST_KEYS) {
+  for (const k of ADJUST_NUMBERS) {
     const v = a[k];
     if (v === undefined) continue;
     if (k.startsWith("subject") ? Number.isFinite(v) : Math.abs(v) >= 1e-4) out[k] = v;
+  }
+  for (const k of ADJUST_REGIONS) {
+    const r = a[k];
+    if (r && r.x2 > r.x1 && r.y2 > r.y1) out[k] = r;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -695,34 +705,50 @@ export interface ResolvedSegment extends LayoutSegment {
 /**
  * Apply the user's adjustments to a decision: a subject re-assigns the pane's track to the person
  * at that x (or fixes the crop there), then the pane's offset shifts the crop relative to what it
- * follows. Pane 1 moves `track`, pane 2 moves `track2`. Whole-frame layouts are left alone.
+ * follows. Pane 1 moves `track`, pane 2 moves `track2`. A fixed crop on a pane makes its subject and
+ * offset moot (the renderer shows the crop itself, `FrameGeometry.crop`); a stack's `contentCrop`
+ * replaces the content region. Whole-frame layouts take only a crop.
  */
 export function adjustDecision(d: LayoutDecision, adjust: SectionAdjust | undefined, samples: FaceSample[], sceneCuts: number[], start: number): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
   const a = cleanAdjust(adjust);
-  if (!a || d.layout === "fit" || d.layout === "none") return { decision: d };
+  if (!a || d.layout === "none" || (d.layout === "fit" && !a.crop)) return { decision: d };
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   let out: LayoutDecision = { ...d };
   let subject: "followed" | "fixed" | undefined;
   let subject2: "followed" | "fixed" | undefined;
   const notes: string[] = [];
-  if (a.subjectX !== undefined) {
+  if (a.crop) {
+    // the pane is this part of the source, not a window around a face: nothing to follow, no tile to show
+    notes.push("fixed crop");
+    out = { ...out, tile: undefined };
+  }
+  if (a.crop2 && d.layout === "split") notes.push("bottom: fixed crop");
+  if (a.contentCrop && d.layout === "stack") {
+    out = { ...out, content: a.contentCrop };
+    notes.push("top: fixed crop");
+  }
+  if (d.layout === "fit") {
+    if (notes.length) out = { ...out, reason: `${out.reason}; ${notes.join("; ")}` };
+    return { decision: out };
+  }
+  if (a.subjectX !== undefined && !a.crop) {
     const s = subjectTrack(samples, a.subjectX, sceneCuts, start);
     subject = s.fixed ? "fixed" : "followed";
     out = { ...out, track: s.track, ...(s.size ? { faceSize: s.size, ...(out.speakerSizes ? { speakerSizes: [s.size, out.speakerSizes[1]] as [number, number] } : {}) } : {}) };
     notes.push(s.fixed ? `no face at ${Math.round(a.subjectX * 100)}%, fixed crop` : `following the person at ${Math.round(a.subjectX * 100)}%`);
   }
-  if (a.subjectX2 !== undefined && d.layout === "split") {
+  if (a.subjectX2 !== undefined && d.layout === "split" && !a.crop2) {
     const s = subjectTrack(samples, a.subjectX2, sceneCuts, start);
     subject2 = s.fixed ? "fixed" : "followed";
     out = { ...out, track2: s.track, ...(s.size ? { speakerSizes: [out.speakerSizes?.[0] ?? out.faceSize, s.size] as [number, number] } : {}) };
     notes.push(s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`);
   }
   const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) => (dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx), y: clamp(p.y + dy) })) : tr);
-  if (a.offsetX || a.offsetY) {
+  if ((a.offsetX || a.offsetY) && !a.crop) {
     out = { ...out, track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }] };
     // a webcam tile stays as detected: the renderer and the preview move its window by the pane's offset (`shiftRegion`)
   }
-  if ((a.offsetX2 || a.offsetY2) && d.layout === "split") {
+  if ((a.offsetX2 || a.offsetY2) && d.layout === "split" && !a.crop2) {
     const base = out.track2?.length ? out.track2 : out.track;
     out = { ...out, track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }] };
   }

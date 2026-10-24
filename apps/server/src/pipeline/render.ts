@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
-import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode } from "./layout.js";
+import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode, type SectionAdjust } from "./layout.js";
 import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
@@ -52,20 +52,26 @@ export interface FrameGeometry {
   content?: ContentRegion;
   /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone (`tileCrop`) */
   tile?: ContentRegion;
+  /** the user's fixed crop for the first pane (the only pane, the top of a split, the speaker of a stack): shown with `fitPane` */
+  crop?: ContentRegion;
+  /** the user's fixed crop for the bottom pane of a split */
+  crop2?: ContentRegion;
 }
 
 /**
- * The speaker pane of a stack when the speaker is a webcam tile: the tile cropped out and fitted at
- * its own aspect over a blurred copy of itself (the way `fit` shows a frame). Reads `[in]`, writes `[out]`.
+ * A part of the source shown in a pane at its own aspect over a blurred copy of itself (the way `fit`
+ * shows a frame): a webcam tile in the speaker pane of a stack, or a crop the user fixed on any pane.
+ * Reads `[in]`; with `outLabel` the chain ends in `[out];`, without it the overlay is left open for
+ * the caller to finish (`,setsar=1`). Labels inside are prefixed with `tag` so two panes can coexist.
  */
-function tilePane(srcW: number, srcH: number, tile: ContentRegion, paneW: number, paneH: number, inLabel: string, outLabel: string): string {
-  const c = tileCrop(srcW, srcH, tile);
+export function fitPane(srcW: number, srcH: number, region: ContentRegion, paneW: number, paneH: number, inLabel: string, outLabel: string, tag = "t"): string {
+  const c = tileCrop(srcW, srcH, region);
   const blur = "boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2";
   return (
-    `[${inLabel}]crop=${c.w}:${c.h}:${c.x}:${c.y},split=2[tbg][tfg];` +
-    `[tbg]scale=${paneW}:${paneH}:force_original_aspect_ratio=increase,crop=${paneW}:${paneH},${blur}[tbgb];` +
-    `[tfg]scale=${paneW}:${paneH}:force_original_aspect_ratio=decrease:flags=lanczos[tfgs];` +
-    `[tbgb][tfgs]overlay=(W-w)/2:(H-h)/2[${outLabel}];`
+    `[${inLabel}]crop=${c.w}:${c.h}:${c.x}:${c.y},split=2[${tag}bg][${tag}fg];` +
+    `[${tag}bg]scale=${paneW}:${paneH}:force_original_aspect_ratio=increase,crop=${paneW}:${paneH},${blur}[${tag}bgb];` +
+    `[${tag}fg]scale=${paneW}:${paneH}:force_original_aspect_ratio=decrease:flags=lanczos[${tag}fgs];` +
+    `[${tag}bgb][${tag}fgs]overlay=(W-w)/2:(H-h)/2${outLabel ? `[${outLabel}];` : ""}`
   );
 }
 
@@ -76,6 +82,8 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
     return { chain: `[0:v]scale=${w}:${h},setsar=1`, width: w, height: h };
   }
   // every chain ends with setsar=1 so differently framed segments can be concatenated
+  // a crop the user fixed on a whole-frame pane: that part of the source, fitted at its own shape over a blurred copy
+  if (geo.crop && layout !== "split" && layout !== "stack") return { chain: `${fitPane(srcW, srcH, geo.crop, OUT_W, OUT_H, "0:v", "")},setsar=1`, width: OUT_W, height: OUT_H };
   if (layout === "fit") return { chain: `${FIT_CHAIN(OUT_W, OUT_H)},setsar=1`, width: OUT_W, height: OUT_H };
 
   // crop window: full height, 9:16 wide (or full width if the source is already narrower)
@@ -99,8 +107,11 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
       return `[${label}]crop=${w}:${h}:x='${x}':y=${c.y},scale=${OUT_W}:${halfH}:flags=lanczos[${out}]`;
     };
     const t2 = track2.length ? track2 : track;
+    // a pane the user fixed to a part of the source shows just that, at its own shape over a blurred copy
+    const top = geo.crop ? fitPane(srcW, srcH, geo.crop, OUT_W, halfH, "a", "as", "ta") : `${mk(track, geo.size, "a", "as")};`;
+    const bottom = geo.crop2 ? fitPane(srcW, srcH, geo.crop2, OUT_W, halfH, "b", "bs", "tb") : `${mk(t2, geo.size2 ?? geo.size, "b", "bs")};`;
     return {
-      chain: `[0:v]split=2[a][b];` + `${mk(track, geo.size, "a", "as")};` + `${mk(t2, geo.size2 ?? geo.size, "b", "bs")};` + `[as][bs]vstack,setsar=1`,
+      chain: `[0:v]split=2[a][b];` + top + bottom + `[as][bs]vstack,setsar=1`,
       width: OUT_W,
       height: OUT_H,
     };
@@ -121,7 +132,8 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
     const zx = track.map((tp) => ({ t: tp.t, v: Math.max(free.lo, Math.min(free.hi - zoomW, tp.x * srcW - zoomW / 2)) }));
     const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `${Math.round((free.lo + free.hi - zoomW) / 2)}`;
     const blur = "boxblur=luma_radius=40:luma_power=2:chroma_radius=20:chroma_power=2";
-    const bots = geo.tile ? tilePane(srcW, srcH, geo.tile, OUT_W, halfH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${zoomY},scale=${OUT_W}:${halfH}:flags=lanczos[bots];`;
+    const fixed = geo.crop ?? geo.tile;
+    const bots = fixed ? fitPane(srcW, srcH, fixed, OUT_W, halfH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${zoomY},scale=${OUT_W}:${halfH}:flags=lanczos[bots];`;
     return {
       chain:
         `[0:v]split=2[psrc][bot];` +
@@ -144,8 +156,9 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
     const zoomH = even(c.h);
     const zx = track.map((p) => ({ t: p.t, v: cropX(srcW, zoomW, p.x) }));
     const zxExpr = zx.length ? piecewiseExpr(zx, 2) : `(iw-${zoomW})/2`;
-    // a webcam tile: the bottom pane is the tile alone, not a face-sized crop that would reach past it
-    const bots = geo.tile ? tilePane(srcW, srcH, geo.tile, OUT_W, botH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${c.y},scale=${OUT_W}:${botH}:flags=lanczos[bots];`;
+    // a webcam tile (or a crop the user fixed): the bottom pane is that alone, not a face-sized crop that would reach past it
+    const fixed = geo.crop ?? geo.tile;
+    const bots = fixed ? fitPane(srcW, srcH, fixed, OUT_W, botH, "bot", "bots") : `[bot]crop=${zoomW}:${zoomH}:x='${zxExpr}':y=${c.y},scale=${OUT_W}:${botH}:flags=lanczos[bots];`;
     return {
       chain:
         `[0:v]split=2[top][bot];` +
@@ -262,8 +275,17 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
   // keep speaker crops clear only of text that is on screen for much of the clip; brief text is just blurred
   let avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
-  // a webcam tile is stored as detected; the pane's nudge moves its window here (and in the editor preview), kept inside the frame
-  const geoOf = (d: LayoutDecision, adjust?: { offsetX?: number; offsetY?: number }): FrameGeometry => ({ size: d.speakerSizes?.[0] ?? d.faceSize, size2: d.speakerSizes?.[1], avoid, ...(d.content ? { content: d.content } : {}), ...(d.tile ? { tile: shiftRegion(d.tile, adjust?.offsetX ?? 0, adjust?.offsetY ?? 0) } : {}) });
+  // a webcam tile is stored as detected; the pane's nudge moves its window here (and in the editor preview), kept inside the frame.
+  // A crop the user fixed is shown as is (`adjustDecision` already dropped the tile and applied a top crop).
+  const geoOf = (d: LayoutDecision, adjust?: SectionAdjust): FrameGeometry => ({
+    size: d.speakerSizes?.[0] ?? d.faceSize,
+    size2: d.speakerSizes?.[1],
+    avoid,
+    ...(d.content ? { content: d.content } : {}),
+    ...(d.tile && !adjust?.crop ? { tile: shiftRegion(d.tile, adjust?.offsetX ?? 0, adjust?.offsetY ?? 0) } : {}),
+    ...(adjust?.crop ? { crop: adjust.crop } : {}),
+    ...(adjust?.crop2 ? { crop2: adjust.crop2 } : {}),
+  });
   const sceneCuts = (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {

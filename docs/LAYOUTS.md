@@ -53,7 +53,14 @@ per-clip layout sections and offset (`layoutSectionSchema`, same file line 109; 
 `layoutSections` fields. A section in any mode but Auto is "manual": automatic post-passes leave it alone.
 Each pane of a section has its own adjustment: `offsetX` / `offsetY` for the top (or only) pane,
 `offsetX2` / `offsetY2` for the bottom of a split, and `subjectX` / `subjectX2` to follow the person at that
-x (a fixed crop there when no face is found). See [specs/editor-tracks.md](specs/editor-tracks.md).
+x (a fixed crop there when no face is found). A fixed crop goes further: `crop` / `crop2` make the pane show
+exactly that part of the source (`contentRegionSchema`, fractions of the source; at least 5% wide and tall)
+and `contentCrop` fixes what a stack shows on top. A crop replaces the pane's offset, subject and webcam tile;
+a crop shaped like the pane fills it, any other shape is fitted at its own aspect over a blurred copy
+(`fitPane`, `render.ts`, the same chain as a webcam tile). The editor sets them from the picture's right-click
+menu (Set crop…: a box over the whole source frame to drag, resize or draw, starting at the automatic window, with
+the numbers beside it; afterwards a drag on the pane moves the fixed crop), the timeline's section menu
+and the section's Crop… button. See [specs/editor-tracks.md](specs/editor-tracks.md).
 
 ## 2. How the decision is made
 

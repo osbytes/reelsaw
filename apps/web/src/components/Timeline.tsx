@@ -3,7 +3,7 @@ import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, LayoutTemplate } from "lucide-react";
-import { formatTime, contentLabel, hasAdjust, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionMode, type Word } from "@reelsaw/shared";
+import { formatTime, contentLabel, hasAdjust, regionLabel, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionAdjustFields, type SectionMode, type Word } from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 export const SPLIT_SHORTCUT = `${MOD}B`;
@@ -112,6 +112,8 @@ interface Props {
   /** spans removed as disfluencies, drawn hatched on the words lane */
   cuts?: Array<{ start: number; end: number }>;
   onResetOffset?: (index: number) => void;
+  /** open the crop dialog for a section (its pane under the playhead) */
+  onSetCrop?: (index: number) => void;
   /** the action bar: editing actions on the left, the transport in the middle, view tools on the right (zoom is the timeline's own) */
   toolbar?: ReactNode;
   transport?: ReactNode;
@@ -157,7 +159,7 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerTemplate, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, onSetCrop, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerTemplate, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const lyRows = useMemo(() => packLayerRows(layers), [layers]);
@@ -723,6 +725,7 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             onMerge={onMerge}
             onResetLayout={onResetLayout}
             onResetOffset={onResetOffset}
+            onSetCrop={onSetCrop}
             onSetIn={(t) => onRange([Math.min(t, range[1] - MIN_CLIP), range[1]])}
             onSetOut={(t) => onRange([range[0], Math.max(t, range[0] + MIN_CLIP)])}
             onSeek={onSeek}
@@ -749,13 +752,14 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
   );
 }
 
-/** "x +12% · y −5% · bottom x +3% · follows 72%" for a section's per-pane adjustments. */
-export function adjustLabel(s: Pick<LayoutSection, "offsetX" | "offsetY" | "offsetX2" | "offsetY2" | "subjectX" | "subjectX2">): string {
+/** "x +12% · y −5% · bottom x +3% · follows 72%" for a section's per-pane adjustments; a fixed crop reads "at 10–60% × 0–100%". */
+export function adjustLabel(s: SectionAdjustFields): string {
   const pct = (v: number) => `${v > 0 ? "+" : "−"}${Math.round(Math.abs(v) * 100)}%`;
-  const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined) => [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
-  const a = pane(s.offsetX, s.offsetY, s.subjectX);
-  const b = pane(s.offsetX2, s.offsetY2, s.subjectX2);
-  return [a, b ? `bottom ${b}` : ""].filter(Boolean).join(" · ");
+  const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined, crop: ContentRegion | undefined) =>
+    crop ? `at ${regionLabel(crop)}` : [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
+  const a = pane(s.offsetX, s.offsetY, s.subjectX, s.crop);
+  const b = pane(s.offsetX2, s.offsetY2, s.subjectX2, s.crop2);
+  return [s.contentCrop ? `top at ${regionLabel(s.contentCrop)}` : "", a, b ? `bottom ${b}` : ""].filter(Boolean).join(" · ");
 }
 
 const MENU_MODES: SectionMode[] = ["auto", "face", "split", "stack", "fit", "center"];
@@ -777,6 +781,7 @@ function TimelineMenu(p: {
   onMerge: (i: number, side: "left" | "right") => void;
   onResetLayout: () => void;
   onResetOffset?: (i: number) => void;
+  onSetCrop?: (i: number) => void;
   onSetIn: (t: number) => void;
   onSetOut: (t: number) => void;
   onSeek: (t: number) => void;
@@ -840,9 +845,14 @@ function TimelineMenu(p: {
           <ContextMenu.Item className={item} disabled={at.section >= p.sections.length - 1} onSelect={() => p.onMerge(at.section, "right")}>
             Merge with next
           </ContextMenu.Item>
+          {p.onSetCrop && (
+            <ContextMenu.Item className={item} disabled={sec.mode === "auto" && !p.detected.some((d) => d.end > sec.start && d.start < sec.end)} onSelect={() => p.onSetCrop!(at.section)}>
+              Set crop…
+            </ContextMenu.Item>
+          )}
           {p.onResetOffset && (
             <ContextMenu.Item className={item} disabled={!hasAdjust(sec)} onSelect={() => p.onResetOffset!(at.section)}>
-              Reset re-centring
+              Reset re-centring and crops
             </ContextMenu.Item>
           )}
         </>
