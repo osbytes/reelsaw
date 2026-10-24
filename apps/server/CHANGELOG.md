@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.19.1
+
+### Patch Changes
+
+- [#151](https://github.com/osbytes/reelsaw/pull/151) [`d579380`](https://github.com/osbytes/reelsaw/commit/d579380a691c35e615a04b0293ce8824646df6b3) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Giphy GIFs play in the library and land on a clip as a small looping sticker you can drag and resize. Adding a catalog or provider item no longer shows it as removed from the library.
+
 ## 0.19.0
 
 ### Minor Changes
