@@ -70,7 +70,7 @@ export const PIPELINE_FIELDS: Field[] = [
   { key: "TRANSCRIPT_CORRECTION", label: "Name fixes after transcription", kind: "bool", on: "On", off: "Off" },
   { key: "DISFLUENCY_REMOVAL", label: "Filler and repeat removal", kind: "bool", on: "On", off: "Off" },
   { key: "DISFLUENCY_LLM", label: "Model pass for fillers", kind: "bool", on: "On", off: "Rules only" },
-  { key: "REFINE_SCENES", label: "Scene cuts and on-screen text", kind: "bool", on: "On", off: "Off" },
+  { key: "REFINE_SCENES", label: "On-screen text scan", kind: "bool", on: "On", off: "Off" },
 ];
 
 export const OPERATIONS_FIELDS: Field[] = [

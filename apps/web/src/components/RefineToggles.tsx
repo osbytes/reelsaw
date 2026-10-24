@@ -10,10 +10,10 @@ type RefineKey = "refineEntities" | "refineDisfluency" | "disfluencyLlm" | "refi
 type GateKey = "entities" | "disfluency" | "disfluencyLlm" | "scenes";
 
 const ROWS: Array<{ key: RefineKey; gate: GateKey; label: string; help: string; needs?: RefineKey }> = [
-  { key: "refineEntities", gate: "entities", label: "Fix misheard names", help: "Language-model pass after transcription. Off by default." },
+  { key: "refineEntities", gate: "entities", label: "Fix misheard names", help: "Language-model pass after transcription. On by default." },
   { key: "refineDisfluency", gate: "disfluency", label: "Remove fillers and repeats", help: "Find ums, stutters and false starts. Off by default." },
   { key: "disfluencyLlm", gate: "disfluencyLlm", label: "Model pass for fillers", help: "Extra model check on top of rules. Off by default (rules only when filler removal is on).", needs: "refineDisfluency" },
-  { key: "refineScenes", gate: "scenes", label: "Scene cuts and on-screen text", help: "Detect shot changes and burned-in captions. Off by default." },
+  { key: "refineScenes", gate: "scenes", label: "On-screen text scan", help: "Find burned-in captions, watermarks and slides so captions avoid them. Shot changes are always detected. On by default." },
 ];
 
 type Props = {
@@ -72,7 +72,7 @@ export function RefineDefaultsFields({
     <div className="flex flex-col gap-3 sm:col-span-2">
       <div>
         <h3 className="text-[13px] font-bold">Refine after transcription</h3>
-        <p className="mt-0.5 text-[13px] text-ink2">Off by default for speed and cost. Empty = built-in (off). The server must allow a step under Settings → System → Pipeline before a project can turn it on.</p>
+        <p className="mt-0.5 text-[13px] text-ink2">Name fixes and the on-screen text scan are on by default; filler removal is off for speed and cost. Empty = built-in. The server must allow a step under Settings → System → Pipeline before a project can run it.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {ROWS.map((r) => {

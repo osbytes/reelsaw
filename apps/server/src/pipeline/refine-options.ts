@@ -19,14 +19,15 @@ type InstanceRefine = Pick<RuntimeSettings, "TRANSCRIPT_CORRECTION" | "DISFLUENC
 type ProjectRefine = Partial<Pick<ProjectSettings, "refineEntities" | "refineDisfluency" | "disfluencyLlm" | "refineScenes">>;
 
 /**
- * Instance off wins (ceiling). Project fields are opt-in (`=== true`); missing keys on older rows
- * count as off so upgrades stay on the fast/cheap path until someone turns a step on.
+ * Instance off wins (ceiling). Name fixes and the on-screen text scan are on unless the project turns
+ * them off; disfluency removal (and its model pass) is opt-in. A key missing on an older row takes
+ * that built-in default.
  */
 export function resolveRefineOptions(instance: InstanceRefine, project: ProjectRefine = {}): RefineOptions {
-  const entities = !!instance.TRANSCRIPT_CORRECTION && project.refineEntities === true;
+  const entities = !!instance.TRANSCRIPT_CORRECTION && (project.refineEntities ?? true) === true;
   const disfluency = !!instance.DISFLUENCY_REMOVAL && project.refineDisfluency === true;
   const disfluencyLlm = disfluency && !!instance.DISFLUENCY_LLM && project.disfluencyLlm === true;
-  const scenes = !!instance.REFINE_SCENES && project.refineScenes === true;
+  const scenes = !!instance.REFINE_SCENES && (project.refineScenes ?? true) === true;
   return { entities, disfluency, disfluencyLlm, scenes };
 }
 
