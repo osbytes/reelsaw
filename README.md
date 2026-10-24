@@ -32,7 +32,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
   <a href="https://reelsaw.com"><img src="docs/assets/hero.gif" alt="A YouTube link is pasted into Reelsaw, three stages run on the local machine, and four captioned 9:16 clips appear with their scores and the reason each was picked" width="920"></a>
 </p>
 <p align="center">
-  <sub>Real output, not a mock-up: a 12-minute street interview in, nine scored and captioned clips out, 5:32 on a laptop. <a href="docs/assets/hero.mp4">Full-quality MP4</a>. Source video: "Foreigners STUNNED by Life in the UK" by MrUniverse, CC BY.</sub>
+  <sub>Real output, not a mock-up: a 12-minute street interview in, nine scored and captioned clips out in 5:32 with cloud models (OpenAI via the AI Gateway; fully local works the same, slower). <a href="docs/assets/hero.mp4">Full-quality MP4</a>. Source video: "Foreigners STUNNED by Life in the UK" by MrUniverse, CC BY.</sub>
 </p>
 
 <p align="center">

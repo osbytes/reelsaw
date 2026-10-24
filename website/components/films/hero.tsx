@@ -103,7 +103,7 @@ function Chips({ T }: { T: number }) {
           );
         })}
       </div>
-      <p style={abs(BOX.x, CHIP_Y + 70, { margin: 0, fontFamily: MONO, fontSize: 15, color: C.ink3, opacity: enter(T, T_CHIPS + 0.5, 0.6) })}>on this machine · nothing uploaded · no API key · no credits</p>
+      <p style={abs(BOX.x, CHIP_Y + 70, { margin: 0, fontFamily: MONO, fontSize: 15, color: C.ink3, opacity: enter(T, T_CHIPS + 0.5, 0.6) })}>cloud models this run (OpenAI via AI Gateway) · or Ollama + Whisper, fully local</p>
     </>
   );
 }
@@ -142,7 +142,7 @@ function Aside({ T }: { T: number }) {
         <br />
         in <span style={{ color: C.acc }}>5:32</span>.
       </p>
-      <p style={{ margin: 0, fontSize: 20, lineHeight: 1.45, color: C.ink2 }}>From a 12-minute video, on a laptop, with nothing uploaded. Each clip scored, captioned and reframed, with the model's reason for the pick.</p>
+      <p style={{ margin: 0, fontSize: 20, lineHeight: 1.45, color: C.ink2 }}>From a 12-minute video, with cloud models through the AI Gateway; the same pipeline runs fully local, slower. Each clip scored, captioned and reframed, with the model's reason for the pick.</p>
     </div>
   );
 }

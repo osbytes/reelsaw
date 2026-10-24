@@ -209,7 +209,7 @@ export default function HomePage() {
             <figure className="card overflow-hidden shadow-pop">
               <DemoVideo src="/films/hero.mp4" poster="/films/hero.jpg" width={1920} height={1080} priority label="A YouTube link is pasted into Reelsaw, three stages run on the local machine, and four captioned 9:16 clips appear with their scores and the reason each was picked." />
               <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">
-                Real output, no mock-up: a 12-minute street interview in, nine scored and captioned clips out, 5:32 on a laptop. Source: &ldquo;Foreigners STUNNED by Life in the UK&rdquo; by MrUniverse (CC BY).
+                Real output, no mock-up: a 12-minute street interview in, nine scored and captioned clips out in 5:32 with cloud models (OpenAI via the AI Gateway; fully local works the same, slower). Source: &ldquo;Foreigners STUNNED by Life in the UK&rdquo; by MrUniverse (CC BY).
               </figcaption>
             </figure>
           </div>
