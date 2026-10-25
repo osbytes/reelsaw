@@ -35,10 +35,21 @@ async function counted(n: Promise<Array<{ n: number }>>): Promise<number> {
   return (await n)[0]?.n ?? 0;
 }
 
-function failMessage(e: unknown): string {
+/**
+ * A per-item reason for the caller. A TRPCError's message is written for people (and a QuotaError
+ * carries the upgrade/free-space actions); anything else is an internal failure whose text (SQL,
+ * storage paths) stays in the log.
+ */
+function failMessage(svc: Services, e: unknown, item: { kind: DeletedKind; id: string }, action: "restore" | "wipe"): string {
   if (e instanceof TRPCError) return e.message;
-  if (e instanceof Error) return e.message;
-  return "Failed";
+  svc.log.child({ module: "deleted" }).error({ err: e, ...item, action }, "deleted item action failed");
+  return "Something went wrong. Try again in a moment.";
+}
+
+/** When every item failed, the first item's own error, so its code (CONFLICT, NOT_FOUND) and quota actions reach the caller. */
+function allFailed(first: unknown): never {
+  if (first instanceof TRPCError) throw first;
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Something went wrong. Try again in a moment." });
 }
 
 function uniqueRefs(items: Array<{ kind: DeletedKind; id: string }>) {
@@ -238,17 +249,19 @@ export async function restoreDeleted(svc: Services, actor: Actor & { id: string 
   const refs = uniqueRefs(items);
   if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
   const results: Array<{ kind: DeletedKind; id: string; ok: boolean; error?: string }> = [];
+  let firstError: unknown;
   for (const it of refs) {
     try {
       await restoreOne(svc, actor, it);
       results.push({ kind: it.kind, id: it.id, ok: true });
     } catch (e) {
-      results.push({ kind: it.kind, id: it.id, ok: false, error: failMessage(e) });
+      firstError ??= e;
+      results.push({ kind: it.kind, id: it.id, ok: false, error: failMessage(svc, e, it, "restore") });
     }
   }
   const restored = results.filter((r) => r.ok).length;
   const failed = results.length - restored;
-  if (!restored && results[0]?.error) throw new TRPCError({ code: "BAD_REQUEST", message: results[0].error });
+  if (!restored) allFailed(firstError);
   return { ok: true as const, restored, failed, results };
 }
 
@@ -260,17 +273,19 @@ export async function purgeDeleted(svc: Services, actor: Actor & { id: string },
   const refs = uniqueRefs(items);
   if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
   const results: Array<{ kind: DeletedKind; id: string; ok: boolean; storedBytes: number; error?: string }> = [];
+  let firstError: unknown;
   for (const it of refs) {
     try {
       const r = await purgeOne(svc, actor, it);
       results.push({ kind: it.kind, id: it.id, ok: true, storedBytes: storedOf(r) });
     } catch (e) {
-      results.push({ kind: it.kind, id: it.id, ok: false, storedBytes: 0, error: failMessage(e) });
+      firstError ??= e;
+      results.push({ kind: it.kind, id: it.id, ok: false, storedBytes: 0, error: failMessage(svc, e, it, "wipe") });
     }
   }
   const purged = results.filter((r) => r.ok).length;
   const failed = results.length - purged;
   const storedBytes = results.reduce((n, r) => n + r.storedBytes, 0);
-  if (!purged && results[0]?.error) throw new TRPCError({ code: "BAD_REQUEST", message: results[0].error });
+  if (!purged) allFailed(firstError);
   return { ok: true as const, purged, failed, storedBytes, results };
 }

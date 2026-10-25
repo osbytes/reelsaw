@@ -29,13 +29,19 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
   return e ? `: ${e.slice(0, 160)}` : "";
 };
 
-/** When the row is wiped for good. "deleted …" is the soft delete; this is the permanent one. */
+/**
+ * When the row is wiped for good, as a countdown (GitLab's "pending deletion", Immich's days left):
+ * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`wipeDate`).
+ */
 function wipeLabel(purgeAt: string | null) {
   if (!purgeAt) return "Kept until wiped";
-  const d = new Date(purgeAt);
-  const days = Math.ceil((d.getTime() - Date.now()) / 86_400_000);
+  const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
   if (days <= 0) return "Wiped with the next hourly sweep";
-  return `wiped ${d.toLocaleDateString(undefined, dateFmt)}`;
+  return days === 1 ? "wiped within a day" : `wiped in ${days} days`;
+}
+
+function wipeDate(purgeAt: string | null) {
+  return purgeAt ? `Wiped for good on ${new Date(purgeAt).toLocaleDateString(undefined, dateFmt)}` : undefined;
 }
 
 type Row = {
@@ -201,11 +207,13 @@ export function DeletedPage() {
                     <span className="hidden font-semibold text-ink3 sm:block">{KIND_LABEL[r.kind]}</span>
                     <span className="min-w-0">
                       <span className="block truncate text-[14px] font-semibold text-ink2">{r.title}</span>
-                      <span className="block truncate text-xs text-ink3 sm:hidden">
+                      <span className="block truncate text-xs text-ink3 sm:hidden" title={wipeDate(r.purgeAt)}>
                         {KIND_LABEL[r.kind]} · {detailOf(r)}
                       </span>
                     </span>
-                    <span className="hidden truncate text-xs text-ink3 sm:block">{detailOf(r)}</span>
+                    <span className="hidden truncate text-xs text-ink3 sm:block" title={wipeDate(r.purgeAt)}>
+                      {detailOf(r)}
+                    </span>
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger asChild>
                         <MoreButton aria-label={`Actions for ${r.title}`} className={`opacity-0 ${REVEAL_ROW}`} />

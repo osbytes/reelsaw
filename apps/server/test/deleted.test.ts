@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { listDeleted, purgeDeleted, restoreDeleted } from "../src/deleted.js";
+import { QuotaError } from "../src/quota.js";
 import { deleteClip, purgeOwnedClip, purgeOwnedProject, restoreClip } from "../src/projects/service.js";
 import { purgeOwnedAsset } from "../src/library/service.js";
 import { purgeLayerTemplate, removeLayerTemplate } from "../src/library/templates.js";
@@ -72,6 +73,26 @@ describe("listDeleted and purge", { skip: notReady ?? false }, () => {
     assert.equal(purged.purged, 2);
     const goneRow = await h.pool.query(`select id from projects where id = $1`, [gone]);
     assert.equal(goneRow.rows.length, 0);
+  });
+
+  it("keeps a lone failure's own error, so a restore over the project cap still carries its quota actions", async () => {
+    const owner = await h.makeUser();
+    const actor = { id: owner, admin: false };
+    await h.makeProject(owner, "done");
+    const gone = await h.makeProject(owner, "done");
+    await h.pool.query(`update projects set deleted_at = now() where id = $1`, [gone]);
+    const settings = h.svc.settings.get() as { MAX_PROJECTS_PER_USER: number };
+    const was = settings.MAX_PROJECTS_PER_USER;
+    settings.MAX_PROJECTS_PER_USER = 1;
+    try {
+      await assert.rejects(restoreDeleted(h.svc, actor, [{ kind: "project", id: gone }]), (err: unknown) => {
+        assert.ok(err instanceof QuotaError);
+        assert.equal(err.quota?.key, "MAX_PROJECTS_PER_USER");
+        return true;
+      });
+    } finally {
+      settings.MAX_PROJECTS_PER_USER = was;
+    }
   });
 
   it("says to restore the project when a clip's project is still deleted, and refuses to wipe a live project", async () => {
