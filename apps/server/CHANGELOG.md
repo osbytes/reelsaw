@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.24.0
+
+### Minor Changes
+
+- [#171](https://github.com/osbytes/reelsaw/pull/171) [`ee190fb`](https://github.com/osbytes/reelsaw/commit/ee190fbfb99cb946620dbce9d7fb9c2df2a2d998) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A Deleted page lists deleted projects, clips, library assets and layer templates in one place, with bulk restore and delete forever. Deleting clips from a project offers Undo, Delete forever and a link to the page, and the same restore, delete forever and list actions are MCP tools and CLI commands. Deleted items keep counting toward storage until they are deleted forever, and minutes used stay counted after a delete forever.
+
 ## 0.23.3
 
 ### Patch Changes
