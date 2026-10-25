@@ -325,10 +325,11 @@ them), so a single-user box stays as it is:
   share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
   suspended automatically. Every refusal is a sentence.
 - **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` is one URL
-  or an operator-ranked pool (a home Pi, a cheap VPS, a paid proxy). Reliability is a
-  circuit breaker on each candidate and never changes the ranking among healthy ones.
-  `YTDLP_COOKIES_FILE` helps too; a blocked download fails with "upload the file instead".
-  `reelsaw ytdlp-proxies` shows the pool.
+  or an operator-ranked pool (a home Pi, a cheap VPS, a paid proxy). `{session}` in a URL is
+  replaced per download so a residential gateway can sticky-session one video and rotate the
+  next. Reliability is a circuit breaker on each candidate and never changes the ranking among
+  healthy ones. `YTDLP_COOKIES_FILE` helps too; a blocked download fails with "upload the file
+  instead". `reelsaw ytdlp-proxies` shows the pool.
 - **Legal**: `TERMS_URL` / `PRIVACY_URL` appear on the sign-up form.
 - **MCP over OAuth** (`MCP_OAUTH=true`): Reelsaw becomes an OAuth 2.1 authorization server for
   MCP connectors (claude.ai, Claude Desktop): dynamic client registration, sign-in and a consent

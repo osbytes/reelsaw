@@ -1,9 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyProxySession,
   classifyYtdlpError,
   createYtdlpProxyPool,
   parseYtdlpProxies,
+  PROXY_SESSION_TOKEN,
   proxyHost,
   type ProxyCandidate,
 } from "../src/ytdlp-proxy.js";
@@ -45,6 +47,21 @@ describe("parseYtdlpProxies", () => {
   it("proxyHost never includes userinfo", () => {
     assert.equal(proxyHost("http://user:s3cret@gate.example:7000"), "gate.example:7000");
     assert.equal(proxyHost(null), "direct");
+  });
+  it("keeps a residential username with {session} and provider semicolons", () => {
+    const got = parseYtdlpProxies("di=http://login__cr.us;sessid.{session};sessttl.60:pass@gw.example:823;priority=1;concurrency=4");
+    assert.deepEqual(got, [{ id: "di", url: "http://login__cr.us;sessid.{session};sessttl.60:pass@gw.example:823", priority: 1, concurrency: 4 }]);
+  });
+});
+
+describe("applyProxySession", () => {
+  it("leaves a URL without {session} alone", () => {
+    assert.equal(applyProxySession("http://user:pass@gate.example:7000"), "http://user:pass@gate.example:7000");
+  });
+  it("fills {session} with the given id and does not leave the token", () => {
+    const url = applyProxySession("http://login__cr.us;sessid.{session};sessttl.60:pass@gw.example:823", "a1b2c3d4e5f6a7b8");
+    assert.equal(url, "http://login__cr.us;sessid.a1b2c3d4e5f6a7b8;sessttl.60:pass@gw.example:823");
+    assert.ok(!url.includes(PROXY_SESSION_TOKEN));
   });
 });
 
@@ -128,5 +145,45 @@ describe("proxy pool ranking", () => {
     const row = pool.snapshot().candidates[0]!;
     assert.equal(row.host, "gate.example:7000");
     assert.ok(!JSON.stringify(row).includes("pass"));
+  });
+
+  it("fills {session} with a distinct id on every download", async () => {
+    const rotating: ProxyCandidate = { id: "di", url: "http://login__cr.us;sessid.{session};sessttl.60:pass@gw.example:823", priority: 1, concurrency: 0 };
+    const pool = createYtdlpProxyPool([rotating], { faultsBeforeOpen: 5, halfOpenAfter: 60_000 });
+    const urls: string[] = [];
+    await pool.run(async ({ args }) => {
+      urls.push(args[1]!);
+      return "ok";
+    });
+    await pool.run(async ({ args }) => {
+      urls.push(args[1]!);
+      return "ok";
+    });
+    assert.equal(urls.length, 2);
+    assert.match(urls[0]!, /sessid\.[0-9a-f]{16};/);
+    assert.match(urls[1]!, /sessid\.[0-9a-f]{16};/);
+    assert.notEqual(urls[0], urls[1]);
+    assert.ok(urls.every((u) => !u.includes(PROXY_SESSION_TOKEN)));
+  });
+
+  it("does not rewrite a URL without {session}", async () => {
+    const pool = createYtdlpProxyPool([paid]);
+    const { value } = await pool.run(async ({ args }) => args[1] ?? "");
+    assert.equal(value, paid.url);
+  });
+
+  it("mints a new session when the pool walks to the next candidate", async () => {
+    const a: ProxyCandidate = { id: "a", url: "http://login;sessid.{session}:p@gw.example:823", priority: 2, concurrency: 0 };
+    const b: ProxyCandidate = { id: "b", url: "http://login;sessid.{session}:p@gw.example:824", priority: 1, concurrency: 0 };
+    const pool = createYtdlpProxyPool([a, b], { faultsBeforeOpen: 5, halfOpenAfter: 60_000 });
+    const urls: string[] = [];
+    await pool.run(async ({ args }) => {
+      urls.push(args[1]!);
+      if (urls.length === 1) throw new Error("Unable to connect to proxy");
+      return "ok";
+    });
+    assert.equal(urls.length, 2);
+    assert.notEqual(urls[0], urls[1]);
+    assert.ok(urls.every((u) => !u.includes(PROXY_SESSION_TOKEN)));
   });
 });
