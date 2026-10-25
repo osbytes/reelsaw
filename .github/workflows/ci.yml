@@ -36,6 +36,7 @@ jobs:
       - run: pnpm --filter @reelsaw/server bundle
       # every test file that does not import test/helpers.ts (no app, no Postgres); see docs/EVALS.md
       - run: pnpm --filter @reelsaw/server test:unit
+      - run: node --test scripts/hook.test.mjs
       # the ONNX models behind the framing, pauses, alignment, speakers and overlays suites
       # (same script the Dockerfile runs); cached so CI does not download ~100 MB per run
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
