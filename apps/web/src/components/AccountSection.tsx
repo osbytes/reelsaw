@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { useMe } from "../lib/account";
@@ -39,7 +39,22 @@ export function AccountSection() {
     },
     onError: (e) => toast.error(e.message),
   });
+  const setPrefs = useMutation(
+    trpc.me.updateEmailPreferences.mutationOptions({
+      onSuccess: (r) => {
+        toast(r.emailPreferences.readyEmail ? "You'll get the ready email" : "Ready email turned off");
+        void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const busy = saveName.isPending || changePassword.isPending;
+  const emailEnabled = !!me.data?.emailEnabled;
+  // `/settings#email` (the ready email's footer): the section renders once me.get resolves, after the browser's own anchor jump
+  useEffect(() => {
+    if (emailEnabled && window.location.hash === "#email") document.getElementById("email")?.scrollIntoView({ block: "start" });
+  }, [emailEnabled]);
+  const readyEmail = setPrefs.isPending ? !!setPrefs.variables?.readyEmail : (me.data?.emailPreferences.readyEmail ?? true);
 
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
@@ -80,6 +95,26 @@ export function AccountSection() {
           </div>
         </form>
       </div>
+      {/* only when this instance sends mail; #email is the link in the ready email's footer */}
+      {emailEnabled && (
+        <div id="email" className="flex scroll-mt-4 flex-col gap-2 border-t border-line pt-4">
+          <span className="text-xs text-ink2">Email</span>
+          <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1 accent-[var(--acc)]"
+              checked={readyEmail}
+              disabled={setPrefs.isPending}
+              onChange={(e) => setPrefs.mutate({ readyEmail: e.target.checked })}
+            />
+            <span>
+              <b className="font-semibold">When projects finish while I'm away</b>
+              <br />
+              <span className="text-[13px] font-normal text-ink2">One note for everything that finished since you last opened Reelsaw. Password resets and other mail you need always come.</span>
+            </span>
+          </label>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,5 +1,7 @@
 import type { Services } from "../services.js";
 import { QUEUES, type ProjectJob, type RenderJob, type PrepareJob, type QueueName } from "./boss.js";
+import { eventHandlerQueues, parseEventHandlerJob } from "../event-handlers.js";
+import { projectEventHandlers } from "../project-event-handlers.js";
 import { prepareClip } from "../pipeline/manual.js";
 import { withLlmContext } from "../ai/trace.js";
 import { ingest } from "../pipeline/ingest.js";
@@ -158,5 +160,27 @@ export async function startWorkers(svc: Services) {
     });
   });
 
-  svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
+  // event handlers (event-handlers.ts): one queue each; the queue's policy is the concurrency it opted into
+  const handlerQueues = eventHandlerQueues(projectEventHandlers);
+  for (const q of handlerQueues) {
+    await boss.work(q.name, { pollingIntervalSeconds: q.options.pollingIntervalSeconds, localConcurrency: q.options.localConcurrency }, async (jobs) => {
+      const job = jobs[0]!;
+      const log = svc.log.child({ module: "events", handler: q.handler, event: q.type, jobId: job.id });
+      const { event, key } = parseEventHandlerJob(q.type, job.data);
+      try {
+        await q.def.handle({
+          event,
+          key,
+          svc,
+          signal: job.signal,
+          again: (u, o) => u.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfter: o.delaySeconds } : {}) }),
+        });
+      } catch (err) {
+        log.error({ err, key, attempt: job.retryCount + 1 }, "event handler failed");
+        throw err;
+      }
+    });
+  }
+
+  svc.log.info({ module: "worker", queues: [...Object.values(QUEUES), ...handlerQueues.map((q) => q.name)], renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
 }

@@ -75,6 +75,7 @@ export const PIPELINE_FIELDS: Field[] = [
 
 export const OPERATIONS_FIELDS: Field[] = [
   { key: "STALL_MINUTES", label: "Stall watchdog", kind: "int", min: 2, max: 1440, unit: "minutes" },
+  { key: "EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES", label: "Ready email delay", kind: "int", min: 1, max: 180, unit: "minutes" },
   { key: "UPDATE_CHECK", label: "Update check", kind: "bool", on: "On", off: "Off" },
   { key: "HEALTH_DETAILS", label: "Machine numbers in /api/health", kind: "bool", on: "Anyone", off: "Admins only" },
 ];

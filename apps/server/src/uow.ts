@@ -14,11 +14,12 @@ import pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEventType } from "@reelsaw/shared";
+import type { ProjectEventPayloadArg, ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
+import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -38,10 +39,10 @@ export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
+  emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<number>;
   enqueue(queue: QueueName, data: JobData): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
-  send(queue: string, data: object, opts?: { singletonKey?: string }): Promise<string | null>;
+  send(queue: string, data: object, opts?: { singletonKey?: string; startAfter?: number }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
   /** record what a stage decided and which models ran (see schema.stageArtifacts) */
@@ -98,11 +99,11 @@ const TX_ATTEMPTS = 3;
 /** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
 const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, eventHandlers?: { handlers: EventHandlerMap; deps: () => EventHandlerDeps }): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
-    const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
+    const emitted: EmittedEvent[] = [];
     let result;
     try {
       await client.query("BEGIN");
@@ -110,9 +111,11 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, payload = {}) {
-          emitted.push({ projectId, type, payload });
+        async emit(projectId, type, ...[rest = {} as never]) {
+          // every payload names its project (projectEventSchemas)
+          const payload = { ...rest, projectId };
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
+          emitted.push({ id: row!.id, projectId, type, payload } as unknown as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
         },
@@ -139,7 +142,11 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
           }
           return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost });
         },
-        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
+        send: (q, data, opts) => queue.send(q, data, {
+          ...exec,
+          ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}),
+          ...(opts?.startAfter != null ? { startAfter: opts.startAfter } : {}),
+        }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {
@@ -148,6 +155,14 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
+      // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
+      if (eventHandlers && emitted.length) {
+        for (const r of await eventHandlerJobs(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
+          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfter: r.startAfter });
+          // null: the handler coalesces and a job is already waiting for this key
+          log.debug({ handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId }, jobId ? "event handler job queued" : "event handler job already queued");
+        }
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});

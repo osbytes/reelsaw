@@ -24,6 +24,7 @@ import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
+import { touchLastActive } from "./presence.js";
 
 function mmss(s: number) {
   const m = Math.floor(s / 60);
@@ -450,6 +451,21 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "get_email_preferences",
+    TOOLS.get_email_preferences,
+    () => run(async () => {
+      const me = await api.me.get();
+      return { emailEnabled: me.emailEnabled, emailPreferences: me.emailPreferences };
+    }),
+  );
+
+  server.registerTool(
+    "set_email_preferences",
+    TOOLS.set_email_preferences,
+    (input) => run(() => api.me.updateEmailPreferences(input)),
+  );
+
+  server.registerTool(
     "get_billing",
     TOOLS.get_billing,
     () => run(() => api.billing.get()),
@@ -508,7 +524,10 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser): Promise<Response> {
-  const server = createMcpServer(svc, user, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
+  const req = c as HonoContext<AppEnv>;
+  req.set("userId", user.id);
+  touchLastActive(svc.database.db, svc.log, user.id);
+  const server = createMcpServer(svc, user, c.req.raw, req.get("requestId"));
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return (await transport.handleRequest(c)) ?? c.text("Not found", 404);

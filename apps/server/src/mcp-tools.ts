@@ -512,6 +512,17 @@ export const TOOLS = {
     inputSchema: settingsPatchSchema.shape,
     annotations: { idempotentHint: true },
   },
+  get_email_preferences: {
+    title: "Email preferences",
+    description: "Which optional emails you get. Returns { emailEnabled, emailPreferences: { readyEmail } }; readyEmail is the note sent when projects finish while you are away. emailEnabled false means this instance sends no mail at all.",
+    annotations: { readOnlyHint: true },
+  },
+  set_email_preferences: {
+    title: "Set email preferences",
+    description: "Turn optional emails on or off; omitted fields stay as they are. readyEmail = the note sent when projects finish while you are away (Settings → Account, or the link in the email). Mail you need (password reset, verification) is not affected. Returns { ok, emailPreferences }.",
+    inputSchema: { readyEmail: z.boolean().optional().describe("true to get the ready email, false to stop it") },
+    annotations: { idempotentHint: true },
+  },
   get_billing: {
     title: "Billing",
     description:

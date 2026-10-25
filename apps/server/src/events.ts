@@ -3,7 +3,7 @@ import pg from "pg";
 import { and, count, desc, eq, gt, lt, lte, max, ne } from "drizzle-orm";
 import type { Config } from "./config.js";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEvent, ProjectEventType } from "@reelsaw/shared";
+import type { ProjectEvent, ProjectEventPayloadArg, ProjectEventType } from "@reelsaw/shared";
 import type { Logger } from "./log.js";
 
 export const EVENTS_CHANNEL = "reelsaw_events";
@@ -65,7 +65,7 @@ export function progressEvent(n: ProgressNotice, now = new Date()): ProjectEvent
  * Postgres NOTIFY wakes every API process holding a LISTEN connection.
  */
 export interface EventBus {
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<ProjectEvent>;
+  emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<ProjectEvent>;
   list(projectId: string, afterId?: number, limit?: number): Promise<ProjectEvent[]>;
   /**
    * The log without progress ticks (those are live-only), newest `limit` rows in ascending order.
@@ -120,7 +120,8 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
   const bus: EventBus = {
     // Standalone event (progress, notices): insert + NOTIFY in ONE statement, so it is atomic.
     // Events tied to a state change go through the unit of work (svc.tx) instead.
-    async emit(projectId, type, payload = {}) {
+    async emit(projectId, type, ...[rest = {}]) {
+      const payload = { ...rest, projectId }; // every payload names its project (projectEventSchemas)
       // NOTIFY payloads are limited to 8000 bytes: send ids only, listeners fetch rows.
       const res = await pool.query<{ id: number; created_at: Date }>(
         `WITH e AS (INSERT INTO project_events (project_id, type, payload) VALUES ($1, $2, $3) RETURNING id, created_at)

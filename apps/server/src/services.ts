@@ -15,6 +15,8 @@ import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
+import { projectEventHandlers } from "./project-event-handlers.js";
+import { eventHandlerQueues } from "./event-handlers.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
 import { sql } from "drizzle-orm";
@@ -304,7 +306,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const queue = await step("job queue (pg-boss)", async () => {
-    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }));
+    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), eventHandlerQueues(projectEventHandlers));
     await q.start();
     return q;
   });
@@ -318,7 +320,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
 
   const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, releases, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
-  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
+  // jobs that commit with the event that triggers them (event-handlers.ts)
+  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry, { handlers: projectEventHandlers, deps: () => svc });
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads
     svc.ee = await step("enterprise edition (billing)", async () => (await import("./ee/index.js")).createEE(svc));
