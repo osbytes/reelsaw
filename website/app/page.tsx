@@ -48,7 +48,7 @@ const STEPS = [
   {
     icon: ScanFace,
     title: "Reframe and render",
-    body: "A 1.2 MB face detector on the CPU picks a layout per segment: follow the speaker, stack two people, slides over a webcam, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro in one encode.",
+    body: "A 1.2 MB face detector on the CPU picks a layout per shot cut: follow the speaker, stack two people, slides over the webcam tile, or fit the whole frame. ffmpeg burns in captions, hook, intro and outro in one encode.",
   },
 ];
 
@@ -71,7 +71,7 @@ const FEATURES = [
   {
     icon: ScanFace,
     title: "Smart 9:16 reframing",
-    body: "Face, split, stack and fit layouts chosen per segment, split at scene cuts and face changes. The crop follows whoever is talking with tripod-style smoothing. Override per project, per clip or per section.",
+    body: "Face, split, stack and fit layouts chosen per shot cut. Webcam-tile stacks, crowds shown whole, hand-set crops, and one clip's framing copied to the project. Override per project, per clip or per section.",
   },
   {
     icon: Captions,
@@ -81,12 +81,12 @@ const FEATURES = [
   {
     icon: Film,
     title: "A real editor",
-    body: "Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, transitions, undo and redo. Keyboard first, shortcuts listed under ?.",
+    body: "Live preview with the clip's framing and captions, a multi-lane timeline with zoom and snapping, frame-accurate trims, layout sections, layers, transitions, undo and redo. Keyboard first, shortcuts listed under ?.",
   },
   {
     icon: Layers,
-    title: "Intros, outros and export",
-    body: "A library of intro and outro videos or images with project and clip overrides. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip.",
+    title: "Library, templates and export",
+    body: "A library of intros, outros, logos, stickers, b-roll and music. Layer templates save a look once and apply it to any clip. Export all as a zip with paste-ready text, YouTube Data API and TikTok post bodies, a manifest and a CSV per clip.",
   },
   {
     icon: Users,
@@ -100,7 +100,7 @@ const FEATURES = [
   },
 ];
 
-const MCP_TOOLS = ["create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "rerender_clip", "delete_clip", "restore_clip", "search_assets", "download"];
+const MCP_TOOLS = ["create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "search_assets", "apply_layer_template", "export_project"];
 
 function SectionHeading({ eyebrow, title, body, id }: { eyebrow: string; title: string; body?: string; id?: string }) {
   return (
@@ -173,7 +173,7 @@ export default function HomePage() {
               <br />
               Vertical clips out.
               <br />
-              On your own hardware.
+              On your hardware, or hosted.
             </h1>
             <p className="max-w-[60ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[19px]">
               Reelsaw transcribes a video, asks a language model for the most clippable moments, then renders 9:16 clips with word-highlight captions and a hook overlay. Every model runs on your machine by default, with no API key. Or point each one at any vendor you like.
@@ -197,14 +197,12 @@ export default function HomePage() {
                   Latest release <ArrowRight className="h-4 w-4" aria-hidden />
                 </a>
               </div>
-              {SITE.hosted && (
-                <p className="text-sm text-ink3">
-                  Prefer not to run a machine?{" "}
-                  <a href={SITE.app} className="prose-link">
-                    Try the hosted Free plan
-                  </a>
-                </p>
-              )}
+              <p className="text-sm text-ink3">
+                Prefer not to run a machine?{" "}
+                <a href={SITE.app} className="prose-link">
+                  Try the hosted Free plan
+                </a>
+              </p>
             </div>
           </div>
           <div className="container-page pb-20">
@@ -270,7 +268,7 @@ export default function HomePage() {
         {/* Features */}
         <section id="features" className="scroll-mt-20 border-t border-line bg-panel/40 py-20" aria-labelledby="features-title">
           <div className="container-page flex flex-col gap-12">
-            <SectionHeading id="features-title" eyebrow="Features" title="Everything between the link and the upload" body="Built for people who publish every week and want their own pipeline, not a subscription." />
+            <SectionHeading id="features-title" eyebrow="Features" title="Everything between the link and the upload" body="Built for people who publish every week and want their own pipeline, not a credit meter." />
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {FEATURES.map((f) => (
                 <li key={f.title} className="card flex flex-col gap-3 p-5">
@@ -294,7 +292,7 @@ export default function HomePage() {
                 MCP is the UI for agents
               </h2>
               <p className="text-[16px] leading-relaxed text-ink2 text-pretty">
-                Everything a person can do in the app exists as a tool on the built-in MCP server (Model Context Protocol, Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit and re-render clips, manage intros and outros and download the results. The operator CLI mirrors the same service code for people running the box.
+                Everything a person can do in the app exists as a tool on the built-in MCP server (Model Context Protocol, Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit layers and framing, create and re-render clips, manage the library and layer templates, and export the results. The same tools are on every hosted plan, including Free. The operator CLI mirrors the same service code for people running the box.
               </p>
               <ul className="flex flex-wrap gap-2" aria-label="Some MCP tools">
                 {MCP_TOOLS.map((t) => (
@@ -331,7 +329,7 @@ export default function HomePage() {
         {/* Compare */}
         <section id="compare" className="scroll-mt-20 border-t border-line py-20" aria-labelledby="compare-title">
           <div className="container-page flex flex-col gap-10">
-            <SectionHeading id="compare-title" eyebrow="How it compares" title={SITE.hosted ? "Hosted clippers charge by the minute. Self-hosted Reelsaw charges nothing." : "Hosted clippers charge by the minute. Reelsaw charges nothing."} body={`Opus Clip, Klap, Vizard, Submagic, 2short.ai and quso.ai meter clips, minutes or credits and watermark or expire their free tiers. The other open-source clipper still needs a Gemini key. Reelsaw is AGPL-3.0 software on your own machine, fully local or with any provider you choose: no plan, no cap, no watermark.${SITE.hosted ? " If you would rather not run a machine, the hosted version costs the same as OpenShorts Cloud." : ""} Each comparison says what the other tool does better. Pricing checked ${CHECKED}.`} />
+            <SectionHeading id="compare-title" eyebrow="How it compares" title="Hosted clippers charge by the minute. Self-hosted Reelsaw charges nothing." body={`Opus Clip, Klap, Vizard, Submagic, 2short.ai and quso.ai meter clips, minutes or credits and watermark or expire their free tiers. The other open-source clipper still needs Gemini for layout picking and silent videos. Reelsaw is AGPL-3.0 software on your own machine, fully local or with any provider you choose: no plan, no cap, no watermark. If you would rather not run a machine, hosted Reelsaw is $12 a month for 100 source minutes — the same list prices as OpenShorts Cloud, and cheaper than Opus Clip Starter at $15. Each comparison says what the other tool does better. Pricing checked ${CHECKED}.`} />
             <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
               <nav aria-label="Comparisons" className="flex flex-col gap-2">
                 <h3 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">Alternatives</h3>

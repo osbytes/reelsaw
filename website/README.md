@@ -1,7 +1,8 @@
 # reelsaw.com
 
-The website for the Reelsaw open-source project: a single Next.js page (App Router, Tailwind v4)
-that reuses the app's design tokens (`apps/web/src/index.css`), fonts and logo.
+The website for the Reelsaw open-source project: Next.js (App Router, Tailwind v4) that reuses
+the app's design tokens (`apps/web/src/index.css`), fonts and logo. Home, alternatives, guides,
+pricing, legal, releases and the pipeline film.
 
 It is a standalone package with its own lockfile, outside the pnpm workspace, so the app's Docker
 image, CI and `pnpm dev` are unaffected.
@@ -50,13 +51,10 @@ stay the same animation.
 - `app/robots.ts`, `app/sitemap.ts`, `app/manifest.ts`, `app/icon.svg`, `app/favicon.ico`, `app/apple-icon.png` (the same files as `apps/web/public`).
 - `app/page.tsx` carries JSON-LD (`SoftwareApplication`, `SoftwareSourceCode`, `WebSite`), one `h1`,
   section landmarks with headings, descriptive alt text, and `next/image` for the screenshots.
+- `/pricing`, `/terms` and `/privacy` are always published. The hosted app URL is `SITE.app`
+  (default `https://app.reelsaw.com`). Plan list: `content/pricing.ts`, mirrored from the server.
 
 ## Analytics (optional)
-
-The hosted service is not announced unless `NEXT_PUBLIC_HOSTED_URL` is set (e.g.
-`https://app.reelsaw.com`): without it there is no `/pricing`, `/terms` or `/privacy`, no links to
-them, and every comparison speaks of self-hosting only. Set it on Vercel and redeploy once the app
-is live; the plan list itself lives in `content/pricing.ts` and mirrors the server's.
 
 PostHog is off unless `NEXT_PUBLIC_POSTHOG_KEY` is set. With a key:
 
@@ -87,6 +85,12 @@ Modelled on the "alternatives" pages hosted clippers rank with. All copy is data
 Adding a competitor or guide is a new object in the matching file; the route, sitemap and link
 lists pick it up. Re-check vendor pricing before bumping `CHECKED`: every claim on these pages is
 either from a vendor's public pricing page or from the Reelsaw README.
+
+When Reelsaw gains or improves a capability, update this package in the same change as the
+code ([docs/PRINCIPLES.md](../docs/PRINCIPLES.md), Process): the home-page features and MCP chips
+(`app/page.tsx`), the Reelsaw column (`content/reelsaw.ts`), and any competitor or guide sentence
+that still says Reelsaw cannot do it. Hosted Reelsaw (app.reelsaw.com) is always in the copy:
+pricing, terms and privacy are always on the site.
 
 ## IndexNow
 

@@ -6,7 +6,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
   {
     title: "Project",
     links: [
-      ...(SITE.hosted ? [{ href: "/pricing", label: "Pricing" }] : []),
+      { href: "/pricing", label: "Pricing" },
       { href: SITE.github, label: "Source on GitHub" },
       { href: SITE.changelog, label: "Releases" },
       { href: SITE.docker, label: "Docker image (GHCR)" },
@@ -33,7 +33,8 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
       { href: SITE.issues, label: "Issues and feature requests" },
       { href: SITE.contributing, label: "Contributing" },
       { href: SITE.glama, label: "Glama MCP listing" },
-      ...(SITE.hosted ? [{ href: "/terms", label: "Terms of service" }, { href: "/privacy", label: "Privacy policy" }] : []),
+      { href: "/terms", label: "Terms of service" },
+      { href: "/privacy", label: "Privacy policy" },
     ],
   },
 ];
@@ -44,7 +45,7 @@ export function Footer() {
       <div className="container-page grid grid-cols-1 gap-10 py-14 sm:grid-cols-2 md:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
         <div className="flex flex-col gap-3">
           <Logo />
-          <p className="max-w-[34ch] text-sm leading-relaxed text-ink2">Self-hosted, AI-powered long-form to short-form video clipper. Pure TypeScript, any AI vendor, one-step Docker deploy.</p>
+          <p className="max-w-[34ch] text-sm leading-relaxed text-ink2">AI-powered long-form to short-form video clipper. Self-host, or use app.reelsaw.com. Pure TypeScript, any AI vendor, one-step Docker deploy.</p>
           <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost w-fit">
             <GitHubMark /> osbytes/reelsaw
           </a>

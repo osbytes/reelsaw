@@ -359,9 +359,23 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   new `h-screen`). Run the relevant evals for pipeline work.
 - Commit and push only when asked. Commit messages describe the change and why; no
   tool-attribution trailers.
-- Keep docs current: `EVALS.md` for suites, `TROUBLESHOOTING.md` for operator recipes,
-  `RESEARCH.md` for findings, `UI.md` for overlay/portal/stacking and mobile-viewport gotchas, and this file for
-  principles.
+- **Docs ship with the capability.** A user-facing feature or improvement is not finished until
+  the public copy matches the code, in the same change, not as a follow-up. Leaving
+  "Reelsaw cannot X" on the site after X shipped is the same class of bug as shipping a screen
+  without its MCP tool. That means:
+  - `README.md`: features, MCP tools, CLI commands, and the roadmap (delete items that shipped).
+  - `website/`: home-page features and MCP chips (`app/page.tsx`; chips must name tools that exist),
+    the Reelsaw column in `content/reelsaw.ts`, competitor `betterAt` / `pickThem` / `pickReelsaw` /
+    FAQs that claim what Reelsaw cannot do (`content/competitors.ts`), and the matching guides
+    (`content/guides.ts`). Hosted Reelsaw at app.reelsaw.com is part of the product: say so, do not
+    gate copy or `/pricing` / `/terms` / `/privacy` behind a flag. Vendor prices: re-read the public
+    page before bumping `CHECKED`. Claims about Reelsaw come from the README and source
+    ([website/README.md](../website/README.md)).
+  - `docs/`: `LAYOUTS.md` for framing, `TROUBLESHOOTING.md` for operator recipes, `EVALS.md` for
+    suites, `RESEARCH.md` when a listed gap closed (a status note; do not rewrite the snapshot as
+    if it was always current), `UI.md` for overlay/portal/stacking and mobile-viewport gotchas, and
+    this file for principles. Generated tables (`docs/CONFIG.md`, CLI, eval suites) from
+    `pnpm docs:gen`.
 - **One agent context, no agent-specific concepts.** `AGENTS.md` is the only agent instruction
   file, and it follows the shared [AGENTS.md convention](https://agents.md) every coding agent
   reads. No `CLAUDE.md`, `.cursor/rules`, `.cursorrules`, `copilot-instructions.md` or other

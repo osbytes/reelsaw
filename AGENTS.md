@@ -4,8 +4,10 @@ Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md) before changing code. It holds the
 (transactions, locking, versioned jobs, evals) and frontend (tokens, overlays, no layout shift, deep links,
 responsive, visible viewport not 100vh) rules that apply to every change, and the surfaces rule: MCP is the UI for agents and
 the glue for integrations, so every user-facing feature ships with its MCP tool (and CLI command)
-backed by the same service code as the screen. Overlay stacking (Select/Combobox inside a dialog)
-and the mobile viewport (`h-dvh`, never `h-screen`) are [docs/UI.md](docs/UI.md).
+backed by the same service code as the screen. The same change updates public copy (README,
+`website/content/`, the matching `docs/` page) so shipped work is not still on the roadmap or
+described as something Reelsaw cannot do (Process). Overlay stacking (Select/Combobox inside a
+dialog) and the mobile viewport (`h-dvh`, never `h-screen`) are [docs/UI.md](docs/UI.md).
 
 Layout: `apps/server` (Hono, tRPC, Drizzle, pg-boss workers), `apps/web` (Vite, React, Tailwind,
 Radix), `packages/shared` (zod schemas, shared geometry/caption helpers; rebuild with
