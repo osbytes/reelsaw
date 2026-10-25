@@ -1258,9 +1258,8 @@ const restRouter = router({
       const { svc } = ctx;
       await ownedProject(svc.database.db, ctx.user.id, input.id);
       // while this stream is open they are here; a done event moves the stamp even inside the coalesce window
-      const see = (e: { type: string }) => {
-        if (e.type === "project.done" || e.type === "clip.done") touchLastActive(svc.database.db, svc.log, ctx.user.id, { force: true });
-      };
+      const isDone = (e: { type: string }) => e.type === "project.done" || e.type === "clip.done";
+      const seen = () => touchLastActive(svc.database.db, svc.log, ctx.user.id, { force: true });
       const beat = setInterval(() => touchLastActive(svc.database.db, svc.log, ctx.user.id), 30_000);
       const stopBeat = () => clearInterval(beat);
       signal?.addEventListener("abort", stopBeat, { once: true });
@@ -1269,10 +1268,9 @@ const restRouter = router({
         const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
         const { headId, total } = await svc.events.stats(input.id);
         const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
-        for (const e of history.events) {
-          see(e);
-          yield tracked(String(e.id), e satisfies ProjectEvent);
-        }
+        // the replay can hold many done events; one forced stamp covers them all
+        if (history.events.some(isDone)) seen();
+        for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
         const marker: EventsReplayed = { type: "events.replayed", shown: history.events.length, total, oldestId: history.events[0]?.id ?? null, hasMore: history.hasMore };
         let lastId = Math.max(headId, after);
         yield tracked(String(lastId), marker);
@@ -1280,9 +1278,9 @@ const restRouter = router({
         const flush = async function* () {
           for (;;) {
             const page = await svc.events.list(input.id, lastId, 500);
+            if (page.some(isDone)) seen();
             for (const e of page) {
               lastId = e.id;
-              see(e);
               yield tracked(String(e.id), e satisfies ProjectEvent);
             }
             if (page.length < 500) return;

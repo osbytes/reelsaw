@@ -11,9 +11,12 @@
  * late one is included. The send is skipped for anything at or before `user.last_active_at`
  * (presence.ts). Nothing is queued when email is off.
  *
- * The job may run twice. Each event is claimed in `completion_notices` before the send and
- * marked after it, so a retry finishes an interrupted send instead of starting a second one.
- * A crash after a successful send and before the mark can mail twice; that is the rare case.
+ * The job may run twice, and two runs for one account can overlap (`short` only dedups the
+ * waiting job; a retry or the next batch can start while one is still sending). Each event is
+ * claimed in `completion_notices` with a lease before the send and marked after it: a second run
+ * skips what a live lease holds, a failed send gives its claim back for the retry, and a run that
+ * died is overtaken once its lease runs out. A crash after a successful send and before the mark
+ * can mail twice; that is the rare case.
  */
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -27,6 +30,11 @@ import { templates } from "../email.js";
 export const MILESTONES = [1, 10, 25, 50, 100] as const;
 
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How long a claim belongs to the run that made it. Longer than any send (Resend times out at 15 s,
+ * SMTP well inside this) and than the job's expiry, so a run is never overtaken while it is sending.
+ */
+const CLAIM_LEASE_SEC = 10 * 60;
 /** One more than we claim, so a full page schedules a follow-up for the rest. */
 const FETCH_LIMIT = 41;
 const SHOW = 8;
@@ -187,20 +195,26 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     return;
   }
 
+  // One statement claims each event: a new row, or an unsent one whose lease ran out (a run that died
+  // mid-send). A live lease belongs to a run still sending (pg-boss can start a retry, or the next
+  // batch's job, while an expired one is still running), so it is not taken. RETURNING is what we own.
   const eventIds = unseen.map((e) => e.eventId);
-  const inserted = await db
-    .insert(schema.completionNotices)
+  const N = schema.completionNotices;
+  const claimedRows = await db
+    .insert(N)
     .values(eventIds.map((eventId) => ({ eventId, userId })))
-    .onConflictDoNothing()
-    .returning({ eventId: schema.completionNotices.eventId });
-  const pending = await db
-    .select({ eventId: schema.completionNotices.eventId })
-    .from(schema.completionNotices)
-    .where(and(eq(schema.completionNotices.userId, userId), isNull(schema.completionNotices.sentAt), inArray(schema.completionNotices.eventId, eventIds)));
-  const owned = new Set([...inserted.map((r) => r.eventId), ...pending.map((r) => r.eventId)]);
+    .onConflictDoUpdate({
+      target: N.eventId,
+      set: { claimedAt: sql`now()` },
+      setWhere: and(isNull(N.sentAt), sql`${N.claimedAt} < now() - make_interval(secs => ${CLAIM_LEASE_SEC})`),
+    })
+    .returning({ eventId: N.eventId });
+  const owned = new Set(claimedRows.map((r) => r.eventId));
   const mine = unseen.filter((e) => owned.has(e.eventId));
   if (!mine.length) {
-    log.debug({ reason: "already claimed" }, "completion notice skipped");
+    // held by another run: if that run dies, this follow-up (after its lease) sends what it held
+    const again = await svc.queue.send(COMPLETION_NOTIFY_QUEUE, { userId }, { singletonKey: userId, startAfter: CLAIM_LEASE_SEC + 30 });
+    log.debug({ reason: "already claimed", followUp: !!again }, "completion notice skipped");
     return;
   }
 
@@ -258,10 +272,13 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
       { strict: true },
     );
   } catch (err) {
-    log.error({ err, events: claimed.length }, "completion notice not marked sent");
+    // give the claim back so pg-boss's retry (a minute away, inside the lease) can take it again
+    await db.update(N).set({ claimedAt: new Date(0) }).where(and(inArray(N.eventId, claimed), isNull(N.sentAt)))
+      .catch((e) => log.warn({ err: e }, "completion notice claim not released"));
+    log.error({ err, events: claimed.length }, "completion notice not sent");
     throw err;
   }
-  await db.update(schema.completionNotices).set({ sentAt: new Date() }).where(inArray(schema.completionNotices.eventId, claimed));
+  await db.update(N).set({ sentAt: new Date() }).where(inArray(N.eventId, claimed));
   log.info({ projects: projects.length, events: claimed.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
 
   if (truncated) {
