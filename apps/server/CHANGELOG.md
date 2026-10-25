@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.23.2
+
+### Patch Changes
+
+- [#165](https://github.com/osbytes/reelsaw/pull/165) [`7565d38`](https://github.com/osbytes/reelsaw/commit/7565d38817f95b37cdc8c7de3b2a1d9c7639bde6) Thanks [@dillonstreator](https://github.com/dillonstreator)! - `YTDLP_PROXY` URLs may include `{session}`, replaced with a fresh id on every yt-dlp download so a residential gateway can pin that process to one IP and give the next video a different one. Ingest also passes `--js-runtimes node` (YouTube JS challenges) the same way eval already did.
+
 ## 0.23.1
 
 ### Patch Changes
