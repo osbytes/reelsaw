@@ -18,7 +18,7 @@ await build({
   splitting: true, // main and cli share one chunk set instead of two copies
   format: "esm",
   platform: "node",
-  target: "node22",
+  target: "node24",
   minify: true,
   sourcemap: false,
   legalComments: "none",
