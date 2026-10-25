@@ -19,7 +19,7 @@ import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
-import type { EventHandlers } from "./event-handlers.js";
+import { reactionsFor, type EmittedEvent, type EventSubscriptions } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -99,11 +99,11 @@ const TX_ATTEMPTS = 3;
 /** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
 const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, handlers?: EventHandlers): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, subscriptions?: EventSubscriptions): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
-    const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
+    const emitted: EmittedEvent[] = [];
     let result;
     try {
       await client.query("BEGIN");
@@ -112,11 +112,9 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       const u: UnitOfWork = {
         db,
         async emit(projectId, type, payload = {}) {
-          emitted.push({ projectId, type, payload });
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
+          emitted.push({ id: row!.id, projectId, type, payload });
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
-          // reactions commit with the event (event-handlers.ts)
-          for (const h of handlers?.of(type) ?? []) await h.handler(u, { id: row!.id, projectId, type, payload });
           return row!.id;
         },
         async enqueue(q, data) {
@@ -155,6 +153,14 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
+      // the outbox: each subscription's job is written on this connection, so it commits with its event (event-handlers.ts)
+      if (subscriptions && emitted.length) {
+        for (const r of await reactionsFor(subscriptions, emitted, db)) {
+          const jobId = await queue.send(r.job.queue, r.job.data, { ...exec, singletonKey: r.job.singletonKey, startAfter: r.job.startAfter });
+          // null: the queue's policy deduped it (one already waiting for this key)
+          log.debug({ subscription: r.subscription, event: r.event.type, projectId: r.event.projectId, jobId }, jobId ? "event reaction queued" : "event reaction already queued");
+        }
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});

@@ -4,17 +4,15 @@ import { messageIdDomain, templates, type Email } from "../src/email.js";
 import {
   collapseProjects,
   completionIdempotencyKey,
-  completionNoticeHandler,
+  readyEmailSubscription,
   greetingName,
   milestoneCrossed,
-  scheduleCompletionNotify,
   selectUnseen,
   type DoneNotice,
 } from "../src/notify/completion.js";
-import { createEventHandlers } from "../src/event-handlers.js";
+import { createEventSubscriptions, reactionsFor, type ReadDb } from "../src/event-handlers.js";
 import { COMPLETION_NOTIFY_QUEUE } from "../src/queue/boss.js";
 import type { Logger } from "../src/log.js";
-import type { UnitOfWork } from "../src/uow.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
 
 const log = { debug() {}, child() { return log; } } as unknown as Logger;
@@ -78,41 +76,6 @@ describe("greeting", () => {
     assert.equal(greetingName("  Ada  "), "Ada");
     assert.equal(greetingName("ada@example.com"), null);
     assert.equal(greetingName("  "), null);
-  });
-});
-
-describe("scheduleCompletionNotify", () => {
-  it("does not queue when email is off", async () => {
-    let called = false;
-    const r = await scheduleCompletionNotify({
-      emailEnabled: false,
-      delayMinutes: 20,
-      log,
-      send: async () => {
-        called = true;
-        return "job";
-      },
-    }, "user-1");
-    assert.equal(r, "off");
-    assert.equal(called, false);
-  });
-
-  it("queues one delayed job per account, and a null send is the debounce", async () => {
-    const calls: Array<{ queue: string; data: object; opts?: { singletonKey?: string; startAfter?: number } }> = [];
-    const send = async (queue: string, data: object, opts?: { singletonKey?: string; startAfter?: number }) => {
-      calls.push({ queue, data, opts });
-      return calls.length === 1 ? "job-1" : null;
-    };
-    const first = await scheduleCompletionNotify({ emailEnabled: true, delayMinutes: 20, log, send }, "user-1");
-    const second = await scheduleCompletionNotify({ emailEnabled: true, delayMinutes: 20, log, send }, "user-1");
-    assert.equal(first, "queued");
-    assert.equal(second, "already");
-    assert.equal(calls.length, 2);
-    assert.equal(calls[0]!.queue, COMPLETION_NOTIFY_QUEUE);
-    assert.deepEqual(calls[0]!.data, { userId: "user-1" });
-    assert.equal(calls[0]!.opts?.singletonKey, "user-1");
-    assert.equal(calls[0]!.opts?.startAfter, 20 * 60);
-    assert.equal(calls[1]!.opts?.startAfter, 20 * 60);
   });
 });
 
@@ -197,31 +160,37 @@ describe("ready email idempotency", () => {
   });
 });
 
-describe("event handlers", () => {
-  it("lists handlers for a type in registration order, and refuses a duplicate name", () => {
-    const h = createEventHandlers();
-    const noop = async () => {};
-    h.on("project.done", "a", noop);
-    h.on("project.done", "b", noop);
-    assert.deepEqual(h.of("project.done").map((x) => x.name), ["a", "b"]);
-    assert.equal(h.of("project.failed").length, 0);
-    assert.throws(() => h.on("project.done", "a", noop));
+describe("event subscriptions", () => {
+  const noop = { name: "a", on: "project.done" as const, react: () => null };
+  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: {} };
+  const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
+
+  it("refuses a duplicate name and lists by type", () => {
+    const subs = createEventSubscriptions();
+    subs.add(noop);
+    subs.add({ ...noop, name: "b" });
+    assert.deepEqual(subs.of("project.done").map((x) => x.name), ["a", "b"]);
+    assert.equal(subs.of("project.failed").length, 0);
+    assert.throws(() => subs.add({ ...noop, on: "project.failed" }));
   });
 
-  it("queues the ready note on the emitting unit of work, and nothing when email is off", async () => {
-    const sent: Array<{ queue: string; opts?: { singletonKey?: string; startAfter?: number } }> = [];
-    const u = {
-      db: { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) },
-      send: async (queue: string, _data: object, opts?: { singletonKey?: string; startAfter?: number }) => {
-        sent.push({ queue, opts });
-        return "job";
-      },
-    } as unknown as UnitOfWork;
+  it("collects jobs in emit then registration order and drops nulls", async () => {
+    const subs = createEventSubscriptions();
+    subs.add({ name: "x", on: "project.done", react: (e) => ({ queue: "q", data: { n: e.id } }) });
+    subs.add(noop);
+    subs.add({ name: "y", on: "project.done", react: async (e) => ({ queue: "q", data: { m: e.id } }) });
+    const r = await reactionsFor(subs, [event, { ...event, id: 2 }], db);
+    assert.deepEqual(r.map((x) => [x.subscription, x.event.id]), [["x", 1], ["y", 1], ["x", 2], ["y", 2]]);
+  });
+
+  it("the ready email asks for one delayed job per account, and none when email is off", async () => {
     const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
-    const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: {} };
-    await completionNoticeHandler({ email: { enabled: false } as Email, settings, log })(u, event);
-    assert.equal(sent.length, 0);
-    await completionNoticeHandler({ email: { enabled: true } as Email, settings, log })(u, event);
-    assert.deepEqual(sent, [{ queue: COMPLETION_NOTIFY_QUEUE, opts: { singletonKey: "owner-1", startAfter: 300 } }]);
+    assert.equal(await readyEmailSubscription({ email: { enabled: false } as Email, settings }).react(event, db), null);
+    assert.deepEqual(await readyEmailSubscription({ email: { enabled: true } as Email, settings }).react(event, db), {
+      queue: COMPLETION_NOTIFY_QUEUE,
+      data: { userId: "owner-1" },
+      singletonKey: "owner-1",
+      startAfter: 300,
+    });
   });
 });

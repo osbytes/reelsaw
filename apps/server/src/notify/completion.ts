@@ -6,9 +6,9 @@
  * cutoff; already-seen posts are skipped):
  *
  * The first `project.done` schedules one pg-boss job (`short` policy, `singletonKey` = the
- * account) to run after `COMPLETION_NOTIFY_MINUTES`. That happens in `completionNoticeHandler`, a
- * handler on the event (event-handlers.ts) that runs in the unit of work that wrote it, so the job
- * commits with the completion and no transition has to remember to call it. A second completion while that job is
+ * account) to run after `COMPLETION_NOTIFY_MINUTES`. `readyEmailSubscription` declares that job on
+ * the event (event-handlers.ts) and the unit of work that wrote the event writes it before COMMIT, so
+ * the job commits with the completion and no transition has to remember it. A second completion while that job is
  * still waiting is a no-op — the job reads every unseen `project.done` when it runs, so the
  * late one is included. The send is skipped for anything at or before `user.last_active_at`
  * (presence.ts). Nothing is queued when email is off.
@@ -24,11 +24,9 @@
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
-import type { EventHandler } from "../event-handlers.js";
+import type { EventSubscription } from "../event-handlers.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
-import type { Logger } from "../log.js";
-import type { UnitOfWork } from "../uow.js";
 import { COMPLETION_NOTIFY_QUEUE } from "../queue/boss.js";
 import { templates } from "../email.js";
 
@@ -107,23 +105,6 @@ export function collapseProjects(events: DoneNotice[]): CollapsedProject[] {
     cur.eventIds.push(e.eventId);
   }
   return [...byId.values()];
-}
-
-/**
- * Queue the ready note, or no-op when one is already waiting for this account. Returns what happened
- * so a caller (and the tests) can tell a debounce from "email is off".
- */
-export async function scheduleCompletionNotify(
-  opts: { emailEnabled: boolean; delayMinutes: number; log: Logger; send: UnitOfWork["send"] },
-  userId: string,
-): Promise<"off" | "queued" | "already"> {
-  if (!opts.emailEnabled) return "off";
-  const startAfter = opts.delayMinutes * 60;
-  const jobId = await opts.send(COMPLETION_NOTIFY_QUEUE, { userId }, { singletonKey: userId, startAfter });
-  const log = opts.log.child({ module: "notify", userId });
-  if (jobId) log.debug({ jobId, startAfter }, "completion notice queued");
-  else log.debug({ startAfter }, "completion notice already queued");
-  return jobId ? "queued" : "already";
 }
 
 function num(v: unknown): number {
@@ -321,17 +302,23 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 }
 
 /**
- * The `project.done` handler (event-handlers.ts): queue the ready note in the unit of work that wrote
- * the event, so the job exists exactly when the completion committed.
+ * The ready note as a reaction to `project.done` (event-handlers.ts): one job per account, written with
+ * the completion's transaction. Nothing when email is off.
  */
-export function completionNoticeHandler(svc: Pick<Services, "email" | "settings" | "log">): EventHandler {
-  return async (u, e) => {
-    if (!svc.email.enabled) return;
-    const [project] = await u.db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, e.projectId));
-    if (!project) return;
-    await scheduleCompletionNotify(
-      { emailEnabled: true, delayMinutes: svc.settings.get().COMPLETION_NOTIFY_MINUTES, log: svc.log, send: u.send },
-      project.userId,
-    );
+export function readyEmailSubscription(svc: Pick<Services, "email" | "settings">): EventSubscription {
+  return {
+    name: "ready email",
+    on: "project.done",
+    async react(e, db) {
+      if (!svc.email.enabled) return null;
+      const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, e.projectId));
+      if (!project) return null;
+      return {
+        queue: COMPLETION_NOTIFY_QUEUE,
+        data: { userId: project.userId },
+        singletonKey: project.userId,
+        startAfter: svc.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
+      };
+    },
   };
 }

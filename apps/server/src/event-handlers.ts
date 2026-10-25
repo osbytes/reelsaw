@@ -1,19 +1,21 @@
 /**
- * Reactions to project events, run inside the unit of work that emits them (uow.ts `emit`).
+ * Reactions to project events that commit atomically with the event (a transactional outbox).
  *
- * `project_events` is already the record of what happened, and pg-boss jobs live in the same
- * database: a handler that reacts by queueing a job with `u.send` / `u.enqueue` on the emitting
- * transaction is a transactional outbox without a relay. The event, the reaction and its job commit
- * together or not at all, and every place that emits the event gets the reaction, so a transition
- * cannot forget to call it.
+ * A subscription never does its work in the emitting transaction. It only *declares* a job: `react`
+ * looks at the event (and may read, on the emitting transaction, so it sees the transition's own
+ * writes) and returns the job to queue, or null. The unit of work (uow.ts) writes that job on the
+ * same connection just before COMMIT, so the event row and every reaction's job commit together or
+ * not at all, and pg-boss is the relay that delivers them. The work itself runs in the job's worker,
+ * after commit, with pg-boss's retries, so it must be idempotent per event.
  *
- * Handlers stay small and in the database: read with `u.db`, queue work with `u.send`. Anything slow
- * or outside Postgres (mail, webhooks, files) belongs in the job they queue, not in the handler. A
- * handler that throws rolls the emitting transition back, which is the point: the reaction is part
- * of the state change. Handlers run in registration order.
+ * What a subscription cannot do, by construction: write (it gets reads only), send mail or call out
+ * (it returns data; the uow does the one write), or forget to run (every `u.emit` of the type fires
+ * it). A `react` that throws rolls the emitting transition back: the reaction is part of the state
+ * change, so keep it to a lookup or two. Only `u.emit` fires subscriptions; events copied in by an
+ * issue-report import (report/import.ts) are history, not transitions, and fire nothing.
  */
 import type { ProjectEventType } from "@reelsaw/shared";
-import type { UnitOfWork } from "./uow.js";
+import type { Db } from "./db/index.js";
 
 export interface EmittedEvent {
   id: number;
@@ -22,23 +24,54 @@ export interface EmittedEvent {
   payload: Record<string, unknown>;
 }
 
-export type EventHandler = (u: UnitOfWork, event: EmittedEvent) => Promise<void>;
-
-export interface EventHandlers {
-  /** `name` is for the log and for telling two handlers on one event apart. */
-  on(type: ProjectEventType, name: string, handler: EventHandler): void;
-  of(type: ProjectEventType): ReadonlyArray<{ name: string; handler: EventHandler }>;
+/** The job a subscription asks for; written with the event's transaction. */
+export interface EventReaction {
+  queue: string;
+  data: object;
+  singletonKey?: string;
+  /** seconds */
+  startAfter?: number;
 }
 
-export function createEventHandlers(): EventHandlers {
-  const byType = new Map<ProjectEventType, Array<{ name: string; handler: EventHandler }>>();
+/** Reads on the emitting transaction. No writes: the job is the only side effect. */
+export type ReadDb = Pick<Db, "select">;
+
+export interface EventSubscription {
+  /** Unique; names the reaction in logs. */
+  name: string;
+  on: ProjectEventType;
+  react(event: EmittedEvent, db: ReadDb): Promise<EventReaction | null> | EventReaction | null;
+}
+
+export interface EventSubscriptions {
+  add(subscription: EventSubscription): void;
+  of(type: ProjectEventType): readonly EventSubscription[];
+}
+
+export function createEventSubscriptions(): EventSubscriptions {
+  const byType = new Map<ProjectEventType, EventSubscription[]>();
+  const names = new Set<string>();
   return {
-    on(type, name, handler) {
-      const list = byType.get(type) ?? [];
-      if (list.some((h) => h.name === name)) throw new Error(`event handler "${name}" is already registered for ${type}`);
-      list.push({ name, handler });
-      byType.set(type, list);
+    add(s) {
+      if (names.has(s.name)) throw new Error(`event subscription "${s.name}" is already registered`);
+      names.add(s.name);
+      byType.set(s.on, [...(byType.get(s.on) ?? []), s]);
     },
     of: (type) => byType.get(type) ?? [],
   };
+}
+
+/**
+ * The jobs every subscription asks for, in emit then registration order. The uow calls this once the
+ * transition's own work is done and writes each job before COMMIT.
+ */
+export async function reactionsFor(subs: EventSubscriptions, events: readonly EmittedEvent[], db: ReadDb): Promise<Array<{ subscription: string; event: EmittedEvent; job: EventReaction }>> {
+  const out: Array<{ subscription: string; event: EmittedEvent; job: EventReaction }> = [];
+  for (const event of events) {
+    for (const s of subs.of(event.type)) {
+      const job = await s.react(event, db);
+      if (job) out.push({ subscription: s.name, event, job });
+    }
+  }
+  return out;
 }

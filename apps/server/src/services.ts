@@ -15,8 +15,8 @@ import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
-import { createEventHandlers } from "./event-handlers.js";
-import { completionNoticeHandler } from "./notify/completion.js";
+import { createEventSubscriptions } from "./event-handlers.js";
+import { readyEmailSubscription } from "./notify/completion.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
 import { sql } from "drizzle-orm";
@@ -320,10 +320,10 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
 
   const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, releases, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
-  // reactions that commit with the event that triggers them (event-handlers.ts)
-  const handlers = createEventHandlers();
-  handlers.on("project.done", "ready email", completionNoticeHandler(svc));
-  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry, handlers);
+  // jobs that commit with the event that triggers them (event-handlers.ts)
+  const subscriptions = createEventSubscriptions();
+  subscriptions.add(readyEmailSubscription(svc));
+  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry, subscriptions);
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads
     svc.ee = await step("enterprise edition (billing)", async () => (await import("./ee/index.js")).createEE(svc));
