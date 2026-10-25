@@ -43,15 +43,16 @@ project already hit the problem it prevents.
   an event for a change that didn't happen, or a "pending" clip with no job.
 - **Work that follows an event is a handler on it, not a call at the emit site.** Something that
   should happen whenever an event is written (the ready email on `project.done`) is a handler in a
-  layered map, `defineEventHandlers({ "project.done": { readyEmail: (ctx) => … } })`, merged into
-  `project-event-handlers.ts` (a name used twice on one event does not compile). `ctx.event.payload`
-  is inferred from the event's zod schema (`projectEventSchemas` in @reelsaw/shared), which every
-  emit site is type-checked against too. A handler only *declares* a job: it may read on the
-  emitting transaction (`ctx.db`, select only) and returns `{ queue, data, singletonKey?, startAfter? }`
-  or null. The unit of work writes that job on the same connection just before COMMIT, so the event
-  and every handler's job commit or roll back together (a transactional outbox whose relay is
-  pg-boss). The work runs in the job's worker, idempotent per event. A handler that throws rolls the
-  transition back.
+  layered map, `defineEventHandlers({ "project.done": { readyEmail: { key, handle, … } } })`, merged
+  into `project-event-handlers.ts` (a name used twice on one event does not compile).
+  `event.payload` is inferred from the event's zod schema (`projectEventSchemas` in @reelsaw/shared),
+  which every emit site is type-checked against too. Each handler has its own pg-boss queue: `key`
+  (select-only reads on the emitting transaction; null skips) picks the job's key, and the unit of
+  work writes the job on the same connection just before COMMIT, so the event and every handler's
+  job commit or roll back together (a transactional outbox whose relay is pg-boss). `handle` runs
+  after commit with retries, idempotent per key. Concurrency is opt-in and enforced by the queue's
+  policy, not by hand: `coalesce` (a waiting job for the key absorbs new ones) and `oneAtATime` (one
+  running job per key, across processes). Don't hand-roll claims or leases for that.
 - **Standalone `svc.events.emit` is only for notifications** that describe no state change, such as
   progress ticks. It is a single atomic statement (insert + NOTIFY).
 - **NOTIFY happens inside the transaction**, so listeners are only woken once the data they will

@@ -10,8 +10,7 @@ import {
   selectUnseen,
   type DoneNotice,
 } from "../src/notify/completion.js";
-import { defineEventHandlers, mergeEventHandlers, runEventHandlers, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
-import { COMPLETION_NOTIFY_QUEUE } from "../src/queue/boss.js";
+import { defineEventHandlers, eventHandlerJobs, eventHandlerQueues, mergeEventHandlers, parseEventHandlerJob, policyOf, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
 
@@ -165,38 +164,54 @@ describe("event handlers", () => {
   const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
   const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
   const deps = (enabled: boolean) => ({ email: { enabled } as Email, settings }) as EventHandlerDeps;
+  const handle = async () => {};
 
   it("merges maps by event and refuses a name registered twice on one event", () => {
-    const a = defineEventHandlers({ "project.done": { x: () => null } });
-    const b = defineEventHandlers({ "project.done": { y: () => null }, "project.failed": { x: () => null } });
+    const a = defineEventHandlers({ "project.done": { x: { handle } } });
+    const b = defineEventHandlers({ "project.done": { y: { handle } }, "project.failed": { x: { handle } } });
     const m = mergeEventHandlers(a, b);
     assert.deepEqual(Object.keys(m["project.done"]), ["x", "y"]);
     assert.deepEqual(Object.keys(m["project.failed"]), ["x"]);
     // @ts-expect-error "project.done: x" is already registered
-    assert.throws(() => mergeEventHandlers(a, defineEventHandlers({ "project.done": { x: () => null } })));
+    assert.throws(() => mergeEventHandlers(a, defineEventHandlers({ "project.done": { x: { handle } } })));
   });
 
-  it("runs handlers in emit then map order, drops nulls, and types the payload", async () => {
+  it("maps the opted-in concurrency to a pg-boss policy, one queue per handler", () => {
+    assert.equal(policyOf({}), "standard");
+    assert.equal(policyOf({ coalesce: true }), "short");
+    assert.equal(policyOf({ oneAtATime: true }), "singleton");
+    assert.equal(policyOf({ coalesce: true, oneAtATime: true }), "stately");
+    const qs = eventHandlerQueues(readyEmailHandlers);
+    assert.deepEqual(qs.map((q) => [q.name, q.policy]), [["event.project.done.readyEmail", "stately"]]);
+  });
+
+  it("queues one job per handler in emit then map order, keyed by event id unless the handler keys it", async () => {
     const handlers = defineEventHandlers({
       "project.done": {
-        x: ({ event }) => ({ queue: "q", data: { n: event.id, clips: event.payload.clips } }),
-        none: () => null,
-        y: async ({ event }) => ({ queue: "q", data: { m: event.id } }),
+        x: { handle },
+        skip: { key: () => null, handle },
+        y: { key: async ({ event: e }) => `clips-${e.payload.clips}`, delaySeconds: () => 30, handle },
       },
     });
-    const r = await runEventHandlers(handlers, [event, { ...event, id: 2 }], db, deps(true));
-    assert.deepEqual(r.map((x) => [x.handler, x.event.id]), [["x", 1], ["y", 1], ["x", 2], ["y", 2]]);
-    assert.deepEqual(r[0]!.job.data, { n: 1, clips: 2 });
+    const jobs = await eventHandlerJobs(handlers, [event, { ...event, id: 2 }], db, deps(true));
+    assert.deepEqual(jobs.map((j) => [j.queue, j.data.key, j.startAfter ?? 0]), [
+      ["event.project.done.x", "1", 0],
+      ["event.project.done.y", "clips-2", 30],
+      ["event.project.done.x", "2", 0],
+      ["event.project.done.y", "clips-2", 30],
+    ]);
   });
 
-  it("the ready email asks for one delayed job per account, and none when email is off", async () => {
+  it("parses a job's event against the schema", () => {
+    assert.deepEqual(parseEventHandlerJob("project.done", { key: "k", event }), { key: "k", event });
+    assert.throws(() => parseEventHandlerJob("project.done", { key: "k", event: { ...event, payload: { clips: "2" } } }));
+    assert.throws(() => parseEventHandlerJob("project.failed", { key: "k", event }));
+  });
+
+  it("the ready email is keyed by the account, delayed by the setting, and skipped when email is off", async () => {
     const readyEmail = readyEmailHandlers["project.done"].readyEmail;
-    assert.equal(await readyEmail({ event, db, deps: deps(false) }), null);
-    assert.deepEqual(await readyEmail({ event, db, deps: deps(true) }), {
-      queue: COMPLETION_NOTIFY_QUEUE,
-      data: { userId: "owner-1" },
-      singletonKey: "owner-1",
-      startAfter: 300,
-    });
+    assert.equal(await readyEmail.key({ event, db, deps: deps(false) }), null);
+    assert.equal(await readyEmail.key({ event, db, deps: deps(true) }), "owner-1");
+    assert.equal(readyEmail.delaySeconds(deps(true)), 300);
   });
 });

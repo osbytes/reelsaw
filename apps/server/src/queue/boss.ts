@@ -1,4 +1,5 @@
 import { PgBoss } from "pg-boss";
+import type { EventHandlerQueue } from "../event-handlers.js";
 import type pg from "pg";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
@@ -16,12 +17,10 @@ export const QUEUES = {
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
 /**
- * Ready email. Not a pipeline stage, so it stays out of `QUEUES` and out of fair-share admission.
- * `short` + `singletonKey` = one waiting job per account: a second completion while the first
- * job is still delayed is inserted as a conflict and comes back null (the debounce). Once the
- * job is active, another completion can queue the next batch.
+ * Event handler queues (event-handlers.ts) are named `event.<type>.<handler>`. They are not pipeline
+ * stages, so they stay out of `QUEUES` and out of fair-share admission.
  */
-export const COMPLETION_NOTIFY_QUEUE = "notify.completion";
+export const EVENT_HANDLER_QUEUE_LIKE = "event.%";
 
 export interface ProjectJob {
   projectId: string;
@@ -102,7 +101,7 @@ export interface Queue {
   stop(): Promise<void>;
 }
 
-export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean, log: Logger): Queue {
+export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean, log: Logger, handlerQueues: readonly EventHandlerQueue[] = []): Queue {
   const boss = new PgBoss({
     db: { executeSql: (text, values) => pool.query(text, values) },
     schema: "pgboss",
@@ -117,14 +116,14 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
   const admission: Queue["admission"] = async (data, opts) => {
     const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
     // one statement; data->>'userId' has no index, but the live states are few rows next to completed history.
-    // notify.completion carries userId too, and is not pipeline work, so it is left out of the live count ($4).
+    // event handler jobs can carry userId too, and are not pipeline work, so they are left out of the live count ($4).
     const res = await exec.executeSql(
       `with o as (select coalesce($2::text, (select user_id from projects where id = $1)) as uid)
        select o.uid as "userId",
-         (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid and j.name <> $4) as live,
+         (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid and j.name not like $4) as live,
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
        from o`,
-      [data.projectId, data.userId ?? null, USER_RENDER_QUEUES, COMPLETION_NOTIFY_QUEUE],
+      [data.projectId, data.userId ?? null, USER_RENDER_QUEUES, EVENT_HANDLER_QUEUE_LIKE],
     );
     const r = res.rows[0] as Admission | undefined;
     return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };
@@ -153,15 +152,12 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
         // createQueue is a no-op for existing queues; keep retry/expiry in sync with the code
         await boss.updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit }).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
-      // short: a second job with the same singleton key stays out while the first is still waiting (created)
-      await boss.createQueue(COMPLETION_NOTIFY_QUEUE, {
-        policy: "short",
-        retryLimit: 3,
-        retryDelay: 60,
-        retryBackoff: true,
-        expireInSeconds: 120,
-        deleteAfterSeconds: 7 * 24 * 3600,
-      });
+      // one queue per event handler; its policy is the concurrency the handler opted into (policyOf)
+      for (const q of handlerQueues) {
+        const opts = { retryLimit: q.def.retryLimit ?? 3, expireInSeconds: q.def.expireInSeconds ?? 300 };
+        await boss.createQueue(q.name, { policy: q.policy, ...opts, retryDelay: 60, retryBackoff: true, deleteAfterSeconds: 7 * 24 * 3600 });
+        await boss.updateQueue(q.name, opts).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
+      }
       started = true;
     },
     async stop() {

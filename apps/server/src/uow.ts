@@ -19,7 +19,7 @@ import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
-import { runEventHandlers, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
+import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -155,10 +155,10 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       result = await fn(u);
       // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
       if (eventHandlers && emitted.length) {
-        for (const r of await runEventHandlers(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
-          const jobId = await queue.send(r.job.queue, r.job.data, { ...exec, singletonKey: r.job.singletonKey, startAfter: r.job.startAfter });
-          // null: the queue's policy deduped it (one already waiting for this key)
-          log.debug({ handler: r.handler, event: r.event.type, projectId: r.event.projectId, jobId }, jobId ? "event handler job queued" : "event handler job already queued");
+        for (const r of await eventHandlerJobs(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
+          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfter: r.startAfter });
+          // null: the handler coalesces and a job is already waiting for this key
+          log.debug({ handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId }, jobId ? "event handler job queued" : "event handler job already queued");
         }
       }
       await client.query("COMMIT");

@@ -5,7 +5,7 @@
  */
 import { inArray, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
-import { COMPLETION_NOTIFY_QUEUE, QUEUES } from "../queue/boss.js";
+import { QUEUES } from "../queue/boss.js";
 import type { Services } from "../services.js";
 
 export const QUEUE_ORDER = Object.values(QUEUES);
@@ -20,7 +20,6 @@ const QUEUE_LABEL: Record<string, string> = {
   [QUEUES.analyze]: "analyze",
   [QUEUES.render]: "render",
   [QUEUES.prepare]: "prepare",
-  [COMPLETION_NOTIFY_QUEUE]: "ready email",
 };
 
 export function queueLabel(name: string): string {

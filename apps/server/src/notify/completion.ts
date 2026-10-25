@@ -5,21 +5,16 @@
  * app), Linear (a digest only for what is still unread) and Discourse (`last_seen_at` is the
  * cutoff; already-seen posts are skipped):
  *
- * The first `project.done` schedules one pg-boss job (`short` policy, `singletonKey` = the
- * account) to run after `COMPLETION_NOTIFY_MINUTES`. the `project.done` handler `readyEmail` declares that job on
- * the event (event-handlers.ts) and the unit of work that wrote the event writes it before COMMIT, so
- * the job commits with the completion and no transition has to remember it. A second completion while that job is
- * still waiting is a no-op — the job reads every unseen `project.done` when it runs, so the
- * late one is included. The send is skipped for anything at or before `user.last_active_at`
- * (presence.ts). Nothing is queued when email is off.
+ * `readyEmail` is a `project.done` handler (event-handlers.ts) keyed by the account, so its job
+ * commits with the completion and runs `COMPLETION_NOTIFY_MINUTES` later. It opts into both kinds of
+ * concurrency (pg-boss `stately`): a completion while a job is still waiting joins it (the job reads
+ * every unseen `project.done` when it runs, so the late one is included), and at most one job per
+ * account runs at once, so two runs never mail the same batch side by side. The send is skipped for
+ * anything at or before `user.last_active_at` (presence.ts). Nothing is queued when email is off.
  *
- * The job may run twice, and two runs for one account can overlap (`short` only dedups the
- * waiting job; a retry or the next batch can start while one is still sending). Each event is
- * claimed in `completion_notices` with a lease before the send and marked after it: a second run
- * skips what a live lease holds, a failed send gives its claim back for the retry, and a run that
- * died is overtaken once its lease runs out. A crash after a successful send and before the mark
- * sends the same batch again with the same idempotency key (`completionIdempotencyKey`): Resend
- * drops the repeat within its 24-hour window; SMTP gets the same Message-ID, which some inboxes
+ * `completion_notices` records which events were mailed. A crash after a successful send and before
+ * that record sends the same batch again with the same idempotency key (`completionIdempotencyKey`):
+ * Resend drops the repeat within its 24-hour window; SMTP gets the same Message-ID, which some inboxes
  * collapse and others show twice (SMTP has no dedup of its own).
  */
 import { createHash } from "node:crypto";
@@ -27,19 +22,14 @@ import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { defineEventHandlers } from "../event-handlers.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
-import { COMPLETION_NOTIFY_QUEUE } from "../queue/boss.js";
+import type { UnitOfWork } from "../uow.js";
 import { templates } from "../email.js";
 
 /** Round numbers worth a line in the note. 1 is "your first", announced ahead of any higher one crossed in the same batch. */
 export const MILESTONES = [1, 10, 25, 50, 100] as const;
 
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-/**
- * How long a claim belongs to the run that made it. Longer than any send (Resend times out at 15 s,
- * SMTP well inside this) and than the job's expiry, so a run is never overtaken while it is sending.
- */
-const CLAIM_LEASE_SEC = 10 * 60;
-/** One more than we claim, so a full page schedules a follow-up for the rest. */
+/** One more than one note covers, so a full page schedules a follow-up for the rest. */
 const FETCH_LIMIT = 41;
 const SHOW = 8;
 const HIGHLIGHTS = 3;
@@ -89,7 +79,7 @@ export interface CollapsedProject {
   eventIds: number[];
 }
 
-/** One row per project, fields from the latest event, every event id kept so each run is claimed. */
+/** One row per project, fields from the latest event, every event id kept so each run is recorded as mailed. */
 export function collapseProjects(events: DoneNotice[]): CollapsedProject[] {
   const byId = new Map<string, CollapsedProject>();
   for (const e of [...events].sort((a, b) => a.at - b.at || a.eventId - b.eventId)) {
@@ -117,8 +107,11 @@ function clipLabel(hook: string, title: string): string {
   return raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
 }
 
-/** Send the ready note for everything this account finished after they were last here. Idempotent. */
-export async function deliverCompletionNotice(svc: Services, userId: string): Promise<void> {
+/**
+ * Send the ready note for everything this account finished after they were last here. Idempotent;
+ * the handler's queue runs one at a time per account. `again` queues the rest of a batch cut short.
+ */
+export async function deliverCompletionNotice(svc: Services, userId: string, again?: (u: UnitOfWork) => Promise<string | null>): Promise<void> {
   const log = svc.log.child({ module: "notify", userId });
   if (!svc.email.enabled) {
     log.debug({ reason: "email off" }, "completion notice skipped");
@@ -134,88 +127,45 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     return;
   }
 
-  // Every write before the send is one unit of work: drop stale claims, read what is still unseen,
-  // claim it, and queue a follow-up when another run holds all of it. They commit together or not
-  // at all, so a crash here leaves no claim without its follow-up and no follow-up for a claim that
-  // rolled back.
-  const N = schema.completionNotices;
   const lastActiveAt = user.lastActiveAt;
-  const claim = await svc.tx(async (u) => {
-    // a claim from a send that never went out, for a completion they have since seen, is dropped
-    if (lastActiveAt) {
-      await u.db.delete(N).where(and(
-        eq(N.userId, userId),
-        isNull(N.sentAt),
-        sql`${N.eventId} in (select id from project_events where created_at <= ${lastActiveAt})`,
-      ));
-    }
+  const cutoff = new Date(Date.now() - LOOKBACK_MS);
+  const rows = await db
+    .select({
+      eventId: schema.projectEvents.id,
+      at: schema.projectEvents.createdAt,
+      payload: schema.projectEvents.payload,
+      projectId: schema.projects.id,
+      title: schema.projects.title,
+    })
+    .from(schema.projectEvents)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.projectEvents.projectId))
+    .where(and(
+      eq(schema.projects.userId, userId),
+      isNull(schema.projects.deletedAt),
+      eq(schema.projectEvents.type, "project.done"),
+      gt(schema.projectEvents.createdAt, cutoff),
+      lastActiveAt ? gt(schema.projectEvents.createdAt, lastActiveAt) : sql`true`,
+      sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id})`,
+    ))
+    .orderBy(asc(schema.projectEvents.createdAt))
+    .limit(FETCH_LIMIT);
 
-    const cutoff = new Date(Date.now() - LOOKBACK_MS);
-    const rows = await u.db
-      .select({
-        eventId: schema.projectEvents.id,
-        at: schema.projectEvents.createdAt,
-        payload: schema.projectEvents.payload,
-        projectId: schema.projects.id,
-        title: schema.projects.title,
-      })
-      .from(schema.projectEvents)
-      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectEvents.projectId))
-      .where(and(
-        eq(schema.projects.userId, userId),
-        isNull(schema.projects.deletedAt),
-        eq(schema.projectEvents.type, "project.done"),
-        gt(schema.projectEvents.createdAt, cutoff),
-        lastActiveAt ? gt(schema.projectEvents.createdAt, lastActiveAt) : sql`true`,
-        sql`not exists (select 1 from completion_notices n where n.event_id = ${schema.projectEvents.id} and n.sent_at is not null)`,
-      ))
-      .orderBy(asc(schema.projectEvents.createdAt))
-      .limit(FETCH_LIMIT);
-
-    const truncated = rows.length > FETCH_LIMIT - 1;
-    const page = truncated ? rows.slice(0, FETCH_LIMIT - 1) : rows;
-    const notices: DoneNotice[] = page.map((r) => ({
-      eventId: Number(r.eventId),
-      projectId: r.projectId,
-      title: r.title,
-      at: r.at.getTime(),
-      clips: num(r.payload.clips),
-      failed: num(r.payload.failed),
-      rerender: r.payload.runReason === "rerender",
-    }));
-    const unseen = selectUnseen(notices, lastActiveAt?.getTime() ?? null, Date.now());
-    if (!unseen.length) return { kind: "none" as const };
-
-    // One statement claims each event: a new row, or an unsent one whose lease ran out (a run that died
-    // mid-send). A live lease belongs to a run still sending (pg-boss can start a retry, or the next
-    // batch's job, while an expired one is still running), so it is not taken. RETURNING is what we own.
-    const claimedRows = await u.db
-      .insert(N)
-      .values(unseen.map((e) => ({ eventId: e.eventId, userId })))
-      .onConflictDoUpdate({
-        target: N.eventId,
-        set: { claimedAt: sql`now()` },
-        setWhere: and(isNull(N.sentAt), sql`${N.claimedAt} < now() - make_interval(secs => ${CLAIM_LEASE_SEC})`),
-      })
-      .returning({ eventId: N.eventId });
-    const owned = new Set(claimedRows.map((r) => r.eventId));
-    const mine = unseen.filter((e) => owned.has(e.eventId));
-    if (!mine.length) {
-      // held by another run: if that run dies, this follow-up (after its lease) sends what it held
-      const again = await u.send(COMPLETION_NOTIFY_QUEUE, { userId }, { singletonKey: userId, startAfter: CLAIM_LEASE_SEC + 30 });
-      return { kind: "held" as const, followUp: !!again };
-    }
-    return { kind: "mine" as const, mine, truncated };
-  });
-  if (claim.kind === "none") {
+  const truncated = rows.length > FETCH_LIMIT - 1;
+  const page = truncated ? rows.slice(0, FETCH_LIMIT - 1) : rows;
+  const notices: DoneNotice[] = page.map((r) => ({
+    eventId: Number(r.eventId),
+    projectId: r.projectId,
+    title: r.title,
+    at: r.at.getTime(),
+    clips: num(r.payload.clips),
+    failed: num(r.payload.failed),
+    rerender: r.payload.runReason === "rerender",
+  }));
+  const mine = selectUnseen(notices, lastActiveAt?.getTime() ?? null, Date.now());
+  if (!mine.length) {
     log.debug({ reason: "nothing unseen" }, "completion notice skipped");
     return;
   }
-  if (claim.kind === "held") {
-    log.debug({ reason: "already claimed", followUp: claim.followUp }, "completion notice skipped");
-    return;
-  }
-  const { mine, truncated } = claim;
 
   const projects = collapseProjects(mine);
   const clipRows = await db
@@ -264,32 +214,27 @@ export async function deliverCompletionNotice(svc: Services, userId: string): Pr
     };
   });
 
-  const claimed = mine.map((e) => e.eventId);
-  // The send sits between two units of work on purpose: a transaction held open across the mail
-  // provider's network call would keep these rows locked for as long as the provider takes. The
-  // lease keeps other runs off these events meanwhile, and the idempotency key (same events, same
-  // key) lets Resend drop the repeat if this run dies after the provider took the mail but before
-  // the mark below commits.
+  const sent = mine.map((e) => e.eventId);
+  // The send sits outside a transaction on purpose: one held open across the mail provider's network
+  // call would hold its connection for as long as the provider takes. No other run for this account
+  // can start meanwhile (the handler runs one at a time per account), and the idempotency key (same
+  // events, same key) lets Resend drop the repeat if this run dies before the record below commits.
   try {
     await svc.email.send(
       { to: user.email, ...templates.clipsReady(svc.config.APP_URL, { greeting: greetingName(user.name), projects: mailProjects, hidden: projects.length - shown.length, milestone }) },
-      { strict: true, idempotencyKey: completionIdempotencyKey(userId, claimed) },
+      { strict: true, idempotencyKey: completionIdempotencyKey(userId, sent) },
     );
   } catch (err) {
-    // Give the claim back so pg-boss's retry (a minute away, inside the lease) can take it again.
-    // One statement, so no unit of work; if it fails, the lease still runs out on its own.
-    await db.update(N).set({ claimedAt: new Date(0) }).where(and(inArray(N.eventId, claimed), isNull(N.sentAt)))
-      .catch((e) => log.warn({ err: e }, "completion notice claim not released"));
-    log.error({ err, events: claimed.length }, "completion notice not sent");
+    log.error({ err, events: sent.length }, "completion notice not sent");
     throw err;
   }
-  // the mark and the follow-up for a page that was cut short commit together
-  const again = await svc.tx(async (u) => {
-    await u.db.update(N).set({ sentAt: new Date() }).where(inArray(N.eventId, claimed));
-    return truncated ? u.send(COMPLETION_NOTIFY_QUEUE, { userId }, { singletonKey: userId, startAfter: 60 }) : null;
+  // the record and the follow-up for a page that was cut short commit together
+  const followUp = await svc.tx(async (u) => {
+    await u.db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
+    return truncated && again ? again(u) : null;
   });
-  log.info({ projects: projects.length, events: claimed.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
-  if (truncated) log.warn({ queued: !!again, held: FETCH_LIMIT - 1 }, "completion notice truncated");
+  log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
+  if (truncated) log.warn({ queued: !!followUp, held: FETCH_LIMIT - 1 }, "completion notice truncated");
 }
 
 /**
@@ -302,21 +247,24 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 }
 
 /**
- * The ready note as a `project.done` handler (event-handlers.ts): one job per account, written with
- * the completion's transaction. Nothing when email is off.
+ * The ready note as a `project.done` handler (event-handlers.ts), keyed by the account: a completion
+ * joins a note still waiting, and one note per account is sent at a time. Nothing when email is off.
  */
 export const readyEmailHandlers = defineEventHandlers({
   "project.done": {
-    readyEmail: async ({ event, db, deps }) => {
-      if (!deps.email.enabled) return null;
-      const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
-      if (!project) return null;
-      return {
-        queue: COMPLETION_NOTIFY_QUEUE,
-        data: { userId: project.userId },
-        singletonKey: project.userId,
-        startAfter: deps.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
-      };
+    readyEmail: {
+      async key({ event, db, deps }) {
+        if (!deps.email.enabled) return null;
+        const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
+        return project?.userId ?? null;
+      },
+      delaySeconds: (deps) => deps.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
+      coalesce: true,
+      oneAtATime: true,
+      // a minute apart with backoff; a run is failed after 2 min (a send takes seconds; Resend times out at 15 s)
+      retryLimit: 3,
+      expireInSeconds: 120,
+      handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, (u) => again(u, { delaySeconds: 60 })),
     },
   },
 });

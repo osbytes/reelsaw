@@ -1,5 +1,5 @@
 {
-  "id": "9fd861d0-b781-4ee8-ba6c-4b411678b03a",
+  "id": "1fea74a7-f40a-411d-836c-257b8fc17400",
   "prevId": "facf260f-5ee0-4e27-91bd-e0af89787511",
   "version": "7",
   "dialect": "postgresql",
@@ -1412,23 +1412,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
         "sent_at": {
           "name": "sent_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
-        "completion_notices_user_unsent_idx": {
-          "name": "completion_notices_user_unsent_idx",
+        "completion_notices_user_id_idx": {
+          "name": "completion_notices_user_id_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -1438,7 +1432,6 @@
             }
           ],
           "isUnique": false,
-          "where": "\"completion_notices\".\"sent_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

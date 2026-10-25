@@ -592,8 +592,8 @@ export type Transcript = typeof transcripts.$inferSelect;
 export type ProjectEventRow = typeof projectEvents.$inferSelect;
 
 /**
- * A `project.done` claimed for the ready email. `sentAt` null is an in-progress send (a retry finishes
- * it); a row with `sentAt` set is not mailed again. Rows go when the event or the account does.
+ * A `project.done` the ready email has covered, so it is not mailed again. Written after the send (a
+ * crash before it re-sends with the same idempotency key). Rows go when the event or the account does.
  */
 export const completionNotices = pgTable(
   "completion_notices",
@@ -604,10 +604,9 @@ export const completionNotices = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    claimedAt: timestamp("claimed_at", { withTimezone: true }).defaultNow().notNull(),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("completion_notices_user_unsent_idx").on(t.userId).where(sql`${t.sentAt} is null`)],
+  (t) => [index("completion_notices_user_id_idx").on(t.userId)],
 );
 
 /**
