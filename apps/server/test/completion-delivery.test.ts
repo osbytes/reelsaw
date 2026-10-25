@@ -22,16 +22,16 @@ after(() => h.cleanup());
 // the app creates handler queues at boot (createQueue().start()); a fresh test database has none
 if (!notReady) for (const q of eventHandlerQueues(projectEventHandlers)) await h.svc.queue.boss.createQueue(q.name, { policy: q.policy });
 
-const sent: Array<{ to: string; subject: string; key?: string; headers?: Record<string, string> }> = [];
+const sent: Array<{ to: string; subject: string; text?: string; key?: string; headers?: Record<string, string> }> = [];
 let failSend = false;
 const svc = {
   ...h.svc,
   config: { ...h.svc.config, APP_URL: "https://app.example.test/", BETTER_AUTH_SECRET: "test-secret-at-least-sixteen" },
   email: {
     enabled: true,
-    send: async (m: { to: string; subject: string; headers?: Record<string, string> }, o?: { idempotencyKey?: string }) => {
+    send: async (m: { to: string; subject: string; text: string; headers?: Record<string, string> }, o?: { idempotencyKey?: string }) => {
       if (failSend) throw new Error("provider down");
-      sent.push({ to: m.to, subject: m.subject, key: o?.idempotencyKey, headers: m.headers });
+      sent.push({ to: m.to, subject: m.subject, text: m.text, key: o?.idempotencyKey, headers: m.headers });
     },
   },
 } as unknown as Services;
@@ -43,7 +43,9 @@ async function account(lastActive: string | null): Promise<string> {
 }
 async function finished(userId: string, ago: string): Promise<string> {
   const p = await h.makeProject(userId, "done");
-  await h.pool.query(`insert into project_events (project_id, type, payload, created_at) values ($1, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}')`, [p]);
+  const e = await h.pool.query(`insert into project_events (project_id, type, payload, created_at) values ($1, 'project.done', '{"clips":2,"failed":0,"runSeq":1,"runReason":"created"}', now() - interval '${ago}') returning id`, [p]);
+  // what finalizeProjectIfDone writes with the first finish
+  await h.pool.query(`insert into finished_projects (project_id, user_id, first_event_id) values ($1, $2, $3) on conflict do nothing`, [p, userId, e.rows[0].id]);
   return p;
 }
 
@@ -73,6 +75,23 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.equal(sent.length, 0);
     const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
     assert.equal(r.rows[0].n, 0);
+  });
+
+  it("announces the 10th project once, even after an earlier project is deleted forever", async () => {
+    const u = await account("1 hour");
+    const old: string[] = [];
+    for (let i = 0; i < 9; i++) old.push(await finished(u, `${2 + i} hours`)); // seen: before they were last here
+    await finished(u, "10 minutes");
+    sent.length = 0;
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.text ?? "", /That's 10 projects finished/);
+    // a purge drops the project and its events; the ledger keeps the count at 10, so the 11th is no milestone
+    await h.pool.query(`delete from projects where id = $1`, [old[0]]);
+    await finished(u, "5 minutes");
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 2);
+    assert.doesNotMatch(sent[1]!.text ?? "", /projects finished/);
   });
 
   it("skips what finished before they were last here", async () => {

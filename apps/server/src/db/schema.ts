@@ -612,6 +612,26 @@ export const completionNotices = pgTable(
 );
 
 /**
+ * One row per project that ever finished, written with its first `project.done` in that transaction
+ * (lifecycle.ts `finalizeProjectIfDone`). The ready email's milestones count these (notify/completion.ts).
+ * No foreign key to the project: deleting it forever, or the retention purge, removes its events but
+ * must not lower the count, or "That's 10 projects finished" would be said again. Rows go with the account.
+ */
+export const finishedProjects = pgTable(
+  "finished_projects",
+  {
+    projectId: text("project_id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** the first project.done; a batch whose mailed events include it is this project's first finish */
+    firstEventId: bigint("first_event_id", { mode: "number" }).notNull(),
+    firstDoneAt: timestamp("first_done_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("finished_projects_user_id_idx").on(t.userId)],
+);
+
+/**
  * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate
  * moment with its scores and the filter that dropped it. Written in the stage's unit of work.
  * `models` records what actually ran (config at report time may differ).

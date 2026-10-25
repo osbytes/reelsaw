@@ -190,20 +190,19 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     byProject.set(c.projectId, list);
   }
 
-  const finishedRow = await db
-    .select({ n: sql<number>`count(distinct ${schema.projectEvents.projectId})::int` })
-    .from(schema.projectEvents)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.projectEvents.projectId))
-    .where(and(eq(schema.projects.userId, userId), eq(schema.projectEvents.type, "project.done")));
-  const finished = finishedRow[0]?.n ?? projects.length;
-  const firsts = await db
-    .select({ projectId: schema.projectEvents.projectId, firstId: sql<number>`min(${schema.projectEvents.id})` })
-    .from(schema.projectEvents)
-    .where(and(eq(schema.projectEvents.type, "project.done"), inArray(schema.projectEvents.projectId, projects.map((p) => p.id))))
-    .groupBy(schema.projectEvents.projectId);
-  const ownedIds = new Set(mine.map((e) => Number(e.eventId)));
-  const firstTime = firsts.filter((f) => ownedIds.has(Number(f.firstId))).length;
-  const milestone = milestoneCrossed(finished - firstTime, finished);
+  // Milestones count the finished_projects ledger, not project_events: deleting a project forever (or the
+  // retention purge) removes its events, and a count that went down would announce the same milestone twice.
+  // A project is new in this batch when its first finish is one of the events being mailed.
+  const F = schema.finishedProjects;
+  const [counts] = await db
+    .select({
+      finished: sql<number>`count(*)::int`,
+      firstTime: sql<number>`(count(*) filter (where ${inArray(F.firstEventId, mine.map((e) => e.eventId))}))::int`,
+    })
+    .from(F)
+    .where(eq(F.userId, userId));
+  const finished = counts?.finished ?? 0;
+  const milestone = milestoneCrossed(finished - (counts?.firstTime ?? 0), finished);
 
   const shown = projects.slice(0, SHOW);
   const mailProjects = shown.map((p) => {
