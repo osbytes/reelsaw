@@ -130,7 +130,7 @@ export async function deleteOwnedProject(svc: Services, actor: Actor, projectId:
       restorable: restorableFor(svc),
       storedBytes: stored,
       message: stored
-        ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you wipe it.`
+        ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.`
         : `Deleted. It can be restored ${restorableFor(svc)}.`,
     };
   });
@@ -153,15 +153,15 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
 export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: string) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: true });
-    if (!p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only projects already in Deleted can be wiped." });
+    if (!p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only projects already in Deleted can be deleted forever." });
     // re-check under the row lock (clips first, then the project, like deleteProject): a restore that committed since
-    // the read above wins, instead of this wiping a project that is live again
+    // the read above wins, instead of this deleting a project that is live again for good
     await lockProjectClips(u, projectId);
     const [still] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt))).for("update");
-    if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was wiped." });
+    if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was deleted." });
     const stored = await projectStoredBytes(u.db, projectId);
     await purgeProject(svc, u, projectId);
-    return { ok: true, storedBytes: stored, message: stored ? `Wiped. ${formatBytes(stored)} is free now.` : "Wiped." };
+    return { ok: true, storedBytes: stored, message: stored ? `Deleted forever. ${formatBytes(stored)} is free now.` : "Deleted forever." };
   });
 }
 
@@ -192,10 +192,10 @@ export async function purgeOwnedClip(svc: Services, actor: Actor, clipId: string
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
     await findProject(u.db, actor, c.projectId, { deleted: false });
-    if (!c.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only clips already in Deleted can be wiped." });
+    if (!c.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only clips already in Deleted can be deleted forever." });
     const stored = c.outputKey && c.outputBytes ? c.outputBytes : 0;
     await purgeClip(svc, u, clipId);
-    return { ok: true as const, storedBytes: stored, message: stored ? `Wiped. ${formatBytes(stored)} is free now.` : "Wiped." };
+    return { ok: true as const, storedBytes: stored, message: stored ? `Deleted forever. ${formatBytes(stored)} is free now.` : "Deleted forever." };
   });
 }
 

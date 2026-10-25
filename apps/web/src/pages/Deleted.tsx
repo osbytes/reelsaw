@@ -23,25 +23,25 @@ const REVEAL_ROW = "transition-opacity group-hover/row:!opacity-100 focus-within
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const dateFmt: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 const keyOf = (kind: DeletedKind, id: string) => `${kind}:${id}`;
-/** The first per-item reason of a partly failed bulk restore / wipe, so the toast says why. */
+/** The first per-item reason of a partly failed bulk restore / delete forever, so the toast says why. */
 const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
   const e = results.find((x) => !x.ok && x.error)?.error;
   return e ? `: ${e.slice(0, 160)}` : "";
 };
 
 /**
- * When the row is wiped for good, as a countdown (GitLab's "pending deletion", Immich's days left):
- * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`wipeDate`).
+ * When the row is deleted forever, as a countdown (GitLab's "pending deletion", Immich's days left):
+ * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`foreverDate`).
  */
-function wipeLabel(purgeAt: string | null) {
-  if (!purgeAt) return "Kept until wiped";
+function foreverLabel(purgeAt: string | null) {
+  if (!purgeAt) return "Kept until you delete it forever";
   const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
-  if (days <= 0) return "Wiped with the next hourly sweep";
-  return days === 1 ? "wiped within a day" : `wiped in ${days} days`;
+  if (days <= 0) return "Deleted forever within the hour";
+  return days === 1 ? "deleted forever within a day" : `deleted forever in ${days} days`;
 }
 
-function wipeDate(purgeAt: string | null) {
-  return purgeAt ? `Wiped for good on ${new Date(purgeAt).toLocaleDateString(undefined, dateFmt)}` : undefined;
+function foreverDate(purgeAt: string | null) {
+  return purgeAt ? `Deleted forever on ${new Date(purgeAt).toLocaleDateString(undefined, dateFmt)}` : undefined;
 }
 
 type Row = {
@@ -70,12 +70,12 @@ function detailOf(r: Row) {
   const size = r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files";
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
   const held = whyHeld(r);
-  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, wipeLabel(r.purgeAt)].filter(Boolean).join(" · ");
+  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt)].filter(Boolean).join(" · ");
 }
 
 /**
  * Restorable deletes in one selectable list: projects, clips of live projects, library items and
- * templates. Each row says when it was deleted and when it is wiped. The header checkbox stays
+ * templates. Each row says when it was deleted and when it is deleted forever. The header checkbox stays
  * visible. A row's checkbox and ⋯ appear on hover (always on a coarse pointer); a checked row
  * keeps its checkbox. The checkbox hit target fills the row from its top and bottom to the left
  * edge. Deep links: `#project=id` (also clip, asset, template).
@@ -147,7 +147,7 @@ export function DeletedPage() {
         <div className="min-w-0">
           <h1 className="text-[28px] font-bold tracking-tight">Deleted</h1>
           <p className="mt-1 min-h-5 text-sm text-ink2">
-            Restore something, or wipe it to free storage. Each row says when it was deleted and when it is wiped
+            Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
             {data && data.keepDays > 0 ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})` : ""}.
           </p>
         </div>
@@ -170,7 +170,7 @@ export function DeletedPage() {
           <div className="flex flex-col items-center gap-2 rounded-[16px] border border-dashed border-line2 px-5 py-10 text-center">
             <Trash2 className="h-6 w-6 text-ink3" aria-hidden />
             <b className="text-[15px]">Nothing waiting</b>
-            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">Deleted projects, clips, library items and templates show up here until you restore them or wipe them.</p>
+            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.</p>
           </div>
         )}
 
@@ -207,11 +207,11 @@ export function DeletedPage() {
                     <span className="hidden font-semibold text-ink3 sm:block">{KIND_LABEL[r.kind]}</span>
                     <span className="min-w-0">
                       <span className="block truncate text-[14px] font-semibold text-ink2">{r.title}</span>
-                      <span className="block truncate text-xs text-ink3 sm:hidden" title={wipeDate(r.purgeAt)}>
+                      <span className="block truncate text-xs text-ink3 sm:hidden" title={foreverDate(r.purgeAt)}>
                         {KIND_LABEL[r.kind]} · {detailOf(r)}
                       </span>
                     </span>
-                    <span className="hidden truncate text-xs text-ink3 sm:block" title={wipeDate(r.purgeAt)}>
+                    <span className="hidden truncate text-xs text-ink3 sm:block" title={foreverDate(r.purgeAt)}>
                       {detailOf(r)}
                     </span>
                     <DropdownMenu.Root>
@@ -224,7 +224,7 @@ export function DeletedPage() {
                             Restore
                           </DropdownMenu.Item>
                           <DropdownMenu.Item className="menu-item text-err" disabled={!r.canPurge || busy} title={heldWhy} onSelect={() => r.canPurge && setPending([r])}>
-                            Wipe
+                            Delete forever
                           </DropdownMenu.Item>
                         </DropdownMenu.Content>
                       </DropdownMenu.Portal>
@@ -252,10 +252,10 @@ export function DeletedPage() {
                       <DropdownMenu.Item
                         className="menu-item text-err"
                         disabled={busy || held.length === selected.length}
-                        title={held.length === selected.length ? "None of the selected items can be wiped yet" : held.length ? `${plural(held.length, "item")} still in use will be skipped` : undefined}
+                        title={held.length === selected.length ? "None of the selected items can be deleted forever yet" : held.length ? `${plural(held.length, "item")} still in use will be skipped` : undefined}
                         onSelect={() => setPending(selected.filter((r) => r.canPurge))}
                       >
-                        Wipe
+                        Delete forever
                       </DropdownMenu.Item>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
@@ -268,7 +268,7 @@ export function DeletedPage() {
       <ConfirmDialog
         open={!!pending}
         onOpenChange={(o) => !o && setPending(null)}
-        title={pending && pending.length > 1 ? `Wipe ${pending.length} items?` : "Wipe for good?"}
+        title={pending && pending.length > 1 ? `Delete ${pending.length} items forever?` : "Delete forever?"}
         body={
           pending && pending.length > 1 ? (
             <>
@@ -294,7 +294,7 @@ export function DeletedPage() {
             <>“{pending?.[0]?.title}” is deleted permanently. Clips that already have its layers keep them. This cannot be undone.</>
           )
         }
-        confirm="Wipe"
+        confirm="Delete forever"
         danger
         onConfirm={() => {
           const rows = pending;
@@ -306,7 +306,7 @@ export function DeletedPage() {
                 setPending(null);
                 setSel([]);
                 refresh();
-                toast(r.failed ? `Wiped ${r.purged} · ${r.failed} couldn’t be wiped${firstError(r.results)}` : r.storedBytes ? `Wiped. ${formatBytes(r.storedBytes)} is free now.` : rows.length === 1 ? `Wiped “${rows[0]!.title}”` : `Wiped ${rows.length} items`);
+                toast(r.failed ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}` : r.storedBytes ? `Deleted forever. ${formatBytes(r.storedBytes)} is free now.` : rows.length === 1 ? `Deleted “${rows[0]!.title}” forever` : `Deleted ${rows.length} items forever`);
               },
               onError: (err) => toast.error(err.message),
             },

@@ -160,7 +160,7 @@ export default function BillingSection() {
                 <span className="text-xs text-ink3">
                   Removed projects still count until you{" "}
                   <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
-                    wipe them
+                    delete them forever
                   </Link>
                   .
                 </span>

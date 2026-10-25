@@ -86,7 +86,7 @@ export const PRIVACY: LegalSection[] = [
   },
   {
     heading: "How long we keep it",
-    paragraphs: ["Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you wipe them or they are purged. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."],
+    paragraphs: ["Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you delete them forever or they are purged. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."],
   },
   {
     heading: "Your rights",

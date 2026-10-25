@@ -95,7 +95,7 @@ describe("listDeleted and purge", { skip: notReady ?? false }, () => {
     }
   });
 
-  it("says to restore the project when a clip's project is still deleted, and refuses to wipe a live project", async () => {
+  it("says to restore the project when a clip's project is still deleted, and refuses to delete a live project forever", async () => {
     const actor = { id: userId, admin: false };
     const p = await h.makeProject(userId, "done");
     const clip = await h.makeClip(p, 0, "done");

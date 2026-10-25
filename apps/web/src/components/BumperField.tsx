@@ -136,7 +136,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       () => (refresh(), toast(`Restored ${a.name}`), true),
       (e) => (fail(e), false),
     );
-  /** Soft delete with Undo / Wipe / See deletions (the server keeps the file, so projects using it keep rendering). */
+  /** Soft delete with Undo / Delete forever / See deletions (the server keeps the file, so projects using it keep rendering). */
   const remove = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
       () => (

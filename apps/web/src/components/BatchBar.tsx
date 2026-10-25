@@ -102,7 +102,7 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={selected.length === 1 ? "Delete this clip?" : `Delete ${selected.length} clips?`}
-        body={`${selected.length === 1 ? `“${selected[0]?.title ?? "This clip"}” is` : `${selected.length} clips are`} hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you wipe ${selected.length === 1 ? "it" : "them"}.`}
+        body={`${selected.length === 1 ? `“${selected[0]?.title ?? "This clip"}” is` : `${selected.length} clips are`} hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete forever ${selected.length === 1 ? "it" : "them"}.`}
         confirm={selected.length === 1 ? "Delete clip" : "Delete clips"}
         danger
         onConfirm={() => {

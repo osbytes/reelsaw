@@ -952,7 +952,7 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you wipe it from Deleted."
+        body="The project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted."
         confirm="Delete project"
         danger
         onConfirm={() =>

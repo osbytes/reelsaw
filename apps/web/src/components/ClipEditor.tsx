@@ -2225,7 +2225,7 @@ export function ClipEditor(props: Props) {
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this clip?"
-        body={`“${title || "Untitled"}” is hidden from the project. Unsaved edits are discarded. You can undo this for a few days from Deleted. Storage still counts until you wipe it.`}
+        body={`“${title || "Untitled"}” is hidden from the project. Unsaved edits are discarded. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() => {

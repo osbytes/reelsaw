@@ -162,9 +162,9 @@ export async function purgeLayerTemplate(svc: Services, userId: string, id: stri
       .where(and(eq(schema.layerTemplates.id, id), eq(schema.layerTemplates.userId, userId)))
       .for("update");
     if (!row) throw notFound();
-    if (!row.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only templates already in Deleted can be wiped." });
+    if (!row.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only templates already in Deleted can be deleted forever." });
     await u.db.delete(schema.layerTemplates).where(eq(schema.layerTemplates.id, id));
-    return { ok: true as const, message: `Wiped “${row.name}”.` };
+    return { ok: true as const, message: `Deleted “${row.name}” forever.` };
   });
 }
 

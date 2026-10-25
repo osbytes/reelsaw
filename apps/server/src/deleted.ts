@@ -40,7 +40,7 @@ async function counted(n: Promise<Array<{ n: number }>>): Promise<number> {
  * carries the upgrade/free-space actions); anything else is an internal failure whose text (SQL,
  * storage paths) stays in the log.
  */
-function failMessage(svc: Services, e: unknown, item: { kind: DeletedKind; id: string }, action: "restore" | "wipe"): string {
+function failMessage(svc: Services, e: unknown, item: { kind: DeletedKind; id: string }, action: "restore" | "purge"): string {
   if (e instanceof TRPCError) return e.message;
   svc.log.child({ module: "deleted" }).error({ err: e, ...item, action }, "deleted item action failed");
   return "Something went wrong. Try again in a moment.";
@@ -280,7 +280,7 @@ export async function purgeDeleted(svc: Services, actor: Actor & { id: string },
       results.push({ kind: it.kind, id: it.id, ok: true, storedBytes: storedOf(r) });
     } catch (e) {
       firstError ??= e;
-      results.push({ kind: it.kind, id: it.id, ok: false, storedBytes: 0, error: failMessage(svc, e, it, "wipe") });
+      results.push({ kind: it.kind, id: it.id, ok: false, storedBytes: 0, error: failMessage(svc, e, it, "purge") });
     }
   }
   const purged = results.filter((r) => r.ok).length;

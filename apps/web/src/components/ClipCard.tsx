@@ -300,7 +300,7 @@ export function ClipCard({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this clip?"
-        body={`“${clip.title || "Untitled moment"}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you wipe it.`}
+        body={`“${clip.title || "Untitled moment"}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() =>

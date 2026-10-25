@@ -357,7 +357,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       { key: "a-templates", group: "Actions", icon: <Layers className="h-4 w-4" />, label: "Go to templates", hint: "layer templates for any clip length", run: go(() => nav("/templates")) },
       { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
-      { key: "a-deleted", group: "Actions", icon: <Trash2 className="h-4 w-4" />, label: "Go to deleted", hint: "restore or wipe", run: go(() => nav(DELETED_PATH)) },
+      { key: "a-deleted", group: "Actions", icon: <Trash2 className="h-4 w-4" />, label: "Go to deleted", hint: "restore or delete forever", run: go(() => nav(DELETED_PATH)) },
       { key: "a-releases", group: "Actions", icon: <Sparkles className="h-4 w-4" />, label: "What's new", hint: "reelsaw.com/releases", run: go(() => window.open(CHANGELOG_URL, "_blank", "noopener,noreferrer")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
@@ -703,7 +703,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you wipe it from Deleted.`}
+        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
@@ -725,7 +725,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "clip"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this clip?"
-        body={`“${confirm?.title ?? ""}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you wipe it.`}
+        body={`“${confirm?.title ?? ""}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() => {

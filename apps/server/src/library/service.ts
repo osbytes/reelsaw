@@ -619,7 +619,7 @@ export async function purgeOwnedAsset(svc: Services, userId: string, assetId: st
       .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
       .for("update");
     if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
-    if (!a.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only library items already in Deleted can be wiped." });
+    if (!a.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only library items already in Deleted can be deleted forever." });
     // "still named" is read from asset_refs, which may miss old projects until its backfill is done (the sweep waits too)
     if (!(await assetRefsReady(u.db))) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The library is still indexing which projects use what. Try again in a few minutes." });
     const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${assetId}) as used`);
@@ -642,6 +642,6 @@ export async function purgeOwnedAsset(svc: Services, userId: string, assetId: st
         svc.log.child({ module: "library", assetId }).warn({ err }, "removed a library item but could not delete its files");
       }
     });
-    return { ok: true as const, storedBytes: a.sizeBytes, message: a.sizeBytes ? `Wiped. ${formatBytes(a.sizeBytes)} is free now.` : "Wiped." };
+    return { ok: true as const, storedBytes: a.sizeBytes, message: a.sizeBytes ? `Deleted forever. ${formatBytes(a.sizeBytes)} is free now.` : "Deleted forever." };
   });
 }

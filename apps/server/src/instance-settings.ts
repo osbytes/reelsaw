@@ -63,7 +63,7 @@ export const RUNTIME_SETTINGS = {
   MAX_NEW_PROJECTS_PER_HOUR: def("limits", int0, "Projects an account may create per hour. 0 = unlimited."),
   MAX_LIVE_JOBS_PER_USER: def("limits", int0, "Queued plus running jobs an account's own requests may add to. 0 = unlimited."),
   MAX_RERENDERS_PER_HOUR: def("limits", int0, "Re-renders and hand-made clips an account may ask for per hour. 0 = unlimited."),
-  MAX_STORAGE_MB: def("limits", int0, "MB of sources, uploads, renders and intros/outros an account may keep (deleted items count until they are wiped). 0 = unlimited."),
+  MAX_STORAGE_MB: def("limits", int0, "MB of sources, uploads, renders and intros/outros an account may keep (deleted items count until they are deleted forever). 0 = unlimited."),
   MAX_SOURCE_MINUTES_PER_MONTH: def("limits", int0, "Minutes of source video an account may add per period: its billing period when it has a plan, else the calendar month (UTC). 0 = unlimited."),
   WATERMARK_NON_ADMINS: def("limits", z.boolean(), "Burn a small watermark into the clips of accounts that are not admins. A paid plan removes it, and an admin can switch it per user on the Users page."),
   WATERMARK_TEXT: def("limits", z.string().trim().min(1).max(60), "The watermark text, e.g. your site name."),

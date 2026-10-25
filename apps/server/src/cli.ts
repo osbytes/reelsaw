@@ -23,7 +23,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   restore-clip <clipId>                   bring back a deleted clip or one a re-analyze replaced
  *   delete-clip <clipId>                    delete one clip, restorable like a project (same as clips.delete and delete_clip)
  *   delete-clips <projectId> <clipId…>      delete several clips of one project at once (same as the selection bar, clips.deleteMany and delete_clips)
- *   purge-clip <clipId>                     wipe one already-deleted clip (same as clips.purge and purge_clip)
+ *   purge-clip <clipId>                     delete one already-deleted clip forever (same as clips.purge and purge_clip)
  *   captions <clipId> [--format srt|vtt] [--words]   print a clip's rendered captions as an SRT or VTT file (same as clips.captions and get_clip_captions)
  *   transcript-file <projectId> [--format srt|vtt] [--words]   print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file)
  *   import-transcript <projectId> <file.srt|file.vtt> [--language xx]   use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript)
@@ -31,7 +31,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
  *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
- *   purge-project <projectId>               wipe one already-deleted project (frees storage; minutes stay counted)
+ *   purge-project <projectId>               delete one already-deleted project forever (frees storage; minutes stay counted)
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
@@ -326,7 +326,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await deleteClips(svc, null, projectId, clipIds);
     console.log(`deleted ${r.deleted} clip(s)${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore-clip brings each back ${r.restorable}`);
   },
-  /** Wipe one already-deleted clip: `reelsaw purge-clip <clipId>`. Same as clips.purge and the purge_clip tool. */
+  /** Delete one already-deleted clip forever: `reelsaw purge-clip <clipId>`. Same as clips.purge and the purge_clip tool. */
   async "purge-clip"(svc) {
     if (!pos[0]) throw new Error("usage: reelsaw purge-clip <clipId>   (must already be deleted; clips of a deleted project go with purge-project)");
     const r = await purgeOwnedClip(svc, null, pos[0]);
@@ -383,7 +383,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await purgeDeleted(svc, { dryRun: dry });
     console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
   },
-  /** Wipe one already-deleted project: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
+  /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
   async "purge-project"(svc) {
     if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId>   (reelsaw deleted lists them; they must already be deleted)");
     const r = await purgeOwnedProject(svc, null, pos[0]);

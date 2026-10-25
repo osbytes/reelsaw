@@ -65,13 +65,13 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
 | `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
 | `reelsaw delete-clips <projectId> <clipId…>` | delete several clips of one project at once (same as the selection bar, clips.deleteMany and delete_clips) |
-| `reelsaw purge-clip <clipId>` | wipe one already-deleted clip (same as clips.purge and purge_clip) |
+| `reelsaw purge-clip <clipId>` | delete one already-deleted clip forever (same as clips.purge and purge_clip) |
 | `reelsaw captions <clipId> [--format srt\|vtt] [--words]` | print a clip's rendered captions as an SRT or VTT file (same as clips.captions and get_clip_captions) |
 | `reelsaw transcript-file <projectId> [--format srt\|vtt] [--words]` | print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file) |
 | `reelsaw import-transcript <projectId> <file.srt\|file.vtt> [--language xx]` | use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
-| `reelsaw purge-project <projectId>` | wipe one already-deleted project (frees storage; minutes stay counted) |
+| `reelsaw purge-project <projectId>` | delete one already-deleted project forever (frees storage; minutes stay counted) |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -314,7 +314,7 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   `project.deleted`; every list, search, export, media route and the reconciler leave it out, and pipeline jobs that
   were already running exit (`ProjectGoneError`). Its rows and files stay for `DELETED_RETENTION_DAYS` (default 7;
   0 keeps them), then the hourly sweep (`purgeDeleted`, also `reelsaw purge [--dry-run]` and `reelsaw storage sweep`)
-  deletes the rows and only then the files. Storage still counts until then, or until the owner wipes it
+  deletes the rows and only then the files. Storage still counts until then, or until the owner deletes it forever
   (Deleted, `projects.purge`, MCP `purge_project` / `list_deleted`, `reelsaw purge-project`). Minutes, hourly creates and
   first-video-free are written to `source_usage` at create/ingest and kept for the life of the account (never pruned), so
   deleting cannot reset them; admin usage charts read that ledger. `reelsaw deleted` lists them with the purge date;
@@ -335,8 +335,8 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   clip card ⋯, clip editor, and ⌘K) is the same soft delete: `deleted_at`, a newer render generation, its
   render/prepare jobs cancelled, a `clip.deleted` event, and the project finalized if it was only waiting for that
   clip. Several clips of one project use `clips.deleteMany` / `deleteClips` (the selection bar). It shows up on
-  Deleted (one list with a compact bar: Restore, and Wipe in ⋯: `deleted.restore` / `deleted.purge`) and in `replacedClips`
-  and comes back with `restore_clip`. The delete toast always offers Undo, Wipe, and See deletions.
+  Deleted (one list with a compact bar: Restore, and Delete forever in ⋯: `deleted.restore` / `deleted.purge`) and in `replacedClips`
+  and comes back with `restore_clip`. The delete toast always offers Undo, Delete forever, and See deletions.
   `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
   and settings (event `project.updated`): nothing re-runs until a re-analyze or re-render.
 - **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the

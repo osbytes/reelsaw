@@ -1,5 +1,5 @@
 /**
- * The standard delete toast: Undo, Wipe, See deletions. Every soft-delete path
+ * The standard delete toast: Undo, Delete forever, See deletions. Every soft-delete path
  * (project, clip, library, template, bulk) calls `useDeletedToast` so the affordances stay the same.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -46,7 +46,7 @@ export function showDeletedToast(opts: {
   const { items, restorable, storedBytes, canPurge = true } = opts;
   if (!items.length) return;
   const bits: string[] = [];
-  if (storedBytes) bits.push(`Still using ${formatBytes(storedBytes)} until you wipe it.`);
+  if (storedBytes) bits.push(`Still using ${formatBytes(storedBytes)} until you delete it forever.`);
   if (restorable) bits.push(`Restorable ${restorable}.`);
   const description = bits.join(" ");
 
@@ -73,12 +73,12 @@ export function showDeletedToast(opts: {
               onClick={() => {
                 toast.dismiss(id);
                 void opts.onPurge().then((r) => {
-                  const msg = r && typeof r === "object" && "message" in r && typeof r.message === "string" ? r.message : items.length === 1 ? `Wiped “${items[0]!.title}”` : `Wiped ${items.length} items`;
+                  const msg = r && typeof r === "object" && "message" in r && typeof r.message === "string" ? r.message : items.length === 1 ? `Deleted “${items[0]!.title}” forever` : `Deleted ${items.length} items forever`;
                   toast(msg);
                 }, failToast);
               }}
             >
-              Wipe
+              Delete forever
             </button>
           ) : null}
           <Link to={seePath(items)} className="text-ink2 no-underline hover:underline" onClick={() => toast.dismiss(id)}>
@@ -91,7 +91,7 @@ export function showDeletedToast(opts: {
   );
 }
 
-/** Wire Undo / Wipe to `deleted.restore` / `deleted.purge` and refresh the lists those pages read. */
+/** Wire Undo / Delete forever to `deleted.restore` / `deleted.purge` and refresh the lists those pages read. */
 export function useDeletedToast() {
   const trpc = useTRPC();
   const qc = useQueryClient();

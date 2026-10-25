@@ -240,7 +240,7 @@ function checkStorage(d: LimitsDetail, bytes: number) {
   if (l.MAX_STORAGE_MB <= 0) return;
   const mb = Math.round(bytes / 1_048_576);
   if (mb >= l.MAX_STORAGE_MB)
-    refuse(d, "MAX_STORAGE_MB", `This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Removed projects still count until you wipe them.${hint(d, "MAX_STORAGE_MB")}`);
+    refuse(d, "MAX_STORAGE_MB", `This account stores ${mb} MB, the most allowed is ${l.MAX_STORAGE_MB} MB. Removed projects still count until you delete them forever.${hint(d, "MAX_STORAGE_MB")}`);
 }
 
 /**

@@ -385,7 +385,7 @@ export const TOOLS = {
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   purge_project: {
-    title: "Wipe project",
+    title: "Delete project forever",
     description: "Permanently remove a deleted project and its files so the storage is freed (find it with list_deleted or list_projects deleted: true). Minutes, hourly creates and first-video-free are not refunded. A project that is not deleted is refused: call delete_project first. Returns { storedBytes, message }.",
     inputSchema: { id: projectId("list_projects with deleted: true") },
     annotations: { destructiveHint: true, idempotentHint: true },
@@ -405,24 +405,24 @@ export const TOOLS = {
   list_deleted: {
     title: "List deleted items",
     description:
-      "Restorable deletes (the Deleted page): one newest-first list of projects, clips of live projects, library items and templates. Returns { items: [{ kind, id, title, deletedAt, purgeAt, storedBytes, canPurge, … }], total, truncated } (max 200) plus keepDays / libraryDays / templateDays. purgeAt null = kept until wiped. restore_project / restore_clip / restore_asset / restore_layer_template bring them back; purge_project / purge_clip / purge_asset / purge_layer_template remove them for good.",
+      "Restorable deletes (the Deleted page): one newest-first list of projects, clips of live projects, library items and templates. Returns { items: [{ kind, id, title, deletedAt, purgeAt, storedBytes, canPurge, … }], total, truncated } (max 200) plus keepDays / libraryDays / templateDays. purgeAt null = kept until deleted forever. restore_project / restore_clip / restore_asset / restore_layer_template bring them back; purge_project / purge_clip / purge_asset / purge_layer_template remove them for good.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },
   purge_clip: {
-    title: "Wipe clip",
+    title: "Delete clip forever",
     description: "Permanently remove a deleted clip of a live project and its rendered file so the storage is freed (find it with list_deleted). A clip that is not deleted is refused: call delete_clip first. Clips of a deleted project go with purge_project. Returns { storedBytes, message }.",
     inputSchema: { id: z.string().describe("Clip id (from list_deleted)") },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   purge_asset: {
-    title: "Wipe library item",
+    title: "Delete library item forever",
     description: "Permanently remove an already-deleted library upload and its files so the storage is freed (find it with list_deleted). Refused while a project, clip or live template still names it. An item that is not deleted is refused: call remove_asset first. Returns { storedBytes, message }.",
     inputSchema: { assetId: assetIdInput("list_deleted") },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   purge_layer_template: {
-    title: "Wipe layer template",
+    title: "Delete layer template forever",
     description: "Permanently remove an already-deleted layer template (find it with list_deleted). Templates hold no media files; this only drops the row. A template that is not deleted is refused: call remove_layer_template first. Returns { ok, message }.",
     inputSchema: { templateId: templateIdSchema },
     annotations: { destructiveHint: true, idempotentHint: true },
