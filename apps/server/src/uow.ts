@@ -14,12 +14,12 @@ import pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEventType } from "@reelsaw/shared";
+import type { ProjectEventPayloadArg, ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
-import { reactionsFor, type EmittedEvent, type EventSubscriptions } from "./event-handlers.js";
+import { runEventHandlers, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -39,7 +39,7 @@ export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
+  emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<number>;
   enqueue(queue: QueueName, data: JobData): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
   send(queue: string, data: object, opts?: { singletonKey?: string; startAfter?: number }): Promise<string | null>;
@@ -99,7 +99,7 @@ const TX_ATTEMPTS = 3;
 /** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
 const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, subscriptions?: EventSubscriptions): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, eventHandlers?: { handlers: EventHandlerMap; deps: () => EventHandlerDeps }): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -111,9 +111,9 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, payload = {}) {
+        async emit(projectId, type, ...[payload = {} as never]) {
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
-          emitted.push({ id: row!.id, projectId, type, payload });
+          emitted.push({ id: row!.id, projectId, type, payload } as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
         },
@@ -153,12 +153,12 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
-      // the outbox: each subscription's job is written on this connection, so it commits with its event (event-handlers.ts)
-      if (subscriptions && emitted.length) {
-        for (const r of await reactionsFor(subscriptions, emitted, db)) {
+      // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
+      if (eventHandlers && emitted.length) {
+        for (const r of await runEventHandlers(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
           const jobId = await queue.send(r.job.queue, r.job.data, { ...exec, singletonKey: r.job.singletonKey, startAfter: r.job.startAfter });
           // null: the queue's policy deduped it (one already waiting for this key)
-          log.debug({ subscription: r.subscription, event: r.event.type, projectId: r.event.projectId, jobId }, jobId ? "event reaction queued" : "event reaction already queued");
+          log.debug({ handler: r.handler, event: r.event.type, projectId: r.event.projectId, jobId }, jobId ? "event handler job queued" : "event handler job already queued");
         }
       }
       await client.query("COMMIT");

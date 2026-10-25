@@ -890,6 +890,88 @@ export const PROJECT_EVENT_TYPES = [
 ] as const;
 export type ProjectEventType = (typeof PROJECT_EVENT_TYPES)[number];
 
+/** How long the run took so far, on project.done / project.failed (runFacts). */
+const runFactsSchema = {
+  runSeq: z.number().int(),
+  runReason: z.string().nullable(),
+  runSec: z.number().optional(),
+  renderSec: z.number().optional(),
+};
+const clipRef = { clipId: z.string(), index: z.number().int(), title: z.string() };
+const skipped = { clipId: z.string(), reason: z.string(), error: z.string().optional() };
+
+/**
+ * The payload of every project event. `u.emit` / `svc.events.emit` take `ProjectEventPayload<T>`, so an
+ * emit site cannot drift from its shape, and handlers (event-handlers.ts) get it inferred. `satisfies`
+ * keeps this in step with PROJECT_EVENT_TYPES: a type without a schema, or a schema without a type,
+ * does not compile. stage.completed carries per-stage stats, so it allows extra keys.
+ */
+export const projectEventSchemas = {
+  "project.created": z.object({ title: z.string() }),
+  "run.started": z.object({ seq: z.number().int(), reason: z.enum(RUN_REASONS) }),
+  "stage.started": z.object({
+    stage: z.string(),
+    status: z.string().optional(),
+    /** render resumed after a restart */
+    resumed: z.boolean().optional(),
+    /** prepare: one clip */
+    clipId: z.string().optional(),
+    mode: z.string().optional(),
+    /** refine: the steps that will run */
+    steps: z.array(z.string()).optional(),
+    /** review: transcript edits and how many clips re-render */
+    changed: z.number().int().optional(),
+    rerendered: z.number().int().optional(),
+    retried: z.boolean().optional(),
+    /** analyze: a re-pick that keeps the clips the user made or edited */
+    repick: z.boolean().optional(),
+    kept: z.number().int().optional(),
+    replaced: z.number().int().optional(),
+  }),
+  "stage.progress": z.object({
+    stage: z.string(),
+    progress: z.number().optional(),
+    message: z.string().optional(),
+    clipId: z.string().optional(),
+    step: z.string().optional(),
+    refine: z.record(z.string(), z.string()).optional(),
+    skipped: z.object({ status: z.literal("skipped"), reason: z.string() }).optional(),
+  }),
+  "stage.completed": z.looseObject({ stage: z.string(), durationSec: z.number().optional() }),
+  "stage.failed": z.object({
+    stage: z.string(),
+    error: z.string(),
+    attempt: z.number().int(),
+    max: z.number().int(),
+    final: z.boolean().optional(),
+    step: z.string().optional(),
+    durationSec: z.number().optional(),
+  }),
+  "clip.created": z.object(clipRef),
+  "clip.rendering": z.object({ clipId: z.string() }),
+  "clip.done": z.object({ clipId: z.string(), index: z.number().int() }),
+  "clip.failed": z.object({ clipId: z.string(), error: z.string() }),
+  "clip.retrying": z.object({ clipId: z.string(), step: z.string(), attempt: z.number().int(), max: z.number().int(), reason: z.string() }),
+  "clip.bumper_skipped": z.object({ ...skipped, slot: z.enum(["intro", "outro"]) }),
+  "clip.overlay_skipped": z.object({ ...skipped, overlayId: z.string().optional() }),
+  "clip.cut_unverified": z.object({ clipId: z.string(), at: z.number(), reason: z.string() }),
+  "job.stalled": z.object({ idleMinutes: z.number(), lastEvent: z.string(), liveJobs: z.number().int(), hint: z.string() }),
+  "source.expired": z.object({ days: z.number() }),
+  "clips.expired": z.object({ clips: z.number().int(), days: z.number() }),
+  "project.deleted": z.object({ days: z.number(), stopped: z.boolean() }),
+  "project.restored": z.object({}),
+  "clip.restored": z.object(clipRef),
+  "clip.deleted": z.object({ ...clipRef, days: z.number() }),
+  "project.updated": z.object({ changed: z.array(z.string()), framingCleared: z.number().int().optional() }),
+  "transcript.imported": z.object({ format: z.string(), cues: z.number().int(), words: z.number().int(), language: z.string().optional(), warnings: z.number().int() }),
+  "project.done": z.object({ clips: z.number().int(), failed: z.number().int(), ...runFactsSchema }),
+  "project.failed": z.object({ stage: z.string(), error: z.string(), ...runFactsSchema }),
+} satisfies { [T in ProjectEventType]: z.ZodType<Record<string, unknown>> };
+
+export type ProjectEventPayload<T extends ProjectEventType> = z.infer<(typeof projectEventSchemas)[T]>;
+/** An emit's payload argument: optional only for an event whose payload has no required keys. */
+export type ProjectEventPayloadArg<T extends ProjectEventType> = {} extends ProjectEventPayload<T> ? [payload?: ProjectEventPayload<T>] : [payload: ProjectEventPayload<T>];
+
 export interface ProjectEvent {
   id: number;
   projectId: string;

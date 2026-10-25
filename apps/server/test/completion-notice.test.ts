@@ -4,13 +4,13 @@ import { messageIdDomain, templates, type Email } from "../src/email.js";
 import {
   collapseProjects,
   completionIdempotencyKey,
-  readyEmailSubscription,
+  readyEmailHandlers,
   greetingName,
   milestoneCrossed,
   selectUnseen,
   type DoneNotice,
 } from "../src/notify/completion.js";
-import { createEventSubscriptions, reactionsFor, type ReadDb } from "../src/event-handlers.js";
+import { defineEventHandlers, mergeEventHandlers, runEventHandlers, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
 import { COMPLETION_NOTIFY_QUEUE } from "../src/queue/boss.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
@@ -160,33 +160,39 @@ describe("ready email idempotency", () => {
   });
 });
 
-describe("event subscriptions", () => {
-  const noop = { name: "a", on: "project.done" as const, react: () => null };
-  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: {} };
+describe("event handlers", () => {
+  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: { clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
   const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
+  const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
+  const deps = (enabled: boolean) => ({ email: { enabled } as Email, settings }) as EventHandlerDeps;
 
-  it("refuses a duplicate name and lists by type", () => {
-    const subs = createEventSubscriptions();
-    subs.add(noop);
-    subs.add({ ...noop, name: "b" });
-    assert.deepEqual(subs.of("project.done").map((x) => x.name), ["a", "b"]);
-    assert.equal(subs.of("project.failed").length, 0);
-    assert.throws(() => subs.add({ ...noop, on: "project.failed" }));
+  it("merges maps by event and refuses a name registered twice on one event", () => {
+    const a = defineEventHandlers({ "project.done": { x: () => null } });
+    const b = defineEventHandlers({ "project.done": { y: () => null }, "project.failed": { x: () => null } });
+    const m = mergeEventHandlers(a, b);
+    assert.deepEqual(Object.keys(m["project.done"]), ["x", "y"]);
+    assert.deepEqual(Object.keys(m["project.failed"]), ["x"]);
+    // @ts-expect-error "project.done: x" is already registered
+    assert.throws(() => mergeEventHandlers(a, defineEventHandlers({ "project.done": { x: () => null } })));
   });
 
-  it("collects jobs in emit then registration order and drops nulls", async () => {
-    const subs = createEventSubscriptions();
-    subs.add({ name: "x", on: "project.done", react: (e) => ({ queue: "q", data: { n: e.id } }) });
-    subs.add(noop);
-    subs.add({ name: "y", on: "project.done", react: async (e) => ({ queue: "q", data: { m: e.id } }) });
-    const r = await reactionsFor(subs, [event, { ...event, id: 2 }], db);
-    assert.deepEqual(r.map((x) => [x.subscription, x.event.id]), [["x", 1], ["y", 1], ["x", 2], ["y", 2]]);
+  it("runs handlers in emit then map order, drops nulls, and types the payload", async () => {
+    const handlers = defineEventHandlers({
+      "project.done": {
+        x: ({ event }) => ({ queue: "q", data: { n: event.id, clips: event.payload.clips } }),
+        none: () => null,
+        y: async ({ event }) => ({ queue: "q", data: { m: event.id } }),
+      },
+    });
+    const r = await runEventHandlers(handlers, [event, { ...event, id: 2 }], db, deps(true));
+    assert.deepEqual(r.map((x) => [x.handler, x.event.id]), [["x", 1], ["y", 1], ["x", 2], ["y", 2]]);
+    assert.deepEqual(r[0]!.job.data, { n: 1, clips: 2 });
   });
 
   it("the ready email asks for one delayed job per account, and none when email is off", async () => {
-    const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
-    assert.equal(await readyEmailSubscription({ email: { enabled: false } as Email, settings }).react(event, db), null);
-    assert.deepEqual(await readyEmailSubscription({ email: { enabled: true } as Email, settings }).react(event, db), {
+    const readyEmail = readyEmailHandlers["project.done"].readyEmail;
+    assert.equal(await readyEmail({ event, db, deps: deps(false) }), null);
+    assert.deepEqual(await readyEmail({ event, db, deps: deps(true) }), {
       queue: COMPLETION_NOTIFY_QUEUE,
       data: { userId: "owner-1" },
       singletonKey: "owner-1",

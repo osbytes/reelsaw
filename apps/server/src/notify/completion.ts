@@ -6,7 +6,7 @@
  * cutoff; already-seen posts are skipped):
  *
  * The first `project.done` schedules one pg-boss job (`short` policy, `singletonKey` = the
- * account) to run after `COMPLETION_NOTIFY_MINUTES`. `readyEmailSubscription` declares that job on
+ * account) to run after `COMPLETION_NOTIFY_MINUTES`. the `project.done` handler `readyEmail` declares that job on
  * the event (event-handlers.ts) and the unit of work that wrote the event writes it before COMMIT, so
  * the job commits with the completion and no transition has to remember it. A second completion while that job is
  * still waiting is a no-op — the job reads every unseen `project.done` when it runs, so the
@@ -24,7 +24,7 @@
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
-import type { EventSubscription } from "../event-handlers.js";
+import { defineEventHandlers } from "../event-handlers.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { COMPLETION_NOTIFY_QUEUE } from "../queue/boss.js";
@@ -302,23 +302,21 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 }
 
 /**
- * The ready note as a reaction to `project.done` (event-handlers.ts): one job per account, written with
+ * The ready note as a `project.done` handler (event-handlers.ts): one job per account, written with
  * the completion's transaction. Nothing when email is off.
  */
-export function readyEmailSubscription(svc: Pick<Services, "email" | "settings">): EventSubscription {
-  return {
-    name: "ready email",
-    on: "project.done",
-    async react(e, db) {
-      if (!svc.email.enabled) return null;
-      const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, e.projectId));
+export const readyEmailHandlers = defineEventHandlers({
+  "project.done": {
+    readyEmail: async ({ event, db, deps }) => {
+      if (!deps.email.enabled) return null;
+      const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
       if (!project) return null;
       return {
         queue: COMPLETION_NOTIFY_QUEUE,
         data: { userId: project.userId },
         singletonKey: project.userId,
-        startAfter: svc.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
+        startAfter: deps.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
       };
     },
-  };
-}
+  },
+});
