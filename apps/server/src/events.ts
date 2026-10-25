@@ -120,7 +120,8 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
   const bus: EventBus = {
     // Standalone event (progress, notices): insert + NOTIFY in ONE statement, so it is atomic.
     // Events tied to a state change go through the unit of work (svc.tx) instead.
-    async emit(projectId, type, ...[payload = {}]) {
+    async emit(projectId, type, ...[rest = {}]) {
+      const payload = { ...rest, projectId }; // every payload names its project (projectEventSchemas)
       // NOTIFY payloads are limited to 8000 bytes: send ids only, listeners fetch rows.
       const res = await pool.query<{ id: number; created_at: Date }>(
         `WITH e AS (INSERT INTO project_events (project_id, type, payload) VALUES ($1, $2, $3) RETURNING id, created_at)

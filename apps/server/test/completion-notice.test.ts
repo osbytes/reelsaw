@@ -4,13 +4,16 @@ import { messageIdDomain, templates, type Email } from "../src/email.js";
 import {
   collapseProjects,
   completionIdempotencyKey,
-  readyEmailHandlers,
+  readyEmail,
   greetingName,
   milestoneCrossed,
   selectUnseen,
   type DoneNotice,
 } from "../src/notify/completion.js";
-import { defineEventHandlers, eventHandlerJobs, eventHandlerQueues, mergeEventHandlers, parseEventHandlerJob, policyOf, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
+import { EVENT_HANDLER_DEFAULTS, defineEventHandlers, eventHandlerJobs, eventHandlerQueues, eventHandlerSetting, parseEventHandlerJob, policyOf, type EventHandlerDeps, type ReadDb } from "../src/event-handlers.js";
+import { projectEventHandlers } from "../src/project-event-handlers.js";
+import { PROJECT_EVENT_TYPES } from "@reelsaw/shared";
+import { envSchema } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 import type { InstanceSettings } from "../src/instance-settings.js";
 
@@ -160,20 +163,32 @@ describe("ready email idempotency", () => {
 });
 
 describe("event handlers", () => {
-  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: { clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
+  const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: { projectId: "p1", clips: 2, failed: 0, runSeq: 1, runReason: "created" } };
   const db = { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) } as unknown as ReadDb;
-  const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
+  const settings = { get: () => ({ EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: 5 }) } as unknown as InstanceSettings;
   const deps = (enabled: boolean) => ({ email: { enabled } as Email, settings }) as EventHandlerDeps;
   const handle = async () => {};
 
-  it("merges maps by event and refuses a name registered twice on one event", () => {
-    const a = defineEventHandlers({ "project.done": { x: { handle } } });
-    const b = defineEventHandlers({ "project.done": { y: { handle } }, "project.failed": { x: { handle } } });
-    const m = mergeEventHandlers(a, b);
-    assert.deepEqual(Object.keys(m["project.done"]), ["x", "y"]);
-    assert.deepEqual(Object.keys(m["project.failed"]), ["x"]);
-    // @ts-expect-error "project.done: x" is already registered
-    assert.throws(() => mergeEventHandlers(a, defineEventHandlers({ "project.done": { x: { handle } } })));
+  it("lists every handler in one map, and a name twice on one event does not compile", () => {
+    assert.deepEqual(eventHandlerQueues(projectEventHandlers).map((q) => q.name), ["event.project.done.readyEmail"]);
+    // @ts-expect-error duplicate key in the one map
+    defineEventHandlers({ "project.done": { x: { handle }, x: { handle } } });
+  });
+
+  it("names a handler's settings EVENT_<EVENT>_<HANDLER>_<NAME>, and every such setting exists", () => {
+    assert.equal(eventHandlerSetting("project.done", "readyEmail", "delayMinutes"), "EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES");
+    assert.equal(eventHandlerSetting("clip.bumper_skipped", "notifyOwner", "DELAY_MINUTES"), "EVENT_CLIP_BUMPER_SKIPPED_NOTIFY_OWNER_DELAY_MINUTES");
+    const prefixes = eventHandlerQueues(projectEventHandlers).map((q) => eventHandlerSetting(q.type, q.handler, ""));
+    // EVENT_REPLAY_LIMIT and EVENT_RETENTION_DAYS are about the event log, not a handler: only EVENT_<an event type>_… counts
+    const typePrefixes = PROJECT_EVENT_TYPES.map((t) => eventHandlerSetting(t, "", "").replace(/_+$/, "_"));
+    const settings = Object.keys(envSchema.shape).filter((k) => typePrefixes.some((p) => k.startsWith(p)));
+    assert.ok(settings.length > 0);
+    for (const k of settings) assert.ok(prefixes.some((p) => k.startsWith(p)), `${k} names no registered handler`);
+  });
+
+  it("fills a handler's queue options from the defaults, overridden at the definition", () => {
+    const [q] = eventHandlerQueues(projectEventHandlers);
+    assert.deepEqual(q!.options, { ...EVENT_HANDLER_DEFAULTS, expireInSeconds: 120 });
   });
 
   it("maps the opted-in concurrency to a pg-boss policy, one queue per handler", () => {
@@ -181,7 +196,7 @@ describe("event handlers", () => {
     assert.equal(policyOf({ coalesce: true }), "short");
     assert.equal(policyOf({ oneAtATime: true }), "singleton");
     assert.equal(policyOf({ coalesce: true, oneAtATime: true }), "stately");
-    const qs = eventHandlerQueues(readyEmailHandlers);
+    const qs = eventHandlerQueues(defineEventHandlers({ "project.done": { readyEmail } }));
     assert.deepEqual(qs.map((q) => [q.name, q.policy]), [["event.project.done.readyEmail", "stately"]]);
   });
 
@@ -209,9 +224,8 @@ describe("event handlers", () => {
   });
 
   it("the ready email is keyed by the account, delayed by the setting, and skipped when email is off", async () => {
-    const readyEmail = readyEmailHandlers["project.done"].readyEmail;
-    assert.equal(await readyEmail.key({ event, db, deps: deps(false) }), null);
-    assert.equal(await readyEmail.key({ event, db, deps: deps(true) }), "owner-1");
-    assert.equal(readyEmail.delaySeconds(deps(true)), 300);
+    assert.equal(await readyEmail.key!({ event, db, deps: deps(false) }), null);
+    assert.equal(await readyEmail.key!({ event, db, deps: deps(true) }), "owner-1");
+    assert.equal(readyEmail.delaySeconds!(deps(true)), 300);
   });
 });

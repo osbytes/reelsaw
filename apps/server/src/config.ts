@@ -69,7 +69,7 @@ export const envSchema = z.object({
    * projects become one note. Sent only when email is on and the account has not come back since.
    * Runtime setting (Settings → System → Operations).
    */
-  COMPLETION_NOTIFY_MINUTES: z.coerce.number().int().min(1).max(180).default(20),
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: z.coerce.number().int().min(1).max(180).default(20),
   EMAIL_FROM: z.string().optional(), // "Reelsaw <no-reply@example.com>"
   SMTP_URL: z.string().optional(), // smtps://user:pass@smtp.example.com:465
   RESEND_API_KEY: z.string().optional(),

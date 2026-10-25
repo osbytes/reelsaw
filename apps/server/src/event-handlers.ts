@@ -2,23 +2,25 @@
  * Project event handlers, run after the event commits, with the job that runs them committed
  * atomically with the event (a transactional outbox whose relay is pg-boss).
  *
- * Handlers live in a layered map, event type → handler name → handler:
+ * Every handler is listed in one map, `projectEventHandlers` (project-event-handlers.ts), event type →
+ * handler name → handler, so all events and what follows them are visible in one place. The handlers
+ * themselves live with their modules:
  *
- *   export const readyEmailHandlers = defineEventHandlers({
- *     "project.done": {
- *       readyEmail: {
- *         key: async ({ event, db }) => ownerOf(db, event.projectId),
- *         delaySeconds: ({ settings }) => settings.get().COMPLETION_NOTIFY_MINUTES * 60,
- *         coalesce: true,
- *         oneAtATime: true,
- *         handle: ({ key, svc }) => deliverCompletionNotice(svc, key),
- *       },
- *     },
- *   });
+ *   // notify/completion.ts
+ *   export const readyEmail: EventHandler<"project.done"> = {
+ *     key: async ({ event, db }) => ownerOf(db, event.projectId),
+ *     delaySeconds: ({ settings }) => settings.get().EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES * 60,
+ *     coalesce: true,
+ *     oneAtATime: true,
+ *     handle: ({ key, svc }) => deliverCompletionNotice(svc, key),
+ *   };
+ *   // project-event-handlers.ts
+ *   export const projectEventHandlers = defineEventHandlers({ "project.done": { readyEmail } });
  *
  * `event.payload` is inferred from the event's zod schema (`projectEventSchemas` in @reelsaw/shared)
- * and parsed again when the job runs. Modules combine their maps with `mergeEventHandlers`; a handler
- * name used twice on one event does not compile (and is refused at runtime too).
+ * and parsed again when the job runs. A name listed twice on one event is a duplicate key in the one
+ * object literal, which does not compile. A handler's settings follow `EVENT_<EVENT>_<HANDLER>_<NAME>`
+ * (`eventHandlerSetting`), e.g. EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES.
  *
  * Each handler has its own queue, `event.<type>.<name>`. When an event is emitted in a unit of work,
  * `key` (reads only, on the emitting transaction) picks the job's key, or null to skip; the unit of
@@ -39,7 +41,6 @@ import { projectEventSchemas, type ProjectEventPayload, type ProjectEventType } 
 import type { QueuePolicy } from "pg-boss";
 import type { Db } from "./db/index.js";
 import type { Services } from "./services.js";
-import type { UnitOfWork } from "./uow.js";
 
 export interface EmittedEvent<T extends ProjectEventType = ProjectEventType> {
   id: number;
@@ -63,45 +64,21 @@ export interface EventHandler<T extends ProjectEventType> {
   coalesce?: boolean;
   /** Opt-in: at most one job per key runs at a time. */
   oneAtATime?: boolean;
-  /** pg-boss retries; default 3, a minute apart with backoff. */
-  retryLimit?: number;
-  /** A run older than this is failed and retried; default 300. */
-  expireInSeconds?: number;
+  /** Queue and worker settings; anything left out comes from EVENT_HANDLER_DEFAULTS. */
+  queue?: Partial<EventHandlerQueueOptions>;
   /**
    * The work, after commit. `event` is the one whose job this is (a coalesced job runs once for several).
-   * `again` queues another run for the same key on a unit of work (a batch cut short).
+   * `again` queues another run for the same key (a batch cut short).
    */
-  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal; again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null> }) => Promise<void>;
+  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal; again: (opts?: { delaySeconds?: number }) => Promise<string | null> }) => Promise<void>;
 }
 
 /** event type → handler name → handler */
 export type EventHandlerMap = { readonly [T in ProjectEventType]?: Readonly<Record<string, EventHandler<T>>> };
 
-/** Handler names `A` and `B` both register on one event, as `"event: name"`. */
-type Overlap<A, B> = {
-  [E in keyof A & keyof B]: E extends string ? `${E}: ${Extract<keyof A[E] & keyof B[E], string>}` : never;
-}[keyof A & keyof B];
-type NoOverlap<A, B> = [Overlap<A, B>] extends [never] ? unknown : { "handler names already registered": Overlap<A, B> };
-
-type Merged<A, B> = { [E in keyof A | keyof B]: (E extends keyof A ? A[E] : unknown) & (E extends keyof B ? B[E] : unknown) };
-
-/** Type a module's handlers; each handler's `event.payload` is inferred from its event key. */
+/** Type the handler map; each handler's `event.payload` is inferred from its event key. */
 export function defineEventHandlers<const M extends EventHandlerMap>(map: M): M {
   return map;
-}
-
-/** Combine two modules' maps. A name already registered on the same event is a type error. */
-export function mergeEventHandlers<A extends EventHandlerMap, B extends EventHandlerMap>(a: A, b: B & NoOverlap<A, B>): Merged<A, B> {
-  const out: Record<string, Record<string, unknown>> = {};
-  for (const map of [a, b] as Array<Record<string, Record<string, unknown> | undefined>>) {
-    for (const [type, handlers] of Object.entries(map)) {
-      for (const [name, handler] of Object.entries(handlers ?? {})) {
-        if (out[type]?.[name]) throw new Error(`event handler "${name}" is already registered on ${type}`);
-        (out[type] ??= {})[name] = handler;
-      }
-    }
-  }
-  return out as Merged<A, B>;
 }
 
 /** The pg-boss policy that gives a handler the concurrency it opted into. */
@@ -112,7 +89,39 @@ export function policyOf(h: Pick<EventHandler<ProjectEventType>, "coalesce" | "o
   return "standard";
 }
 
+export interface EventHandlerQueueOptions {
+  /** pg-boss retries after the first attempt */
+  retryLimit: number;
+  /** seconds before the first retry (doubling with backoff) */
+  retryDelaySeconds: number;
+  retryBackoff: boolean;
+  /** a run older than this is failed and retried; keep it above the slowest run for oneAtATime */
+  expireInSeconds: number;
+  /** finished jobs are kept this long for `reelsaw status` and debugging */
+  deleteAfterSeconds: number;
+  /** how often an idle worker looks for a job */
+  pollingIntervalSeconds: number;
+  /** jobs one process runs at once (oneAtATime still holds one per key across processes) */
+  localConcurrency: number;
+}
+
+export const EVENT_HANDLER_DEFAULTS: EventHandlerQueueOptions = {
+  retryLimit: 3,
+  retryDelaySeconds: 60,
+  retryBackoff: true,
+  expireInSeconds: 300,
+  deleteAfterSeconds: 7 * 24 * 3600,
+  pollingIntervalSeconds: 2,
+  localConcurrency: 2,
+};
+
 export const eventHandlerQueue = (type: ProjectEventType, name: string) => `event.${type}.${name}`;
+
+/** `EVENT_<EVENT>_<HANDLER>_<NAME>`: project.done + readyEmail + DELAY_MINUTES → EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES */
+export function eventHandlerSetting(type: ProjectEventType, handler: string, name: string): string {
+  const part = (x: string) => x.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+  return `EVENT_${part(type)}_${part(handler)}_${part(name)}`;
+}
 
 export interface EventHandlerQueue {
   name: string;
@@ -120,13 +129,14 @@ export interface EventHandlerQueue {
   handler: string;
   def: EventHandler<ProjectEventType>;
   policy: QueuePolicy;
+  options: EventHandlerQueueOptions;
 }
 
 /** One queue per handler, for the queue to create and the worker to serve. */
 export function eventHandlerQueues(map: EventHandlerMap): EventHandlerQueue[] {
   const out: EventHandlerQueue[] = [];
   for (const [type, handlers] of Object.entries(map) as Array<[ProjectEventType, Record<string, EventHandler<ProjectEventType>> | undefined]>) {
-    for (const [name, def] of Object.entries(handlers ?? {})) out.push({ name: eventHandlerQueue(type, name), type, handler: name, def, policy: policyOf(def) });
+    for (const [name, def] of Object.entries(handlers ?? {})) out.push({ name: eventHandlerQueue(type, name), type, handler: name, def, policy: policyOf(def), options: { ...EVENT_HANDLER_DEFAULTS, ...def.queue } });
   }
   return out;
 }

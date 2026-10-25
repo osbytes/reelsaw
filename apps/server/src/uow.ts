@@ -111,9 +111,11 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, ...[payload = {} as never]) {
+        async emit(projectId, type, ...[rest = {} as never]) {
+          // every payload names its project (projectEventSchemas)
+          const payload = { ...rest, projectId };
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
-          emitted.push({ id: row!.id, projectId, type, payload } as EmittedEvent);
+          emitted.push({ id: row!.id, projectId, type, payload } as unknown as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
         },

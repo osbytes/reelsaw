@@ -665,7 +665,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     if (usedOverlays) {
       log.warn({ err }, "render with overlays failed; rendering without");
       overlayItems.skipped.push("the render with the overlays failed");
-      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, reason: "the overlays could not be composited, so the clip was rendered without them", error: String((err as Error).message).slice(0, 1500) }).catch(() => {});
+      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, layerIds: [...overlayItems.items.map((o) => o.id), ...music.map((m) => m.id)], assetIds: [...overlayItems.items.map((o) => o.assetId), ...music.map((m) => m.assetId)], reason: "the overlays could not be composited, so the clip was rendered without them", error: String((err as Error).message).slice(0, 1500) }).catch(() => {});
       usedOverlays = false;
       try {
         attached = await encode(usedBumpers, false);
@@ -673,14 +673,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
         if (ctx.signal.aborted || !usedBumpers) throw err2;
         log.warn({ err: err2 }, "render with intro/outro failed; rendering without");
         bumpers.skipped.push("the render with the intro and outro failed");
-        await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot: "intro", reason: "the video could not be joined to the clip, so it was rendered without an intro or outro", error: String((err2 as Error).message).slice(0, 1500) }).catch(() => {});
+        await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot: "both", assetIds: bumperIds(bumpers), reason: "the video could not be joined to the clip, so it was rendered without an intro or outro", error: String((err2 as Error).message).slice(0, 1500) }).catch(() => {});
         usedBumpers = false;
         attached = await encode(false, false);
       }
     } else {
       log.warn({ err }, "render with intro/outro failed; rendering without");
       bumpers.skipped.push("the render with the intro and outro failed");
-      await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot: "intro", reason: "the video could not be joined to the clip, so it was rendered without an intro or outro", error: String((err as Error).message).slice(0, 1500) }).catch(() => {});
+      await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot: "both", assetIds: bumperIds(bumpers), reason: "the video could not be joined to the clip, so it was rendered without an intro or outro", error: String((err as Error).message).slice(0, 1500) }).catch(() => {});
       usedBumpers = false;
       attached = await encode(false, false);
     }
@@ -752,6 +752,9 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   }
 }
 
+/** The intro and outro assets a render used, for an event that drops both. */
+const bumperIds = (b: { intro?: LoadedBumper; outro?: LoadedBumper }) => [b.intro?.id, b.outro?.id].filter((x): x is string => !!x);
+
 interface LoadedBumper {
   id: string;
   path: string;
@@ -772,7 +775,7 @@ async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: stri
     const skip = async (reason: string, error?: unknown) => {
       out.skipped.push(`${slot}: ${reason}`);
       log.warn({ slot, assetId: id, err: error }, "bumper skipped");
-      await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
+      await svc.events.emit(projectId, "clip.bumper_skipped", { clipId, slot, assetIds: [id], reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
     const asset = await db.query.assets.findFirst({ where: eq(schema.assets.id, id) });
     if (!asset || (asset.userId !== null && asset.userId !== userId)) {
@@ -830,7 +833,7 @@ async function loadOverlays(ctx: StageContext, userId: string, overlays: AssetLa
     const skip = async (reason: string, error?: unknown) => {
       out.skipped.push(`${o.id}: ${reason}`);
       log.warn({ overlayId: o.id, assetId: o.assetId, err: error }, "overlay skipped");
-      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, overlayId: o.id, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
+      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, layerIds: [o.id], assetIds: [o.assetId], reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
     const a = Math.max(0, o.start - clipStart);
     const b = Math.min(duration, o.end - clipStart);
@@ -908,7 +911,7 @@ async function loadMusic(ctx: StageContext, userId: string, tracks: Array<ClipAu
   for (const audio of tracks) {
     const skip = async (reason: string, error?: unknown) => {
       log.warn({ trackId: audio.id, assetId: audio.assetId, err: error }, "music skipped");
-      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, overlayId: audio.id, reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
+      await svc.events.emit(projectId, "clip.overlay_skipped", { clipId, layerIds: [audio.id], assetIds: [audio.assetId], reason, ...(error ? { error: String((error as Error).message ?? error).slice(0, 1500) } : {}) }).catch(() => {});
     };
     const a = Math.max(0, audio.start - clipStart);
     const b = Math.min(duration, audio.end - clipStart);

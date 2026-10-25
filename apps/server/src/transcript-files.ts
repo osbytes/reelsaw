@@ -183,7 +183,7 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .values({ projectId, ...values, sceneCuts: null })
       .onConflictDoUpdate({ target: schema.transcripts.projectId, set: values });
     if (idle && (await startRun(u, projectId, { reason: "refine", status: "refining", stage: "refine" })) === null) throw new TRPCError({ code: "CONFLICT", message: "The project started working again. Try once more when it is done." });
-    await u.emit(projectId, "transcript.imported", { format: parsed.format, cues: parsed.cues.length, words: words.length, ...(values.language ? { language: values.language } : {}), warnings: parsed.warnings.length });
+    await u.emit(projectId, "transcript.imported", { ...(input.uploadId ? { uploadId: input.uploadId } : {}), format: parsed.format, cues: parsed.cues.length, words: words.length, ...(values.language ? { language: values.language } : {}), warnings: parsed.warnings.length });
     if (idle) await enqueueRefine(svc, projectId, undefined, u);
     await releaseUpload(svc, u, projectId, input.uploadId); // the subtitle file is not needed once its text is the transcript
     u.afterCommit(() => log.info({ format: parsed.format, cues: parsed.cues.length, words: words.length, warnings: parsed.warnings, restarted: idle, previousLanguage: prev?.language ?? null }, "transcript imported"));

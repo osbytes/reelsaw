@@ -292,7 +292,7 @@ choosing a new password signs out other devices. Without email everything else w
 are handled on the Users page.
 
 The ready note is one email when projects finish and you have not come back to see them. The first
-project to finish schedules it (`COMPLETION_NOTIFY_MINUTES`, default 20, Settings → System →
+project to finish schedules it (`EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES`, default 20, Settings → System →
 Operations); another project that finishes while it is waiting joins the same note instead of
 sending its own. Opening the app, or an API or MCP call, counts as being here, so clips you stayed to
 watch are left out of the note. The first project, and later the 10th, 25th, 50th and 100th,

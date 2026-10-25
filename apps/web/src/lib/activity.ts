@@ -68,7 +68,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     case "clip.retrying":
       return { text: `Retrying ${p.step} (attempt ${p.attempt} of ${p.max}) after: ${p.reason}`, tone: "warn" };
     case "clip.bumper_skipped":
-      return { text: `${p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
+      return { text: `${p.slot === "both" ? "Intro and outro" : p.slot === "outro" ? "Outro" : "Intro"} skipped: ${p.reason}`, tone: "warn" };
     case "clip.overlay_skipped":
       return { text: `Overlay skipped: ${p.reason}`, tone: "warn" };
     case "clip.cut_unverified":

@@ -154,8 +154,10 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       }
       // one queue per event handler; its policy is the concurrency the handler opted into (policyOf)
       for (const q of handlerQueues) {
-        const opts = { retryLimit: q.def.retryLimit ?? 3, expireInSeconds: q.def.expireInSeconds ?? 300 };
-        await boss.createQueue(q.name, { policy: q.policy, ...opts, retryDelay: 60, retryBackoff: true, deleteAfterSeconds: 7 * 24 * 3600 });
+        const o = q.options;
+        const opts = { retryLimit: o.retryLimit, retryDelay: o.retryDelaySeconds, retryBackoff: o.retryBackoff, expireInSeconds: o.expireInSeconds, deleteAfterSeconds: o.deleteAfterSeconds };
+        await boss.createQueue(q.name, { policy: q.policy, ...opts });
+        // createQueue is a no-op for an existing queue; keep its options in sync with the definition
         await boss.updateQueue(q.name, opts).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
       started = true;

@@ -6,7 +6,7 @@
  * cutoff; already-seen posts are skipped):
  *
  * `readyEmail` is a `project.done` handler (event-handlers.ts) keyed by the account, so its job
- * commits with the completion and runs `COMPLETION_NOTIFY_MINUTES` later. It opts into both kinds of
+ * commits with the completion and runs `EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES` later. It opts into both kinds of
  * concurrency (pg-boss `stately`): a completion while a job is still waiting joins it (the job reads
  * every unseen `project.done` when it runs, so the late one is included), and at most one job per
  * account runs at once, so two runs never mail the same batch side by side. The send is skipped for
@@ -19,10 +19,9 @@
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
-import { defineEventHandlers } from "../event-handlers.js";
+import type { EventHandler } from "../event-handlers.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
-import type { UnitOfWork } from "../uow.js";
 import { templates } from "../email.js";
 
 /** Round numbers worth a line in the note. 1 is "your first", announced ahead of any higher one crossed in the same batch. */
@@ -31,6 +30,8 @@ export const MILESTONES = [1, 10, 25, 50, 100] as const;
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 /** One more than one note covers, so a full page schedules a follow-up for the rest. */
 const FETCH_LIMIT = 41;
+/** A batch cut short at FETCH_LIMIT sends the rest this long after. */
+const FOLLOW_UP_SEC = 60;
 const SHOW = 8;
 const HIGHLIGHTS = 3;
 
@@ -111,7 +112,7 @@ function clipLabel(hook: string, title: string): string {
  * Send the ready note for everything this account finished after they were last here. Idempotent;
  * the handler's queue runs one at a time per account. `again` queues the rest of a batch cut short.
  */
-export async function deliverCompletionNotice(svc: Services, userId: string, again?: (u: UnitOfWork) => Promise<string | null>): Promise<void> {
+export async function deliverCompletionNotice(svc: Services, userId: string, again?: () => Promise<string | null>): Promise<void> {
   const log = svc.log.child({ module: "notify", userId });
   if (!svc.email.enabled) {
     log.debug({ reason: "email off" }, "completion notice skipped");
@@ -228,11 +229,10 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     log.error({ err, events: sent.length }, "completion notice not sent");
     throw err;
   }
-  // the record and the follow-up for a page that was cut short commit together
-  const followUp = await svc.tx(async (u) => {
-    await u.db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
-    return truncated && again ? again(u) : null;
-  });
+  // Two single statements, no transaction: the follow-up for a page cut short is queued first, so a
+  // crash before the record re-sends this batch (same key) rather than losing the rest.
+  const followUp = truncated && again ? await again() : null;
+  await db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
   log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
   if (truncated) log.warn({ queued: !!followUp, held: FETCH_LIMIT - 1 }, "completion notice truncated");
 }
@@ -247,24 +247,20 @@ export function completionIdempotencyKey(userId: string, eventIds: number[]): st
 }
 
 /**
- * The ready note as a `project.done` handler (event-handlers.ts), keyed by the account: a completion
- * joins a note still waiting, and one note per account is sent at a time. Nothing when email is off.
+ * The ready note as a `project.done` handler (listed in project-event-handlers.ts), keyed by the
+ * account: a completion joins a note still waiting, and one note per account is sent at a time.
+ * Nothing when email is off.
  */
-export const readyEmailHandlers = defineEventHandlers({
-  "project.done": {
-    readyEmail: {
-      async key({ event, db, deps }) {
-        if (!deps.email.enabled) return null;
-        const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
-        return project?.userId ?? null;
-      },
-      delaySeconds: (deps) => deps.settings.get().COMPLETION_NOTIFY_MINUTES * 60,
-      coalesce: true,
-      oneAtATime: true,
-      // a minute apart with backoff; a run is failed after 2 min (a send takes seconds; Resend times out at 15 s)
-      retryLimit: 3,
-      expireInSeconds: 120,
-      handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, (u) => again(u, { delaySeconds: 60 })),
-    },
+export const readyEmail: EventHandler<"project.done"> = {
+  async key({ event, db, deps }) {
+    if (!deps.email.enabled) return null;
+    const [project] = await db.select({ userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, event.projectId));
+    return project?.userId ?? null;
   },
-});
+  delaySeconds: (deps) => deps.settings.get().EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES * 60,
+  coalesce: true,
+  oneAtATime: true,
+  // a send takes seconds (Resend times out at 15 s): a run stuck for 2 min is failed and retried
+  queue: { expireInSeconds: 120 },
+  handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, () => again({ delaySeconds: FOLLOW_UP_SEC })),
+};

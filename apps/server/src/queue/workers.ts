@@ -163,7 +163,7 @@ export async function startWorkers(svc: Services) {
   // event handlers (event-handlers.ts): one queue each; the queue's policy is the concurrency it opted into
   const handlerQueues = eventHandlerQueues(projectEventHandlers);
   for (const q of handlerQueues) {
-    await boss.work(q.name, { pollingIntervalSeconds: 2, localConcurrency: 2 }, async (jobs) => {
+    await boss.work(q.name, { pollingIntervalSeconds: q.options.pollingIntervalSeconds, localConcurrency: q.options.localConcurrency }, async (jobs) => {
       const job = jobs[0]!;
       const log = svc.log.child({ module: "events", handler: q.handler, event: q.type, jobId: job.id });
       const { event, key } = parseEventHandlerJob(q.type, job.data);
@@ -173,7 +173,7 @@ export async function startWorkers(svc: Services) {
           key,
           svc,
           signal: job.signal,
-          again: (u, o) => u.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfter: o.delaySeconds } : {}) }),
+          again: (o) => svc.queue.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfter: o.delaySeconds } : {}) }),
         });
       } catch (err) {
         log.error({ err, key, attempt: job.retryCount + 1 }, "event handler failed");

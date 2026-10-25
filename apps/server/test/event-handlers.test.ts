@@ -64,6 +64,11 @@ describe("event handlers", { skip: notReady ?? false }, () => {
     });
     assert.equal(await h.eventCount(p, "project.done"), 1);
     assert.equal((await jobs("testWrites", `${p}|renamed later`)).length, 1);
+    // the payload names its project (filled in by emit), in the row and in the job
+    const row = await h.pool.query(`select payload->>'projectId' as id from project_events where project_id = $1`, [p]);
+    assert.equal(row.rows[0].id, p);
+    const job = await h.pool.query(`select data->'event'->'payload'->>'projectId' as id from pgboss.job where name = 'event.project.done.testWrites' and singleton_key = $1`, [`${p}|renamed later`]);
+    assert.equal(job.rows[0].id, p);
   });
 
   it("leaves no job when the transition rolls back", async () => {
