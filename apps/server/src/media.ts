@@ -222,10 +222,13 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
     ytdlpProxies: () => ytdlpPool.snapshot(),
     async ytdlp(args, opts) {
       const cookies = config.YTDLP_COOKIES_FILE ? ["--cookies", config.YTDLP_COOKIES_FILE] : [];
+      // YouTube n-sig / PO tokens: eval already passes this; ingest and issue-report must too
+      const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
+      const prefix = [...js, ...cookies];
       if (args.includes("--proxy") || ytdlpPool.size === 0) {
-        return run(config.YTDLP_PATH, [...cookies, ...args], opts);
+        return run(config.YTDLP_PATH, [...prefix, ...args], opts);
       }
-      const { value } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...cookies, ...args], { ...opts, signal }), opts?.signal);
+      const { value } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }), opts?.signal);
       return value;
     },
 

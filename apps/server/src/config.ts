@@ -254,7 +254,7 @@ export const envSchema = z.object({
   FFMPEG_ENCODER: z.enum(["auto", "libx264", "h264_nvenc", "h264_videotoolbox"]).default("auto"),
   FFPROBE_PATH: z.string().default("ffprobe"),
   YTDLP_PATH: z.string().default("yt-dlp"),
-  /** Datacentre IPs get blocked by YouTube: one proxy URL, or a ranked pool (ytdlp-proxy.ts) */
+  /** Datacentre IPs get blocked by YouTube: one proxy URL, or a ranked pool (`{session}` filled per download; ytdlp-proxy.ts) */
   YTDLP_PROXY: z.string().optional(),
   YTDLP_COOKIES_FILE: z.string().optional(),
   CAPTION_FONT: z.string().default("DejaVu Sans"),

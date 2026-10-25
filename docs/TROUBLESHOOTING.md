@@ -254,6 +254,19 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
      and the next priority was used; it comes back after the cooldown without you changing
      `priority`. Circuits are in-process (each worker has its own); they reset on restart.
 
+  **Paid residential gateway (DataImpulse and similar).** YouTube needs one exit IP for the
+  whole download, then a *different* IP for the next video. Plan-wide / dashboard sticky pins
+  every ingest to one IP until YouTube flags it — that is the "site blocked the download" / bot-check
+  failure. Targeting belongs in the proxy **username**, not headers (`yt-dlp --proxy` cannot send
+  them). Put `{session}` in the URL; Reelsaw replaces it with a new id on every yt-dlp process
+  (including ingest retries). Quote the value: it contains semicolons.
+
+  DataImpulse HTTP (port 823), plan sticky **off**:
+  `YTDLP_PROXY='di=http://LOGIN__cr.us;sessid.{session};sessttl.60:PASSWORD@gw.dataimpulse.com:823;priority=1'`.
+  SOCKS5 is port 10000 and `socks5h://`. `sessttl.60` is minutes; keep it as long as a long download.
+  Each download already has its own IP, so a modest `concurrency` (2–4) is safe; `concurrency=1`
+  is only required on a single home Pi.
+
 - **"That address points inside this server's network."** Link sources must be public http(s) URLs: ingest resolves
   the host and refuses loopback, private (RFC1918), CGNAT, link-local, unique-local and multicast addresses, plus
   `localhost`, `host.docker.internal` and `*.internal`. To ingest from a LAN NAS, set `ALLOW_PRIVATE_SOURCE_URLS=true`.

@@ -20,8 +20,13 @@
  *   `[id=]<url-or-direct>[;priority=N][;concurrency=N]`
  * A bare URL is still one candidate (priority 100). `direct` = no `--proxy` (this server's IP).
  * `socks5h` resolves DNS on the proxy, which is what you want when the exit is a home IP.
+ * `{session}` in a URL is replaced with a fresh id on every download (and every retry): one
+ * yt-dlp process stays pinned to that exit IP; the next process gets a different one. That is
+ * how a residential gateway (DataImpulse `sessid.{session}`) should be used — not a dashboard-wide
+ * sticky login, which makes every ingest share one IP until YouTube flags it.
  * URLs never appear in logs; only `id`.
  */
+import { randomBytes } from "node:crypto";
 import {
   BrokenCircuitError,
   CircuitState,
@@ -47,6 +52,8 @@ const NAMED_URL = /^([\w.-]+)=(https?|socks5h?|socks4a?):\/\//i;
 export const PROXY_FAULTS_BEFORE_OPEN = 2;
 export const PROXY_COOLDOWN_CAP_MS = 15 * 60 * 1000;
 export const PROXY_RESULT_WINDOW = 20;
+/** Replaced in a proxy URL on every download so a residential gateway can pin that process to one IP. */
+export const PROXY_SESSION_TOKEN = "{session}";
 
 export interface ProxyCandidate {
   id: string;
@@ -170,6 +177,21 @@ function mask(s: string): string {
   return s.replace(/\/\/([^/?#]*@)/g, "//");
 }
 
+/** Hex, no punctuation: safe inside a proxy username (DataImpulse `sessid.{session}`). */
+export function newProxySession(): string {
+  return randomBytes(8).toString("hex");
+}
+
+/** Fill `{session}` in a stored URL. Unchanged when the token is absent (a Pi, a static login). */
+export function applyProxySession(url: string, session = newProxySession()): string {
+  return url.includes(PROXY_SESSION_TOKEN) ? url.replaceAll(PROXY_SESSION_TOKEN, session) : url;
+}
+
+function proxyArgs(url: string | null): string[] {
+  if (!url) return [];
+  return ["--proxy", applyProxySession(url)];
+}
+
 export type YtdlpErrorKind = "content" | "abort" | "proxy" | "other";
 
 /**
@@ -289,7 +311,7 @@ export function createYtdlpProxyPool(
         for (const slot of walk) {
           signal?.throwIfAborted();
           const id = slot.candidate.id;
-          const args = slot.candidate.url ? ["--proxy", slot.candidate.url] : [];
+          const args = proxyArgs(slot.candidate.url);
           try {
             const value = await slot.breaker.execute(async (ctx) => {
               if (slot.bulkhead) return slot.bulkhead.execute(() => fn({ id, args }, ctx.signal), ctx.signal);
@@ -313,7 +335,8 @@ export function createYtdlpProxyPool(
             if (kind === "content" || kind === "abort") throw err;
             exclude.add(id);
             usedFallback = true;
-            log?.warn({ proxyId: id, kind }, "yt-dlp proxy failed, trying next");
+            const hasNext = slots.some((s) => !exclude.has(s.candidate.id));
+            log?.warn({ proxyId: id, kind }, hasNext ? "yt-dlp proxy failed, trying next" : "yt-dlp proxy failed");
           }
         }
         if (skippedBusy) {
@@ -325,7 +348,7 @@ export function createYtdlpProxyPool(
         const panic = [...slots].filter((s) => !exclude.has(s.candidate.id)).sort(rank)[0];
         if (panic && lastErr === undefined) {
           const id = panic.candidate.id;
-          const args = panic.candidate.url ? ["--proxy", panic.candidate.url] : [];
+          const args = proxyArgs(panic.candidate.url);
           log?.warn({ proxyId: id }, "yt-dlp proxy all cooling, trying anyway");
           try {
             const value = await fn({ id, args }, signal ?? NEVER_ABORT);
