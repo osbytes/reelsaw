@@ -60,6 +60,20 @@ export interface EncoderChoice {
 }
 
 /**
+ * Decoder/encoder threads plus the two filtergraph pools. `-threads` does not apply to filters;
+ * those default to the CPU count, and a 32-core host running several jump-cut graphs then races
+ * inside `scale` (`Failed to configure output pad` / EAGAIN on reinit). Filtergraph threads stay at
+ * 1: x264/NVENC take the encode cores, and overlay/scale reinit is not safe to parallelise.
+ */
+export function ffmpegThreadArgs(encodeThreads: number): string[] {
+  const t = String(Math.max(1, encodeThreads));
+  return ["-threads", t, "-filter_threads", "1", "-filter_complex_threads", "1"];
+}
+
+/** Rawvideo-to-pipe sampling: frame-threaded rawvideo fails to open (`ff_frame_thread_encoder_init`). */
+export const ffmpegPipeThreads = ["-threads", "1", "-filter_threads", "1"] as const;
+
+/**
  * `-c:v …` and its quality settings per encoder, tuned to look alike: libx264 crf 21 is the
  * reference; NVENC's constant-quality 23 with VBR and VideoToolbox's q 65 land near it. The caller
  * adds -pix_fmt yuv420p and the frame rate.
@@ -266,7 +280,7 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       try {
         await run(
           config.FFMPEG_PATH,
-          ["-hide_banner", "-nostdin", ...seek, "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
+          ["-hide_banner", "-nostdin", ...ffmpegPipeThreads, ...seek, "-i", input, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
           {
             signal,
             onStderr: (line) => {

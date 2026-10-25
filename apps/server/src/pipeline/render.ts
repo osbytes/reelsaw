@@ -27,7 +27,7 @@ import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExp
 import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
-import type { VideoEncoder } from "../media.js";
+import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
 import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, ensureRaster, isSvgAsset, RASTER_WIDTH, BUMPER_FPS } from "./bumpers.js";
 
 const OUT_W = 1080;
@@ -149,7 +149,9 @@ export function layoutFilter(layout: Layout, srcW: number, srcH: number, track: 
   }
   if (layout === "stack") {
     // top: whole frame letterboxed to 1080 wide; bottom: speaker crop sized to the (small) face
-    const topH = Math.round((OUT_W * srcH) / srcW / 2) * 2;
+    const fittedH = Math.round((OUT_W * srcH) / srcW / 2) * 2;
+    // a portrait source already fills 9:16: leaving the speaker pane at 0 makes `scale=1080:0` fail
+    const topH = Math.min(fittedH, OUT_H - 2);
     const botH = OUT_H - topH;
     const c = speakerCrop(srcW, srcH, OUT_W / botH, { cy: trackCenter(track).y, size: geo.size ?? 0.17 }, geo.avoid);
     const zoomW = even(c.w);
@@ -629,7 +631,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       ...(withBumpers && bumpers.outro ? ["-i", bumpers.outro.path] : []),
       "-filter_complex", graph,
       "-map", "[v]", ...audioMap,
-      "-threads", String(svc.resources.ffmpegThreads()),
+      ...ffmpegThreadArgs(svc.resources.ffmpegThreads()),
       ...svc.media.videoEncodeArgs(encoder), "-pix_fmt", "yuv420p", "-r", "30",
       "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
       "-movflags", "+faststart", "-f", "mp4", tmpOut,

@@ -8,6 +8,7 @@
  * a coarse grid, and keep only cells that show text in several different shots.
  */
 import { spawn } from "node:child_process";
+import { ffmpegPipeThreads } from "../media.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import type { TextDetector } from "../vision/text.js";
 import { TEXT_INPUT_W, TEXT_INPUT_H } from "../vision/text.js";
@@ -156,7 +157,7 @@ export function dropFaceOverlaps<O extends Box>(overlays: O[], frames: Array<{ t
 function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSignal): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", t.toFixed(2), "-i", source, "-frames:v", "1", "-vf", `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal });
+    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", t.toFixed(2), "-i", source, "-frames:v", "1", "-vf", `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal });
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.on("error", reject);
     p.on("close", (code) => (code === 0 ? resolve(new Uint8Array(Buffer.concat(chunks))) : reject(new Error(`ffmpeg exited ${code}`))));
@@ -334,7 +335,7 @@ export interface ClipTextFrame {
 /** Text boxes per frame in a clip's own time range (one ffmpeg pass at `fps`). */
 export async function sampleClipText(deps: { detector: TextDetector; ffmpegPath: string; signal?: AbortSignal }, source: string, startSec: number, durationSec: number, fps = 2): Promise<ClipTextFrame[]> {
   const frameBytes = TEXT_INPUT_W * TEXT_INPUT_H * 3;
-  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", startSec.toFixed(3), "-t", durationSec.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
+  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", startSec.toFixed(3), "-t", durationSec.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
   const frames: ClipTextFrame[] = [];
   let buf = Buffer.alloc(0);
   for await (const chunk of ff.stdout) {

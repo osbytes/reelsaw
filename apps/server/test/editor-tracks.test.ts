@@ -294,4 +294,9 @@ describe("fixed crops", () => {
     // no crop: the face-sized window as before
     assert.ok(!layoutFilter("face", 1920, 1080, track(0.3), [], {}).chain.includes("split=2"));
   });
+  it("a stack on a portrait source keeps a speaker pane (scale height never 0)", () => {
+    const chain = layoutFilter("stack", 1080, 1920, track(0.5)).chain;
+    assert.ok(!chain.includes("scale=1080:0"), chain);
+    assert.ok(chain.includes("scale=1080:1918") && chain.includes("scale=1080:2"), chain);
+  });
 });

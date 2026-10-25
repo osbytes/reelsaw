@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
+import { ffmpegPipeThreads } from "../media.js";
 import { FULL_FRAME, isFullFrame, contentSide, type ContentRegion } from "@reelsaw/shared";
 import { FACE_INPUT_W, FACE_INPUT_H, type FaceDetector, type FaceBox } from "../vision/faces.js";
 import { contentRunReport, type ContentRun, type RunCandidate } from "./content-runs.js";
@@ -117,7 +118,7 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
   };
   const ff = spawn(
     opts.ffmpegPath,
-    ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", opts.startSec.toFixed(3), "-t", opts.durationSec.toFixed(3), "-i", opts.source, "-vf", `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+    ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", opts.startSec.toFixed(3), "-t", opts.durationSec.toFixed(3), "-i", opts.source, "-vf", `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
     { signal: opts.signal, stdio: ["ignore", "pipe", "pipe"] },
   );
   let stderr = "";

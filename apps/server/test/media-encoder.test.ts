@@ -1,7 +1,7 @@
 /** Encoder selection: which encoders a setting probes, and the per-encoder ffmpeg arguments. */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { encoderCandidates, videoEncodeArgs } from "../src/media.js";
+import { encoderCandidates, ffmpegPipeThreads, ffmpegThreadArgs, videoEncodeArgs } from "../src/media.js";
 import { normaliseArgs } from "../src/pipeline/bumpers.js";
 
 describe("video encoder", () => {
@@ -26,6 +26,12 @@ describe("video encoder", () => {
     }
     // the reference quality settings stay what every clip rendered so far was encoded with
     assert.deepEqual(videoEncodeArgs("libx264"), ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]);
+  });
+
+  it("caps filtergraph threads at 1 so concurrent scale graphs cannot EAGAIN on reinit", () => {
+    assert.deepEqual(ffmpegThreadArgs(8), ["-threads", "8", "-filter_threads", "1", "-filter_complex_threads", "1"]);
+    assert.deepEqual(ffmpegThreadArgs(0), ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"]);
+    assert.deepEqual([...ffmpegPipeThreads], ["-threads", "1", "-filter_threads", "1"]);
   });
 
   it("bumper normalisation takes the encoder in use and defaults to libx264", () => {
