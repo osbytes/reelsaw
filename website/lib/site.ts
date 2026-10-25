@@ -1,20 +1,15 @@
 /**
- * The hosted service, when it exists: NEXT_PUBLIC_HOSTED_URL (e.g. https://app.reelsaw.com). Unset, the site
- * says nothing about a hosted plan: no pricing / terms / privacy pages, no links, self-hosted-only copy.
- * Read at build time; set it on Vercel and redeploy when app.reelsaw.com goes live.
+ * Public site constants. Hosted Reelsaw is a product fact (app.reelsaw.com): pricing, terms and
+ * privacy are always on the site. NEXT_PUBLIC_HOSTED_URL only overrides the app URL (staging).
  */
-const hostedUrl = process.env.NEXT_PUBLIC_HOSTED_URL?.replace(/\/+$/, "") || null;
-export const HOSTED = !!hostedUrl;
-
 export const SITE = {
   name: "Reelsaw",
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "https://reelsaw.com").replace(/\/+$/, ""),
-  hosted: HOSTED,
-  title: "Reelsaw: self-hosted, AI-powered video clipper",
+  title: "Reelsaw: AI video clipper you self-host or run hosted",
   description:
-    "Turn long videos into vertical 9:16 clips on your own hardware. Reelsaw transcribes, picks the most clippable moments with an LLM, reframes speakers and burns in word-highlight captions. Open source (AGPL-3.0), fully local with no API keys or any AI provider you choose, one-command Docker install.",
-  /** the hosted service (docs/specs/ee.md); only meaningful when `hosted` is true */
-  app: hostedUrl ?? "https://app.reelsaw.com",
+    "Turn long videos into vertical 9:16 clips. Self-host with no meter, or use app.reelsaw.com (Free, then $12 / $29 / $59 a month). Open source (AGPL-3.0), fully local with no API keys or any AI provider, MCP on every plan.",
+  /** the hosted service (docs/specs/ee.md) */
+  app: (process.env.NEXT_PUBLIC_HOSTED_URL ?? "https://app.reelsaw.com").replace(/\/+$/, ""),
   github: "https://github.com/osbytes/reelsaw",
   /** GitHub's own releases (zips, tags). The changelog page is `/releases`. */
   releases: "https://github.com/osbytes/reelsaw/releases",

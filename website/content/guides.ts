@@ -1,5 +1,4 @@
 import { CHECKED } from "./reelsaw";
-import { HOSTED } from "../lib/site";
 import type { Guide } from "./types";
 
 export const GUIDES: Guide[] = [
@@ -7,13 +6,13 @@ export const GUIDES: Guide[] = [
     slug: "free-ai-clip-generator-no-watermark",
     metaTitle: "Free AI clip generator with no watermark (self-hosted)",
     metaDescription:
-      "Most free AI clip generators watermark your clips until you pay. Reelsaw is open-source software you can run yourself, so clips are free and never watermarked" + (HOSTED ? " (its hosted Free plan watermarks like everyone else's)" : "") + ". How each tool handles watermarks, checked " +
+      "Most free AI clip generators watermark your clips until you pay. Reelsaw is open-source software you can run yourself, so clips are free and never watermarked (its hosted Free plan watermarks like everyone else's). How each tool handles watermarks, checked " +
       CHECKED +
       ".",
     h1: "A free AI clip generator with no watermark, and why that is rare",
     intro: [
       "Every hosted clipping service pays for GPUs, storage and bandwidth on your behalf, so its free tier has to push you toward a plan. The watermark is how: it makes the free clips unusable in public while still showing you the product works.",
-      "The structural exception is software you run yourself. Reelsaw is an open-source AI clipper that installs with one command; on your own machine it has no plans and never writes a watermark, because there is nothing to upsell." + (HOSTED ? " (Its hosted service at app.reelsaw.com is a normal hosted product: the Free plan watermarks, paid plans from $12 a month do not.)" : ""),
+      "The structural exception is software you run yourself. Reelsaw is an open-source AI clipper that installs with one command; on your own machine it has no plans and never writes a watermark, because there is nothing to upsell. (Its hosted service at app.reelsaw.com is a normal hosted product: the Free plan watermarks, paid plans from $12 a month do not.)",
     ],
     sections: [
       {
@@ -34,14 +33,13 @@ export const GUIDES: Guide[] = [
         table: {
           columns: ["Tool", "Free tier", "Cheapest way to lose the watermark"],
           rows: [
-            ["Reelsaw", "Everything, self-hosted", "There is none. $0"],
-            ["Reelsaw", HOSTED ? "Self-hosted: none, ever. Hosted: first video up to 60 min, then 20 min/mo with watermark" : "None, ever", HOSTED ? "Self-host ($0) or Starter, $12/mo" : "Self-host ($0)"],
+            ["Reelsaw", "Self-hosted: none, ever. Hosted: first video up to 60 min, then 20 min/mo with watermark", "Self-host ($0) or Starter, $12/mo"],
             ["OpenShorts", "Self-hosted: none. Cloud: first video up to 60 min, then 20 min/mo with watermark", "Self-host ($0) or Cloud from $12/mo"],
             ["Opus Clip", "Captions with watermark, exports expire after 3 days", "Starter, $15/mo"],
-            ["Vizard", "60 upload min/mo, 720p, 3-day storage; 'No watermark' is a Creator feature", "Creator, priced by yearly credit bundle"],
+            ["Vizard", "60 upload min/mo, 720p, 3-day storage; 'No watermark' is a Creator feature", "Creator, $29/mo or $14.50/mo billed yearly"],
             ["2short.ai", "30 min of analysis/mo", "Page says 'goodbye to watermarks' without a plan; Lite is $9.90/mo"],
-            ["quso.ai", "75 credits/mo, 720p, 7-day retention", "Watermark not mentioned; Lite is $29/mo"],
-            ["Submagic", "No free plan", "Starter, $19/mo or $12/mo yearly, no watermark on any plan"],
+            ["quso.ai", "75 credits/mo, 720p with a quso.ai watermark, 7-day retention", "Lite, $29/mo"],
+            ["Submagic", "No free plan listed on the pricing page", "Starter, $19/mo or $12/mo yearly, no watermark on listed plans. Magic Clips is a $19/mo add-on"],
             ["Klap", "No free plan listed", "Basic, $14/mo billed yearly; watermark not stated"],
           ],
         },
@@ -58,8 +56,8 @@ export const GUIDES: Guide[] = [
       },
     ],
     faqs: [
-      { q: "Is there a free AI clip generator without a watermark?", a: "Yes: self-hosted software. Reelsaw is open source under the AGPL-3.0, installs with one command, and never watermarks on your own machine. OpenShorts, also open source, is watermark-free when self-hosted." + (HOSTED ? " Both hosted services watermark their free plans." : "") },
-      { q: "Do any hosted free plans skip the watermark?", a: "Among the tools checked on " + CHECKED + ", Submagic lists no watermark on any plan but has no free plan; 2short.ai makes a general 'no watermarks' claim without tying it to a plan. Opus Clip" + (HOSTED ? ", OpenShorts Cloud and hosted Reelsaw" : " and OpenShorts Cloud") + " watermark their free tiers; Vizard lists watermark removal as a paid feature." },
+      { q: "Is there a free AI clip generator without a watermark?", a: "Yes: self-hosted software. Reelsaw is open source under the AGPL-3.0, installs with one command, and never watermarks on your own machine. OpenShorts, also open source, is watermark-free when self-hosted. Both hosted services watermark their free plans." },
+      { q: "Do any hosted free plans skip the watermark?", a: "Among the tools checked on " + CHECKED + ", Submagic lists no watermark on any plan but has no free plan on the pricing page; 2short.ai makes a general 'no watermarks' claim without tying it to a plan. Opus Clip, quso.ai, OpenShorts Cloud and hosted Reelsaw watermark their free tiers; Vizard lists watermark removal as a paid Creator feature ($29/mo, or $14.50/mo billed yearly)." },
       { q: "How do I remove a watermark from a clip I already made?", a: "Re-render it from the source without the watermark. Cropping or blurring a watermark lowers quality and usually breaks the tool's terms; running the source through Reelsaw gives you a clean clip from the original video." },
     ],
     sources: [
@@ -79,14 +77,14 @@ export const GUIDES: Guide[] = [
       "Comparing open-source AI video clippers (Reelsaw, AGPL-3.0, TypeScript; OpenShorts, MIT, Python): what to check in the licence, the local-only path, the agent surface and the pipeline before you commit.",
     h1: "Open-source video clippers: what 'open source' actually gets you",
     intro: [
-      "'Open source' on a clipping tool can mean anything from a fully local pipeline to a thin client that still calls one vendor's API. The question that matters is whether you can run every step on your own hardware, with the models you choose. Reelsaw was built to answer yes to both; OpenShorts, the other open-source clipper with traction, answers yes to the first only if you keep a Gemini key.",
+      "'Open source' on a clipping tool can mean anything from a fully local pipeline to a thin client that still calls one vendor's API. The question that matters is whether you can run every step on your own hardware, with the models you choose. Reelsaw was built to answer yes to both; OpenShorts, the other open-source clipper with traction, can pick moments locally, but Gemini is still required for layout picking and silent videos.",
       "This page lists what to check and how each project answers.",
     ],
     sections: [
       {
         heading: "Four things to check before you choose",
         bullets: [
-          "Local-only path: can every model run on your hardware, or is one vendor still required for some step? That decides whether 'self-hosted' also means 'private' and 'free'. Reelsaw: yes, by default. OpenShorts: Gemini stays required for layout picking and silent videos.",
+          "Local-only path: can every model run on your hardware, or is one vendor still required for some step? That decides whether 'self-hosted' also means 'private' and 'free'. Reelsaw: yes, by default. OpenShorts: moment picking can be local; Gemini stays required for layout picking and silent videos.",
           "Provider choice: can you point each model at the vendor you want (or at a local server) without changing code? Reelsaw: every model is a provider:model string, switchable at runtime. OpenShorts: an OpenAI-compatible server for moment picking only.",
           "Licence: MIT lets anyone take the code private, including as a hosted service. AGPL-3.0 requires anyone who runs a modified version for others to publish their changes. Neither is wrong; they protect different people.",
           "Agent surface: an MCP server means Claude Code, Claude Desktop, Cursor or a script can drive the whole pipeline. Check whether it is plan-gated.",
@@ -98,16 +96,16 @@ export const GUIDES: Guide[] = [
         table: {
           columns: ["", "Reelsaw", "OpenShorts"],
           rows: [
-            ["Fully local, no API keys", "Yes, the installer's default: Ollama, local Whisper, on-device alignment and face detection", "No: Gemini is still needed for layout picking and silent videos"],
+            ["Fully local, no API keys", "Yes, the installer's default: Ollama, local Whisper, on-device alignment and face detection", "Partly: moment picking can be local; Gemini is still needed for layout picking and silent videos"],
             ["Language model", "Any: OpenAI, Anthropic, Google, Groq, Vercel AI Gateway, Ollama, vLLM, LM Studio or any OpenAI-compatible server; switched at runtime", "Gemini by default; any OpenAI-compatible server for moment picking only"],
             ["Transcription", "Any: Deepgram, AssemblyAI, OpenAI, Groq, or a local Whisper server (Speaches, CPU or CUDA)", "faster-whisper, optional Parakeet backend; GPU override"],
             ["GPU", "Compose override: faster-whisper on CUDA, Ollama in a container, NVENC encoding; detection models on the CPU", "Image build flag: faster-whisper on CUDA, NVENC encoding, detection models on CUDA"],
             ["Licence", "AGPL-3.0, whole repository", "MIT core; cloud/ directory under a commercial licence"],
             ["Stack", "TypeScript: Hono, tRPC, Drizzle, Postgres, pg-boss, React", "Python: FastAPI, faster-whisper, MediaPipe, YOLOv8; React frontend"],
             ["Moment selection", "Map, pool, rank: chunked at pauses, rubric scored as a median of k samples, pairwise top-10 with swapped positions, optional judge model", "Gemini picks 3 to 15 moments per video"],
-            ["Reframing", "Face, split, stack, fit per segment; active-speaker following; per-section overrides in the editor", "Track, general, split, screencast modes picked per video"],
+            ["Reframing", "Face, split, stack, fit per shot cut; webcam-tile stacks; hand-set crops; per-section overrides", "Track, general, split, screencast modes picked per video"],
             ["Filler removal", "Yes, forced-alignment verified, each cut reviewable", "Not listed"],
-            ["Editor", "Live 9:16 preview, multi-lane timeline, snapping, layout sections, transitions, intros and outros, undo", "Dashboard with per-video settings"],
+            ["Editor", "Live 9:16 preview, multi-lane timeline, snapping, layout sections, layers, layer templates, transitions, intros and outros, undo", "Dashboard with per-video settings"],
             ["Agents", "MCP server (OAuth optional), operator CLI", "MCP server, REST API with webhooks, CLI, agent skill"],
             ["Beyond clipping", "Export zip with platform-ready metadata", "Dubbing, AI UGC videos, YouTube studio, direct publishing, hosted cloud"],
             ["Multi-user", "Accounts, admin approval, quotas, usage, runtime model switching", "Hosted accounts with API keys"],
@@ -120,13 +118,13 @@ export const GUIDES: Guide[] = [
         heading: "Which one to pick",
         bullets: [
           "Pick Reelsaw for the core job and control over it: fully local by default with no API key, any provider for any model, selection you can audit, cuts you can review, per-segment framing, an editor, teams, and a pipeline that resumes after a crash.",
-          "Pick OpenShorts for breadth around the job: dubbing, UGC generation, publishing, a hosted fallback and a bigger community.",
-          "Pick either over a hosted plan if you clip long videos regularly or need the source to stay on your hardware.",
+          "Pick OpenShorts for breadth around the job: dubbing, UGC generation, publishing and a bigger community.",
+          "Pick either hosted plan if you do not want to run a machine: both are Free, then $12, $29 and $59 a month. Pick self-hosted Reelsaw if the source must stay on your hardware or you clip past a monthly minute cap.",
         ],
       },
     ],
     faqs: [
-      { q: "Is there an open-source alternative to Opus Clip?", a: "Yes. Reelsaw (AGPL-3.0, TypeScript) and OpenShorts (MIT, Python) are both open-source AI clippers you can self-host with Docker Compose. Reelsaw runs with no API key at all and lets you pick any provider per model; OpenShorts keeps a Gemini dependency. See the Opus Clip comparison for a feature-by-feature table." },
+      { q: "Is there an open-source alternative to Opus Clip?", a: "Yes. Reelsaw (AGPL-3.0, TypeScript) and OpenShorts (MIT, Python) are both open-source AI clippers you can self-host with Docker Compose. Reelsaw runs with no API key at all and lets you pick any provider per model; OpenShorts can pick moments locally but still needs Gemini for layout picking and silent videos. See the Opus Clip comparison for a feature-by-feature table." },
       { q: "Does open source mean my video stays private?", a: "Only if every model can run locally. Reelsaw's installer sets up Ollama and a local Whisper so nothing leaves your machine; with cloud models, only audio (for transcription) or transcript text (for selection) is sent to the vendor you chose." },
       { q: "Can I modify Reelsaw and run it for my team?", a: "Yes. The AGPL-3.0 allows internal use and modification freely. If you offer a modified version to the public as a service, you must publish your changes." },
     ],
@@ -139,7 +137,7 @@ export const GUIDES: Guide[] = [
     slug: "youtube-to-shorts-converter",
     metaTitle: "YouTube to Shorts converter you run on your own machine",
     metaDescription:
-      "Paste a YouTube link, get vertical Shorts with word-highlight captions, a hook and a YouTube Data API upload body, all rendered on your own hardware with open-source software. No credits, no watermark" + (HOSTED ? " when you self-host." : "."),
+      "Paste a YouTube link, get vertical Shorts with word-highlight captions, a hook and a YouTube Data API upload body, all rendered on your own hardware with open-source software. No credits, no watermark when you self-host.",
     h1: "YouTube to Shorts converter you can run on your own machine",
     intro: [
       "A YouTube link is the most common input to a clipping tool, and the first thing hosted services charge for is the minutes in it. Reelsaw takes the same link and does the whole job on your hardware: fetch, transcribe, pick moments, reframe to 9:16, caption, and hand back clips with upload metadata.",
@@ -170,10 +168,10 @@ export const GUIDES: Guide[] = [
         table: {
           columns: ["", "Reelsaw", "Hosted converters (Opus Clip, Vizard, 2short, quso)"],
           rows: [
-            ["Price", HOSTED ? "$0 software on your hardware (or hosted: Free, then $12 to $59 a month)" : "$0 software; your hardware or your model keys", "Free tiers with watermarks, 720p or expiring exports; paid from about $10 to $29 a month"],
+            ["Price", "$0 software on your hardware (or hosted: Free, then $12 to $59 a month)", "Free tiers with watermarks, 720p or expiring exports; paid from about $10 to $29 a month"],
             ["Source length", "No limit beyond your disk", "Metered per minute or per credit; some cap export length"],
             ["Where the video goes", "Stays on your machine", "Uploaded to the vendor"],
-            ["Automation", "MCP server and CLI on every install", "API or MCP on higher plans, where offered"],
+            ["Automation", "MCP server and CLI on every install, including hosted Free", "API or MCP on higher plans, where offered"],
             ["Publishing", "Export with API bodies; no built-in posting", "Built-in scheduling on most paid plans"],
           ],
         },
@@ -207,7 +205,7 @@ export const GUIDES: Guide[] = [
         bullets: [
           "Split: two speakers stacked top and bottom, when the shot has two faces and detection is confident.",
           "Face: the crop follows whoever is talking, chosen by mouth motion correlated with the audio envelope, with a minimum of 2.5 seconds per shot so it never flickers.",
-          "Stack: slides or a screen on top, a zoomed webcam below, for video podcasts that share a screen.",
+          "Stack: slides or a screen on top, the webcam tile below (the picture-in-picture box of a Zoom, Teams, Meet or OBS recording), for video podcasts that share a screen.",
           "Fit: the whole frame over a blurred background when there is no face, such as a title card or b-roll.",
           "Clips are split at scene cuts and face-presence changes, so one clip can open on a wide shot and switch to a talking head. Override any section in the editor.",
         ],

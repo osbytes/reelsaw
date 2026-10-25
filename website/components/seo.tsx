@@ -121,7 +121,13 @@ export function TryIt() {
     <aside className="card flex flex-col items-start gap-3 bg-acc-soft/40 p-6 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <p className="text-[16px] font-bold">Try it: paste a link, get vertical clips</p>
-        <p className="mt-1 text-sm text-ink2">One command installs Reelsaw with Docker: no plan, no meter, no watermark.{SITE.hosted ? " Or start on the hosted Free plan." : ""}</p>
+        <p className="mt-1 text-sm text-ink2">
+          One command installs Reelsaw with Docker: no plan, no meter, no watermark. Or{" "}
+          <a href={SITE.app} className="prose-link">
+            start on the hosted Free plan
+          </a>
+          .
+        </p>
       </div>
       <div className="flex shrink-0 gap-2">
         <a href="/#install" className="btn-primary">

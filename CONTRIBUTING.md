@@ -36,7 +36,7 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
   an hour in the future and removed afterwards, so workers never touch the fake clips.
 - Changed an env var, a CLI command or an eval suite? Run `pnpm docs:gen` (CI runs `pnpm docs:check`):
   `.env.example`, `docs/CONFIG.md` and the command/suite tables are generated from the code.
-- Keep docs current: `README.md`, `docs/CONFIG.md` (generated), `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md`, `docs/UI.md` (overlay/portal/stacking and mobile-viewport gotchas).
+- Keep docs current in the same change as the capability ([docs/PRINCIPLES.md](docs/PRINCIPLES.md), Process): `README.md` (features, MCP, CLI, roadmap), `website/content/` and the home page when the public story changes, `docs/CONFIG.md` (generated; `pnpm docs:gen`), `docs/TROUBLESHOOTING.md`, `docs/EVALS.md`, `docs/RESEARCH.md` (status note if a listed gap closed), `docs/UI.md` (overlay/portal/stacking and mobile-viewport gotchas).
 
 ## Licensing: the CLA and the Developer Certificate of Origin
 

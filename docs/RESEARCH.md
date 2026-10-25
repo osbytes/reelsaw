@@ -2,6 +2,8 @@
 
 **Scope:** what competitors do that Reelsaw doesn't yet do, and what 2021–2026 research suggests for each pipeline stage. Every source below is linked. Figures from vendor marketing pages are marked *(vendor claim)*.
 
+**Status (2026-10-24):** this is a snapshot of gaps and research at the time it was written. Several A2 items have since shipped: map-pool-rank selection with a run-relative gate (not one LLM pass), per-shot-cut layout sections and hand-set crops, keyword captions with drag-to-place, topic-focused clipping and an optional max-clip cap, layer templates, library B-roll and stock search, and background music with ducking. Still open: punch-in zooms, a learned active-speaker model, multi-aspect export, publishing, dubbing. Do not treat the A1/A2 tables as the current product surface; the README is.
+
 ---
 
 ## PART A: Competitor audit
@@ -24,9 +26,9 @@
 | **FunClip** (Alibaba, MIT) | Paraformer ASR with **hotwords**. **CAM++ speaker ID**, so users can clip by speaker. LLM picks clips from the SRT ([repo](https://github.com/joephon/FunClip)) | LLM-driven | n/a |
 | imgly/videoclipper | Runs in the browser: Whisper, then Gemini, with face-api.js tracking ([repo](https://github.com/imgly/videoclipper)) | LLM-driven | Automatic |
 
-**How competitors decide clip count.** Commercial tools almost all let content and length drive the count, with a user-set cap and length bucket on top (OpusClip, Vizard, Klap, Riverside). OpenShorts uses a fixed 3–15. Our current approach is one LLM pass plus top-up passes when it finds too few, so we sit between the two. The clearest pattern to copy is Vizard and OpusClip: generate **candidates above a quality threshold**, let the user set an optional `maxClips` and a length bucket, and offer "find more" or "reprompt" (Riverside and OpusClip both have this).
+**How competitors decide clip count.** Commercial tools almost all let content and length drive the count, with a user-set cap and length bucket on top (OpusClip, Vizard, Klap, Riverside). OpenShorts uses a fixed 3–15. Reelsaw now does map → pool → rank: overlapping chunks, rubric scores, pairwise comparison of the top picks, and a run-relative MAD gate instead of a fixed count, plus an optional cap and "Find clips about …". What is still missing versus the commercial pattern is a length bucket and a "find more / reprompt" control (Riverside and OpusClip both have this).
 
-**Reframing control UX.** No product I found lets users keyframe a crop path or click to choose which face to track. The best pattern on offer is OpusClip's **per-scene layout and crop override with multi-select batch apply**. Reelsaw already has a per-clip layout override. Moving it to per-scene, keyed to our ffmpeg scene cuts, would match the best competitor. Adding "click a face to lock tracking" would put us ahead.
+**Reframing control UX.** No product I found lets users keyframe a crop path or click to choose which face to track. OpusClip's **per-scene layout and crop override with multi-select batch apply** was the best pattern on offer; Reelsaw now has per-section layouts keyed to shot cuts, hand-set crops, and "Use for all clips" (`apply_framing`). Adding "click a face to lock tracking" would still put us ahead of the remaining gap.
 
 **Caption positioning UX.** I found no public docs from OpusClip or Submagic on dragging captions into position. What they document is template, font, colour, animation and position presets saved into a brand kit ([OpusClip](https://www.opus.pro/tools/instagram-reel-caption-generator)). Third-party safe-zone guides for 1080×1920 disagree: the bottom reserve ranges from about 250–660 px and the right action rail is about 120 px ([Remotion safe zones](https://www.remotion.dev/elements/overlays/social-safe-zones/)). Recommendation: offer a vertical-position slider with a safe-zone overlay toggle, and default captions to roughly 60–70% of frame height.
 
