@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.23.1
+
+### Patch Changes
+
+- [#163](https://github.com/osbytes/reelsaw/pull/163) [`8943cca`](https://github.com/osbytes/reelsaw/commit/8943cca9d7e19d2b349e10cc850655deaa8fd2e5) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The Docker image and production bundle now run Node 24 LTS (the same line CI already uses). The base image stays digest-pinned on the 24 line so Dependabot can pick up 24.x security releases.
+
 ## 0.23.0
 
 ### Minor Changes
