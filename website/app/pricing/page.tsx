@@ -65,7 +65,7 @@ export default function PricingPage() {
             ))}
           </ul>
           <p className="text-sm leading-relaxed text-ink3">
-            Prices in USD; tax is added at checkout where it applies. A plan's minutes count the length of the videos you add in the billing period, never per clip; on Free, your first video is free up to 60 minutes. When minutes run out, the app says so and tells you when they reset. Storage counts sources, uploads and rendered clips; delete a project to make room. Plans change on Stripe's portal and are prorated. Limits: {PRICING.map((p) => `${p.label} ${p.minutes} min, ${gb(p.storageMb)}, ${p.projects ? `${p.projects} projects` : "unlimited projects"}`).join("; ")}. Same prices as OpenShorts Cloud, so the choice is the pipeline and the licence.
+            Prices in USD; tax is added at checkout where it applies. A plan's minutes count the length of the videos you add in the billing period, never per clip; on Free, your first video is free up to 60 minutes. When minutes run out, the app says so and tells you when they reset. Storage counts sources, uploads and rendered clips, including deleted projects until you wipe them. Plans change on Stripe's portal and are prorated. Limits: {PRICING.map((p) => `${p.label} ${p.minutes} min, ${gb(p.storageMb)}, ${p.projects ? `${p.projects} projects` : "unlimited projects"}`).join("; ")}. Same prices as OpenShorts Cloud, so the choice is the pipeline and the licence.
           </p>
         </section>
 

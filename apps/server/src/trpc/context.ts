@@ -1,4 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
+import { QuotaError } from "../quota.js";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { Services } from "../services.js";
 import { cannotUseApp, requester, type Requester } from "../auth.js";
@@ -31,6 +32,15 @@ export function contextFactory(svc: Services) {
 
 const t = initTRPC.context<Context>().create({
   sse: { ping: { enabled: true, intervalMs: 15_000 }, client: { reconnectAfterInactivityMs: 30_000 } },
+  errorFormatter({ shape, error }) {
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        ...(error instanceof QuotaError && error.quota ? { quota: error.quota } : {}),
+      },
+    };
+  },
 });
 
 export const router = t.router;

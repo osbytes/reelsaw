@@ -60,15 +60,18 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
 | `reelsaw set-password <email> [--must-change]` | set an account's password from a prompt (or two stdin lines); `--must-change` requires a new one at next sign-in. Do not put the secret on the command line |
 | `reelsaw retention` | run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS) |
-| `reelsaw deleted` | deleted projects that can still be restored, with their purge date |
+| `reelsaw deleted [email]` | restorable deletes as one list with their purge date. No email: projects across the install. With email: that account (the Deleted page / list_deleted) |
 | `reelsaw restore <projectId>` | undo a project delete (same as projects.restore and the restore_project tool) |
 | `reelsaw restore-clip <clipId>` | bring back a deleted clip or one a re-analyze replaced |
 | `reelsaw delete-clip <clipId>` | delete one clip, restorable like a project (same as clips.delete and delete_clip) |
+| `reelsaw delete-clips <projectId> <clipId…>` | delete several clips of one project at once (same as the selection bar, clips.deleteMany and delete_clips) |
+| `reelsaw purge-clip <clipId>` | wipe one already-deleted clip (same as clips.purge and purge_clip) |
 | `reelsaw captions <clipId> [--format srt\|vtt] [--words]` | print a clip's rendered captions as an SRT or VTT file (same as clips.captions and get_clip_captions) |
 | `reelsaw transcript-file <projectId> [--format srt\|vtt] [--words]` | print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file) |
 | `reelsaw import-transcript <projectId> <file.srt\|file.vtt> [--language xx]` | use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
 | `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw purge-project <projectId>` | wipe one already-deleted project (frees storage; minutes stay counted) |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -92,13 +95,13 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
-| `reelsaw library list [--kind video\|image\|audio] [--q text]` | \| search <q…> [--source library\|catalog\|<provider>] [--kind video\|image\|audio] [--license cc0\|by] \| add <file\|url\|provider:externalId> [--name n] [--tags a,b] [--color #hex] \| update <id> --tags a,b \| rename <id> <name…> \| remove <id> \| restore <id> \| usage <id> \| default <intro\|outro> <id\|none> \| reindex            [--user <email>] the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a file, a link or a search hit (license and credit are recorded). The user is --user, else the only account on this install; otherwise pass --user. `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion |
+| `reelsaw library list [--kind video\|image\|audio] [--q text]` | \| search <q…> [--source library\|catalog\|<provider>] [--kind video\|image\|audio] [--license cc0\|by] \| add <file\|url\|provider:externalId> [--name n] [--tags a,b] [--color #hex] \| update <id> --tags a,b \| rename <id> <name…> \| remove <id> \| restore <id> \| purge <id> \| usage <id> \| default <intro\|outro> <id\|none> \| reindex            [--user <email>] the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a file, a link or a search hit (license and credit are recorded). The user is --user, else the only account on this install; otherwise pass --user. `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion |
 | `reelsaw catalog status\|refresh` | the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw clip-layers <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop\|--no-loop] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] \| --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck\|--no-duck] [--loop\|--no-loop] \| --remove <layerId> \| --clear] [--rerender]` | everything laid over or played under a clip, one list (source seconds, x/y/w/size as fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at full level, anything else music (ducked, faded, looped); with no change flag it lists them |
 | `reelsaw apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]` | make one clip's framing (its section at --at, else its first framed one: mode plus nudge / subject / crop) the project's default for every clip, clearing the others' own sections and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing) |
-| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| remove <id> \| restore <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative); `save` builds one from a clip's layers, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
+| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| remove <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative); `save` builds one from a clip's layers, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
@@ -311,9 +314,13 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   `project.deleted`; every list, search, export, media route and the reconciler leave it out, and pipeline jobs that
   were already running exit (`ProjectGoneError`). Its rows and files stay for `DELETED_RETENTION_DAYS` (default 7;
   0 keeps them), then the hourly sweep (`purgeDeleted`, also `reelsaw purge [--dry-run]` and `reelsaw storage sweep`)
-  deletes the rows and only then the files. `reelsaw deleted` lists them with the purge date; `reelsaw restore
-  <projectId>` (UI Undo toast, `projects.restore`, MCP `restore_project`) brings one back, failed if it was
-  stopped, so Retry resumes it. Removing a user account still deletes its projects at once.
+  deletes the rows and only then the files. Storage still counts until then, or until the owner wipes it
+  (Deleted, `projects.purge`, MCP `purge_project` / `list_deleted`, `reelsaw purge-project`). Minutes, hourly creates and
+  first-video-free are written to `source_usage` at create/ingest and kept for the life of the account (never pruned), so
+  deleting cannot reset them; admin usage charts read that ledger. `reelsaw deleted` lists them with the purge date;
+  `reelsaw restore <projectId>` (UI Undo toast, `projects.restore`, MCP `restore_project`) brings one back, failed if
+  it was stopped, so Retry resumes it (restore re-checks the live project cap). Removing a user account still deletes
+  its projects at once.
 - **Re-analyze keeps the user's clips.** Clips with `origin` manual / manual-ai, or that the user changed
   (`clips.edited_at`, set by every `clips.update`; a framing override or sections, a style override, an intro/outro
   choice) stay and keep rendering; untouched AI picks get `deleted_at` (and a newer render generation, so a render
@@ -324,10 +331,13 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   one back. Clips edited before `edited_at` existed are only recognised by their framing, style or intro/outro.
   A project finishes (`finalizeProjectIfDone`) only from `rendering`, so a kept clip that finishes while the
   re-analyze is still picking does not end the run early.
-- **Deleting one clip** (`clips.delete`, MCP `delete_clip`, `reelsaw delete-clip <clipId>`, all `deleteClip`) is the
-  same soft delete: `deleted_at`, a newer render generation, its render/prepare jobs cancelled, a `clip.deleted`
-  event, and the project finalized if it was only waiting for that clip. It shows up in `replacedClips` and comes
-  back with `restore_clip`. `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
+- **Deleting one clip** (`clips.delete`, MCP `delete_clip`, `reelsaw delete-clip <clipId>`, all `deleteClip`; the
+  clip card ⋯, clip editor, and ⌘K) is the same soft delete: `deleted_at`, a newer render generation, its
+  render/prepare jobs cancelled, a `clip.deleted` event, and the project finalized if it was only waiting for that
+  clip. Several clips of one project use `clips.deleteMany` / `deleteClips` (the selection bar). It shows up on
+  Deleted (one list with a compact bar: Restore, and Wipe in ⋯: `deleted.restore` / `deleted.purge`) and in `replacedClips`
+  and comes back with `restore_clip`. The delete toast always offers Undo, Wipe, and See deletions.
+  `projects.update` / MCP `update_project` / `reelsaw update-project` only save the title
   and settings (event `project.updated`): nothing re-runs until a re-analyze or re-render.
 - **Fair share between users.** Every job carries its owner (`data.userId`) and a pg-boss `priority` of minus the
   owner's live jobs (all queues) when it was queued; pg-boss fetches `priority desc, created_on`, so someone with

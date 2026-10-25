@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate } from "react-router";
+import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2 } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -13,11 +13,12 @@ import { LoginPage, takeAfterSignIn } from "./pages/Login";
 import { ResetPasswordPage } from "./pages/ResetPassword";
 import { identify, initTelemetry, pageview } from "./lib/telemetry";
 import { initOtel } from "./lib/otel";
-import { BILLING_PATH, CHANGELOG_URL, REPO_URL } from "@reelsaw/shared";
+import { BILLING_PATH, CHANGELOG_URL, DELETED_PARAM, DELETED_PATH, REPO_URL } from "@reelsaw/shared";
 import { ProjectsPage } from "./pages/Projects";
 const NewProjectPage = lazy(() => import("./pages/NewProject").then((m) => ({ default: m.NewProjectPage })));
 const ProjectPage = lazy(() => import("./pages/Project").then((m) => ({ default: m.ProjectPage })));
 const LibraryPage = lazy(() => import("./pages/Library").then((m) => ({ default: m.LibraryPage })));
+const DeletedPage = lazy(() => import("./pages/Deleted").then((m) => ({ default: m.DeletedPage })));
 const TemplatesPage = lazy(() => import("./pages/Templates").then((m) => ({ default: m.TemplatesPage })));
 const TemplateEditorPage = lazy(() => import("./pages/TemplateEditor").then((m) => ({ default: m.TemplateEditorPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
@@ -96,6 +97,9 @@ function Avatar() {
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate("/settings")}>
             <SettingsIcon className="h-4 w-4" /> Settings
             <UpdateMenuHint />
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" onSelect={() => navigate(DELETED_PATH)}>
+            <Trash2 className="h-4 w-4" /> Deleted
           </DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" asChild>
             <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">
@@ -299,6 +303,13 @@ function TelemetryBridge() {
   return null;
 }
 
+/** `/?deleted=1` used to scroll to the Projects footer; that list now lives at /deleted. */
+function HomePage() {
+  const [search] = useSearchParams();
+  if (search.get(DELETED_PARAM) === "1") return <Navigate to={DELETED_PATH} replace />;
+  return <ProjectsPage />;
+}
+
 export function App() {
   useShortcuts("Everywhere", [
     ["Search, jump or run an action", `${MOD}K`],
@@ -315,7 +326,8 @@ export function App() {
       <Route path="/signup" element={<LoginPage signup />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/consent" element={<ConsentPage />} />
-      <Route path="/" element={<Protected><ProjectsPage /></Protected>} />
+      <Route path="/" element={<Protected><HomePage /></Protected>} />
+      <Route path={DELETED_PATH} element={<Protected><DeletedPage /></Protected>} />
       <Route path="/new" element={<Protected><NewProjectPage /></Protected>} />
       <Route path="/library" element={<Protected><LibraryPage /></Protected>} />
       <Route path="/templates" element={<Protected><TemplatesPage /></Protected>} />

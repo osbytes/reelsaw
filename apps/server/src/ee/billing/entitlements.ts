@@ -72,7 +72,17 @@ export function grantsOf(row: BillingSubscriptionRow | null | undefined, graceDa
     firstVideoFreeMinutes: plan.firstVideoFreeMinutes,
     queuePriority: plan.queuePriority,
     period,
-    ...(next ? { upgrade: { text: `${next.label} gives ${nextMinutes ? `${nextMinutes.toLocaleString("en-US")} minutes a month` : "more"}`, url: new URL(billingPath(), appUrl).toString() } } : {}),
+    ...(next
+      ? {
+          upgrade: {
+            text: `${next.label} gives ${nextMinutes ? `${nextMinutes.toLocaleString("en-US")} minutes a month` : "more"}`,
+            url: new URL(billingPath(), appUrl).toString(),
+            plan: next.name,
+            planLabel: next.label,
+            limits: next.limits,
+          },
+        }
+      : {}),
   };
 }
 

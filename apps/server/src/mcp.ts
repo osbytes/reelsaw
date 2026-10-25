@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
+import { QuotaError } from "./quota.js";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Services } from "./services.js";
 import type { AuthUser } from "./auth.js";
@@ -53,6 +54,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     try {
       return text(await fn());
     } catch (err) {
+      if (err instanceof QuotaError) return fail(`${err.code}: ${err.message}${err.quota ? `\n${JSON.stringify({ quota: err.quota })}` : ""}`);
       if (err instanceof TRPCError) return fail(`${err.code}: ${err.message}`);
       log.error({ err }, "mcp tool failed");
       return fail(err instanceof Error ? err.message : String(err));
@@ -70,7 +72,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     durationSec: p.durationSec,
     clips: `${p.clipsDone}/${p.clipCount} rendered`,
     createdAt: p.createdAt,
-    ...(p.deletedAt ? { deletedAt: p.deletedAt } : {}),
+    ...(p.deletedAt ? { deletedAt: p.deletedAt, storedBytes: p.storedBytes, purgeAt: p.purgeAt } : {}),
     url: abs(`/p/${p.id}`),
   });
   const clipSummary = (c: Awaited<ReturnType<typeof api.projects.get>>["clips"][number]) => ({
@@ -278,6 +280,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "delete_clips",
+    TOOLS.delete_clips,
+    (input) => run(() => api.clips.deleteMany(input)),
+  );
+
+  server.registerTool(
     "rerender_clip",
     TOOLS.rerender_clip,
     ({ id }) => run(() => api.clips.rerender({ id })),
@@ -347,6 +355,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("update_asset", TOOLS.update_asset, ({ assetId, ...patch }) => run(() => api.library.update({ id: assetId, ...patch })));
   server.registerTool("remove_asset", TOOLS.remove_asset, ({ assetId }) => run(() => api.library.remove({ id: assetId })));
   server.registerTool("restore_asset", TOOLS.restore_asset, ({ assetId }) => run(() => api.library.restore({ id: assetId })));
+  server.registerTool("purge_asset", TOOLS.purge_asset, ({ assetId }) => run(() => api.library.purge({ id: assetId })));
   server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
 
   // ── layer templates ──────────────────────────────────────────────────────
@@ -459,6 +468,12 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "purge_project",
+    TOOLS.purge_project,
+    ({ id }) => run(() => api.projects.purge({ id })),
+  );
+
+  server.registerTool(
     "restore_project",
     TOOLS.restore_project,
     ({ id }) => run(() => api.projects.restore({ id })),
@@ -468,6 +483,24 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     "restore_clip",
     TOOLS.restore_clip,
     ({ id }) => run(() => api.clips.restore({ id })),
+  );
+
+  server.registerTool(
+    "list_deleted",
+    TOOLS.list_deleted,
+    () => run(() => api.deleted.list()),
+  );
+
+  server.registerTool(
+    "purge_clip",
+    TOOLS.purge_clip,
+    ({ id }) => run(() => api.clips.purge({ id })),
+  );
+
+  server.registerTool(
+    "purge_layer_template",
+    TOOLS.purge_layer_template,
+    ({ templateId }) => run(() => api.layerTemplates.purge({ id: templateId })),
   );
 
   return server;

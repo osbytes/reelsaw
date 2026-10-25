@@ -300,6 +300,15 @@ export async function removeScratchSource(svc: Services, projectId: string) {
 export const PURGE_BATCH = 200;
 export const PURGE_BUDGET_MS = 30_000;
 export const BUMPER_PURGE_MS = 30 * 24 * 60 * 60_000;
+export const ASSET_RESTORE_DAYS = BUMPER_PURGE_MS / 86_400_000;
+
+/** Drop the store prefix and local cache for one library asset. A missing folder is fine. */
+export async function dropAssetStorage(svc: Services, sourceKey: string) {
+  const dir = keys.assetDir(sourceKey);
+  if (typeof svc.storage.deletePrefix === "function") await svc.storage.deletePrefix(dir);
+  const root = svc.paths.root;
+  if (root) await fs.rm(path.join(root, dir), { recursive: true, force: true });
+}
 
 /**
  * A removed asset is purgeable once it has been gone for 30 days and no project setting or clip names it. An
@@ -391,9 +400,7 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
       u.afterCommit(async () => {
         try {
           // rows made before the rename keep their files under bumpers/<id>, newer ones under assets/<id>
-          const dir = keys.assetDir(a.sourceKey);
-          await svc.storage.deletePrefix(dir);
-          await fs.rm(path.join(svc.paths.root, dir), { recursive: true, force: true });
+          await dropAssetStorage(svc, a.sourceKey);
         } catch (err) {
           log.warn({ err, assetId: id }, "purged a library asset but could not remove its files");
         }

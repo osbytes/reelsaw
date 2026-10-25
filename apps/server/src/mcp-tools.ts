@@ -13,13 +13,13 @@ import { settingsPatchSchema } from "./instance-settings.js";
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
-- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
+- inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, remove_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, remove_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
-Deleting is reversible for a while: delete_project, delete_clip and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze.
+Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, name fixes and the on-screen text scan on, filler removal off). Set refineDisfluency / disfluencyLlm true to opt into filler removal, refineEntities / refineScenes false to skip those steps (instance Pipeline gates must be on).");
@@ -54,7 +54,7 @@ const assetIdInput = (from = "search_assets") => z.string().min(1).max(100).desc
 export const TOOLS = {
   list_projects: {
     title: "List projects",
-    description: "Your projects, most recently updated first. Returns { projects: [{ id, title, status, stage, clips: \"n/m rendered\", url }], total, nextCursor }; pass nextCursor as cursor for the next page. Use get_project for one project's clips, search_clips to find by words.",
+    description: "Your projects, most recently updated first. Returns { projects: [{ id, title, status, stage, clips: \"n/m rendered\", url }], total, nextCursor }; pass nextCursor as cursor for the next page. deleted: true lists restorable deletes (storedBytes still count until purge_project). For every kind of restorable delete (projects, clips, library, templates) use list_deleted. Use get_project for one project's clips, search_clips to find by words.",
     inputSchema: {
       cursor: z.string().optional().describe("nextCursor from the previous page; omit for the first page"),
       limit: z.number().int().min(1).max(100).default(24).describe("Projects per page (1-100, default 24)"),
@@ -199,8 +199,17 @@ export const TOOLS = {
   },
   delete_clip: {
     title: "Delete clip",
-    description: "Delete one clip of your project; a render in progress stops. Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Returns { changed, restorable }.",
+    description: "Delete one clip of a live project; a render in progress stops. It shows up on Deleted (list_deleted). Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_clip. For several clips of one project use delete_clips. Returns { changed, restorable, storedBytes }.",
     inputSchema: { id: clipId() },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  delete_clips: {
+    title: "Delete clips",
+    description: "Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. Each shows up on Deleted (list_deleted) and restore_clip brings it back for DELETED_RETENTION_DAYS. Already-deleted ids are skipped. Storage still counts until purge_clip. Returns { deleted, skipped, restorable, storedBytes }.",
+    inputSchema: {
+      projectId: projectId(),
+      clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
+    },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   rerender_clip: {
@@ -371,21 +380,52 @@ export const TOOLS = {
   },
   delete_project: {
     title: "Delete project",
-    description: "Delete one of your projects and all its clips; work in progress stops. Reversible: restore_project brings it back for DELETED_RETENTION_DAYS (7 days by default), then it and its files are removed for good. Returns { changed, restorable, message }.",
+    description: "Delete one of your projects and all its clips; work in progress stops. Reversible: restore_project brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_project (or the retention sweep) removes it for good; minutes already used stay counted. Returns { changed, restorable, storedBytes, message }.",
     inputSchema: { id: projectId() },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  purge_project: {
+    title: "Wipe project",
+    description: "Permanently remove a deleted project and its files so the storage is freed (find it with list_deleted or list_projects deleted: true). Minutes, hourly creates and first-video-free are not refunded. A project that is not deleted is refused: call delete_project first. Returns { storedBytes, message }.",
+    inputSchema: { id: projectId("list_projects with deleted: true") },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   restore_project: {
     title: "Restore project",
-    description: "Bring back a deleted project with its clips and files (find it with list_projects deleted: true); restoring a project that is not deleted changes nothing. A project that was processing comes back failed: retry_project resumes it. Returns { changed, status }.",
+    description: "Bring back a deleted project with its clips and files (find it with list_deleted or list_projects deleted: true); restoring a project that is not deleted changes nothing. Refused if the account is already at its live project cap. A project that was processing comes back failed: retry_project resumes it. Returns { changed, status }.",
     inputSchema: { id: projectId("list_projects with deleted: true") },
     annotations: { idempotentHint: true },
   },
   restore_clip: {
     title: "Restore clip",
-    description: "Bring back a deleted clip or one a re-analyze replaced (get_project lists them as replacedClips); it goes to the end of the project's clips. Returns { changed, status, needsRerender }; needsRerender means it never finished, so call rerender_clip.",
-    inputSchema: { id: z.string().describe("Clip id (from get_project → replacedClips)") },
+    description: "Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it goes to the end of the project's clips. Returns { changed, status, needsRerender }; needsRerender means it never finished, so call rerender_clip.",
+    inputSchema: { id: z.string().describe("Clip id (from list_deleted or get_project → replacedClips)") },
     annotations: { idempotentHint: true },
+  },
+  list_deleted: {
+    title: "List deleted items",
+    description:
+      "Restorable deletes (the Deleted page): one newest-first list of projects, clips of live projects, library items and templates. Returns { items: [{ kind, id, title, deletedAt, purgeAt, storedBytes, canPurge, … }], total, truncated } (max 200) plus keepDays / libraryDays / templateDays. purgeAt null = kept until wiped. restore_project / restore_clip / restore_asset / restore_layer_template bring them back; purge_project / purge_clip / purge_asset / purge_layer_template remove them for good.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  purge_clip: {
+    title: "Wipe clip",
+    description: "Permanently remove a deleted clip of a live project and its rendered file so the storage is freed (find it with list_deleted). A clip that is not deleted is refused: call delete_clip first. Clips of a deleted project go with purge_project. Returns { storedBytes, message }.",
+    inputSchema: { id: z.string().describe("Clip id (from list_deleted)") },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  purge_asset: {
+    title: "Wipe library item",
+    description: "Permanently remove an already-deleted library upload and its files so the storage is freed (find it with list_deleted). Refused while a project, clip or live template still names it. An item that is not deleted is refused: call remove_asset first. Returns { storedBytes, message }.",
+    inputSchema: { assetId: assetIdInput("list_deleted") },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  purge_layer_template: {
+    title: "Wipe layer template",
+    description: "Permanently remove an already-deleted layer template (find it with list_deleted). Templates hold no media files; this only drops the row. A template that is not deleted is refused: call remove_layer_template first. Returns { ok, message }.",
+    inputSchema: { templateId: templateIdSchema },
+    annotations: { destructiveHint: true, idempotentHint: true },
   },
   check_for_update: {
     title: "Check for update",

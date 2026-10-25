@@ -6,7 +6,7 @@
  * a project whose settings name a template) all call these functions.
  */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { MAX_CLIP_LAYERS, clipLayers, layerTemplateLayersSchema, layerTemplateNameSchema, resolveTemplateLayers, templateFromLayers, type ClipLayer, type TemplateLayer } from "@reelsaw/shared";
@@ -18,7 +18,9 @@ import { assetVisibleTo } from "./visible.js";
 import { syncClipsRefs } from "./refs.js";
 import { cleanLayers } from "./layers.js";
 
-const RESTORE_DAYS = 30;
+/** Removed templates stay restorable this long; after that they drop off the list (the row remains until purge). */
+export const TEMPLATE_RESTORE_DAYS = 30;
+const RESTORE_DAYS = TEMPLATE_RESTORE_DAYS;
 
 export const templateIdSchema = z.string().min(1).max(100).describe("Layer template id (list_layer_templates)");
 export const applyModeSchema = z.enum(["replace", "add"]).describe('"replace" (default) = the template becomes the clip\'s layers; "add" = its layers join the ones the clip already has');
@@ -148,6 +150,21 @@ export async function restoreLayerTemplate(svc: Services, userId: string, id: st
       .returning();
     if (!r.length) throw notFound();
     return publicTemplate(r[0]!);
+  });
+}
+
+/** Hard-delete a removed template. Templates hold no media files; this only drops the row. */
+export async function purgeLayerTemplate(svc: Services, userId: string, id: string) {
+  return svc.tx(async (u) => {
+    const [row] = await u.db
+      .select({ id: schema.layerTemplates.id, name: schema.layerTemplates.name, deletedAt: schema.layerTemplates.deletedAt })
+      .from(schema.layerTemplates)
+      .where(and(eq(schema.layerTemplates.id, id), eq(schema.layerTemplates.userId, userId)))
+      .for("update");
+    if (!row) throw notFound();
+    if (!row.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only templates already in Deleted can be wiped." });
+    await u.db.delete(schema.layerTemplates).where(eq(schema.layerTemplates.id, id));
+    return { ok: true as const, message: `Wiped “${row.name}”.` };
   });
 }
 

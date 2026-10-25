@@ -2,13 +2,16 @@
  * Deleting is reversible. A deleted project, or a clip a re-analyze replaced, keeps its row and files with
  * `deleted_at` set: every read path leaves it out, its jobs are cancelled, and restore clears the mark. After
  * DELETED_RETENTION_DAYS the hourly purge (`purgeDeleted`, run with the storage sweep) removes the rows and only
- * then the files. tRPC (`projects.delete` / `restore` / `reanalyze` / `update`, `clips.delete` / `restore`), the MCP
- * tools and the CLI all call these functions.
+ * then the files. Storage still counts until remove-for-good (`purgeOwnedProject`). tRPC (`projects.delete` /
+ * `restore` / `purge` / `reanalyze` / `update`, `clips.delete` / `restore` / `purge`), the MCP tools and the CLI all call these
+ * functions.
  */
 import fs from "node:fs/promises";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { REFINE_STEPS, adjustOf, projectSettingsSchema, styleSchema, type ClearableSetting, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
+import { REFINE_STEPS, adjustOf, formatBytes, projectSettingsSchema, styleSchema, type ClearableSetting, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
+import { checkRestoreQuota, projectStoredBytes } from "../quota.js";
+import { takeTxLock, txLock } from "../locks.js";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -119,20 +122,99 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
 export async function deleteOwnedProject(svc: Services, actor: Actor, projectId: string) {
   return svc.tx(async (u) => {
     await findProject(u.db, actor, projectId, { deleted: false });
+    const stored = await projectStoredBytes(u.db, projectId);
     const changed = await deleteProject(svc, u, projectId);
-    return { ok: true, changed, restorable: restorableFor(svc), message: `Deleted. It can be restored ${restorableFor(svc)}.` };
+    return {
+      ok: true,
+      changed,
+      restorable: restorableFor(svc),
+      storedBytes: stored,
+      message: stored
+        ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you wipe it.`
+        : `Deleted. It can be restored ${restorableFor(svc)}.`,
+    };
   });
 }
 
-/** Bring a deleted project back (owner or admin). A project that was working comes back failed: Retry resumes it. */
+/** Bring a deleted project back (owner or admin). A project that was working comes back failed: Retry resumes it. Operator CLI (actor null) skips the live-slot check. */
 export async function restoreProject(svc: Services, actor: Actor, projectId: string) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: true });
     if (!p.deletedAt) return { ok: true, changed: false, status: p.status };
+    if (actor) await checkRestoreQuota(u.db, svc.settings.get(), p.userId, { lock: true, ent: svc.entitlements });
+    else await takeTxLock(u.db, txLock.quota(p.userId));
     await u.db.update(schema.projects).set({ deletedAt: null, updatedAt: new Date() }).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
     await u.emit(projectId, "project.restored", {});
     return { ok: true, changed: true, status: p.status };
   });
+}
+
+/** Remove a already-deleted project for good (owner or admin): rows and files go, storage is freed. Minutes already counted stay on the usage ledger. */
+export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: string) {
+  return svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: true });
+    if (!p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only projects already in Deleted can be wiped." });
+    // re-check under the row lock (clips first, then the project, like deleteProject): a restore that committed since
+    // the read above wins, instead of this wiping a project that is live again
+    await lockProjectClips(u, projectId);
+    const [still] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt))).for("update");
+    if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was wiped." });
+    const stored = await projectStoredBytes(u.db, projectId);
+    await purgeProject(svc, u, projectId);
+    return { ok: true, storedBytes: stored, message: stored ? `Wiped. ${formatBytes(stored)} is free now.` : "Wiped." };
+  });
+}
+
+/**
+ * Hard-delete one already-deleted clip: the row first, files after commit. `before` is the sweep cutoff (ISO);
+ * omitted = any deleted clip (the owner's Remove for good). Returns null if it was restored or already gone.
+ */
+export async function purgeClip(svc: Services, u: UnitOfWork, clipId: string, opts: { before?: string } = {}): Promise<{ projectId: string; files: string[] } | null> {
+  const [c] = await u.db
+    .delete(schema.clips)
+    .where(and(eq(schema.clips.id, clipId), isNotNull(schema.clips.deletedAt), opts.before ? sql`${schema.clips.deletedAt} < ${opts.before}::timestamptz` : undefined))
+    .returning({ projectId: schema.clips.projectId, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey });
+  if (!c) return null;
+  const files = [c.outputKey, c.thumbnailKey].filter((k): k is string => !!k);
+  const log = svc.log.child({ module: "sweep" });
+  u.afterCommit(async () => {
+    for (const key of files) {
+      await svc.storage.delete(key).catch((err) => log.warn({ err, clipId }, "could not delete a purged clip's file"));
+      await removeScratchClip(svc, c.projectId, key);
+    }
+  });
+  return { projectId: c.projectId, files };
+}
+
+/** Remove one already-deleted clip of a live project for good (owner or admin). Clips of a deleted project go with purge_project. */
+export async function purgeOwnedClip(svc: Services, actor: Actor, clipId: string) {
+  return svc.tx(async (u) => {
+    const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
+    await findProject(u.db, actor, c.projectId, { deleted: false });
+    if (!c.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Delete it first. Only clips already in Deleted can be wiped." });
+    const stored = c.outputKey && c.outputBytes ? c.outputBytes : 0;
+    await purgeClip(svc, u, clipId);
+    return { ok: true as const, storedBytes: stored, message: stored ? `Wiped. ${formatBytes(stored)} is free now.` : "Wiped." };
+  });
+}
+
+function clipStored(c: { outputKey: string | null; outputBytes: number | null }) {
+  return c.outputKey && c.outputBytes ? c.outputBytes : 0;
+}
+
+/** Soft-delete one live clip under an already-taken clip lock. Returns false if it was already deleted. */
+async function markClipDeleted(svc: Services, u: UnitOfWork, c: typeof schema.clips.$inferSelect) {
+  if (c.deletedAt) return false;
+  await u.cancelLiveJobs(QUEUES.render, c.id);
+  await u.cancelLiveJobs(QUEUES.prepare, c.id);
+  const unfinished = c.status !== "done" && c.status !== "failed";
+  await u.db
+    .update(schema.clips)
+    .set({ deletedAt: new Date(), renderGen: sql`${schema.clips.renderGen} + 1`, ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}), updatedAt: new Date() })
+    .where(eq(schema.clips.id, c.id));
+  await u.emit(c.projectId, "clip.deleted", { clipId: c.id, index: c.index, title: c.title, days: days(svc) });
+  return true;
 }
 
 /**
@@ -146,17 +228,43 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
     await findProject(u.db, actor, c.projectId, { deleted: false });
-    if (c.deletedAt) return { ok: true, changed: false, clipId, restorable: restorableFor(svc) };
-    await u.cancelLiveJobs(QUEUES.render, c.id);
-    await u.cancelLiveJobs(QUEUES.prepare, c.id);
-    const unfinished = c.status !== "done" && c.status !== "failed";
-    await u.db
-      .update(schema.clips)
-      .set({ deletedAt: new Date(), renderGen: sql`${schema.clips.renderGen} + 1`, ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}), updatedAt: new Date() })
-      .where(eq(schema.clips.id, c.id));
-    await u.emit(c.projectId, "clip.deleted", { clipId: c.id, index: c.index, title: c.title, days: days(svc) });
-    await finalizeProjectIfDone(svc, u, c.projectId);
-    return { ok: true, changed: true, clipId, restorable: restorableFor(svc), message: `Deleted. restore_clip brings it back ${restorableFor(svc)}.` };
+    const changed = await markClipDeleted(svc, u, c);
+    if (changed) await finalizeProjectIfDone(svc, u, c.projectId);
+    const stored = clipStored(c);
+    return {
+      ok: true,
+      changed,
+      clipId,
+      restorable: restorableFor(svc),
+      storedBytes: stored,
+      message: `Deleted. restore_clip brings it back ${restorableFor(svc)}.`,
+    };
+  });
+}
+
+/**
+ * Soft-delete several clips of one live project (the selection bar). One transaction, clip locks first then the
+ * project row (finalize). Already-deleted ids are counted as skipped. tRPC `clips.deleteMany`, the BatchBar.
+ */
+export async function deleteClips(svc: Services, actor: Actor, projectId: string, clipIds: string[]) {
+  const ids = [...new Set(clipIds)].slice(0, 200);
+  if (!ids.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one clip" });
+  return svc.tx(async (u) => {
+    await findProject(u.db, actor, projectId, { deleted: false });
+    await lockProjectClips(u, projectId);
+    const rows = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)));
+    if (rows.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "A selected clip is not on this project" });
+    let deleted = 0;
+    let skipped = 0;
+    let storedBytes = 0;
+    for (const c of rows) {
+      if (await markClipDeleted(svc, u, c)) {
+        deleted++;
+        storedBytes += clipStored(c);
+      } else skipped++;
+    }
+    if (deleted) await finalizeProjectIfDone(svc, u, projectId);
+    return { ok: true as const, deleted, skipped, restorable: restorableFor(svc), storedBytes };
   });
 }
 
@@ -165,7 +273,8 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
   return svc.tx(async (u) => {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
-    await findProject(u.db, actor, c.projectId, { deleted: false });
+    const p = await findProject(u.db, actor, c.projectId, { deleted: true });
+    if (p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
     if (!c.deletedAt) return { ok: true, changed: false, clipId, status: c.status };
     const [{ next }] = await u.db.select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` }).from(schema.clips).where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
@@ -442,24 +551,10 @@ export async function purgeDeleted(svc: Services, opts: { dryRun?: boolean; now?
           out.clips.push(r.id);
           continue;
         }
-        const files = await svc.tx(async (u) => {
-          const [c] = await u.db
-            .delete(schema.clips)
-            .where(and(eq(schema.clips.id, r.id), isNotNull(schema.clips.deletedAt), sql`${schema.clips.deletedAt} < ${cutoff}::timestamptz`))
-            .returning({ outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey });
-          if (!c) return null;
-          const list = [c.outputKey, c.thumbnailKey].filter((k): k is string => !!k);
-          u.afterCommit(async () => {
-            for (const key of list) {
-              await svc.storage.delete(key).catch((err) => log.warn({ err, clipId: r.id }, "could not delete a purged clip's file"));
-              await removeScratchClip(svc, r.projectId, key);
-            }
-          });
-          return list;
-        });
+        const files = await svc.tx(async (u) => purgeClip(svc, u, r.id, { before: cutoff }));
         if (files) {
           out.clips.push(r.id);
-          log.info({ clipId: r.id, projectId: r.projectId, files: files.length, days: days(svc) }, "purged a replaced clip");
+          log.info({ clipId: r.id, projectId: files.projectId, files: files.files.length, days: days(svc) }, "purged a replaced clip");
         }
       }
     },

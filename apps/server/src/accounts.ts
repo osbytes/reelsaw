@@ -93,6 +93,7 @@ export async function removeUser(svc: Services, actorId: string | null, userId: 
     // removing an account is final: its projects (deleted ones included) go now, not after the restore window
     for (const p of projects) await purgeProject(svc, u, p.id);
     await u.db.delete(schema.user).where(eq(schema.user.id, userId)); // sessions, accounts, keys, uploads cascade
+    await u.db.delete(schema.sourceUsage).where(eq(schema.sourceUsage.userId, userId)); // no FK: it outlives project purges, not the account
     await u.db.insert(schema.adminEvents).values({ type: "user.removed", actorId, userId, email: user.email, payload: { projects: projects.length } });
     audit(svc, u, "user.removed", actorId, userId);
     // after commit, best effort: a failure is logged and the daily reconcile lists the orphan

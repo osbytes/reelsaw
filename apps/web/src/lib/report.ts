@@ -5,6 +5,9 @@ export interface ReportTarget {
   projectId?: string;
   projectTitle?: string;
   clipId?: string;
+  /** Opens the report with this already in the box (capacity requests from a quota refusal). */
+  prefill?: string;
+  tags?: Record<string, string>;
 }
 let state: ReportTarget | null = null;
 const subs = new Set<() => void>();

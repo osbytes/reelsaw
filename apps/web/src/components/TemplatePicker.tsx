@@ -257,14 +257,21 @@ export function ApplyTemplateToClipsDialog({ open, onOpenChange, projectId, clip
   );
 }
 
-/** The selection bar's "Template…" slot: a button and the server dialog for the selected clips. */
-export function BulkTemplateButton({ projectId, clips, rerenderable, onDone, className }: { projectId: string; clips: Array<{ id: string; layers?: unknown[] | null }>; rerenderable: number; onDone: () => void; className: string }) {
-  const [open, setOpen] = useState(false);
+/** The selection bar's "Template…" action: a button and the server dialog for the selected clips. Pass `open` to drive it from the bar's ⋯ menu. */
+export function BulkTemplateButton({ projectId, clips, rerenderable, onDone, className, open: openProp, onOpenChange }: { projectId: string; clips: Array<{ id: string; layers?: unknown[] | null }>; rerenderable: number; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [inner, setInner] = useState(false);
+  const open = openProp ?? inner;
+  const setOpen = (next: boolean) => {
+    onOpenChange?.(next);
+    if (openProp === undefined) setInner(next);
+  };
   return (
     <>
-      <button className={className} title={`Apply a layer template to ${plural(clips.length, "clip")}`} onClick={() => setOpen(true)}>
-        Template…
-      </button>
+      {openProp === undefined && (
+        <button className={className} title={`Apply a layer template to ${plural(clips.length, "clip")}`} onClick={() => setOpen(true)}>
+          Template…
+        </button>
+      )}
       <ApplyTemplateToClipsDialog open={open} onOpenChange={setOpen} projectId={projectId} clipIds={clips.map((c) => c.id)} withLayers={clips.filter((c) => (c.layers?.length ?? 0) > 0).length} rerenderable={rerenderable} onDone={onDone} />
     </>
   );

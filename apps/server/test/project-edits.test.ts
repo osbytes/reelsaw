@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { schema } from "../src/db/index.js";
-import { applyProjectFraming, deleteClip, restoreClip, updateProject } from "../src/projects/service.js";
+import { applyProjectFraming, deleteClip, deleteClips, restoreClip, updateProject } from "../src/projects/service.js";
 import { requestRender } from "../src/pipeline/lifecycle.js";
 
 const h = lifecycleHarness();
@@ -48,6 +48,20 @@ describe("deleteClip", { skip: notReady ?? false }, () => {
     const back = await restoreClip(h.svc, { id: userId, admin: false }, busy);
     assert.equal(back.changed, true);
     assert.equal(back.needsRerender, true);
+  });
+
+  it("deletes several clips of one project in one step", async () => {
+    const projectId = await h.makeProject(userId, "done");
+    const a = await h.makeClip(projectId, 0, "done", { outputKey: "a.mp4" });
+    const b = await h.makeClip(projectId, 1, "done", { outputKey: "b.mp4" });
+    const r = await deleteClips(h.svc, { id: userId, admin: false }, projectId, [a, b, a]);
+    assert.equal(r.deleted, 2);
+    assert.equal(r.skipped, 0);
+    assert.ok((await clipRow(a)).deleted_at);
+    assert.ok((await clipRow(b)).deleted_at);
+    const again = await deleteClips(h.svc, { id: userId, admin: false }, projectId, [a, b]);
+    assert.equal(again.deleted, 0);
+    assert.equal(again.skipped, 2);
   });
 
   it("refuses someone else's clip", async () => {
