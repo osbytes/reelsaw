@@ -15,6 +15,28 @@ pnpm typecheck
 pnpm build && pnpm start
 ```
 
+## The demo films
+
+`components/films/*.tsx` are the short loops on the home page: `hero` (a link in, four clips out, 12 s),
+`captions` (the same seconds raw and rendered, 7 s) and `reframe` (before → after per layout, 9 s).
+Like the pipeline film below, each is one element tree rendered as a pure function of authored time,
+but these also play real rendered clips as `<video>` elements (`<Clip>` in `components/films/core.tsx`;
+the excerpts and their Creative Commons sources are in `public/films/footage/README.md`). The site
+serves the rendered MP4 with a poster through `components/demo-video.tsx` (muted, looping, paused off
+screen, a still under `prefers-reduced-motion`), the same way every clipper's landing page does.
+
+```bash
+pnpm dev                                  # or pnpm build && pnpm start
+pnpm render:film hero                     # → public/films/hero.{mp4,jpg}; --gif ../docs/assets/hero.gif for the README
+pnpm render:film reframe --still --at 4.4 --out /tmp/stills   # one frame, to check a moment
+```
+
+`/films/<name>` is the capture page (`noindex`); `/films/<name>?preview=1` plays a film live while you
+write it. `scripts/render-film.mjs` steps `window.__film.seek(t)`, which also seeks every `<video>` to
+the time the frame asks for and waits for `seeked`, so frames are exact and the render is repeatable.
+Adding a film: a `FilmDef` in `components/films/<name>.tsx`, registered in `components/films/index.ts`
+and `components/films/names.ts`.
+
 ## The pipeline film
 
 `components/pipeline-film.tsx` is the animation under "How it works": one video going through the five
@@ -25,7 +47,7 @@ paused while off screen, with a pause button, and opening on a still frame under
 
 ```bash
 pnpm build && pnpm start          # or pnpm dev; the dev overlay is hidden in the frames
-pnpm render:film                  # ../docs/assets/pipeline.{mp4,gif} + pipeline-poster.jpg
+pnpm render:pipeline-film         # ../docs/assets/pipeline.{mp4,gif} + pipeline-poster.jpg
 ```
 
 `scripts/render-pipeline-film.mjs` opens `/pipeline-film` (the film at 1920×1080 with its clock off,

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import editor from "@/public/editor.png";
 import transcriptFixes from "@/public/transcript-fixes.png";
-import workspace from "@/public/workspace.png";
+import { DemoVideo } from "@/components/demo-video";
 import { Code, Command } from "@/components/command";
 import { PipelineFilm } from "@/components/pipeline-film";
 import { Footer } from "@/components/footer";
@@ -132,7 +132,7 @@ function JsonLd() {
         license: "https://www.gnu.org/licenses/agpl-3.0.html",
         isAccessibleForFree: true,
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        screenshot: `${SITE.url}/workspace.png`,
+        screenshot: `${SITE.url}/films/hero.jpg`,
         featureList: FEATURES.map((f) => f.title),
         sameAs: [SITE.github, SITE.glama],
       },
@@ -207,8 +207,10 @@ export default function HomePage() {
           </div>
           <div className="container-page pb-20">
             <figure className="card overflow-hidden shadow-pop">
-              <Image src={workspace} alt="Reelsaw project workspace: source player and clickable transcript on the left, rendered vertical clips with scores and layout badges on the right" priority sizes="(max-width: 1120px) 100vw, 1120px" className="h-auto w-full" />
-              <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">The project workspace: clips stream in on the right as they render, with score, layout and a copy-ready caption.</figcaption>
+              <DemoVideo src="/films/hero.mp4" poster="/films/hero.jpg" width={1920} height={1080} priority label="A YouTube link is pasted into Reelsaw, three stages run on the local machine, and four captioned 9:16 clips appear with their scores and the reason each was picked." />
+              <figcaption className="border-t border-line px-4 py-2.5 text-center text-xs text-ink3">
+                Real output, no mock-up: a 12-minute street interview in, nine scored and captioned clips out in 5:32 with cloud models (OpenAI via the AI Gateway; fully local works the same, slower). Source: &ldquo;Foreigners STUNNED by Life in the UK&rdquo; by MrUniverse (CC BY).
+              </figcaption>
             </figure>
           </div>
         </section>
@@ -240,27 +242,27 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Demo + screenshots */}
+        {/* Demo films + screenshots */}
         <section className="py-20" aria-labelledby="look-title">
           <div className="container-page flex flex-col gap-12">
-            <SectionHeading id="look-title" eyebrow="See it" title="Reframing, captions and fixes you can inspect" body="Nothing is a black box. Every automatic decision is shown where you are looking, with a one-click override." />
-            <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-              <figure className="card mx-auto w-full max-w-[340px] overflow-hidden">
-                <video src="/demo-framing.mp4" poster="/demo-framing-poster.jpg" controls playsInline preload="none" className="aspect-[9/16] w-full bg-film object-cover" aria-label="Demo: automatic reframing within one clip, switching between split, face, stack and fit layouts">
-                  <a href="/demo-framing.mp4">Download the demo video</a>
-                </video>
-                <figcaption className="px-3 py-2.5 text-center text-xs text-ink3">Auto reframing in one clip: split → face → stack → fit</figcaption>
+            <SectionHeading id="look-title" eyebrow="See it" title="Captions, reframing and fixes you can inspect" body="Nothing is a black box. Every automatic decision is shown where you are looking, with a one-click override. The films below are rendered clips, not mock-ups." />
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <figure className="card overflow-hidden">
+                <DemoVideo src="/films/captions.mp4" poster="/films/captions.jpg" width={1920} height={1080} label="Two vertical videos of the same seconds side by side: a plain crop, and the Reelsaw render with a hook overlay and word-by-word highlighted captions." />
+                <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">Same seconds, one render apart: hook overlay, key words coloured and enlarged, karaoke highlight timed by forced alignment, the source&rsquo;s own burned-in subtitles found and blurred.</figcaption>
               </figure>
-              <div className="flex min-w-0 flex-col gap-6">
-                <figure className="card overflow-hidden">
-                  <Image src={editor} alt="Clip editor with a live 9:16 preview, captions panel and multi-lane timeline" sizes="(max-width: 1024px) 100vw, 760px" className="h-auto w-full" />
-                  <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">The clip editor: 9:16 preview, captions panel and a multi-lane timeline with layout sections.</figcaption>
-                </figure>
-                <figure className="card overflow-hidden">
-                  <Image src={transcriptFixes} alt="Transcript with filler-word cuts highlighted inline and a list of fixes to accept or reject" sizes="(max-width: 1024px) 100vw, 760px" className="h-auto w-full" />
-                  <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">Transcript fixes: filler cuts and name corrections shown inline, each with accept and reject.</figcaption>
-                </figure>
-              </div>
+              <figure className="card overflow-hidden">
+                <DemoVideo src="/films/reframe.mp4" poster="/films/reframe.jpg" width={1920} height={1080} label="Three before-and-after pairs: a 16:9 source frame with the detected faces outlined, next to the 9:16 clip Reelsaw rendered from it, labelled Face, Split and Fit." />
+                <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">A layout per segment from the faces it finds: Face, Split and Fit, with the detector&rsquo;s boxes on the source. Sources: MrUniverse and Sister Circle TV (CC BY).</figcaption>
+              </figure>
+              <figure className="card overflow-hidden">
+                <Image src={editor} alt="Clip editor with a live 9:16 preview, captions panel and multi-lane timeline" sizes="(max-width: 1024px) 100vw, 560px" className="h-auto w-full" />
+                <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">The clip editor: 9:16 preview, captions panel and a multi-lane timeline with layout sections.</figcaption>
+              </figure>
+              <figure className="card overflow-hidden">
+                <Image src={transcriptFixes} alt="Transcript with filler-word cuts highlighted inline and a list of fixes to accept or reject" sizes="(max-width: 1024px) 100vw, 560px" className="h-auto w-full" />
+                <figcaption className="border-t border-line px-3 py-2.5 text-xs text-ink3">Transcript fixes: filler cuts and name corrections shown inline, each with accept and reject.</figcaption>
+              </figure>
             </div>
           </div>
         </section>

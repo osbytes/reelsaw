@@ -29,16 +29,10 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 </p>
 
 <p align="center">
-  <img src="docs/assets/workspace.png" alt="Project workspace with source player, transcript, and rendered clips" width="920">
-</p>
-
-<p align="center">
-  <video src="docs/assets/demo-framing.mp4" poster="docs/assets/demo-framing-poster.jpg" width="280" controls playsinline>
-    <a href="docs/assets/demo-framing.mp4">demo-framing.mp4</a>
-  </video>
+  <a href="https://reelsaw.com"><img src="docs/assets/hero.gif" alt="A YouTube link is pasted into Reelsaw, three stages run on the local machine, and four captioned 9:16 clips appear with their scores and the reason each was picked" width="920"></a>
 </p>
 <p align="center">
-  <sub>Auto reframing in one clip: split → face → stack → fit</sub>
+  <sub>Real output, not a mock-up: a 12-minute street interview in, nine scored and captioned clips out in 5:32 with cloud models (OpenAI via the AI Gateway; fully local works the same, slower). <a href="docs/assets/hero.mp4">Full-quality MP4</a>. Source video: "Foreigners STUNNED by Life in the UK" by MrUniverse, CC BY.</sub>
 </p>
 
 <p align="center">
@@ -165,6 +159,10 @@ The language model and the transcription model are independent; mix vendors free
 The transcription model must return word timestamps (captions and cuts need them), so `openai:gpt-4o-transcribe`, which returns none, is not supported.
 
 ### Fully local (no API keys)
+
+<p align="center">
+  <img src="docs/assets/local.png" alt="Diagram: a link or file goes into your machine, where speech to text, moment picking, face detection and rendering run in Docker, and captioned 9:16 clips come out" width="920">
+</p>
 
 Ollama only serves language models; it has no speech-to-text. So the local stack is Ollama for `AI_MODEL` plus [Speaches](https://github.com/speaches-ai/speaches) (faster-whisper behind an OpenAI-compatible API, word timestamps supported) for `TRANSCRIPTION_MODEL`. Both ship as a compose profile:
 
