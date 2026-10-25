@@ -10,7 +10,9 @@
  * concurrency (pg-boss `stately`): a completion while a job is still waiting joins it (the job reads
  * every unseen `project.done` when it runs, so the late one is included), and at most one job per
  * account runs at once, so two runs never mail the same batch side by side. The send is skipped for
- * anything at or before `user.last_active_at` (presence.ts). Nothing is queued when email is off.
+ * anything at or before `user.last_active_at` (presence.ts). Nothing is queued when email is off, and
+ * nothing is sent to an account that turned the note off (notify/preferences.ts; every note carries a
+ * one-click unsubscribe, RFC 8058).
  *
  * `completion_notices` records which events were mailed. A crash after a successful send and before
  * that record sends the same batch again with the same idempotency key (`completionIdempotencyKey`):
@@ -24,6 +26,7 @@ import type { UnitOfWork } from "../uow.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { templates } from "../email.js";
+import { emailPreferences, unsubscribeUrl } from "./preferences.js";
 
 /** Round numbers worth a line in the note. 1 is "your first", announced ahead of any higher one crossed in the same batch. */
 export const MILESTONES = [1, 10, 25, 50, 100] as const;
@@ -128,6 +131,11 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     log.debug({ reason: !user ? "gone" : user.banned ? "suspended" : !user.approvedAt ? "pending" : "no email" }, "completion notice skipped");
     return;
   }
+  // read when the job runs, not when it was queued: turning it off during the delay holds the note
+  if (!(await emailPreferences(db, userId)).readyEmail) {
+    log.debug({ reason: "turned off" }, "completion notice skipped");
+    return;
+  }
 
   const lastActiveAt = user.lastActiveAt;
   const cutoff = new Date(Date.now() - LOOKBACK_MS);
@@ -223,7 +231,7 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
   // events, same key) lets Resend drop the repeat if this run dies before the record below commits.
   try {
     await svc.email.send(
-      { to: user.email, ...templates.clipsReady(svc.config.APP_URL, { greeting: greetingName(user.name), projects: mailProjects, hidden: projects.length - shown.length, milestone }) },
+      { to: user.email, ...templates.clipsReady(svc.config.APP_URL, { greeting: greetingName(user.name), projects: mailProjects, hidden: projects.length - shown.length, milestone, unsubscribeUrl: unsubscribeUrl(svc.config.APP_URL, svc.config.BETTER_AUTH_SECRET, userId, "ready") }) },
       { strict: true, idempotencyKey: completionIdempotencyKey(userId, sent) },
     );
   } catch (err) {

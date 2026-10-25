@@ -35,6 +35,7 @@ import { REFINE_STEPS, PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
 import { touchLastActive } from "../presence.js";
+import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { needsPrepare } from "../pipeline/manual.js";
@@ -382,8 +383,15 @@ const headRouter = router({
         report: reportCapabilities(ctx.svc, ctx.user),
         /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
+        /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
+        emailEnabled: ctx.svc.email.enabled,
+        emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
       };
     }),
+    /** Turn optional mail on or off (Settings → Account). Same service as MCP `set_email_preferences` and the unsubscribe link. */
+    updateEmailPreferences: signedInProcedure
+      .input(z.object({ readyEmail: z.boolean().optional() }))
+      .mutation(({ ctx, input }) => setEmailPreferences(ctx.svc, ctx.user.id, input)),
     /**
      * After `reelsaw set-password --must-change`: pick a new password without the current one.
      * The session is the proof they knew the temporary password. Other devices stay signed out.

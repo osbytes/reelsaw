@@ -451,6 +451,21 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   );
 
   server.registerTool(
+    "get_email_preferences",
+    TOOLS.get_email_preferences,
+    () => run(async () => {
+      const me = await api.me.get();
+      return { emailEnabled: me.emailEnabled, emailPreferences: me.emailPreferences };
+    }),
+  );
+
+  server.registerTool(
+    "set_email_preferences",
+    TOOLS.set_email_preferences,
+    (input) => run(() => api.me.updateEmailPreferences(input)),
+  );
+
+  server.registerTool(
     "get_billing",
     TOOLS.get_billing,
     () => run(() => api.billing.get()),

@@ -296,7 +296,10 @@ project to finish schedules it (`EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES`, 
 Operations); another project that finishes while it is waiting joins the same note instead of
 sending its own. Opening the app, or an API or MCP call, counts as being here, so clips you stayed to
 watch are left out of the note. The first project, and later the 10th, 25th, 50th and 100th,
-get a line of their own. Nothing is sent when email is off.
+get a line of their own. Nothing is sent when email is off. Each note has a one-click unsubscribe
+(the `List-Unsubscribe` header mail apps show, and a link in the footer); people can also turn it
+off under Settings → Account, with `set_email_preferences` over MCP, or an operator with
+`reelsaw email-prefs <email> --ready-email off`.
 
 ## Hosting for many people
 
@@ -462,6 +465,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
+| `get_email_preferences` | Which optional emails you get. |
+| `set_email_preferences` | Turn optional emails on or off; omitted fields stay as they are. |
 | `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
 <!-- /generated -->
@@ -534,6 +539,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
+| `reelsaw email-prefs <email> [--ready-email on\|off]` | an account's optional mail; --ready-email turns the ready note on or off (same as their Settings → Account and the email's unsubscribe link) |
 | `reelsaw abuse` | [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |

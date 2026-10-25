@@ -8,6 +8,9 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { deliverCompletionNotice } from "../src/notify/completion.js";
+import { setEmailPreferences } from "../src/notify/preferences.js";
+import { eventHandlerQueues } from "../src/event-handlers.js";
+import { projectEventHandlers } from "../src/project-event-handlers.js";
 import type { Services } from "../src/services.js";
 import type { UnitOfWork } from "../src/uow.js";
 
@@ -16,17 +19,19 @@ const QUEUE = "event.project.done.readyEmail";
 const h = lifecycleHarness();
 const notReady = await h.ready();
 after(() => h.cleanup());
+// the app creates handler queues at boot (createQueue().start()); a fresh test database has none
+if (!notReady) for (const q of eventHandlerQueues(projectEventHandlers)) await h.svc.queue.boss.createQueue(q.name, { policy: q.policy });
 
-const sent: Array<{ to: string; subject: string; key?: string }> = [];
+const sent: Array<{ to: string; subject: string; key?: string; headers?: Record<string, string> }> = [];
 let failSend = false;
 const svc = {
   ...h.svc,
-  config: { ...h.svc.config, APP_URL: "https://app.example.test/" },
+  config: { ...h.svc.config, APP_URL: "https://app.example.test/", BETTER_AUTH_SECRET: "test-secret-at-least-sixteen" },
   email: {
     enabled: true,
-    send: async (m: { to: string; subject: string }, o?: { idempotencyKey?: string }) => {
+    send: async (m: { to: string; subject: string; headers?: Record<string, string> }, o?: { idempotencyKey?: string }) => {
       if (failSend) throw new Error("provider down");
-      sent.push({ to: m.to, subject: m.subject, key: o?.idempotencyKey });
+      sent.push({ to: m.to, subject: m.subject, key: o?.idempotencyKey, headers: m.headers });
     },
   },
 } as unknown as Services;
@@ -52,10 +57,22 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0]!.to, `${u}@example.test`);
     assert.match(sent[0]!.key ?? "", /^ready-[0-9a-f]{40}$/);
+    assert.match(sent[0]!.headers?.["List-Unsubscribe"] ?? "", /^<https:\/\/app\.example\.test\/api\/email\/unsubscribe\?u=/);
     const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
     assert.equal(r.rows[0].n, 2);
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 1);
+  });
+
+  it("sends nothing to an account that turned the note off, and keeps the batch for when it is back on", async () => {
+    const u = await account(null);
+    await finished(u, "10 minutes");
+    await setEmailPreferences(h.svc, u, { readyEmail: false });
+    sent.length = 0;
+    await deliverCompletionNotice(svc, u);
+    assert.equal(sent.length, 0);
+    const r = await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u]);
+    assert.equal(r.rows[0].n, 0);
   });
 
   it("skips what finished before they were last here", async () => {

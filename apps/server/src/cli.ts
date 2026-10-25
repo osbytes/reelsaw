@@ -1,4 +1,5 @@
 import { requestPrepare, requestRender, requestRenders } from "./pipeline/lifecycle.js";
+import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -110,6 +111,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   limits  <email> [--watermark always|never|follow]
  *                                           an account's quotas: instance value, plan, override, in force, in use now;
  *                                           --watermark sets the per-user override (same as Users → Limits)
+ *   email-prefs <email> [--ready-email on|off]
+ *                                           an account's optional mail; --ready-email turns the ready note on or off
+ *                                           (same as their Settings → Account and the email's unsubscribe link)
  *   abuse   [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
@@ -612,6 +616,18 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await retryFailures(svc, filter, null);
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     console.log(`retried ${r.retried}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
+  },
+  /** One account's optional mail (notify/preferences.ts): show it, or `--ready-email on|off` (a "stop emailing me" request). */
+  "email-prefs": async (svc) => {
+    const u = await userByEmail(svc, pos[0]);
+    const arg = flag("ready-email");
+    if (arg !== undefined) {
+      const on = arg === "on" || arg === "true" ? true : arg === "off" || arg === "false" ? false : undefined;
+      if (on === undefined) throw new Error("usage: reelsaw email-prefs <email> [--ready-email on|off]");
+      await setEmailPreferences(svc, u.id, { readyEmail: on });
+    }
+    const p = await emailPreferences(svc.database.db, u.id);
+    console.log(`${u.email}: ready email ${p.readyEmail ? "on" : "off"}${svc.email.enabled ? "" : " (this instance sends no mail: EMAIL_DRIVER=none)"}`);
   },
   /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
   async limits(svc) {
@@ -1496,7 +1512,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

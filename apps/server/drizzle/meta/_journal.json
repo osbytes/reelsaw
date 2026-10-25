@@ -316,6 +316,13 @@
       "when": 1792971027035,
       "tag": "0044_completion_notices",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792971045983,
+      "tag": "0045_ready_email_opt_out",
+      "breakpoints": true
     }
   ]
 }

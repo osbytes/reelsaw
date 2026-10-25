@@ -296,6 +296,8 @@ export const userSettings = pgTable("user_settings", {
   limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
   /** admin's per-user watermark decision: true / false; null = follow the plan and the instance setting (quota.ts `watermarkFor`) */
   watermark: boolean("watermark"),
+  /** the ready email (notify/completion.ts); off from Settings, `set_email_preferences`, `reelsaw email-prefs` or the email's unsubscribe link */
+  readyEmail: boolean("ready_email").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;

@@ -6,6 +6,7 @@
  * Templates send multipart HTML + plain text. HTML is table-based and inline-styled for mail
  * clients; no remote images or tracking pixels. The plain-text part keeps the same links.
  */
+import { unsubscribeHeaders } from "./notify/preferences.js";
 import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
@@ -15,6 +16,8 @@ export interface Mail {
   subject: string;
   text: string;
   html: string;
+  /** extra headers, e.g. List-Unsubscribe on mail an account can turn off (notify/preferences.ts) */
+  headers?: Record<string, string>;
 }
 
 export interface Email {
@@ -53,7 +56,7 @@ export function createEmail(config: Config, log: Logger): Email {
     if (driver === "smtp") {
       if (!transport) transport = (await import("nodemailer")).default.createTransport(config.SMTP_URL!);
       const messageId = idempotencyKey ? `<${idempotencyKey}@${messageIdDomain(from, config.APP_URL)}>` : undefined;
-      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html, ...(messageId ? { messageId } : {}) });
+      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html, ...(messageId ? { messageId } : {}), ...(mail.headers ? { headers: mail.headers } : {}) });
       return "sent";
     }
     if (driver === "resend") {
@@ -64,7 +67,7 @@ export function createEmail(config: Config, log: Logger): Email {
           "content-type": "application/json",
           ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
         },
-        body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html }),
+        body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html, ...(mail.headers ? { headers: mail.headers } : {}) }),
         signal: AbortSignal.timeout(15_000),
       });
       if (res.ok) return "sent";
@@ -117,7 +120,7 @@ const acc = "#8460d2";
 const accInk = "#ffffff";
 const accText = "#653eae";
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -258,6 +261,8 @@ export const templates = {
       projects: Array<{ id: string; title: string; clips: number; failed: number; rerender: boolean; highlights: string[]; more: number }>;
       hidden: number;
       milestone: number | null;
+      /** one-click unsubscribe (notify/preferences.ts): a line under the note and the List-Unsubscribe headers */
+      unsubscribeUrl?: string;
     },
   ) => {
     const base = appUrl.replace(/\/$/, "");
@@ -288,7 +293,10 @@ export const templates = {
     const more = opts.hidden > 0
       ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
       : "";
-    return message({
+    const stop = opts.unsubscribeUrl
+      ? `<p style="margin:20px 0 0;font-size:12px;color:${ink3}">You get this because a project finished while you were away. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:${ink3};text-decoration:underline">Stop these emails</a> or change it under <a href="${escapeHtml(`${base}/settings#email`)}" style="color:${ink3};text-decoration:underline">Settings → Account</a>.</p>`
+      : "";
+    const mail = message({
       subject,
       preheader,
       title: subject,
@@ -299,6 +307,7 @@ export const templates = {
         ...opts.projects.map((p) => projectText(base, p)),
         opts.hidden > 0 ? `And ${opts.hidden} more: ${home}` : null,
         n === 1 ? `Open: ${open}` : `Open your projects: ${home}`,
+        opts.unsubscribeUrl ? `Stop these emails: ${opts.unsubscribeUrl}` : null,
       ].filter((s): s is string => !!s).join("\n\n"),
       bodyHtml:
         `<p style="margin:0 0 12px">${hi}${intro}</p>` +
@@ -307,8 +316,10 @@ export const templates = {
         blocks +
         more +
         ctaButton(open, n === 1 ? "Open project" : "Open projects") +
-        linkFallback(open),
+        linkFallback(open) +
+        stop,
     });
+    return opts.unsubscribeUrl ? { ...mail, headers: unsubscribeHeaders(opts.unsubscribeUrl) } : mail;
   },
 };
 
