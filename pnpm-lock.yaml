@@ -156,6 +156,9 @@ importers:
       langfuse:
         specifier: 3.39.2
         version: 3.39.2
+      lru-cache:
+        specifier: ^11.5.3
+        version: 11.5.3
       nodemailer:
         specifier: ^10.2.1
         version: 10.2.1

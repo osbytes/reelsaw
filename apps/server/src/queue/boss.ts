@@ -15,6 +15,14 @@ export const QUEUES = {
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+/**
+ * Ready email. Not a pipeline stage, so it stays out of `QUEUES` and out of fair-share admission.
+ * `short` + `singletonKey` = one waiting job per account: a second completion while the first
+ * job is still delayed is inserted as a conflict and comes back null (the debounce). Once the
+ * job is active, another completion can queue the next batch.
+ */
+export const COMPLETION_NOTIFY_QUEUE = "notify.completion";
+
 export interface ProjectJob {
   projectId: string;
   /** the project's owner, written by `enqueue` (fairness: live jobs are counted per user) */
@@ -82,7 +90,7 @@ export interface Queue {
    */
   enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission; priorityBoost?: number }): Promise<string | null>;
   /** A job on any queue the caller created itself (ee/ billing): plain pg-boss send on the transaction's connection when given. */
-  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string }): Promise<string | null>;
+  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string; startAfter?: number }): Promise<string | null>;
   /** The job owner's in-flight work (see `Admission`), on the transaction's connection when given. */
   admission(data: JobData, opts?: TxOpts): Promise<Admission>;
   /** True if a job for this key is created, retrying, or active. */
@@ -108,14 +116,15 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
 
   const admission: Queue["admission"] = async (data, opts) => {
     const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
-    // one statement; data->>'userId' has no index, but the live states are few rows next to completed history
+    // one statement; data->>'userId' has no index, but the live states are few rows next to completed history.
+    // notify.completion carries userId too, and is not pipeline work, so it is left out of the live count ($4).
     const res = await exec.executeSql(
       `with o as (select coalesce($2::text, (select user_id from projects where id = $1)) as uid)
        select o.uid as "userId",
-         (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid) as live,
+         (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid and j.name <> $4) as live,
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
        from o`,
-      [data.projectId, data.userId ?? null, USER_RENDER_QUEUES],
+      [data.projectId, data.userId ?? null, USER_RENDER_QUEUES, COMPLETION_NOTIFY_QUEUE],
     );
     const r = res.rows[0] as Admission | undefined;
     return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };
@@ -144,6 +153,15 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
         // createQueue is a no-op for existing queues; keep retry/expiry in sync with the code
         await boss.updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit }).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
+      // short: a second job with the same singleton key stays out while the first is still waiting (created)
+      await boss.createQueue(COMPLETION_NOTIFY_QUEUE, {
+        policy: "short",
+        retryLimit: 3,
+        retryDelay: 60,
+        retryBackoff: true,
+        expireInSeconds: 120,
+        deleteAfterSeconds: 7 * 24 * 3600,
+      });
       started = true;
     },
     async stop() {
@@ -153,7 +171,11 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       started = false;
     },
     admission,
-    send: (queue, data, opts) => boss.send(queue, data, { ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}), ...(opts?.db ? { db: opts.db } : {}) }),
+    send: (queue, data, opts) => boss.send(queue, data, {
+      ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}),
+      ...(opts?.startAfter != null ? { startAfter: opts.startAfter } : {}),
+      ...(opts?.db ? { db: opts.db } : {}),
+    }),
     async enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
       const a = opts?.admission ?? (await admission(data, opts));

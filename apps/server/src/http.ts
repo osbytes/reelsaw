@@ -38,6 +38,7 @@ import { z } from "zod";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
+import { touchLastActive } from "./presence.js";
 
 /** What the browser may report: trimmed so a loop of errors cannot fill the log. */
 const clientLogSchema = z.object({
@@ -60,7 +61,10 @@ export function createApp(svc: Services) {
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
     const who = await activeRequester(auth, db, c.req.raw.headers);
-    if (who) c.set("userId", who.user.id);
+    if (who) {
+      c.set("userId", who.user.id);
+      touchLastActive(svc.database.db, svc.log, who.user.id);
+    }
     return who;
   };
   app.use(

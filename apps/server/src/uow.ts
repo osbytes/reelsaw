@@ -41,7 +41,7 @@ export interface UnitOfWork {
   emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
   enqueue(queue: QueueName, data: JobData): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
-  send(queue: string, data: object, opts?: { singletonKey?: string }): Promise<string | null>;
+  send(queue: string, data: object, opts?: { singletonKey?: string; startAfter?: number }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
   /** record what a stage decided and which models ran (see schema.stageArtifacts) */
@@ -139,7 +139,11 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
           }
           return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost });
         },
-        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
+        send: (q, data, opts) => queue.send(q, data, {
+          ...exec,
+          ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}),
+          ...(opts?.startAfter != null ? { startAfter: opts.startAfter } : {}),
+        }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {

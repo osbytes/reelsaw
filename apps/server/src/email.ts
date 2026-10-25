@@ -1,7 +1,7 @@
 /**
- * Outgoing mail (approvals, password reset, verification). EMAIL_DRIVER=none (default) keeps every
- * mail-dependent feature off, so a self-hosted box needs no mail setup. smtp uses nodemailer;
- * resend uses the Resend HTTP API. Boot checks the driver so a typo fails fast.
+ * Outgoing mail (approvals, password reset, verification, the ready note). EMAIL_DRIVER=none
+ * (default) keeps every mail-dependent feature off, so a self-hosted box needs no mail setup.
+ * smtp uses nodemailer; resend uses the Resend HTTP API. Boot checks the driver so a typo fails fast.
  *
  * Templates send multipart HTML + plain text. HTML is table-based and inline-styled for mail
  * clients; no remote images or tracking pixels. The plain-text part keeps the same links.
@@ -21,8 +21,11 @@ export interface Email {
   enabled: boolean;
   driver: Config["EMAIL_DRIVER"];
   check(): Promise<void>;
-  /** Sends, or logs at debug when disabled. Never throws into a request: failures are logged. */
-  send(mail: Mail): Promise<void>;
+  /**
+   * Sends, or logs at debug when disabled. Failures are logged. `strict` rethrows so a job can
+   * retry; request-path mail leaves it off and never fails the request.
+   */
+  send(mail: Mail, opts?: { strict?: boolean }): Promise<void>;
 }
 
 export function createEmail(config: Config, log: Logger): Email {
@@ -60,7 +63,7 @@ export function createEmail(config: Config, log: Logger): Email {
         if (res.status === 401 || res.status === 403) throw new Error("RESEND_API_KEY was rejected");
       }
     },
-    async send(mail) {
+    async send(mail, opts) {
       if (driver === "none") {
         log.debug({ to: mail.to, subject: mail.subject }, "email disabled; not sent");
         return;
@@ -70,6 +73,7 @@ export function createEmail(config: Config, log: Logger): Email {
         log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
         log.error({ err, to: mail.to, subject: mail.subject }, "email failed");
+        if (opts?.strict) throw err;
       }
     },
   };
@@ -216,4 +220,96 @@ export const templates = {
         ctaButton(url, "Confirm email") +
         linkFallback(url),
     }),
+  /**
+   * Projects that finished while the account was away. One note for the whole batch.
+   * `milestone` 1 is "your first"; higher numbers get a single line. No tracking.
+   */
+  clipsReady: (
+    appUrl: string,
+    opts: {
+      greeting: string | null;
+      projects: Array<{ id: string; title: string; clips: number; failed: number; rerender: boolean; highlights: string[]; more: number }>;
+      hidden: number;
+      milestone: number | null;
+    },
+  ) => {
+    const base = appUrl.replace(/\/$/, "");
+    const n = opts.projects.length;
+    const clips = opts.projects.reduce((sum, p) => sum + p.clips, 0);
+    const allRerender = n > 0 && opts.projects.every((p) => p.rerender);
+    const first = opts.milestone === 1;
+    const subject = first
+      ? "Your first clips are ready"
+      : n === 1 && allRerender
+        ? "A new render is ready"
+        : n === 1
+          ? "Your clips are ready"
+          : `${n} projects are ready`;
+    const one = opts.projects[0];
+    const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : `${n} projects, ${clipCount(clips)}`;
+    const intro = n === 1
+      ? allRerender ? "A new render finished while you were away." : "This finished while you were away."
+      : allRerender ? "New renders finished while you were away." : "These finished while you were away.";
+    const hi = opts.greeting ? `Hi ${escapeHtml(opts.greeting)} — ` : "";
+    const firstLine = first
+      ? n === 1 ? "This is the first project you've finished." : "These are the first projects you've finished."
+      : null;
+    const milestoneLine = opts.milestone && opts.milestone > 1 ? `That's ${opts.milestone} projects finished.` : null;
+    const home = `${base}/`;
+    const open = n === 1 && one ? `${base}/p/${encodeURIComponent(one.id)}` : home;
+    const blocks = opts.projects.map((p) => projectBlock(base, p)).join("");
+    const more = opts.hidden > 0
+      ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
+      : "";
+    return message({
+      subject,
+      preheader,
+      title: subject,
+      text: [
+        `${opts.greeting ? `Hi ${opts.greeting} — ` : ""}${intro}`,
+        firstLine,
+        milestoneLine,
+        ...opts.projects.map((p) => projectText(base, p)),
+        opts.hidden > 0 ? `And ${opts.hidden} more: ${home}` : null,
+        n === 1 ? `Open: ${open}` : `Open your projects: ${home}`,
+      ].filter((s): s is string => !!s).join("\n\n"),
+      bodyHtml:
+        `<p style="margin:0 0 12px">${hi}${intro}</p>` +
+        (firstLine ? `<p style="margin:0 0 12px">${firstLine}</p>` : "") +
+        (milestoneLine ? `<p style="margin:0 0 16px;color:${accText};font-weight:600">${milestoneLine}</p>` : "") +
+        blocks +
+        more +
+        ctaButton(open, n === 1 ? "Open project" : "Open projects") +
+        linkFallback(open),
+    });
+  },
 };
+
+function clipCount(n: number): string {
+  return n === 1 ? "1 clip" : `${n} clips`;
+}
+
+function failedCount(n: number): string {
+  return n === 1 ? "1 needs another try" : `${n} need another try`;
+}
+
+function projectBlock(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
+  const href = escapeHtml(`${base}/p/${encodeURIComponent(p.id)}`);
+  const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(" · ");
+  const names = p.highlights.map((h) => escapeHtml(h)).join(" · ");
+  const extra = p.more > 0 ? ` and ${p.more} more` : "";
+  return (
+    `<p style="margin:14px 0 0">` +
+    `<a href="${href}" style="color:${ink};font-weight:600;text-decoration:underline">${escapeHtml(p.title)}</a><br>` +
+    `<span style="color:${ink3};font-size:13px">${bits}</span>` +
+    (names ? `<br><span style="font-size:14px">${names}${extra}</span>` : "") +
+    `</p>`
+  );
+}
+
+function projectText(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
+  const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(", ");
+  const names = p.highlights.join(", ");
+  const extra = p.more > 0 ? ` and ${p.more} more` : "";
+  return `${p.title} — ${bits}${names ? `\n${names}${extra}` : ""}\n${base}/p/${p.id}`;
+}

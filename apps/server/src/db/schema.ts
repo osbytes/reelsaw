@@ -41,6 +41,8 @@ export const user = pgTable("user", {
   flags: jsonb("flags").$type<string[]>().notNull().default([]),
   /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
   mustChangePassword: boolean("must_change_password").default(false).notNull(),
+  /** last authenticated request, coalesced (presence.ts). Null until the first one after this column existed. */
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
 },
@@ -588,6 +590,25 @@ export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
 export type ProjectEventRow = typeof projectEvents.$inferSelect;
+
+/**
+ * A `project.done` claimed for the ready email. `sentAt` null is an in-progress send (a retry finishes
+ * it); a row with `sentAt` set is not mailed again. Rows go when the event or the account does.
+ */
+export const completionNotices = pgTable(
+  "completion_notices",
+  {
+    eventId: bigint("event_id", { mode: "number" })
+      .primaryKey()
+      .references(() => projectEvents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).defaultNow().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [index("completion_notices_user_unsent_idx").on(t.userId).where(sql`${t.sentAt} is null`)],
+);
 
 /**
  * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate

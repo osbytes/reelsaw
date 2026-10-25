@@ -1,5 +1,6 @@
 import type { Services } from "../services.js";
-import { QUEUES, type ProjectJob, type RenderJob, type PrepareJob, type QueueName } from "./boss.js";
+import { COMPLETION_NOTIFY_QUEUE, QUEUES, type ProjectJob, type RenderJob, type PrepareJob, type QueueName } from "./boss.js";
+import { deliverCompletionNotice } from "../notify/completion.js";
 import { prepareClip } from "../pipeline/manual.js";
 import { withLlmContext } from "../ai/trace.js";
 import { ingest } from "../pipeline/ingest.js";
@@ -158,5 +159,21 @@ export async function startWorkers(svc: Services) {
     });
   });
 
-  svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
+  await boss.work<{ userId?: string }>(COMPLETION_NOTIFY_QUEUE, { pollingIntervalSeconds: 2, localConcurrency: 4 }, async (jobs) => {
+    const job = jobs[0]!;
+    const userId = typeof job.data?.userId === "string" ? job.data.userId : "";
+    const log = svc.log.child({ module: "notify", jobId: job.id, ...(userId ? { userId } : {}) });
+    if (!userId) {
+      log.warn({ reason: "missing user" }, "completion notice skipped");
+      return;
+    }
+    try {
+      await deliverCompletionNotice(svc, userId);
+    } catch (err) {
+      log.error({ err, attempt: job.retryCount + 1 }, "completion notice failed");
+      throw err;
+    }
+  });
+
+  svc.log.info({ module: "worker", queues: [...Object.values(QUEUES), COMPLETION_NOTIFY_QUEUE], renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
 }
