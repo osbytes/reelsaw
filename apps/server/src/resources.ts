@@ -100,7 +100,7 @@ export interface ResourceGovernor {
    * immediately (`ResourceExhaustedError`): waiting does not free space.
    */
   acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<void>;
-  /** ffmpeg -threads value: the CPUs shared by the renders running right now. */
+  /** ffmpeg encode `-threads` value: the CPUs shared by the renders running right now. Filtergraph threads are always 1 (see `ffmpegThreadArgs`). */
   ffmpegThreads(): number;
   /**
    * Wait for a render slot. With RENDER_CONCURRENCY=auto a render starts while fewer are running
@@ -263,6 +263,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
     },
 
     ffmpegThreads() {
+      // encode cores only; the filtergraph is always single-threaded (ffmpegThreadArgs)
       return Math.max(1, Math.floor(cpus / Math.max(1, running)));
     },
 

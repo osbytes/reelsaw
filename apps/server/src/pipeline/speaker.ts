@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import type { FaceDetector, FaceBox } from "../vision/faces.js";
 import { FACE_INPUT_W, FACE_INPUT_H } from "../vision/faces.js";
+import { ffmpegPipeThreads } from "../media.js";
 import { VAD_FRAME_SEC } from "../audio/vad.js";
 
 const W = FACE_INPUT_W * 2; // decode at 640×480: detector gets a 2× downscale, mouths keep detail
@@ -99,7 +100,7 @@ export async function activeSpeakers(
   const margin = opts.margin ?? 0.12;
   const window = opts.window ?? 1.5;
   const frameBytes = W * H * 3;
-  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${W}:${H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
+  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${W}:${H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
   const act: [number[], number[]] = [[], []];
   // a box belongs to a speaker when its centre is within a third of the seat separation (capped at
   // 0.12 for far-apart seats, so close-seated pairs get a tighter, non-overlapping tolerance)
