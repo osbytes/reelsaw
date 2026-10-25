@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { EventHandler } from "../event-handlers.js";
+import type { UnitOfWork } from "../uow.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { templates } from "../email.js";
@@ -112,7 +113,7 @@ function clipLabel(hook: string, title: string): string {
  * Send the ready note for everything this account finished after they were last here. Idempotent;
  * the handler's queue runs one at a time per account. `again` queues the rest of a batch cut short.
  */
-export async function deliverCompletionNotice(svc: Services, userId: string, again?: () => Promise<string | null>): Promise<void> {
+export async function deliverCompletionNotice(svc: Services, userId: string, again?: (u: UnitOfWork) => Promise<string | null>): Promise<void> {
   const log = svc.log.child({ module: "notify", userId });
   if (!svc.email.enabled) {
     log.debug({ reason: "email off" }, "completion notice skipped");
@@ -229,10 +230,13 @@ export async function deliverCompletionNotice(svc: Services, userId: string, aga
     log.error({ err, events: sent.length }, "completion notice not sent");
     throw err;
   }
-  // Two single statements, no transaction: the follow-up for a page cut short is queued first, so a
-  // crash before the record re-sends this batch (same key) rather than losing the rest.
-  const followUp = truncated && again ? await again() : null;
-  await db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
+  // The record and the follow-up for a page cut short commit together: the follow-up exists exactly
+  // when this batch is recorded as mailed, so neither a failed record nor a crash leaves a second run
+  // re-sending it (the idempotency key only dedups on Resend).
+  const followUp = await svc.tx(async (u) => {
+    await u.db.insert(schema.completionNotices).values(sent.map((eventId) => ({ eventId, userId }))).onConflictDoNothing();
+    return truncated && again ? again(u) : null;
+  });
   log.info({ projects: projects.length, events: sent.length, ...(milestone ? { milestone } : {}) }, "completion notice sent");
   if (truncated) log.warn({ queued: !!followUp, held: FETCH_LIMIT - 1 }, "completion notice truncated");
 }
@@ -262,5 +266,5 @@ export const readyEmail: EventHandler<"project.done"> = {
   oneAtATime: true,
   // a send takes seconds (Resend times out at 15 s): a run stuck for 2 min is failed and retried
   queue: { expireInSeconds: 120 },
-  handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, () => again({ delaySeconds: FOLLOW_UP_SEC })),
+  handle: ({ key, svc, again }) => deliverCompletionNotice(svc, key, (u) => again(u, { delaySeconds: FOLLOW_UP_SEC })),
 };

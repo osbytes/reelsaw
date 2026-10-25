@@ -173,7 +173,7 @@ export async function startWorkers(svc: Services) {
           key,
           svc,
           signal: job.signal,
-          again: (o) => svc.queue.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfter: o.delaySeconds } : {}) }),
+          again: (u, o) => u.send(q.name, { event, key }, { singletonKey: key, ...(o?.delaySeconds ? { startAfter: o.delaySeconds } : {}) }),
         });
       } catch (err) {
         log.error({ err, key, attempt: job.retryCount + 1 }, "event handler failed");

@@ -9,6 +9,9 @@ import assert from "node:assert/strict";
 import { lifecycleHarness } from "./lifecycle-harness.js";
 import { deliverCompletionNotice } from "../src/notify/completion.js";
 import type { Services } from "../src/services.js";
+import type { UnitOfWork } from "../src/uow.js";
+
+const QUEUE = "event.project.done.readyEmail";
 
 const h = lifecycleHarness();
 const notReady = await h.ready();
@@ -77,5 +80,24 @@ describe("deliverCompletionNotice", { skip: notReady ?? false }, () => {
     assert.equal(r.rows[0].n, 0);
     await deliverCompletionNotice(svc, u);
     assert.equal(sent.length, 1);
+  });
+
+  it("records a batch cut short and queues its follow-up together, or neither", async () => {
+    const u = await account(null);
+    for (let i = 0; i < 41; i++) await finished(u, `${50 - i} minutes`);
+    const recorded = async () => (await h.pool.query(`select count(*)::int as n from completion_notices where user_id = $1`, [u])).rows[0].n;
+    const followUps = async () => (await h.pool.query(`select count(*)::int as n from pgboss.job where name = $1 and singleton_key = $2`, [QUEUE, u])).rows[0].n;
+    const again = (u2: UnitOfWork) => u2.send(QUEUE, { key: u }, { singletonKey: u, startAfter: 3600 });
+    try {
+      // the follow-up fails: the record rolls back with it, so the retry sends this batch again (same key)
+      await assert.rejects(deliverCompletionNotice(svc, u, async () => { throw new Error("queue down"); }), /queue down/);
+      assert.equal(await recorded(), 0);
+      assert.equal(await followUps(), 0);
+      await deliverCompletionNotice(svc, u, again);
+      assert.equal(await recorded(), 40);
+      assert.equal(await followUps(), 1);
+    } finally {
+      await h.pool.query(`delete from pgboss.job where name = $1 and singleton_key = $2`, [QUEUE, u]);
+    }
   });
 });

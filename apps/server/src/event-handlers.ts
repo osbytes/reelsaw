@@ -41,6 +41,7 @@ import { projectEventSchemas, type ProjectEventPayload, type ProjectEventType } 
 import type { QueuePolicy } from "pg-boss";
 import type { Db } from "./db/index.js";
 import type { Services } from "./services.js";
+import type { UnitOfWork } from "./uow.js";
 
 export interface EmittedEvent<T extends ProjectEventType = ProjectEventType> {
   id: number;
@@ -68,9 +69,10 @@ export interface EventHandler<T extends ProjectEventType> {
   queue?: Partial<EventHandlerQueueOptions>;
   /**
    * The work, after commit. `event` is the one whose job this is (a coalesced job runs once for several).
-   * `again` queues another run for the same key (a batch cut short).
+   * `again` queues another run for the same key (a batch cut short) on a unit of work, so it commits
+   * with whatever the handler records about this run.
    */
-  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal; again: (opts?: { delaySeconds?: number }) => Promise<string | null> }) => Promise<void>;
+  handle: (ctx: { event: EmittedEvent<T>; key: string; svc: Services; signal: AbortSignal; again: (u: UnitOfWork, opts?: { delaySeconds?: number }) => Promise<string | null> }) => Promise<void>;
 }
 
 /** event type → handler name → handler */
