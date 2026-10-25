@@ -63,6 +63,8 @@ export function lifecycleHarness() {
     // the runtime settings a service function reads (instance-settings.ts); tests change the object in place
     settings: { get: () => runtime },
     database: { db: database, pool },
+    // no mail: nothing a service function does here may try to send
+    email: { enabled: false, driver: "none", check: async () => {}, send: async () => {} },
     storage: { delete: async (key: string) => void deletedKeys.push(key) },
     paths: { project: (id: string) => `/tmp/reelsaw-test-nonexistent/${id}` },
   } as unknown as Services;

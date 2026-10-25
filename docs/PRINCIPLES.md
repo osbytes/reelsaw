@@ -41,6 +41,11 @@ project already hit the problem it prevents.
   uses `u.db`, `u.emit`, `u.enqueue` and `u.cancelLiveJobs`. Never update with `svc.database.db`
   and then call `svc.events.emit` or `svc.queue.enqueue` afterwards. A crash between them leaves
   an event for a change that didn't happen, or a "pending" clip with no job.
+- **A reaction to an event is a handler on it, not a call at the emit site.** Something that should
+  happen whenever an event is written (the ready email on `project.done`) registers in
+  `event-handlers.ts` and runs inside the emitting unit of work: it reads with `u.db` and queues its
+  job with `u.send`, so the event, the reaction and the job commit together (a transactional outbox
+  whose relay is pg-boss). Slow or external work (mail, webhooks) goes in the job, never the handler.
 - **Standalone `svc.events.emit` is only for notifications** that describe no state change, such as
   progress ticks. It is a single atomic statement (insert + NOTIFY).
 - **NOTIFY happens inside the transaction**, so listeners are only woken once the data they will

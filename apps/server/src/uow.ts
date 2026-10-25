@@ -19,6 +19,7 @@ import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
+import type { EventHandlers } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -98,7 +99,7 @@ const TX_ATTEMPTS = 3;
 /** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
 const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry): RunInTx {
+export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry, handlers?: EventHandlers): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -114,6 +115,8 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
           emitted.push({ projectId, type, payload });
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
+          // reactions commit with the event (event-handlers.ts)
+          for (const h of handlers?.of(type) ?? []) await h.handler(u, { id: row!.id, projectId, type, payload });
           return row!.id;
         },
         async enqueue(q, data) {

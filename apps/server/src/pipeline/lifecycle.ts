@@ -11,7 +11,6 @@ import { QUEUES } from "../queue/boss.js";
 import { cleanupWorkdir, runFacts } from "./common.js";
 import type { PipelineStage, ProjectStatus, RunReason } from "@reelsaw/shared";
 import { removeScratchClip } from "../storage/sweep.js";
-import { scheduleCompletionNotify } from "../notify/completion.js";
 
 /**
  * Ask for a fresh render of a clip. Bumps clips.render_gen so any render still running for an
@@ -171,7 +170,7 @@ export async function lockProjectClips(u: UnitOfWork, projectId: string): Promis
  * clip, then project.
  */
 export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projectId: string) {
-  const [project] = await u.db.select({ status: schema.projects.status, userId: schema.projects.userId }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
+  const [project] = await u.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
   // only a rendering project finishes here: while a re-analyze is still picking (the clips it kept go on rendering),
   // the analyze hand-off moves it to rendering and the last render finalizes
   if (!project || project.status !== "rendering") return;
@@ -187,10 +186,6 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
   await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });
-  await scheduleCompletionNotify(
-    { emailEnabled: svc.email.enabled, delayMinutes: svc.settings.get().COMPLETION_NOTIFY_MINUTES, log: svc.log, send: u.send },
-    project.userId,
-  );
   u.afterCommit(() => cleanupWorkdir(svc, projectId));
 }
 

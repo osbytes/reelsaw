@@ -1,9 +1,21 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { templates } from "../src/email.js";
-import { collapseProjects, greetingName, milestoneCrossed, scheduleCompletionNotify, selectUnseen, type DoneNotice } from "../src/notify/completion.js";
+import { messageIdDomain, templates, type Email } from "../src/email.js";
+import {
+  collapseProjects,
+  completionIdempotencyKey,
+  completionNoticeHandler,
+  greetingName,
+  milestoneCrossed,
+  scheduleCompletionNotify,
+  selectUnseen,
+  type DoneNotice,
+} from "../src/notify/completion.js";
+import { createEventHandlers } from "../src/event-handlers.js";
 import { COMPLETION_NOTIFY_QUEUE } from "../src/queue/boss.js";
 import type { Logger } from "../src/log.js";
+import type { UnitOfWork } from "../src/uow.js";
+import type { InstanceSettings } from "../src/instance-settings.js";
 
 const log = { debug() {}, child() { return log; } } as unknown as Logger;
 
@@ -129,12 +141,13 @@ describe("clips ready template", () => {
       greeting: null,
       hidden: 2,
       milestone: 1,
-      projects: [{ id: "p1", title: `<script>`, clips: 1, failed: 0, rerender: false, highlights: [], more: 0 }],
+      projects: [{ id: "p1", title: `<SCRIPT>`, clips: 1, failed: 0, rerender: false, highlights: [], more: 0 }],
     });
     assert.equal(mail.subject, "Your first clips are ready");
     assert.match(mail.text, /first project you've finished/);
-    assert.doesNotMatch(mail.html, /<script>/);
-    assert.match(mail.html, /&lt;script&gt;/);
+    // any case: no tag survives, only its escaped text
+    assert.equal(mail.html.toLowerCase().includes("<script"), false);
+    assert.ok(mail.html.includes("&lt;SCRIPT&gt;"));
     assert.match(mail.html, /And 2 more/);
     assert.match(mail.text, /https:\/\/app\.example\.com\/\n/);
   });
@@ -164,5 +177,51 @@ describe("clips ready template", () => {
     });
     assert.equal(mail.subject, "A new render is ready");
     assert.match(mail.text, /new render finished/i);
+  });
+});
+
+describe("ready email idempotency", () => {
+  it("gives one batch the same key whatever the order, and a different batch another", () => {
+    const a = completionIdempotencyKey("user-1", [3, 1, 2]);
+    assert.equal(a, completionIdempotencyKey("user-1", [1, 2, 3]));
+    assert.notEqual(a, completionIdempotencyKey("user-1", [1, 2]));
+    assert.notEqual(a, completionIdempotencyKey("user-2", [1, 2, 3]));
+    // fits Resend's key limit and a Message-ID's local part
+    assert.match(a, /^ready-[0-9a-f]{40}$/);
+  });
+
+  it("puts the SMTP Message-ID on the sender's domain, else the app's host", () => {
+    assert.equal(messageIdDomain("Reelsaw <no-reply@mail.example.com>", "https://app.example.com"), "mail.example.com");
+    assert.equal(messageIdDomain("no-reply@example.org", "https://app.example.com"), "example.org");
+    assert.equal(messageIdDomain("", "https://app.example.com/"), "app.example.com");
+  });
+});
+
+describe("event handlers", () => {
+  it("lists handlers for a type in registration order, and refuses a duplicate name", () => {
+    const h = createEventHandlers();
+    const noop = async () => {};
+    h.on("project.done", "a", noop);
+    h.on("project.done", "b", noop);
+    assert.deepEqual(h.of("project.done").map((x) => x.name), ["a", "b"]);
+    assert.equal(h.of("project.failed").length, 0);
+    assert.throws(() => h.on("project.done", "a", noop));
+  });
+
+  it("queues the ready note on the emitting unit of work, and nothing when email is off", async () => {
+    const sent: Array<{ queue: string; opts?: { singletonKey?: string; startAfter?: number } }> = [];
+    const u = {
+      db: { select: () => ({ from: () => ({ where: async () => [{ userId: "owner-1" }] }) }) },
+      send: async (queue: string, _data: object, opts?: { singletonKey?: string; startAfter?: number }) => {
+        sent.push({ queue, opts });
+        return "job";
+      },
+    } as unknown as UnitOfWork;
+    const settings = { get: () => ({ COMPLETION_NOTIFY_MINUTES: 5 }) } as unknown as InstanceSettings;
+    const event = { id: 1, projectId: "p1", type: "project.done" as const, payload: {} };
+    await completionNoticeHandler({ email: { enabled: false } as Email, settings, log })(u, event);
+    assert.equal(sent.length, 0);
+    await completionNoticeHandler({ email: { enabled: true } as Email, settings, log })(u, event);
+    assert.deepEqual(sent, [{ queue: COMPLETION_NOTIFY_QUEUE, opts: { singletonKey: "owner-1", startAfter: 300 } }]);
   });
 });

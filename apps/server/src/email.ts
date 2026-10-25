@@ -24,8 +24,23 @@ export interface Email {
   /**
    * Sends, or logs at debug when disabled. Failures are logged. `strict` rethrows so a job can
    * retry; request-path mail leaves it off and never fails the request.
+   *
+   * `idempotencyKey` (a job that may send the same mail twice): the same key means the same mail.
+   * Resend gets it as `Idempotency-Key` and drops a repeat within 24 hours. SMTP has no dedup, so
+   * the key becomes a fixed Message-ID: some inboxes collapse the repeat, others show it twice.
    */
-  send(mail: Mail, opts?: { strict?: boolean }): Promise<void>;
+  send(mail: Mail, opts?: { strict?: boolean; idempotencyKey?: string }): Promise<void>;
+}
+
+/** The domain of a Message-ID: the sender's, else the app's host. */
+export function messageIdDomain(from: string, appUrl: string): string {
+  const m = /@([A-Za-z0-9.-]+)>?\s*$/.exec(from);
+  if (m) return m[1]!;
+  try {
+    return new URL(appUrl).hostname || "reelsaw.local";
+  } catch {
+    return "reelsaw.local";
+  }
 }
 
 export function createEmail(config: Config, log: Logger): Email {
@@ -33,21 +48,32 @@ export function createEmail(config: Config, log: Logger): Email {
   const driver = config.EMAIL_DRIVER;
   let transport: import("nodemailer").Transporter | null = null;
 
-  async function deliver(mail: Mail) {
+  /** "sent", or "duplicate" when the provider says this idempotency key already went out */
+  async function deliver(mail: Mail, idempotencyKey?: string): Promise<"sent" | "duplicate"> {
     if (driver === "smtp") {
       if (!transport) transport = (await import("nodemailer")).default.createTransport(config.SMTP_URL!);
-      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html });
-      return;
+      const messageId = idempotencyKey ? `<${idempotencyKey}@${messageIdDomain(from, config.APP_URL)}>` : undefined;
+      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html, ...(messageId ? { messageId } : {}) });
+      return "sent";
     }
     if (driver === "resend") {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
-        headers: { authorization: `Bearer ${config.RESEND_API_KEY}`, "content-type": "application/json" },
+        headers: {
+          authorization: `Bearer ${config.RESEND_API_KEY}`,
+          "content-type": "application/json",
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+        },
         body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html }),
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) throw new Error(`resend ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      if (res.ok) return "sent";
+      const body = (await res.text()).slice(0, 300);
+      // same key, different body: the first one was accepted (a re-render changed a clip name since)
+      if (idempotencyKey && res.status === 409 && body.includes("invalid_idempotent_request")) return "duplicate";
+      throw new Error(`resend ${res.status}: ${body}`);
     }
+    return "sent";
   }
 
   return {
@@ -69,8 +95,9 @@ export function createEmail(config: Config, log: Logger): Email {
         return;
       }
       try {
-        await deliver(mail);
-        log.info({ to: mail.to, subject: mail.subject }, "email sent");
+        const r = await deliver(mail, opts?.idempotencyKey);
+        if (r === "duplicate") log.info({ to: mail.to, subject: mail.subject, idempotencyKey: opts?.idempotencyKey }, "email already sent; repeat dropped");
+        else log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
         log.error({ err, to: mail.to, subject: mail.subject }, "email failed");
         if (opts?.strict) throw err;
