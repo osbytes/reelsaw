@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.23.3
+
+### Patch Changes
+
+- [#167](https://github.com/osbytes/reelsaw/pull/167) [`608c446`](https://github.com/osbytes/reelsaw/commit/608c4467498e351c3066f71bf5c89237495631c5) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Renders of many clips at once no longer fail inside ffmpeg on large machines (filter-graph thread races and face-frame sampling).
+
 ## 0.23.2
 
 ### Patch Changes
