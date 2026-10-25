@@ -1,5 +1,5 @@
 /**
- * History pruning: project_events, llm_usage and admin_events older than their retention are deleted
+ * History pruning: project_events, llm_usage, stt_usage and admin_events older than their retention are deleted
  * in batches by id (keyset), from the reconciler, at most once a day per table.
  *
  * `planPruneBatch` is the pure part: given one page of rows in id order it says which ids to delete

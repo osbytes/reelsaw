@@ -16,7 +16,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
-import { assetTagsSchema, bumperSecondsSchema, clipLayers, type AssetProvenance } from "@reelsaw/shared";
+import { assetTagsSchema, bumperSecondsSchema, clipLayers, formatBytes, type AssetProvenance } from "@reelsaw/shared";
 import type { Services } from "../services.js";
 import type { appRouter } from "../trpc/router.js";
 import { userDefaults } from "../pipeline/settings.js";
@@ -27,6 +27,8 @@ import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { assetVisibleTo } from "./visible.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { dropAssetStorage } from "../storage/sweep.js";
+import { assetRefsReady } from "./refs.js";
 import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
 import { bumperCoverage, type BumperCoverage, type SlotCoverage } from "./summary.js";
@@ -590,4 +592,56 @@ export async function bumperAssetUsage(db: Db, userId: string, assetId: string):
   // a project whose settings name the asset only counts when a clip really resolves to it (or it has no clips yet)
   for (const [id, p] of out) if (!p.clips.length && hasClips.has(id)) out.delete(id);
   return { projects: [...out.values()], templates };
+}
+
+/** Undo a removal of one of your uploads. tRPC `library.restore`, MCP `restore_asset` and Deleted all call this. */
+export async function restoreOwnedAsset(svc: Services, userId: string, assetId: string) {
+  return svc.tx(async (u) => {
+    const r = await u.db
+      .update(schema.assets)
+      .set({ deletedAt: null })
+      .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
+      .returning({ id: schema.assets.id });
+    if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    return { ok: true as const };
+  });
+}
+
+/**
+ * Remove one of your already-deleted library uploads for good. Refused while a project, clip or live template still
+ * names it (those keep rendering with the file). Storage is freed after commit.
+ */
+export async function purgeOwnedAsset(svc: Services, userId: string, assetId: string) {
+  return svc.tx(async (u) => {
+    const [a] = await u.db
+      .select({ id: schema.assets.id, name: schema.assets.name, deletedAt: schema.assets.deletedAt, sourceKey: schema.assets.sourceKey, sizeBytes: schema.assets.sizeBytes })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
+      .for("update");
+    if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "That item is not in your library" });
+    if (!a.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove it first. Only library items already in Deleted can be deleted forever." });
+    // "still named" is read from asset_refs, which may miss old projects until its backfill is done (the sweep waits too)
+    if (!(await assetRefsReady(u.db))) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The library is still indexing which projects use what. Try again in a few minutes." });
+    const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${assetId}) as used`);
+    const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
+    const tpl = await u.db.execute(sql`select exists (select 1 from layer_templates t, jsonb_array_elements(t.layers) l where t.deleted_at is null and l->>'assetId' = ${assetId}) as used`);
+    const inTemplate = !!(tpl.rows[0] as { used: boolean } | undefined)?.used;
+    if (used || inTemplate) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: used
+          ? "A project or clip still names this item. Restore or purge those first; the file stays so they keep rendering."
+          : "A layer template still names this item. Remove it from the template first.",
+      });
+    }
+    await u.db.delete(schema.assets).where(eq(schema.assets.id, assetId));
+    u.afterCommit(async () => {
+      try {
+        await dropAssetStorage(svc, a.sourceKey);
+      } catch (err) {
+        svc.log.child({ module: "library", assetId }).warn({ err }, "removed a library item but could not delete its files");
+      }
+    });
+    return { ok: true as const, storedBytes: a.sizeBytes, message: a.sizeBytes ? `Deleted forever. ${formatBytes(a.sizeBytes)} is free now.` : "Deleted forever." };
+  });
 }

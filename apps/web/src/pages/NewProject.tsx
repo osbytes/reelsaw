@@ -15,6 +15,7 @@ import { defaultProjectSettings, projectSettingsSchema, userProjectDefaultsSchem
 import { VerticalPreview, type PreviewLayout, type PreviewWord } from "../components/VerticalPreview";
 import { RefineToggles } from "../components/RefineToggles";
 import { youtubeId } from "../lib/links";
+import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 
 const LENGTHS = [
   { id: "short", label: "< 30s", min: 10, max: 30 },
@@ -477,7 +478,9 @@ export function NewProjectPage() {
 
       <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
-          <span className="min-w-0 flex-1 truncate text-[13px] text-ink2">{create.error ? <span className="text-err">{create.error.message}</span> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : summary}</span>
+          <span className="min-w-0 flex-1 text-[13px] text-ink2">
+            {create.error ? <QuotaNotice message={create.error.message} quota={quotaFromError(create.error)} /> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : <span className="truncate">{summary}</span>}
+          </span>
           <button
             type="button"
             className="btn-quiet text-xs"

@@ -149,7 +149,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   MAX_NEW_PROJECTS_PER_HOUR: ["limits", "Quota: new projects per account per hour. 0 = unlimited."],
   MAX_LIVE_JOBS_PER_USER: ["limits", "Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused. 0 = unlimited."],
   MAX_RERENDERS_PER_HOUR: ["limits", "Quota: re-renders and hand-made clips per account per hour. 0 = unlimited."],
-  MAX_STORAGE_MB: ["limits", "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. 0 = unlimited."],
+  MAX_STORAGE_MB: ["limits", "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. Deleted items count until they are deleted forever. 0 = unlimited."],
   MAX_SOURCE_MINUTES_PER_MONTH: ["limits", "Quota: minutes of source video per account per period: the billing period when the account has a plan (ee), else the UTC calendar month. 0 = unlimited."],
   WATERMARK_NON_ADMINS: ["limits", "Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits)."],
   WATERMARK_TEXT: ["limits", "The watermark text, shown under the logo."],
@@ -159,7 +159,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   EVENT_RETENTION_DAYS: ["limits", "Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep."],
   LLM_USAGE_RETENTION_DAYS: ["limits", "Prune model-call usage rows after N days. 0 = keep."],
   ADMIN_EVENT_RETENTION_DAYS: ["limits", "Prune the admin event log after N days. 0 = keep."],
-  DELETED_RETENTION_DAYS: ["limits", "Deleted projects and clips replaced by a re-analyze stay restorable this long, then their rows and files are purged. 0 = keep forever."],
+  DELETED_RETENTION_DAYS: ["limits", "Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever."],
   EVENT_REPLAY_LIMIT: ["limits", "Events a project page replays when it connects (progress ticks never replay); older ones load on request."],
 
   MAX_CPU_PERCENT: ["resources", "Heavy steps wait while total CPU time is busier than this (measured, any OS)."],

@@ -58,7 +58,7 @@ export function ReportDialog() {
     mutationFn: async () => {
       if (feedbackOnly) {
         const client = clientContext();
-        const tags: Record<string, string> = { source: "report-dialog" };
+        const tags: Record<string, string> = { source: target?.tags?.source ?? "report-dialog", ...target?.tags };
         if (projectId) tags.projectId = projectId;
         if (clipIds.length) tags.clipIds = clipIds.join(",");
         if (client.route) tags.route = client.route;
@@ -102,7 +102,7 @@ export function ReportDialog() {
           message: text.trim(),
           name: me.data?.name,
           email: me.data?.email,
-          tags: { source: "report-dialog", ...(projectId ? { projectId } : {}), ...(client.route ? { route: client.route } : {}) },
+          tags: { source: target?.tags?.source ?? "report-dialog", ...target?.tags, ...(projectId ? { projectId } : {}), ...(client.route ? { route: client.route } : {}) },
           properties: { project_id: projectId ?? null, clip_count: clipIds.length, route: client.route ?? null, via: "zip" },
         }).catch(() => {});
       }
@@ -120,14 +120,14 @@ export function ReportDialog() {
   // reset per opening
   useEffect(() => {
     if (!open) return;
-    setText("");
+    setText(target?.prefill ?? "");
     setHint(null);
     setClipIds(target?.clipId ? [target.clipId] : []);
     setInc({ logs: true, system: caps.system, instance: false, previews: true, allClips: false, source: false });
     submitM.reset();
     // reset is stable; opening is the trigger
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, projectId, target?.clipId, caps.system]);
+  }, [open, projectId, target?.clipId, target?.prefill, caps.system]);
 
   const submit = () => {
     if (text.trim().length < 3) {

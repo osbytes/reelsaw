@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { sourceMinutesExceeded } from "../quota.js";
+import { recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq } from "drizzle-orm";
 import { schema } from "../db/index.js";
@@ -133,6 +133,7 @@ export async function ingest(ctx: StageContext) {
       .update(schema.projects)
       .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
+    await recordSourceDuration(u.db, projectId, probe.durationSec);
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;

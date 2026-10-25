@@ -1,9 +1,14 @@
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
+import { useDeletedToast } from "../lib/deletedToast";
 import { BulkBumpersPopover } from "./BumperField";
+import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
+import { ConfirmDialog, MoreButton } from "./ui";
 
 interface BatchClip {
   id: string;
@@ -15,16 +20,18 @@ interface BatchClip {
   layers?: unknown[] | null;
 }
 
-const slot = "inline-flex h-8 min-w-0 items-center justify-center truncate rounded-[8px] px-1.5 text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:opacity-50";
-
 /**
- * The selection's actions, sticky at the bottom of the clips list. Two fixed lines (a status line, then five button
- * slots) so it is the same height at every width and whatever the selection holds. A button that does not apply stays
- * in its slot, disabled, with a title that says why.
+ * The selection's actions, one compact row at the bottom of the clips list. Re-render and Export stay
+ * on the row; copy, intro/outro, template, retry and delete live in ⋯. Sticky inside the clips ScrollArea.
  */
 export function BatchBar({ projectId, selected, introId, outroId, onClear, onChanged }: { projectId: string; selected: BatchClip[]; introId?: string | null; outroId?: string | null; onClear: () => void; onChanged: () => void }) {
   const trpc = useTRPC();
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
+  const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
+  const notifyDeleted = useDeletedToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [bumpersOpen, setBumpersOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const done = selected.filter((c) => c.status === "done");
   const failed = selected.filter((c) => c.status === "failed");
   const renderable = selected.filter((c) => c.status === "done" || c.status === "failed");
@@ -46,47 +53,81 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
       .catch(() => toast.error("Couldn’t copy"));
   const n = (k: number) => `${k} clip${k === 1 ? "" : "s"}`;
   const exportHref = `/api/projects/${projectId}/export.zip?clips=${done.map((c) => c.id).join(",")}`;
-  const btn = `${slot} btn-ghost`;
+  const later = (fn: () => void) => window.setTimeout(fn, 0);
 
   return (
-    <div role="region" aria-label="Selected clips" className="sticky bottom-0 z-10 flex flex-col gap-1.5 border-t border-line bg-panel px-3 py-2 shadow-pop">
-      <div className="flex h-8 items-center gap-2 text-xs">
-        <span className="min-w-0 flex-1 truncate font-semibold" aria-live="polite">
-          <span aria-hidden className="mr-1 font-mono text-acc-text">
-            ✓
-          </span>
-          {selected.length} selected
-          <span className="ml-1.5 font-normal text-ink3">
-            {done.length} rendered{failed.length ? ` · ${failed.length} failed` : ""}
-          </span>
-        </span>
-        {/* keeps its slot when nothing failed, so the line does not shift */}
-        <button className={`${slot} w-[8.5rem] shrink-0 text-err hover:bg-err-soft ${failed.length ? "" : "invisible"}`} disabled={many.isPending} title={`Re-render the ${n(failed.length)} that failed`} onClick={() => run(failed, "Retrying")}>
-          ▲ Retry failed {failed.length}
+    <SelectionBar label="Selected clips" count={selected.length} onClear={onClear}>
+      <button className="btn-ghost" disabled={!renderable.length || many.isPending} title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"} onClick={() => run(renderable, "Re-rendering")}>
+        Re-render
+      </button>
+      {done.length ? (
+        <a className="btn-ghost" href={exportHref} title={`Download a zip of ${n(done.length)} with YouTube and TikTok metadata`}>
+          Export
+        </a>
+      ) : (
+        <button className="btn-ghost" disabled title="None of the selected clips is rendered yet">
+          Export
         </button>
-        <button className="text-xs font-semibold text-acc-text" onClick={onClear}>
-          Clear
-        </button>
-      </div>
-      <div className="grid h-8 grid-cols-[1fr_0.8fr_1fr_1.35fr_1.15fr] gap-1">
-        <button className={btn} disabled={!renderable.length || many.isPending} title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"} aria-label={`Re-render ${n(renderable.length)}`} onClick={() => run(renderable, "Re-rendering")}>
-          Re-render
-        </button>
-        {done.length ? (
-          <a className={btn} href={exportHref} title={`Download a zip of ${n(done.length)} with YouTube and TikTok metadata`} aria-label={`Export ${n(done.length)}`}>
-            Export
-          </a>
-        ) : (
-          <button className={btn} disabled title="None of the selected clips is rendered yet" aria-label="Export (no rendered clip selected)">
-            Export
-          </button>
-        )}
-        <button className={btn} title={`Copy the title, caption and hashtags of ${n(selected.length)}`} aria-label={`Copy text of ${n(selected.length)}`} onClick={() => void copyAll()}>
-          Copy text
-        </button>
-        <BulkBumpersPopover projectId={projectId} clipIds={selected.map((c) => c.id)} rerenderable={renderable.length} projectIntroId={introId} projectOutroId={outroId} onDone={onChanged} className={btn} />
-        <BulkTemplateButton projectId={projectId} clips={selected} rerenderable={renderable.length} onDone={onChanged} className={btn} />
-      </div>
-    </div>
+      )}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <MoreButton aria-label="More actions for the selection" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
+            <DropdownMenu.Item className="menu-item" onSelect={() => void copyAll()}>
+              Copy text
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setBumpersOpen(true))}>
+              Intro / outro…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setTemplateOpen(true))}>
+              Layer template…
+            </DropdownMenu.Item>
+            {failed.length > 0 && (
+              <DropdownMenu.Item className="menu-item" disabled={many.isPending} onSelect={() => run(failed, "Retrying")}>
+                Retry failed ({failed.length})
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+            <DropdownMenu.Item className="menu-item text-err" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
+              Delete
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <BulkBumpersPopover projectId={projectId} clipIds={selected.map((c) => c.id)} rerenderable={renderable.length} projectIntroId={introId} projectOutroId={outroId} onDone={onChanged} open={bumpersOpen} onOpenChange={setBumpersOpen} />
+      <BulkTemplateButton projectId={projectId} clips={selected} rerenderable={renderable.length} onDone={onChanged} open={templateOpen} onOpenChange={setTemplateOpen} />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={selected.length === 1 ? "Delete this clip?" : `Delete ${selected.length} clips?`}
+        body={`${selected.length === 1 ? `“${selected[0]?.title ?? "This clip"}” is` : `${selected.length} clips are`} hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete forever ${selected.length === 1 ? "it" : "them"}.`}
+        confirm={selected.length === 1 ? "Delete clip" : "Delete clips"}
+        danger
+        onConfirm={() => {
+          const clips = selected;
+          delMany.mutate(
+            { projectId, clipIds: clips.map((c) => c.id) },
+            {
+              onSuccess: (r) => {
+                onClear();
+                onChanged();
+                if (!r.deleted) {
+                  toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
+                  return;
+                }
+                notifyDeleted({
+                  items: clips.map((c) => ({ kind: "clip", id: c.id, title: c.title })),
+                  restorable: r.restorable,
+                  storedBytes: r.storedBytes,
+                });
+              },
+              onError: (e) => toast.error(e.message),
+            },
+          );
+        }}
+      />
+    </SelectionBar>
   );
 }

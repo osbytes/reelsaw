@@ -17,10 +17,13 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           `--must-change` requires a new one at next sign-in. Do not put
  *                                           the secret on the command line
  *   retention                               run the retention sweep now (SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS)
- *   deleted                                 deleted projects that can still be restored, with their purge date
+ *   deleted [email]                         restorable deletes as one list with their purge date. No email: projects
+ *                                           across the install. With email: that account (the Deleted page / list_deleted)
  *   restore <projectId>                     undo a project delete (same as projects.restore and the restore_project tool)
  *   restore-clip <clipId>                   bring back a deleted clip or one a re-analyze replaced
  *   delete-clip <clipId>                    delete one clip, restorable like a project (same as clips.delete and delete_clip)
+ *   delete-clips <projectId> <clipId…>      delete several clips of one project at once (same as the selection bar, clips.deleteMany and delete_clips)
+ *   purge-clip <clipId>                     delete one already-deleted clip forever (same as clips.purge and purge_clip)
  *   captions <clipId> [--format srt|vtt] [--words]   print a clip's rendered captions as an SRT or VTT file (same as clips.captions and get_clip_captions)
  *   transcript-file <projectId> [--format srt|vtt] [--words]   print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file)
  *   import-transcript <projectId> <file.srt|file.vtt> [--language xx]   use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript)
@@ -28,6 +31,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
  *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
+ *   purge-project <projectId>               delete one already-deleted project forever (frees storage; minutes stay counted)
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
@@ -72,7 +76,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   library list [--kind video|image|audio] [--q text]
  *           | search <q…> [--source library|catalog|<provider>] [--kind video|image|audio] [--license cc0|by]
  *           | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex]
- *           | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | usage <id>
+ *           | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | purge <id> | usage <id>
  *           | default <intro|outro> <id|none> | reindex            [--user <email>]
  *                                           the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and
  *                                           sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled
@@ -94,7 +98,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
  *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
  *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
- *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
  *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
  *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
  *                                           (all of them without clip ids; --add keeps the clip's own layers, default replaces);
@@ -161,7 +165,8 @@ import { libraryProviders } from "./library/import.js";
 import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
-import { deleteClip, deletedProjects, framingOfClip, purgeDeleted, restoreClip, restoreProject, updateProject } from "./projects/service.js";
+import { listDeleted } from "./deleted.js";
+import { deleteClip, deleteClips, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, restoreClip, restoreProject, updateProject } from "./projects/service.js";
 import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
@@ -268,8 +273,31 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const s = svc.settings.get();
     console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${s.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${s.CLIP_RETENTION_DAYS})`);
   },
-  /** Deleted projects that can still be restored, with the date the purge removes them (DELETED_RETENTION_DAYS). */
+  /** Restorable deletes. No email: every project's across the install. With email: that account (same as Deleted / list_deleted). */
   async deleted(svc) {
+    const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "never");
+    if (pos[0]) {
+      const u = await userByEmail(svc, pos[0]);
+      const page = await listDeleted(svc, u.id);
+      console.log(`${u.email}: projects/clips restorable ${page.keepDays} day(s); library ${page.libraryDays}d; templates ${page.templateDays}d`);
+      if (!page.items.length) {
+        console.log("nothing waiting");
+        return;
+      }
+      table(
+        page.items.map((r) => ({
+          kind: r.kind,
+          id: r.id,
+          name: r.title,
+          bytes: r.storedBytes,
+          deleted: r.deletedAt.slice(0, 16),
+          purged: day(r.purgeAt),
+          purge: r.canPurge ? "yes" : "held",
+        })),
+      );
+      if (page.truncated) console.log(`showing first ${page.items.length} of ${page.total}`);
+      return;
+    }
     const rows = await deletedProjects(svc);
     table(rows.map((r) => ({ id: r.id, title: r.title, owner: r.email, status: r.status, deleted: r.deletedAt!.toISOString().slice(0, 16), purged: r.purgeAt?.toISOString().slice(0, 10) ?? "never" })));
   },
@@ -290,6 +318,19 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!pos[0]) throw new Error("usage: reelsaw delete-clip <clipId>");
     const r = await deleteClip(svc, null, pos[0]);
     console.log(r.changed ? `deleted clip ${pos[0]}; reelsaw restore-clip brings it back ${r.restorable}` : `${pos[0]} was already deleted`);
+  },
+  /** Several clips of one project in one unit of work: `reelsaw delete-clips <projectId> <clipId…>`. Same as clips.deleteMany and delete_clips. */
+  async "delete-clips"(svc) {
+    const [projectId, ...clipIds] = pos;
+    if (!projectId || !clipIds.length) throw new Error("usage: reelsaw delete-clips <projectId> <clipId…>");
+    const r = await deleteClips(svc, null, projectId, clipIds);
+    console.log(`deleted ${r.deleted} clip(s)${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore-clip brings each back ${r.restorable}`);
+  },
+  /** Delete one already-deleted clip forever: `reelsaw purge-clip <clipId>`. Same as clips.purge and the purge_clip tool. */
+  async "purge-clip"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw purge-clip <clipId>   (must already be deleted; clips of a deleted project go with purge-project)");
+    const r = await purgeOwnedClip(svc, null, pos[0]);
+    console.log(r.message);
   },
   /** A clip's rendered captions as a file on stdout: `reelsaw captions <clipId> [--format srt|vtt] [--words] > clip.srt`. */
   async captions(svc) {
@@ -341,6 +382,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const dry = args.includes("--dry-run");
     const r = await purgeDeleted(svc, { dryRun: dry });
     console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
+  },
+  /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
+  async "purge-project"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId>   (reelsaw deleted lists them; they must already be deleted)");
+    const r = await purgeOwnedProject(svc, null, pos[0]);
+    console.log(r.message);
   },
   abuse: async (svc) => {
     if (args.includes("--run")) {
@@ -988,7 +1035,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async library(svc) {
     const o = bumperArgs();
     const [sub, a, b] = o.pos;
-    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
+    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
     if (sub === "reindex") {
       const r = await backfillAssetRefs(svc, { all: true });
       console.log(`reindexed ${r.projects} project(s), ${r.clips} clip(s), ${r.refs} reference(s)`);
@@ -1035,6 +1082,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if ((sub === "remove" || sub === "restore") && a) {
       await api.library[sub]({ id: a });
       console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
+    } else if (sub === "purge" && a) {
+      const r = await api.library.purge({ id: a });
+      console.log(r.message);
     } else if (sub === "search" && a) {
       // your library, the Reelsaw catalog (default) or an enabled provider: the same procedure as the Browse panel and search_assets
       const kind = o.kind as "video" | "image" | "audio" | undefined;
@@ -1159,7 +1209,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async templates(svc) {
     const { pos: p, rerender, addMode, layers } = bumperArgs();
     const usage =
-      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
@@ -1213,6 +1263,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!a) throw new Error(usage);
       console.log("restored:");
       show(await api.layerTemplates.restore({ id: a }));
+    } else if (sub === "purge") {
+      if (!a) throw new Error(usage);
+      const r = await api.layerTemplates.purge({ id: a });
+      console.log(r.message);
     } else if (sub === "apply") {
       if (!a || !b) throw new Error(usage);
       const clipIds = p.slice(3);
@@ -1442,7 +1496,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|captions|transcript-file|import-transcript|update-project|purge|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

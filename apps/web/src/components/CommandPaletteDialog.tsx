@@ -16,7 +16,8 @@ import { ago } from "../lib/time";
 import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
-import { CHANGELOG_URL, formatTime } from "@reelsaw/shared";
+import { CHANGELOG_URL, DELETED_PATH, formatTime } from "@reelsaw/shared";
+import { useDeletedToast } from "../lib/deletedToast";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -87,13 +88,13 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const retry = useMutation(trpc.projects.retry.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
-  const restoreProject = useMutation(trpc.projects.restore.mutationOptions());
+  const delClip = useMutation(trpc.clips.delete.mutationOptions());
+  const notifyDeleted = useDeletedToast();
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
   const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
   const removeAsset = useMutation(trpc.library.remove.mutationOptions());
-  const restoreAsset = useMutation(trpc.library.restore.mutationOptions());
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
@@ -155,7 +156,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
 
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
-  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "asset"; id: string; title: string }>(null);
+  const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "clip" | "asset"; id: string; title: string }>(null);
   const savedQ = useRef("");
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -305,11 +306,12 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       } else {
         const c = known.current.clips.get(target.id);
         if (!c) return out;
-        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, run });
+        const A = (key: string, label: string, icon: ReactNode, run: () => void, hint?: string, danger?: boolean): Item => ({ key: `ta-${key}`, group: "Actions", label, icon, hint, danger, run });
         acts.push(A("open", "Open in project", <ExternalLink className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}#clip=${c.id}`))));
         acts.push(A("edit", "Edit clip", <Pencil className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}/clips/${c.id}`))));
         acts.push(A("rerender", "Re-render", <RefreshCw className="h-4 w-4" />, act("Re-rendering the clip", "Couldn’t re-render", () => rerender.mutateAsync({ id: c.id }), c.projectId)));
         if (c.videoUrl && c.status === "done") acts.push(A("download", "Download clip", <Download className="h-4 w-4" />, go(() => download(`${c.videoUrl}?download`)), "The rendered mp4"));
+        acts.push(A("delete", "Delete clip", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })), "Hidden until you restore it from Deleted", true));
       }
       return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
     }
@@ -355,6 +357,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       { key: "a-templates", group: "Actions", icon: <Layers className="h-4 w-4" />, label: "Go to templates", hint: "layer templates for any clip length", run: go(() => nav("/templates")) },
       { key: "a-upload-bumper", group: "Actions", icon: <Upload className="h-4 w-4" />, label: "Add to library…", hint: "video, image or audio", run: () => bumperFileRef.current?.click() },
       { key: "a-settings", group: "Actions", icon: <Settings className="h-4 w-4" />, label: "Go to settings", run: go(() => nav("/settings")) },
+      { key: "a-deleted", group: "Actions", icon: <Trash2 className="h-4 w-4" />, label: "Go to deleted", hint: "restore or delete forever", run: go(() => nav(DELETED_PATH)) },
       { key: "a-releases", group: "Actions", icon: <Sparkles className="h-4 w-4" />, label: "What's new", hint: "reelsaw.com/releases", run: go(() => window.open(CHANGELOG_URL, "_blank", "noopener,noreferrer")) },
       { key: "a-theme", group: "Actions", icon: <Moon className="h-4 w-4" />, label: "Toggle light / dark theme", run: go(toggleTheme) },
       { key: "a-report", group: "Actions", icon: <LifeBuoy className="h-4 w-4" />, label: "Report an issue…", hint: "bug, feedback · !", run: go(openReportHere) },
@@ -682,11 +685,15 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         danger
         onConfirm={() => {
           const c = confirm!;
+          const a = library?.find((x) => x.id === c.id);
           removeAsset.mutateAsync({ id: c.id }).then(
             () => {
-              const refresh = () => (void qc.invalidateQueries({ queryKey: trpc.library.pathKey() }), void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }));
               refresh();
-              toast(`Removed ${c.title}`, { duration: 8000, action: { label: "Undo", onClick: () => void restoreAsset.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
+              notifyDeleted({
+                items: [{ kind: "asset", id: c.id, title: c.title }],
+                restorable: "for 30 days",
+                canPurge: !a?.usedBy && !a?.usedByClips && !a?.usedByTemplates,
+              });
             },
             (err: Error) => toast.error(`Couldn’t remove: ${err.message.slice(0, 120)}`),
           );
@@ -696,7 +703,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are removed. Work in progress stops. You can undo this for a few days.`}
+        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
@@ -704,7 +711,33 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           del.mutateAsync({ id: c.id }).then(
             (r) => {
               refresh();
-              toast(`Deleted ${c.title}`, { description: `Restorable ${r.restorable}`, duration: 8000, action: { label: "Undo", onClick: () => void restoreProject.mutateAsync({ id: c.id }).then(() => (refresh(), toast(`Restored ${c.title}`)), (err: Error) => toast.error(err.message.slice(0, 120))) } });
+              notifyDeleted({
+                items: [{ kind: "project", id: c.id, title: c.title }],
+                restorable: r.restorable,
+                storedBytes: r.storedBytes,
+              });
+            },
+            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
+          );
+        }}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "clip"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title="Delete this clip?"
+        body={`“${confirm?.title ?? ""}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        confirm="Delete clip"
+        danger
+        onConfirm={() => {
+          const c = confirm!;
+          delClip.mutateAsync({ id: c.id }).then(
+            (r) => {
+              refresh();
+              notifyDeleted({
+                items: [{ kind: "clip", id: c.id, title: c.title }],
+                restorable: r.restorable,
+                storedBytes: r.storedBytes,
+              });
             },
             (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );

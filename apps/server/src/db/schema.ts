@@ -212,6 +212,28 @@ export const llmUsage = pgTable(
 );
 
 /**
+ * One row per project that used minutes: written at create, duration filled at ingest. Survives project
+ * delete and purge so monthly minutes, first-video-free and admin usage cannot be reset by deleting.
+ * Not pruned by time: first-video-free reads the account's earliest row, so a retention cut would hand out a
+ * second free video (and a cut shorter than a billing period would undercount minutes). One small row per
+ * project ever created; the rows go with the account (`removeUser`).
+ */
+export const sourceUsage = pgTable(
+  "source_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id").notNull(),
+    /** the project that consumed the minutes; no FK, so a purge of the project keeps this row */
+    projectId: text("project_id").notNull(),
+    /** null until ingest knows the length; minutes only count once it is set */
+    durationSec: real("duration_sec"),
+    /** when the project was created (the window minutes and hourly creates count in) */
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("source_usage_project_idx").on(t.projectId), index("source_usage_user_id_idx").on(t.userId, t.createdAt)],
+);
+
+/**
  * One row per speech-to-text call that reached a provider (cache hits are free and not written), for usage per
  * user: seconds of audio transcribed. Written by the asr hook in services.ts; pruned with llm_usage.
  */
@@ -363,7 +385,7 @@ export type AssetRef = typeof assetRefs.$inferSelect;
  * Layer templates: a named set of layers whose windows are placed by a timing mode (head / tail / fill /
  * relative) instead of absolute seconds, so one template fits a 15 s clip and a 90 s clip (docs/specs/layer-templates.md).
  * Applying one materialises ordinary `clips.layers`; the template itself is never read at render time.
- * Removal is a soft delete, restorable from the Templates page or `restore_layer_template`.
+ * Removal is a soft delete, restorable from Deleted or `restore_layer_template`.
  */
 export const layerTemplates = pgTable(
   "layer_templates",

@@ -17,7 +17,7 @@ import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
-import { checkStorageQuota } from "./quota.js";
+import { checkStorageQuota, QuotaError } from "./quota.js";
 import { keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
@@ -169,7 +169,8 @@ export function createApp(svc: Services) {
       await checkStorageQuota(db, svc.settings.get(), session.user.id, length, svc.entitlements);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
-      return c.json({ error: (err as Error).message }, 413);
+      const quota = err instanceof QuotaError ? err.quota : undefined;
+      return c.json({ error: (err as Error).message, ...(quota ? { quota } : {}) }, 429);
     }
     if (!c.req.raw.body) return c.json({ error: "empty body" }, 400);
     const id = randomUUID();

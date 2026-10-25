@@ -28,6 +28,7 @@ import { openReport } from "../lib/report";
 import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
+import { useDeletedToast } from "../lib/deletedToast";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
@@ -62,7 +63,7 @@ export function ProjectPage() {
   const reanalyze = useMutation(trpc.projects.reanalyze.mutationOptions());
   const refine = useMutation(trpc.projects.refine.mutationOptions());
   const del = useMutation(trpc.projects.delete.mutationOptions());
-  const restore = useMutation(trpc.projects.restore.mutationOptions());
+  const notifyDeleted = useDeletedToast();
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const rerenderMany = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
@@ -951,7 +952,7 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The project, its transcript and every clip are removed. Work in progress stops. You can undo this for a few days."
+        body="The project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted."
         confirm="Delete project"
         danger
         onConfirm={() =>
@@ -959,10 +960,11 @@ export function ProjectPage() {
             nav("/"); // leave first, so this page never refetches the project it just deleted
             void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
             const title = q.data?.title ?? "Project";
-            toast(`Deleted ${title}`, {
-              description: `Restorable ${r.restorable}`,
-              duration: 8000,
-              action: { label: "Undo", onClick: () => void restore.mutateAsync({ id }).then(() => (void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() }), nav(`/p/${id}`)), (err: Error) => toast.error(err.message.slice(0, 120))) },
+            notifyDeleted({
+              items: [{ kind: "project", id, title }],
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+              afterUndo: () => nav(`/p/${id}`),
             });
           })
         }

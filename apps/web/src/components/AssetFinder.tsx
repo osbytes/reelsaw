@@ -11,7 +11,8 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import type { inferRouterOutputs } from "@trpc/server";
 import { Loader2, Search, Upload, X } from "lucide-react";
 import { toast } from "sonner";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
+import { DELETED_PATH } from "@reelsaw/shared";
 import type { AppRouter } from "@reelsaw/server";
 import { useTRPC } from "../lib/trpc";
 import { useMe } from "../lib/account";
@@ -362,6 +363,15 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
           </div>
         )}
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
+        {mode === "library" && (list.data?.deleted.length ?? 0) > 0 && (
+          <p className="text-xs text-ink3">
+            {list.data!.deleted.length} removed {list.data!.deleted.length === 1 ? "item" : "items"} restorable from{" "}
+            <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
+              Deleted
+            </Link>{" "}
+            for 30 days.
+          </p>
+        )}
       </div>
 
       {mode === "library" && (

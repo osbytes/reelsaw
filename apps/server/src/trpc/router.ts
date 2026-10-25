@@ -6,7 +6,8 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
-import { applyProjectFraming, deleteClip, deleteOwnedProject, deletedClips, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
+import { applyProjectFraming, deleteClip, deleteClips, deleteOwnedProject, deletedClips, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, restoreClip, restoreProject, retryProject, updateProject, type Actor } from "../projects/service.js";
+import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
 import { listWorkers } from "../ops/workers.js";
 import { summarizeQueue } from "../ops/queue.js";
@@ -22,10 +23,10 @@ import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
-import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload } from "../library/service.js";
+import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload, restoreOwnedAsset, purgeOwnedAsset } from "../library/service.js";
 import { syncClipRefs, syncClipsRefs, syncProjectRefs } from "../library/refs.js";
 import { cleanLayers } from "../library/layers.js";
-import { applyLayerTemplate, applyLayerTemplateInput, createLayerTemplate, getLayerTemplate, layerTemplateFromClip, listLayerTemplates, publicTemplate, removeLayerTemplate, restoreLayerTemplate, templateIdSchema, updateLayerTemplate } from "../library/templates.js";
+import { applyLayerTemplate, applyLayerTemplateInput, createLayerTemplate, getLayerTemplate, layerTemplateFromClip, listLayerTemplates, publicTemplate, purgeLayerTemplate, removeLayerTemplate, restoreLayerTemplate, templateIdSchema, updateLayerTemplate } from "../library/templates.js";
 import { assetVisibleTo } from "../library/visible.js";
 import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
@@ -39,7 +40,7 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
 import { decodeCursor, pageOf } from "../pagination.js";
-import { checkProjectQuota, limitsDetail, LIMIT_KEYS, limitUsage, periodFor, usageByUser, watermarkFor } from "../quota.js";
+import { checkProjectQuota, limitsDetail, LIMIT_KEYS, limitUsage, periodFor, recordProjectCreated, usageByUser, watermarkFor } from "../quota.js";
 import { defaultFactors, estimateStages, loadHistory, processingTimes, type Models } from "../pipeline/estimates.js";
 import { MODEL_KINDS } from "../ai/models.js";
 import { settingsPatchSchema, SettingsError } from "../instance-settings.js";
@@ -628,17 +629,9 @@ const libraryRouter = router({
       });
     }),
     /** Undo a removal of one of your uploads. */
-    restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
-      return ctx.svc.tx(async (u) => {
-        const r = await u.db
-          .update(schema.assets)
-          .set({ deletedAt: null })
-          .where(and(eq(schema.assets.id, input.id), eq(schema.assets.userId, ctx.user.id)))
-          .returning({ id: schema.assets.id });
-        if (!r.length) throw new TRPCError({ code: "NOT_FOUND", message: "Intro or outro not found" });
-        return { ok: true };
-      });
-    }),
+    restore: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(({ ctx, input }) => restoreOwnedAsset(ctx.svc, ctx.user.id, input.id)),
+    /** Remove an already-deleted library upload for good so its storage is freed. Refused while something still names it. */
+    purge: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(({ ctx, input }) => purgeOwnedAsset(ctx.svc, ctx.user.id, input.id)),
 });
 
 const restRouter = router({
@@ -984,6 +977,21 @@ const restRouter = router({
     }),
   }),
 
+  /**
+   * Restorable deletes for the Deleted page: one newest-first list of projects, clips of live
+   * projects, library items and templates, with auto-remove dates and stored bytes. Same payload as
+   * MCP `list_deleted`. Restore / purge of a selection call the same services as the per-kind tools.
+   */
+  deleted: router({
+    list: protectedProcedure.query(({ ctx }) => listDeleted(ctx.svc, ctx.user.id)),
+    restore: protectedProcedure
+      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
+      .mutation(({ ctx, input }) => restoreDeleted(ctx.svc, { id: ctx.user.id, admin: false }, input.items)),
+    purge: protectedProcedure
+      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
+      .mutation(({ ctx, input }) => purgeDeleted(ctx.svc, { id: ctx.user.id, admin: false }, input.items)),
+  }),
+
   /** ⌘K palette before anything is typed: the 20 projects changed most recently, with their clip counts. */
   searchIndex: protectedProcedure.query(async ({ ctx }) => ({ projects: await recentProjects(ctx.svc.database.db, ctx.user.id, 20) })),
 
@@ -1006,9 +1014,14 @@ const restRouter = router({
       .input(z.object({ cursor: z.string().max(300).optional(), limit: z.number().int().min(1).max(100).default(24), status: z.enum(PROJECT_STATUSES).optional(), deleted: z.boolean().optional().describe("true = only deleted projects that can still be restored") }).optional())
       .query(async ({ ctx, input }) => {
         const page = await listProjectsPage(ctx.svc.database.db, ctx.user.id, { cursor: input?.cursor, limit: input?.limit ?? 24, status: input?.status, deleted: input?.deleted });
+        const keepDays = ctx.svc.settings.get().DELETED_RETENTION_DAYS;
         ctx.log.debug({ limit: input?.limit ?? 24, cursor: !!input?.cursor, status: input?.status ?? null, items: page.rows.length, hasMore: !!page.nextCursor, total: page.total }, "projects page");
         return {
-          items: page.rows.map(({ p, ...card }) => ({ ...publicProject(p), ...card })),
+          items: page.rows.map(({ p, ...card }) => ({
+            ...publicProject(p),
+            ...card,
+            purgeAt: p.deletedAt && keepDays > 0 ? new Date(p.deletedAt.getTime() + keepDays * 86_400_000).toISOString() : null,
+          })),
           nextCursor: page.nextCursor,
           total: page.total,
         };
@@ -1069,6 +1082,7 @@ const restRouter = router({
           .insert(schema.projects)
           .values({ id, userId: ctx.user.id, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
           .returning();
+        await recordProjectCreated(u.db, ctx.user.id, id, row!.createdAt);
         await syncProjectRefs(u.db, row!); // the defaults' intro/outro
         await u.emit(id, "project.created", { title });
         await startRun(u, id, { reason: "created", status: "queued" });
@@ -1221,11 +1235,14 @@ const restRouter = router({
       .input(z.object({ id: z.string(), reframe: sectionModeSchema, adjust: sectionAdjustSchema.optional(), keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) }))
       .mutation(({ ctx, input }) => applyProjectFraming(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
-    /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. */
+    /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. Storage still counts until purge. */
     delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /** Undo a delete (the owner, or an admin for anyone's project). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),
+
+    /** Remove a deleted project for good: files go, storage is freed. Minutes already used stay counted. */
+    purge: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => purgeOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
     /**
      * SSE stream of project events. It replays the newest `EVENT_REPLAY_LIMIT` non-progress events (after
@@ -1551,8 +1568,16 @@ const restRouter = router({
     /** Soft-delete one clip; restorable with clips.restore until the purge (DELETED_RETENTION_DAYS). */
     delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteClip(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
 
+    /** Soft-delete several clips of one live project (the selection bar). Already-deleted ids are skipped. */
+    deleteMany: protectedProcedure
+      .input(z.object({ projectId: z.string(), clipIds: z.array(z.string()).min(1).max(200) }))
+      .mutation(({ ctx, input }) => deleteClips(ctx.svc, { id: ctx.user.id, admin: false }, input.projectId, input.clipIds)),
+
     /** Bring back a deleted clip or one a re-analyze replaced (listed as replacedClips on projects.get). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreClip(ctx.svc, actorOf(ctx.user), input.id)),
+
+    /** Remove an already-deleted clip of a live project for good so its render is freed. */
+    purge: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => purgeOwnedClip(ctx.svc, actorOf(ctx.user), input.id)),
 
     /**
      * Re-render several clips of a project at once (the selection bar, "Retry failed"). One transaction, one run:
@@ -1585,6 +1610,8 @@ const layerTemplatesRouter = router({
   update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
   remove: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  /** Hard-delete a removed template (no media files). */
+  purge: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => purgeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   /** A new template from one clip's layers: a layer that spans the clip fills, the rest anchor to the nearer edge with their length. */
   fromClip: protectedProcedure.input(z.object({ clipId: z.string(), name: layerTemplateNameSchema })).mutation(({ ctx, input }) => layerTemplateFromClip(ctx.svc, ctx.user.id, input)),
   /** Materialise a template on clips of one project (all of them, or `clipIds`), replacing or adding to their layers. (`apply` is a word tRPC reserves.) */

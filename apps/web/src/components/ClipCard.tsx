@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import { useMutation } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { openReport } from "../lib/report";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Modal, MoreButton, ProgressBar, StatusText } from "./ui";
+import { ConfirmDialog, Modal, MoreButton, ProgressBar, StatusText } from "./ui";
 import { ScrollArea } from "./scroll-area";
 import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
+import { useTRPC } from "../lib/trpc";
+import { useDeletedToast } from "../lib/deletedToast";
 import { ClipBumpersDialog } from "./BumperField";
 import { ApplyTemplateToClipsDialog } from "./TemplatePicker";
 import { useMe } from "../lib/account";
@@ -91,6 +94,10 @@ export function ClipCard({
   const [postOpen, setPost] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const trpc = useTRPC();
+  const del = useMutation(trpc.clips.delete.mutationOptions());
+  const notifyDeleted = useDeletedToast();
   const isAdmin = useMe().data?.role === "admin";
   const done = clip.status === "done";
   const working = clip.status === "rendering" || clip.status === "preparing";
@@ -260,6 +267,10 @@ export function ClipCard({
                   Report an issue…
                 </DropdownMenu.Item>
               )}
+              <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
+              <DropdownMenu.Item className="menu-item text-err" disabled={del.isPending} onSelect={() => setConfirmDelete(true)}>
+                Delete clip
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -285,6 +296,28 @@ export function ClipCard({
       </Modal>
       <ClipBumpersDialog open={bumpersOpen} onOpenChange={setBumpersOpen} clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
       <ApplyTemplateToClipsDialog open={templateOpen} onOpenChange={setTemplateOpen} projectId={projectId} clipIds={[clip.id]} withLayers={clip.layers?.length ?? 0} rerenderable={clip.status === "done" || clip.status === "failed" ? 1 : 0} />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this clip?"
+        body={`“${clip.title || "Untitled moment"}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        confirm="Delete clip"
+        danger
+        onConfirm={() =>
+          del.mutate(
+            { id: clip.id },
+            {
+              onSuccess: (r) =>
+                notifyDeleted({
+                  items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled moment" }],
+                  restorable: r.restorable,
+                  storedBytes: r.storedBytes,
+                }),
+              onError: (e) => toast.error(e.message),
+            },
+          )
+        }
+      />
     </article>
   );
 }

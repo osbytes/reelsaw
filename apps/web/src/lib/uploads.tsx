@@ -2,8 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Loader2, X } from "lucide-react";
+import type { QuotaRefusal } from "@reelsaw/shared";
 import { useTRPC } from "./trpc";
 import { useSession } from "./auth";
+import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 
 /** POST the file to /api/upload (raw body, name in x-filename); resolves to the upload id. */
 export function uploadFile(f: File, onProgress?: (p: number) => void): Promise<string> {
@@ -16,7 +18,18 @@ export function uploadFile(f: File, onProgress?: (p: number) => void): Promise<s
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve((JSON.parse(xhr.responseText) as { uploadId: string }).uploadId);
-      else reject(new Error(xhr.responseText || `upload failed (${xhr.status})`));
+      else {
+        let msg = xhr.responseText || `upload failed (${xhr.status})`;
+        let quota: QuotaRefusal | undefined;
+        try {
+          const body = JSON.parse(xhr.responseText) as { error?: string; quota?: QuotaRefusal };
+          if (body.error) msg = body.error;
+          quota = body.quota;
+        } catch {
+          /* raw body */
+        }
+        reject(Object.assign(new Error(msg), { quota }));
+      }
     };
     xhr.onerror = () => reject(new Error("upload failed"));
     xhr.send(f);
@@ -61,6 +74,7 @@ interface Job {
   state: "uploading" | "creating" | "done" | "failed";
   projectId?: string;
   error?: string;
+  quota?: QuotaRefusal;
 }
 
 const Ctx = createContext<{ startProjects: (files: File[]) => void; openWithFile: (f: File) => void }>({ startProjects: () => {}, openWithFile: () => {} });
@@ -101,7 +115,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
             patch(key, { state: "done", projectId: p.id });
             void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
           } catch (err) {
-            patch(key, { state: "failed", error: (err as Error).message.slice(0, 160) });
+            patch(key, { state: "failed", error: (err as Error).message, quota: quotaFromError(err) });
           }
         }
       };
@@ -203,7 +217,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
                   <div className="h-full bg-acc transition-all" style={{ width: `${j.pct * 100}%` }} />
                 </div>
               )}
-              {j.error && <span className="text-err">{j.error}</span>}
+              {j.error && <QuotaNotice message={j.error} quota={j.quota} />}
             </div>
           ))}
         </div>

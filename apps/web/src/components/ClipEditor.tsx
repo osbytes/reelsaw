@@ -20,6 +20,7 @@ import { loadTextFonts } from "../lib/fonts";
 import { z } from "zod";
 import { ThemeToggle } from "../App";
 import { HeaderAlerts } from "./HeaderAlerts";
+import { useDeletedToast } from "../lib/deletedToast";
 import { useUnsavedFlag } from "../lib/unsaved";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
@@ -641,6 +642,9 @@ export function ClipEditor(props: Props) {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
   const updateStyle = useMutation(trpc.projects.updateStyle.mutationOptions());
   const applyFraming = useMutation(trpc.projects.applyFraming.mutationOptions());
+  const delClip = useMutation(trpc.clips.delete.mutationOptions());
+  const notifyDeleted = useDeletedToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const setRange = (r: [number, number], key?: string) => {
     const a = Math.max(0, Number(r[0].toFixed(2)));
@@ -2146,6 +2150,9 @@ export function ClipEditor(props: Props) {
       >
         <Link2 className="h-4 w-4" />
       </button>
+      <button className={`${hb} hidden text-err sm:grid`} disabled={delClip.isPending} onClick={() => setConfirmDelete(true)} title="Delete clip" aria-label="Delete clip">
+        <Trash2 className="h-4 w-4" />
+      </button>
       <button className={`${hb} hidden sm:grid`} onClick={() => setKeysOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
         <Keyboard className="h-4 w-4" />
       </button>
@@ -2214,6 +2221,31 @@ export function ClipEditor(props: Props) {
       )}
 
       <ProjectBumpersModal open={bumpersDialog} onOpenChange={setBumpersDialog} projectId={projectId} clipCount={clipCount} introId={settings.introAssetId} outroId={settings.outroAssetId} introSec={settings.introSec} outroSec={settings.outroSec} />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this clip?"
+        body={`“${title || "Untitled"}” is hidden from the project. Unsaved edits are discarded. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        confirm="Delete clip"
+        danger
+        onConfirm={() => {
+          delClip.mutate(
+            { id: clip.id },
+            {
+              onSuccess: (r) => {
+                onExit();
+                notifyDeleted({
+                  items: [{ kind: "clip", id: clip.id, title: title || "Untitled" }],
+                  restorable: r.restorable,
+                  storedBytes: r.storedBytes,
+                  afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
+                });
+              },
+              onError: (e) => toast.error(e.message),
+            },
+          );
+        }}
+      />
       <ConfirmDialog
         open={applyAll !== null}
         onOpenChange={(o) => !o && setApplyAll(null)}

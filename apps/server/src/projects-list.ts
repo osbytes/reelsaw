@@ -59,6 +59,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
   const { items, nextCursor } = pageOf(fetched, input.limit, (r) => [r.ts, r.row.id]);
   const rows = items.map((r) => r.row);
   const facts = await clipFacts(db, rows.map((r) => r.id));
+  const stored = await storedBytesByProject(db, rows.map((r) => r.id));
   const bumperSummaries = await projectBumperSummaries(
     db,
     userId,
@@ -83,11 +84,25 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
         bumpers: bumperSummaries.get(p.id) ?? { intro: null, outro: null },
         thumbnailUrl: f?.firstThumbId ? `/media/clips/${p.id}/${f.firstThumbId}.jpg` : sourceThumb,
         deletedAt: p.deletedAt?.toISOString() ?? null,
+        storedBytes: stored.get(p.id) ?? 0,
       };
     }),
     nextCursor,
     total,
   };
+}
+
+async function storedBytesByProject(db: Db, ids: string[]): Promise<Map<string, number>> {
+  if (!ids.length) return new Map();
+  const P = schema.projects;
+  const rows = await db
+    .select({
+      id: P.id,
+      bytes: sql<number>`coalesce(${P.sourceBytes}, 0) + coalesce((select sum(c.output_bytes) from clips c where c.project_id = ${P.id} and c.output_key is not null), 0)`,
+    })
+    .from(P)
+    .where(inArray(P.id, ids));
+  return new Map(rows.map((r) => [r.id, Number(r.bytes)]));
 }
 
 /** Header numbers for the Projects page: all of the user's projects, how many are processing, clips rendered. */

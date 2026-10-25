@@ -5,11 +5,11 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useTRPC } from "../../lib/trpc";
 import { track } from "../../lib/telemetry";
-import { CHECKOUT_PARAM, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM } from "@reelsaw/shared";
+import { CHECKOUT_PARAM, deletedProjectsPath, INTERVAL_PARAM, isCheckoutOutcome, PLAN_PARAM } from "@reelsaw/shared";
 import { Skeleton, SkeletonRegion } from "../../components/ui";
 
 const num = new Intl.NumberFormat();
@@ -157,6 +157,13 @@ export default function BillingSection() {
                 <span className="text-xs font-semibold text-ink2">Storage</span>
                 {bar(d.usage.MAX_STORAGE_MB, storageCap)}
                 <span className="text-xs tabular-nums text-ink3">{storageCap ? `${gb(d.usage.MAX_STORAGE_MB)} of ${gb(storageCap)}` : `${gb(d.usage.MAX_STORAGE_MB)}, no cap`}</span>
+                <span className="text-xs text-ink3">
+                  Removed projects still count until you{" "}
+                  <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
+                    delete them forever
+                  </Link>
+                  .
+                </span>
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-ink2">Projects</span>

@@ -7,6 +7,7 @@ import type { AppRouter } from "@reelsaw/server";
 import { formatTag, licenseText } from "../lib/library";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
+import { useDeletedToast } from "../lib/deletedToast";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { Modal, Skeleton, SkeletonRegion } from "./ui";
@@ -59,6 +60,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const dupRef = useRef(onDuplicate);
   dupRef.current = onDuplicate;
   const fail = (e: unknown) => toast.error((e instanceof Error ? e.message : String(e)).slice(0, 200));
+  const notifyDeleted = useDeletedToast();
   const create = useMutation(trpc.library.add.mutationOptions());
   const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
   const removeM = useMutation(trpc.library.remove.mutationOptions());
@@ -134,10 +136,19 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       () => (refresh(), toast(`Restored ${a.name}`), true),
       (e) => (fail(e), false),
     );
-  /** Soft delete with an Undo toast (the server keeps the file, so projects using it keep rendering). */
+  /** Soft delete with Undo / Delete forever / See deletions (the server keeps the file, so projects using it keep rendering). */
   const remove = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(`Removed ${a.name}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(a) } }), true),
+      () => (
+        refresh(),
+        notifyDeleted({
+          items: [{ kind: "asset", id: a.id, title: a.name }],
+          restorable: "for 30 days",
+          storedBytes: a.sizeBytes,
+          canPurge: !a.usedBy && !a.usedByClips && !a.usedByTemplates,
+        }),
+        true
+      ),
       (e) => (fail(e), false),
     );
   /** Image length; resolves true when saved. */
@@ -732,11 +743,16 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
   );
 }
 
-/** Applies an intro and/or outro to every selected clip (the selection bar's "Intro / outro…"). Slots left on "Leave as it is" are untouched. */
-export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void; className: string }) {
+/** Applies an intro and/or outro to every selected clip (the selection bar's ⋯ menu). Slots left on "Leave as it is" are untouched. Pass `open` to drive it from that menu; otherwise it renders its own button. */
+export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className, open: openProp, onOpenChange }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [inner, setInner] = useState(false);
+  const open = openProp ?? inner;
+  const setOpen = (next: boolean) => {
+    onOpenChange?.(next);
+    if (openProp === undefined) setInner(next);
+  };
   const [v, setV] = useState<SlotChoices>({ intro: "keep", outro: "keep" });
   const many = useMutation(trpc.clips.setBumpersMany.mutationOptions());
   const nothing = v.intro === "keep" && v.outro === "keep";
@@ -765,11 +781,15 @@ export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIn
     );
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button className={className} title={`Set the intro and outro of ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`}>
-          Intro/outro…
-        </button>
-      </Popover.Trigger>
+      {openProp === undefined ? (
+        <Popover.Trigger asChild>
+          <button className={className} title={`Set the intro and outro of ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`}>
+            Intro/outro…
+          </button>
+        </Popover.Trigger>
+      ) : (
+        <Popover.Anchor className="pointer-events-none absolute right-8 bottom-0 h-px w-px" />
+      )}
       <Popover.Portal>
         <Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
           <b className="text-[13px]">

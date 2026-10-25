@@ -71,8 +71,8 @@ mode per layer, never the default.
 
 ## What the user sees
 - **Templates page** (`/templates`, nav next to Library; `#template=<id>` deep link): a list of templates
-  (name, layer count, updated), New template, and per row Edit / Rename / Duplicate / Remove, with the
-  removed ones restorable below. Loading is a skeleton, empty is a sentence only after the query resolves.
+  (name, layer count, updated), New template, and per row Edit / Rename / Duplicate / Remove. Removed
+  templates are restorable from Deleted (`/deleted`) for 30 days. Loading is a skeleton, empty is a sentence only after the query resolves.
 - **Template editor** (`/templates/:id`): the clip editor slimmed to what a template is. A 9:16 canvas with
   a neutral stand-in frame (no source video), the Layers lane (reused `Timeline`, one "auto" section, no
   words or scene cuts, clip handles disabled) and the Layers inspector (reused `LayerCard` fields plus a
@@ -110,12 +110,12 @@ mode per layer, never the default.
 | list / get | Templates page | `layerTemplates.list` / `get` | `list_layer_templates` | `reelsaw templates list` / `show <id>` |
 | create (from layers or a clip) | editor "Save as template…", page "New template" | `create` / `fromClip` | `save_layer_template { name, clipId \| layers }` | `templates save <projectId> <clipId> <name…>` |
 | edit | template editor | `update` | `update_layer_template` | `templates rename <id> <name…>` / `templates set <id> --layers '<json>'` |
-| remove / restore | page | `remove` / `restore` | `remove_layer_template` / `restore_layer_template` | `templates remove <id>` / `restore <id>` |
+| remove / restore / purge | page (toast: Undo / Delete forever / See deletions); restore and delete forever on Deleted (compact bar, Delete forever in ⋯) | `remove` / `restore` / `purge`; bulk `deleted.restore` / `deleted.purge` | `remove_layer_template` / `restore_layer_template` / `purge_layer_template` | `templates remove <id>` / `restore <id>` / `purge <id>` |
 | apply to clips | editor, selection bar | `applyToClips` | `apply_layer_template { templateId, projectId, clipIds?, mode, rerender }` | `templates apply <templateId> <projectId> [clipId…] [--add] [--rerender]` |
 | default for new clips | Settings, project settings | `me.updateProjectDefaults`, `projects.update { settings.layerTemplateId }` | `update_project { settings: { layerTemplateId } }` | `update-project` |
 
 One implementation: `apps/server/src/library/templates.ts` (`listLayerTemplates`, `createLayerTemplate`,
-`updateLayerTemplate`, `removeLayerTemplate`, `restoreLayerTemplate`, `layerTemplateFromClip`,
+`updateLayerTemplate`, `removeLayerTemplate`, `restoreLayerTemplate`, `purgeLayerTemplate`, `layerTemplateFromClip`,
 `applyLayerTemplate`, `templateForNewClips` + `layersForNewClip` for the pipeline); the pure parts
 (`templateWindow`, `resolveTemplateLayers`, `templateFromLayers`, `timingText`) live in `packages/shared`
 so the editor previews exactly what the server writes. `cleanLayers` moved from the router to
@@ -126,7 +126,7 @@ so the editor previews exactly what the server writes. `cleanLayers` moved from 
   skipped at render as today (`clip.overlay_skipped`). A clip still being prepared is skipped with a reason.
 - Clips are locked in id order in one transaction with their `asset_refs` rewrite; re-renders only for
   finished clips and only when asked.
-- No layout shift on the Templates page or in the selection bar (the new button takes a fixed slot).
+- No layout shift on the Templates page. The clips selection bar stays one compact row; Template… is in its ⋯ menu.
 - Works at 390 px: the template editor stacks like the clip editor's compact layout.
 
 ## Open
