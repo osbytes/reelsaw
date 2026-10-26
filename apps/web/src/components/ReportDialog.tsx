@@ -206,6 +206,7 @@ export function ReportDialog() {
                 placeholder="None in particular"
                 searchPlaceholder="Search clips by number or title…"
                 empty="No clip matches"
+                footerHint="Pick any that show the problem"
                 value={clipIds}
                 onChange={setClipIds}
                 options={clips.map((c) => ({ value: c.id, prefix: String(c.index + 1), label: c.title, hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined }))}

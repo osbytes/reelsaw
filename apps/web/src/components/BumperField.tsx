@@ -11,6 +11,7 @@ import { useDeletedToast } from "../lib/deletedToast";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
 import { Modal, Skeleton, SkeletonRegion } from "./ui";
+import { MultiCombobox } from "./MultiCombobox";
 import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -369,34 +370,23 @@ export function LicenseBadge({ provenance: p, className = "", wrap = false }: { 
   );
 }
 
-/** Tags as removable chips with an add field (Enter or comma); each change saves right away. */
+/** Tags: pick from the ones already in your library or create one (Enter); each change saves right away. */
 function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name" | "tags">; busy: boolean; onTags: (tags: string[]) => void }) {
-  const [v, setV] = useState("");
-  const add = () => {
-    const next = v.split(",").map((t) => t.trim().toLowerCase().slice(0, 40)).filter((t) => t && !a.tags.includes(t));
-    setV("");
-    if (next.length) onTags([...a.tags, ...next].slice(0, 30));
-  };
+  const library = useBumperLibrary();
+  const known = [...new Set([...(library.data?.assets ?? []).flatMap((x) => x.tags), ...a.tags])].sort((x, y) => x.localeCompare(y));
   return (
-    <div className="flex min-h-[3.25rem] flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1" aria-label="Tags">
-        {a.tags.map((t) => (
-          <span key={t} className="inline-flex items-center gap-0.5 rounded-full bg-sunk py-0.5 pl-2 pr-1 text-[11px] text-ink2">
-            {t}
-            <button type="button" className="grid h-4 w-4 place-items-center rounded-full hover:bg-line" disabled={busy} aria-label={`Remove tag ${t}`} onClick={() => onTags(a.tags.filter((x) => x !== t))}>
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        ))}
-        {a.tags.length === 0 && <span className="text-[11px] text-ink3">No tags yet</span>}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <input className="input h-7 min-w-0 flex-1 px-2 py-0 text-xs" type="text" maxLength={40} value={v} disabled={busy} placeholder="Add a tag…" aria-label={`Add a tag to ${a.name}`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => (e.key === "Enter" || e.key === ",") && (e.preventDefault(), add())} />
-        <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={busy || !v.trim()} onClick={add} aria-label="Add tag">
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+    <MultiCombobox
+      label={`Tags on ${a.name}`}
+      placeholder="Add tags…"
+      searchPlaceholder="Find or create a tag…"
+      empty="No tags yet. Type one to create it."
+      footerHint="Tags make an item easy to find"
+      options={known.map((t) => ({ value: t, label: t }))}
+      value={a.tags}
+      disabled={busy}
+      onChange={(tags) => onTags(tags.slice(0, 30))}
+      creatable={{ noun: "tag", normalize: (q) => q.trim().toLowerCase().slice(0, 40) || null }}
+    />
   );
 }
 
