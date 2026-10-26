@@ -11,7 +11,8 @@ import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJ
 import { ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
-import { trackJob } from "./inflight.js";
+import { inflightJobs, trackJob } from "./inflight.js";
+import { gauge, histogram, realtimeFactor, type MetricAttributes } from "../metrics.js";
 
 type Job<T> = { id: string; data: T; retryCount: number; signal: AbortSignal };
 
@@ -32,6 +33,49 @@ async function previousAttempt(svc: Services, jobId: string): Promise<string | u
 }
 const interrupted = (reason?: string) => !!reason && /heartbeat|expired|abort/i.test(reason);
 
+/** Seconds of media a job worked on: the source's length, or the clip's for prepare and render. Null before ingest knows it. */
+async function mediaSeconds(svc: Services, projectId: string, clipId?: string): Promise<number | null> {
+  try {
+    const r = await svc.database.pool.query<{ project: number | null; clip: number | null }>(
+      "select p.duration_sec as project, c.end_sec - c.start_sec as clip from projects p left join clips c on c.id = $2 and c.project_id = p.id where p.id = $1",
+      [projectId, clipId ?? null],
+    );
+    const row = r.rows[0];
+    const sec = clipId ? row?.clip : row?.project;
+    return sec != null && Number.isFinite(Number(sec)) ? Number(sec) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wall time of one stage job, by outcome; for a job that finished, also the media it covered and the
+ * seconds of work per second of media, so a long video and a short one compare. Render waits for a
+ * slot outside this, so its numbers are encode time. Ids stay off the attributes (metrics.ts).
+ */
+async function measured<T>(svc: Services, stage: string, scope: { projectId: string; clipId?: string }, fn: () => Promise<T>): Promise<T> {
+  const t0 = performance.now();
+  let outcome = "ok";
+  try {
+    return await fn();
+  } catch (err) {
+    outcome = err instanceof StaleJobError ? "superseded" : err instanceof ProjectGoneError ? "gone" : "error";
+    throw err;
+  } finally {
+    const sec = (performance.now() - t0) / 1000;
+    const attrs: MetricAttributes = stage === "render" ? { stage, encoder: svc.media.encoder().name } : { stage };
+    histogram("reelsaw.pipeline.stage.duration", sec, "s", { ...attrs, outcome }, "Wall time of one pipeline stage job, by outcome");
+    if (outcome === "ok") {
+      void mediaSeconds(svc, scope.projectId, scope.clipId).then((media) => {
+        if (media === null) return;
+        histogram("reelsaw.pipeline.media.duration", media, "s", attrs, "Seconds of media a finished stage job covered (source length; clip length for prepare and render)");
+        const rtf = realtimeFactor(sec, media);
+        if (rtf !== null) histogram("reelsaw.pipeline.realtime_factor", rtf, "1", attrs, "Stage wall seconds per second of media; 1 = as long as the video");
+      });
+    }
+  }
+}
+
 function runTracked<T>(job: Job<ProjectJob>, queue: QueueName, extra: { clipId?: string }, fn: () => Promise<T>): Promise<T> {
   return trackJob({ jobId: job.id, queue, projectId: job.data.projectId, ...(extra.clipId ? { clipId: extra.clipId } : {}), startedAt: new Date().toISOString() }, fn);
 }
@@ -49,12 +93,14 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
         log.info({ attempt, maxAttempts: max + 1, seq, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
         const t0 = Date.now();
-        await withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
-          withLlmContext({ projectId, stage, jobId: job.id }, async () => {
-            const ctx = await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }, seq);
-            seq = ctx.seq;
-            return fn(ctx);
-          }),
+        await measured(svc, stage, { projectId }, () =>
+          withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
+            withLlmContext({ projectId, stage, jobId: job.id }, async () => {
+              const ctx = await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }, seq);
+              seq = ctx.seq;
+              return fn(ctx);
+            }),
+          ),
         );
         log.info({ ms: Date.now() - t0 }, "job done");
       } catch (err) {
@@ -93,12 +139,14 @@ export async function startWorkers(svc: Services) {
     return runTracked(job, queue, {}, async () => {
       try {
         log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, seq }, "job start");
-        await withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () =>
-          withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => {
-            const ctx = await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }, seq);
-            seq = ctx.seq;
-            return fn(ctx);
-          }),
+        await measured(svc, `refine.${step}`, { projectId }, () =>
+          withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () =>
+            withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => {
+              const ctx = await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }, seq);
+              seq = ctx.seq;
+              return fn(ctx);
+            }),
+          ),
         );
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
@@ -129,7 +177,9 @@ export async function startWorkers(svc: Services) {
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
         log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
         if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "prepare", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
-        await withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => prepareClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.prepare }), clipId, mode)));
+        await measured(svc, "prepare", { projectId, clipId }, () =>
+          withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => prepareClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.prepare }), clipId, mode))),
+        );
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
@@ -155,8 +205,10 @@ export async function startWorkers(svc: Services) {
         if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "render", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
         const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
         try {
-          await withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () =>
-            renderClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.render }), clipId, gen),
+          await measured(svc, "render", { projectId, clipId }, () =>
+            withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () =>
+              renderClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.render }), clipId, gen),
+            ),
           );
         } finally {
           release();
@@ -172,6 +224,17 @@ export async function startWorkers(svc: Services) {
       }
     });
   });
+
+  // this process only; pg-boss reports the cluster-wide backlog as pgboss.queue.jobs (OTLP)
+  gauge("reelsaw.render.slots", "{render}", () => {
+    const r = svc.resources.renders();
+    return [[r.running, { state: "running" }], [r.limit, { state: "limit" }]];
+  }, "Renders running in this worker and the limit CPU and memory allow right now");
+  gauge("reelsaw.worker.jobs.active", "{job}", () => {
+    const by = new Map<string, number>(Object.values(QUEUES).map((q) => [q, 0]));
+    for (const j of inflightJobs()) by.set(j.queue, (by.get(j.queue) ?? 0) + 1);
+    return [...by].map(([queue, n]) => [n, { queue }]);
+  }, "Jobs this worker process is running, by queue");
 
   svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
 }

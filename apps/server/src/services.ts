@@ -34,6 +34,7 @@ import type { EE } from "./ee/index.js";
 import { createTelemetry, type Telemetry } from "./telemetry.js";
 import { setOtelLogScrubber } from "./otel-log.js";
 import { secretValues } from "./report/redact.js";
+import { count, histogram, realtimeFactor } from "./metrics.js";
 
 /** Everything a handler or pipeline stage needs, built once in main() and passed explicitly. */
 export interface Services {
@@ -280,6 +281,14 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
         costUsd: u.costUsd ?? null,
       })
       .catch((err) => log.warn({ module: "llm", err }, "usage row failed"));
+    // OTel GenAI conventions; stage and call name the pipeline step, never the project
+    const attrs = { "gen_ai.request.model": u.model, "reelsaw.stage": u.ctx.stage ?? "none", "reelsaw.call": u.ctx.call ?? u.ctx.stage ?? "none" };
+    histogram("gen_ai.client.operation.duration", u.ms / 1000, "s", { ...attrs, outcome: u.ok ? "ok" : "error" }, "Language model call duration");
+    if (u.ok) {
+      histogram("gen_ai.client.token.usage", u.inputTokens, "{token}", { ...attrs, "gen_ai.token.type": "input" }, "Tokens per language model call");
+      histogram("gen_ai.client.token.usage", u.outputTokens, "{token}", { ...attrs, "gen_ai.token.type": "output" }, "Tokens per language model call");
+    }
+    if (u.costUsd) count("reelsaw.llm.cost", u.costUsd, "USD", { "gen_ai.request.model": u.model, "reelsaw.stage": attrs["reelsaw.stage"] }, "Provider-reported language model cost");
   };
   asr.onUsage = (u) => {
     void database.db
@@ -295,6 +304,14 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
         ok: u.ok,
       })
       .catch((err) => log.warn({ module: "asr", err }, "usage row failed"));
+    // transcription time grows with the audio, so the comparable number is seconds per audio second
+    const attrs = { provider: u.provider, model: u.model };
+    histogram("reelsaw.stt.duration", u.ms / 1000, "s", { ...attrs, outcome: u.ok ? "ok" : "error" }, "Speech-to-text call duration");
+    if (u.ok && u.audioSec > 0) {
+      histogram("reelsaw.stt.audio.duration", u.audioSec, "s", attrs, "Seconds of audio per speech-to-text call");
+      const rtf = realtimeFactor(u.ms / 1000, u.audioSec);
+      if (rtf !== null) histogram("reelsaw.stt.realtime_factor", rtf, "1", attrs, "Speech-to-text wall seconds per second of audio");
+    }
   };
 
   const events = await step("event bus", async () => {

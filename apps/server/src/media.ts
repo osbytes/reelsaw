@@ -105,7 +105,8 @@ export interface MediaTools {
   /** `-c:v …` for the encoder in use (or a named one, for a software retry after a hardware failure) */
   videoEncodeArgs(encoder?: VideoEncoder): string[];
   ffprobe(file: string): Promise<ProbeInfo>;
-  ytdlp(args: string[], opts?: RunOptions): Promise<RunResult>;
+  /** `proxyId`: the YTDLP_PROXY candidate that served it, "direct" with no pool, "explicit" when `args` carry `--proxy` */
+  ytdlp(args: string[], opts?: RunOptions): Promise<RunResult & { proxyId: string }>;
   /** operator-ranked yt-dlp egress candidates and their circuit state (`reelsaw ytdlp-proxies`) */
   ytdlpProxies(): { next: string | null; candidates: ProxySnapshot[] };
   extractAudio(input: string, output: string, signal?: AbortSignal): Promise<void>;
@@ -240,10 +241,10 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
       const js = args.includes("--js-runtimes") ? [] : ["--js-runtimes", "node"];
       const prefix = [...js, ...cookies];
       if (args.includes("--proxy") || ytdlpPool.size === 0) {
-        return run(config.YTDLP_PATH, [...prefix, ...args], opts);
+        return { ...(await run(config.YTDLP_PATH, [...prefix, ...args], opts)), proxyId: args.includes("--proxy") ? "explicit" : "direct" };
       }
-      const { value } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }), opts?.signal);
-      return value;
+      const { value, id } = await ytdlpPool.run((choice, signal) => run(config.YTDLP_PATH, [...choice.args, ...prefix, ...args], { ...opts, signal }), opts?.signal);
+      return { ...value, proxyId: id };
     },
 
     async ffprobe(file) {

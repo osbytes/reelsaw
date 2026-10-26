@@ -200,13 +200,17 @@ function addLogAttribute(out: Record<string, string | number | boolean>, key: st
   }
 }
 
-/** Attribute bag for a Sentry span-duration metric. Drops non-scalars so a bad attribute cannot fail the span. */
+/**
+ * Attribute bag for the span-duration metric. Span attributes are per-call (project, clip and job ids,
+ * attempt numbers, argument counts); on a metric each distinct value is a new series. Keep the span
+ * name, its status, and string or boolean attributes that are not ids.
+ */
 export function spanMetricAttributes(name: string, ok: boolean, attributes: Record<string, unknown>): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = { span: name, status: ok ? "ok" : "error" };
   for (const [k, v] of Object.entries(attributes)) {
+    if (/(?:^|[._])id$|[a-z]Id$/.test(k)) continue; // project_id, messaging.message.id, jobId
     if (typeof v === "string") out[k] = v.length > 200 ? v.slice(0, 200) : v;
     else if (typeof v === "boolean") out[k] = v;
-    else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
   }
   return out;
 }

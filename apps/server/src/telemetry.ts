@@ -1,7 +1,8 @@
 /**
  * Error reporting (Sentry) and product analytics (PostHog), both optional and off unless their keys are set:
  * nothing is initialised, nothing is sent, no code path changes. When OpenTelemetry is aimed at Sentry and
- * metrics are on, this also sends Sentry Application Metrics (Sentry has no OTLP metrics ingest).
+ * metrics are on, this also sends Sentry Application Metrics (Sentry has no OTLP metrics ingest): runtime
+ * gauges, and everything metrics.ts records.
  * One service, used from the few places where the facts are known: boot and process-level failures (main.ts), 5xx tRPC errors (http.ts), a job's final
  * failed attempt (queue/workers.ts), committed project events (uow.ts), sign-ups (auth.ts), billing
  * transitions (ee/billing) and abuse flags (abuse.ts). The browser gets the public keys from `system.status`
@@ -15,8 +16,8 @@ import * as Sentry from "@sentry/node";
 import { PostHog } from "posthog-node";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
-import { spanMetricAttributes } from "./otel-config.js";
-import { otel, setSpanMetric } from "./otel.js";
+import { readGauges, setMetricSink, type MetricSink } from "./metrics.js";
+import { otel } from "./otel.js";
 
 export interface TelemetryPublic {
   sentry: { dsn: string; environment: string; release: string } | null;
@@ -42,12 +43,23 @@ function metricIntervalMs(): number {
   return Number.isFinite(n) && n >= 1000 ? n : 30_000;
 }
 
+/** OTel UCUM units as Sentry names them; anything else (`{token}`, `USD`) passes through. */
+export function sentryUnit(unit: string): string {
+  return ({ s: "second", ms: "millisecond", By: "byte", "By/s": "byte/second", "1": "ratio" } as Record<string, string>)[unit] ?? unit.replace(/^\{(.+)\}$/, "$1");
+}
+
+const sentryMetricSink: MetricSink = {
+  count: (name, value, unit, attributes) => Sentry.metrics.count(name, value, { unit: sentryUnit(unit), attributes }),
+  distribution: (name, value, unit, attributes) => Sentry.metrics.distribution(name, value, { unit: sentryUnit(unit), attributes }),
+  gauge: (name, value, unit, attributes) => Sentry.metrics.gauge(name, value, { unit: sentryUnit(unit), attributes }),
+};
+
 export function createTelemetry(config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV">, log: Logger): Telemetry {
   const release = `reelsaw@${config.REELSAW_VERSION}`;
   const environment = config.SENTRY_ENVIRONMENT ?? (config.NODE_ENV === "production" ? "production" : "development");
   const sentry = !!config.SENTRY_DSN;
   // Sentry has no OTLP metrics endpoint. With the exporter pointed at Sentry and metrics left on,
-  // runtime gauges and span durations go through the DSN. Tracing stays on the OTLP exporter.
+  // runtime gauges and the application metrics go through the DSN. Tracing stays on the OTLP exporter.
   const sentryMetrics = sentry && otel.sentryMetrics;
   if (otel.sentryMetrics && !sentry) log.warn("Sentry OTLP does not accept metrics, and SENTRY_DSN is unset, so metrics are not exported");
   if (sentry) {
@@ -66,15 +78,16 @@ export function createTelemetry(config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVI
       ],
     });
   }
+  // metrics.ts records to the OTLP meter and, here, to Sentry; gauges are pushed on the collector's interval
+  let gaugeTimer: NodeJS.Timeout | null = null;
   if (sentryMetrics) {
-    setSpanMetric(({ name, durationMs, ok, attributes }) => {
-      Sentry.metrics.distribution("reelsaw.span.duration", durationMs, {
-        unit: "millisecond",
-        attributes: spanMetricAttributes(name, ok, attributes),
-      });
-    });
+    setMetricSink(sentryMetricSink);
+    gaugeTimer = setInterval(() => {
+      for (const g of readGauges()) for (const [value, attributes] of g.readings) sentryMetricSink.gauge(g.name, value, g.unit, attributes);
+    }, metricIntervalMs());
+    gaugeTimer.unref();
   } else {
-    setSpanMetric(null);
+    setMetricSink(null);
   }
   const posthog = config.POSTHOG_KEY ? new PostHog(config.POSTHOG_KEY, { host: config.POSTHOG_HOST, flushAt: 20, flushInterval: 10_000 }) : null;
   if (posthog) posthog.on("error", (err: unknown) => log.warn({ err }, "posthog send failed"));
@@ -97,7 +110,8 @@ export function createTelemetry(config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVI
       posthog?.identify({ distinctId, properties });
     },
     async shutdown() {
-      setSpanMetric(null);
+      setMetricSink(null);
+      if (gaugeTimer) clearInterval(gaugeTimer);
       await posthog?.shutdown().catch(() => {});
       if (sentry) await Sentry.close(2000).catch(() => {});
     },
