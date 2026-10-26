@@ -1124,6 +1124,9 @@ const restRouter = router({
           // transcript first, then the project row (vocabulary, startRun)
           const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
           if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+          // a refine already running restarts; anything else running (renders, picking) would have its status
+          // overwritten and never finalize, so wait for it
+          if (!["done", "failed", "refining"].includes(p.status)) throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
           if (input.vocabulary !== undefined) {
             const vocabulary = input.vocabulary || undefined;
             projectSettingsSchema.parse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
