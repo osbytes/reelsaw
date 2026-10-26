@@ -64,8 +64,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
  *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status
- *   storage [sweep [--dry-run]]            disk use: unique, scratch-only, duplicate-source, expired-but-present bytes;
- *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
+ *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes;
+ *                                           `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep);
+ *                                           `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
  *   logs    <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]
