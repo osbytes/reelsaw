@@ -802,7 +802,7 @@ function TimelineMenu(p: {
       </ContextMenu.Item>
       {p.layer && p.onLayerRemove ? (
         <ContextMenu.Item className={item} onSelect={() => p.onLayerRemove!(p.layer!.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ml-auto">⌫</span>
+          <Trash2 className="h-3.5 w-3.5" /> Remove layer “{p.layer.name}” <span className="kbd ml-auto">Delete</span>
         </ContextMenu.Item>
       ) : p.onLayerAdd ? (
         <>

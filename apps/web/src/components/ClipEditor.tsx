@@ -21,6 +21,7 @@ import { z } from "zod";
 import { ThemeToggle } from "../App";
 import { HeaderAlerts } from "./HeaderAlerts";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { useUnsavedFlag } from "../lib/unsaved";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
@@ -341,7 +342,7 @@ const SIZES: Array<{ v: number; l: string }> = [
  */
 function LayerCard({ layer: l, asset, selected, rangeStart, rangeEnd, loading, onSelect, onPatch, onRemove }: { layer: ClipLayer; asset: LayerAsset | undefined; selected: boolean; rangeStart: number; rangeEnd: number; loading: boolean; onSelect: () => void; onPatch: (patch: LayerPatch, key?: string) => void; onRemove: () => void }) {
   const min = layerMin(l);
-  const removed = loading ? "…" : "Removed from the library";
+  const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
@@ -645,6 +646,7 @@ export function ClipEditor(props: Props) {
   const delClip = useMutation(trpc.clips.delete.mutationOptions());
   const notifyDeleted = useDeletedToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const keepWindow = useRestoreWindow("clip", confirmDelete);
 
   const setRange = (r: [number, number], key?: string) => {
     const a = Math.max(0, Number(r[0].toFixed(2)));
@@ -1011,7 +1013,7 @@ export function ClipEditor(props: Props) {
         <OverlayMenuSeparator />
         <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Copy" kbd="⌘C" onSelect={() => copyLayer(l)} />
         <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
-        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="⌫" onSelect={() => removeLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="Delete" onSelect={() => removeLayer(l.id)} />
       </>
     );
   };
@@ -1020,7 +1022,7 @@ export function ClipEditor(props: Props) {
       layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = assetById(l.assetId);
-        const name = a?.name ?? (assetsLoading ? "…" : "removed");
+        const name = a?.name ?? (assetsLoading ? "…" : "deleted");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name, kind: "audio" as const };
         return { id: l.id, start: l.start, end: l.end, name, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
       }),
@@ -2122,7 +2124,7 @@ export function ClipEditor(props: Props) {
         <div className="truncate text-[11px] text-ink3">
           {projectTitle} · clip #{clip.index + 1}
         </div>
-        <div className="truncate text-[15px] font-bold leading-tight">{title || "Untitled"}</div>
+        <div className="truncate text-[15px] font-bold leading-tight">{title || "Untitled clip"}</div>
       </div>
       <button className={hb} disabled={!history.canUndo} onClick={history.undo} title={`Undo (${MOD}Z)`} aria-label="Undo">
         <Undo2 className="h-4 w-4" />
@@ -2161,7 +2163,7 @@ export function ClipEditor(props: Props) {
         className="btn-primary min-w-[5.5rem] justify-center sm:min-w-[148px]"
         disabled={busy || (!changed && clip.status !== "failed")}
         onClick={() => void save(needsRender || (!changed && clip.status === "failed"))}
-        title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don't need a re-render (${MOD}S)`}
+        title={needsRender ? `Saves and re-renders the clip (${MOD}S)` : `Saves; text-only edits don’t need a re-render (${MOD}S)`}
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
         <span className="sm:hidden">{!changed && clip.status === "failed" ? "Retry" : "Save"}</span>
@@ -2225,7 +2227,7 @@ export function ClipEditor(props: Props) {
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this clip?"
-        body={`“${title || "Untitled"}” is hidden from the project. Unsaved edits are discarded. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        body={`“${title || "Untitled clip"}” is hidden from the project. Unsaved edits are discarded. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() => {
@@ -2235,7 +2237,7 @@ export function ClipEditor(props: Props) {
               onSuccess: (r) => {
                 onExit();
                 notifyDeleted({
-                  items: [{ kind: "clip", id: clip.id, title: title || "Untitled" }],
+                  items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
                   restorable: r.restorable,
                   storedBytes: r.storedBytes,
                   afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),

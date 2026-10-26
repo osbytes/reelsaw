@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { formatTime, type ClipScores, type ClipDiagnostics, type ClipBumpers, type DetectedSegment } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { ClipBumpersDialog } from "./BumperField";
 import { ApplyTemplateToClipsDialog } from "./TemplatePicker";
 import { useMe } from "../lib/account";
@@ -95,6 +96,7 @@ export function ClipCard({
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const keepWindow = useRestoreWindow("clip", confirmDelete);
   const trpc = useTRPC();
   const del = useMutation(trpc.clips.delete.mutationOptions());
   const notifyDeleted = useDeletedToast();
@@ -145,7 +147,7 @@ export function ClipCard({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-start gap-2">
             <span className="pt-px font-mono text-xs text-ink3">#{clip.index + 1}</span>
-            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || "Untitled moment"}</h3>
+            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{clip.title || "Untitled clip"}</h3>
             {clip.watermark && done && (
               <span className="shrink-0 pt-px font-mono text-[11px] text-ink3" title="Rendered with the watermark; a re-render after an upgrade removes it">
                 ◇ wm
@@ -254,7 +256,7 @@ export function ClipCard({
                 Re-render
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setBumpersOpen(true)}>
-                Intro / outro…
+                Intro and outro…
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item" disabled={clip.status === "preparing"} onSelect={() => setTemplateOpen(true)}>
                 Layer template…
@@ -263,13 +265,13 @@ export function ClipCard({
                 Caption &amp; hashtags…
               </DropdownMenu.Item>
               {clip.status === "failed" && (
-                <DropdownMenu.Item className="menu-item text-err" onSelect={() => openReport({ projectId, clipId: clip.id })}>
+                <DropdownMenu.Item className="menu-item" onSelect={() => openReport({ projectId, clipId: clip.id })}>
                   Report an issue…
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-              <DropdownMenu.Item className="menu-item text-err" disabled={del.isPending} onSelect={() => setConfirmDelete(true)}>
-                Delete clip
+              <DropdownMenu.Item className="menu-item-danger" disabled={del.isPending} onSelect={() => setConfirmDelete(true)}>
+                Delete clip…
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -300,7 +302,7 @@ export function ClipCard({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this clip?"
-        body={`“${clip.title || "Untitled moment"}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        body={`“${clip.title || "Untitled clip"}” is hidden from the project. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() =>
@@ -309,7 +311,7 @@ export function ClipCard({
             {
               onSuccess: (r) =>
                 notifyDeleted({
-                  items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled moment" }],
+                  items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
                   restorable: r.restorable,
                   storedBytes: r.storedBytes,
                 }),

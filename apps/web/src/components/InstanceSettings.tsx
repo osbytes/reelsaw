@@ -130,7 +130,7 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
       onSuccess: (_st, input) => {
         setDraft({});
         const names = fields.filter((f) => f.key in input).map((f) => f.label);
-        toast(`Saved: ${names.join(", ")}. Every process applies it within a few seconds.`);
+        toast(`Saved: ${names.join(", ")}. Every process applies it within a few seconds`);
         void qc.invalidateQueries({ queryKey: trpc.admin.settings.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.admin.system.pathKey() });
         void qc.invalidateQueries({ queryKey: trpc.system.status.pathKey() });

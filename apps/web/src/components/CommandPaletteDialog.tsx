@@ -18,6 +18,8 @@ import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
 import { CHANGELOG_URL, DELETED_PATH, formatTime } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
+import { DeleteAssetDialog } from "./BumperField";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -95,6 +97,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
   const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
   const removeAsset = useMutation(trpc.library.remove.mutationOptions());
+  const assetWindow = useRestoreWindow("asset", open);
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length
   const [pickSec, setPickSec] = useState("");
@@ -103,7 +106,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const libQ = useQuery({ ...trpc.library.list.queryOptions(), enabled: open, staleTime: 30_000 });
   const library = libQ.data?.assets;
   const libFuse = useMemo(() => (library ? createFuzzy(library.map(searchable), SEARCH_KEYS) : null), [library]);
-  const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "removed") : "none");
+  const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "deleted") : "none");
 
   // The list before typing is the 20 most recent projects; typing asks the server (debounced), which matches in SQL
   // and returns a handful of rows. Fuse only ranks and highlights those rows.
@@ -157,6 +160,8 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
   const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "clip" | "asset"; id: string; title: string }>(null);
+  // projects and clips share one window (DELETED_RETENTION_DAYS)
+  const keepWindow = useRestoreWindow("project", confirm?.kind === "delete" || confirm?.kind === "clip");
   const savedQ = useRef("");
   const go = (fn: () => void) => () => {
     onOpenChange(false);
@@ -174,7 +179,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     go(() => {
       fn().then(
         () => (refresh(projectId), toast(done)),
-        (err: Error) => toast(`${failed}: ${err.message.slice(0, 120)}`),
+        (err: Error) => toast.error(`${failed}: ${err.message.slice(0, 120)}`),
       );
     });
   /** Runs a mutation per id, one after another, and reports how many worked. */
@@ -279,7 +284,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           );
         }
         acts.unshift(A("open", "Open in library", <ExternalLink className="h-4 w-4" />, go(() => nav(`/library#asset=${a.id}`))));
-        acts.push(A("remove", "Remove", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "asset", id: a.id, title: a.name })), a.usedBy ? `Used by ${plural(a.usedBy, "project")}; they keep rendering with it` : "You can restore it for 30 days", true));
+        acts.push(A("delete", "Delete…", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "asset", id: a.id, title: a.name })), a.usedBy ? `Used by ${plural(a.usedBy, "project")}; they keep rendering with it` : "You can restore it from Deleted", true));
         return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
       }
       if (target.kind === "project") {
@@ -301,8 +306,8 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           );
         acts.push(A("intro", "Set intro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "intro", id: p.id })), "Default, none or a library item"));
         acts.push(A("outro", "Set outro…", <Images className="h-4 w-4" />, () => (setQ(""), setTarget({ kind: "pick", slot: "outro", id: p.id })), "Default, none or a library item"));
-        if (p.status === "done" || p.status === "failed") acts.push(A("refine", "Re-run refine", <Sparkles className="h-4 w-4" />, go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })), "Names, disfluencies, scene changes"));
-        acts.push(A("delete", "Delete project", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })), "Removes the source, transcript and every clip", true));
+        if (p.status === "done" || p.status === "failed") acts.push(A("refine", "Re-run refine…", <Sparkles className="h-4 w-4" />, go(() => setConfirm({ kind: "refine", id: p.id, title: p.title })), "Names, disfluencies, scene changes"));
+        acts.push(A("delete", "Delete project…", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "delete", id: p.id, title: p.title })), "Hides the source, transcript and every clip until you restore it", true));
       } else {
         const c = known.current.clips.get(target.id);
         if (!c) return out;
@@ -311,7 +316,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         acts.push(A("edit", "Edit clip", <Pencil className="h-4 w-4" />, go(() => nav(`/p/${c.projectId}/clips/${c.id}`))));
         acts.push(A("rerender", "Re-render", <RefreshCw className="h-4 w-4" />, act("Re-rendering the clip", "Couldn’t re-render", () => rerender.mutateAsync({ id: c.id }), c.projectId)));
         if (c.videoUrl && c.status === "done") acts.push(A("download", "Download clip", <Download className="h-4 w-4" />, go(() => download(`${c.videoUrl}?download`)), "The rendered mp4"));
-        acts.push(A("delete", "Delete clip", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })), "Hidden until you restore it from Deleted", true));
+        acts.push(A("delete", "Delete clip…", <Trash2 className="h-4 w-4" />, go(() => setConfirm({ kind: "clip", id: c.id, title: c.title || "Untitled clip" })), "Hidden until you restore it from Deleted", true));
       }
       return ql ? createFuzzy(acts, ["label", "hint"], { threshold: 0.4, minMatchCharLength: 1 }).filter(ql) : acts;
     }
@@ -563,7 +568,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
                     ))}
                   </SkeletonRegion>
                 )}
-                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && <div className="px-3 py-8 text-center text-sm text-ink3">Nothing found</div>}
+                {items.length === 0 && !(target?.kind === "pick" ? libQ.isLoading : !target && loadingIndex) && <div className="px-3 py-8 text-center text-sm text-ink3">No matches</div>}
                 {items.map((it, i) => {
                   const head = it.group !== lastGroup ? it.group : null;
                   lastGroup = it.group;
@@ -676,26 +681,23 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
           );
         }}
       />
-      <ConfirmDialog
-        open={confirm?.kind === "asset"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title="Remove from your library?"
-        body={`“${confirm?.title ?? ""}” is hidden from pickers and defaults. Projects that use it keep rendering with it. You can restore it for 30 days.`}
-        confirm="Remove"
-        danger
+      <DeleteAssetDialog
+        asset={confirm?.kind === "asset" ? (library?.find((x) => x.id === confirm.id) ?? { id: confirm.id, name: confirm.title, usedBy: 0, usedByTemplates: 0 }) : null}
+        onClose={() => setConfirm(null)}
         onConfirm={() => {
           const c = confirm!;
           const a = library?.find((x) => x.id === c.id);
           removeAsset.mutateAsync({ id: c.id }).then(
             () => {
               refresh();
+              void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
               notifyDeleted({
                 items: [{ kind: "asset", id: c.id, title: c.title }],
-                restorable: "for 30 days",
+                restorable: assetWindow.restorable,
                 canPurge: !a?.usedBy && !a?.usedByClips && !a?.usedByTemplates,
               });
             },
-            (err: Error) => toast.error(`Couldn’t remove: ${err.message.slice(0, 120)}`),
+            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
       />
@@ -703,7 +705,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted.`}
+        body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
@@ -725,7 +727,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         open={confirm?.kind === "clip"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this clip?"
-        body={`“${confirm?.title ?? ""}” is hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete it forever.`}
+        body={`“${confirm?.title ?? ""}” is hidden from the project. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
         onConfirm={() => {

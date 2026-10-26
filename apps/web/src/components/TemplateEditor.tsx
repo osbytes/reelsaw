@@ -322,7 +322,7 @@ function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLaye
  * fields of its kind (the clip editor's LayerCard), and the Timing row in place of from / to seconds.
  */
 function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading, onSelect, onPatch, onRemove }: { layer: TemplateLayer; window: [number, number] | null; len: number; asset: LibraryAsset | undefined; selected: boolean; loading: boolean; onSelect: () => void; onPatch: (patch: TemplatePatch, key?: string) => void; onRemove: () => void }) {
-  const removed = loading ? "…" : "Removed from the library";
+  const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
@@ -605,7 +605,7 @@ export function TemplateEditor({ template, onExit }: Props) {
         )}
         <OverlayMenuSeparator />
         <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
-        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="⌫" onSelect={() => removeLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="Delete" onSelect={() => removeLayer(l.id)} />
       </>
     );
   };
@@ -654,7 +654,7 @@ export function TemplateEditor({ template, onExit }: Props) {
       resolved.layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = libraryAssets.get(l.assetId);
-        const nm = a?.name ?? (assetsLoading ? "…" : "removed");
+        const nm = a?.name ?? (assetsLoading ? "…" : "deleted");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name: nm, kind: "audio" as const };
         return { id: l.id, start: l.start, end: l.end, name: nm, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
       }),

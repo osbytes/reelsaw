@@ -133,18 +133,20 @@ export function Modal({ open, onOpenChange, title, children, width = 420 }: { op
   );
 }
 
-export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger, onConfirm }: { open: boolean; onOpenChange: (o: boolean) => void; title: string; body: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void }) {
+/** Cancel / confirm over a one-paragraph body; `children` go under it (e.g. a list of what still uses the item). */
+export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger, onConfirm, children, width }: { open: boolean; onOpenChange: (o: boolean) => void; title: string; body: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void; children?: ReactNode; width?: number }) {
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title={title}>
+    <Modal open={open} onOpenChange={onOpenChange} title={title} width={width}>
       <Dialog.Description asChild>
         <p className="text-sm leading-relaxed text-ink2">{body}</p>
       </Dialog.Description>
+      {children}
       <div className="mt-1 flex justify-end gap-2">
         <button className="btn-ghost" onClick={() => onOpenChange(false)}>
           Cancel
         </button>
         <button
-          className={danger ? "btn bg-err font-semibold text-white hover:brightness-110" : "btn-ink"}
+          className={danger ? "btn-danger-solid" : "btn-ink"}
           onClick={() => {
             onConfirm();
             onOpenChange(false);

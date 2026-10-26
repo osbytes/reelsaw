@@ -4,7 +4,7 @@
  * `mode="library"` is the Library page body (filters live in the URL: ?kind=&q=, #asset=<id>);
  * `mode="picker"` is the editor's dialog (filters are local, each tile has one "Add to clip" button that imports a
  * catalog / provider result first).
- * Server: `library.list / search / get / providers / add / remove / restore` (same services as the MCP tools).
+ * Server: `library.list / search / get / providers / add / remove (delete) / restore` (same services as the MCP tools).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,9 +19,10 @@ import { useMe } from "../lib/account";
 import { useHashParams } from "../lib/hash";
 import { createFuzzy } from "../lib/fuzzy";
 import { KIND_FILTERS, SEARCH_KEYS, searchable, type LibraryKind } from "../lib/library";
-import { AssetLightbox, RemoveDialog, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
+import { AssetLightbox, DeleteAssetDialog, UploadJobs, useBumperActions, useBumperLibrary, type LibraryAsset } from "./BumperField";
 import { AssetTile, AssetTileSkeleton, type TileModel } from "./AssetTile";
 import { Modal, Notice } from "./ui";
+import { useRestoreWindow } from "../lib/retention";
 
 type Out = inferRouterOutputs<AppRouter>;
 type RemoteItem = Out["library"]["search"]["items"][number];
@@ -143,7 +144,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const defaults = useMe().data?.projectDefaults;
   const selected = useHashParams().get("asset");
   const [viewingId, setViewingId] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<LibraryAsset | null>(null);
+  const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
+  const restoreWindow = useRestoreWindow("asset", mode === "library");
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [states, setStates] = useState<Record<string, SourceState>>({});
@@ -225,9 +227,9 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
 
   const fadeOut = (a: LibraryAsset) => {
     setLeaving((s) => new Set(s).add(a.id));
-    window.setTimeout(() => void actions.remove(a).then(() => setLeaving((s) => (s.delete(a.id), new Set(s)))), 160);
+    window.setTimeout(() => void actions.deleteAsset(a).then(() => setLeaving((s) => (s.delete(a.id), new Set(s)))), 160);
   };
-  const remove = (a: LibraryAsset) => (a.usedBy || a.usedByTemplates ? setRemoving(a) : fadeOut(a));
+  const deleteAsset = (a: LibraryAsset) => (a.usedBy || a.usedByTemplates ? setDeleting(a) : fadeOut(a));
   const select = (a: LibraryAsset) => nav({ pathname: loc.pathname, search: loc.search, hash: selected === a.id ? "" : `#asset=${a.id}` }, { replace: true });
   const viewing = list.data?.assets.find((a) => a.id === viewingId) ?? null;
 
@@ -353,7 +355,7 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
             <SourceTiles key={p.id} sid={p.id} provider={p.id} q={dq} kind={searchKind} license={p.id === "freesound" ? "cc0" : undefined} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
           ))}
         </ul>
-        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `Nothing matches “${q.trim()}”.` : kind ? "Nothing matches this kind." : "Nothing here yet. Upload a file."}</p>}
+        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `No items match “${q.trim()}”` : kind ? "No items of this kind" : "Nothing here yet. Upload a file."}</p>}
         {nextId && (
           <div className="flex justify-center py-1">
             <button type="button" className="btn-ghost" disabled={fetchingMore} onClick={() => fetchers.current[nextId]?.()}>
@@ -365,11 +367,11 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
         {mode === "library" && (list.data?.deleted.length ?? 0) > 0 && (
           <p className="text-xs text-ink3">
-            {list.data!.deleted.length} removed {list.data!.deleted.length === 1 ? "item" : "items"} restorable from{" "}
+            {list.data!.deleted.length} deleted {list.data!.deleted.length === 1 ? "item" : "items"} restorable from{" "}
             <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
               Deleted
-            </Link>{" "}
-            for 30 days.
+            </Link>
+            {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
           </p>
         )}
       </div>
@@ -383,15 +385,15 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
             busy={actions.busy}
             onClose={() => setViewingId(null)}
             onUse={(slot) => viewing && actions.setDefault(slot, viewing, slot === "intro" ? defaults?.introAssetId : defaults?.outroAssetId)}
-            onRemove={() => {
+            onDelete={() => {
               if (!viewing) return;
               setViewingId(null);
-              remove(viewing);
+              deleteAsset(viewing);
             }}
             onRename={(name) => viewing && void actions.rename(viewing, name)}
             onTags={(tags) => viewing && void actions.setTags(viewing, tags)}
           />
-          <RemoveDialog asset={removing} onClose={() => setRemoving(null)} onConfirm={fadeOut} />
+          <DeleteAssetDialog asset={deleting} onClose={() => setDeleting(null)} onConfirm={() => deleting && fadeOut(deleting)} />
         </>
       )}
     </div>

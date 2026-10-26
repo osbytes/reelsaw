@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTRPC } from "../lib/trpc";
 import { clipsText } from "../lib/clipMeta";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { BulkBumpersPopover } from "./BumperField";
 import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
@@ -30,6 +31,7 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
   const notifyDeleted = useDeletedToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const keepWindow = useRestoreWindow("clip", confirmDelete);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const done = selected.filter((c) => c.status === "done");
@@ -90,8 +92,8 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-            <DropdownMenu.Item className="menu-item text-err" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
-              Delete
+            <DropdownMenu.Item className="menu-item-danger" disabled={delMany.isPending} onSelect={() => later(() => setConfirmDelete(true))}>
+              Delete…
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -102,7 +104,7 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={selected.length === 1 ? "Delete this clip?" : `Delete ${selected.length} clips?`}
-        body={`${selected.length === 1 ? `“${selected[0]?.title ?? "This clip"}” is` : `${selected.length} clips are`} hidden from the project. You can undo this for a few days from Deleted. Storage still counts until you delete forever ${selected.length === 1 ? "it" : "them"}.`}
+        body={`${selected.length === 1 ? `“${selected[0]?.title || "Untitled clip"}” is` : `${selected.length} clips are`} hidden from the project. ${keepWindow.hint(selected.length > 1)} Storage still counts until you delete ${selected.length === 1 ? "it" : "them"} forever.`}
         confirm={selected.length === 1 ? "Delete clip" : "Delete clips"}
         danger
         onConfirm={() => {

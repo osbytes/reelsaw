@@ -29,6 +29,7 @@ import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
@@ -74,6 +75,7 @@ export function ProjectPage() {
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
+  const keepWindow = useRestoreWindow("project", confirm === "delete");
   const [actOpen, setActOpen] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -516,7 +518,7 @@ export function ProjectPage() {
               )}
               {p.transcript && !active && (
                 <DropdownMenu.Item className="menu-item block" onSelect={() => setConfirm("refine")}>
-                  Re-run refine
+                  Re-run refine…
                   <div className="text-xs text-ink3">Names, disfluencies, scene changes</div>
                 </DropdownMenu.Item>
               )}
@@ -527,7 +529,7 @@ export function ProjectPage() {
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item className="menu-item block" onSelect={() => setBumpersOpen(true)}>
-                Intro and outro
+                Intro and outro…
                 <div className="text-xs text-ink3">Default, none or a library item</div>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => setTemplateOpen(true)}>
@@ -540,10 +542,10 @@ export function ProjectPage() {
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}>
                 Report an issue…
-                <div className="text-xs text-ink3">Send the project's data and logs</div>
+                <div className="text-xs text-ink3">Send the project’s data and logs</div>
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-              <DropdownMenu.Item className="menu-item text-err data-[highlighted]:bg-err-soft" onSelect={() => setConfirm("delete")}>
+              <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm("delete")}>
                 Delete project…
               </DropdownMenu.Item>
             </DropdownMenu.Content>
@@ -952,7 +954,7 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted."
+        body={`The project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() =>

@@ -8,9 +8,10 @@ import { formatTag, licenseText } from "../lib/library";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { uploadFile } from "../lib/uploads";
 import { useMe } from "../lib/account";
-import { Modal, Skeleton, SkeletonRegion } from "./ui";
+import { ConfirmDialog, Modal, Skeleton, SkeletonRegion } from "./ui";
 import { MultiCombobox } from "./MultiCombobox";
 import { ScrollArea } from "./scroll-area";
 import { BumperCombobox, clockText, type FixedOption } from "./BumperCombobox";
@@ -29,7 +30,7 @@ const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10
 /** One `library.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
 export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["assets"][number];
 
-/** The user's library (live assets and recently removed ones). */
+/** The user's library (live assets and recently deleted ones). */
 export function useBumperLibrary() {
   const trpc = useTRPC();
   return useQuery(trpc.library.list.queryOptions());
@@ -50,7 +51,7 @@ export interface UploadJob {
   note?: string;
 }
 
-/** Upload (several at once, two at a time), default and remove/restore actions for the library. */
+/** Upload (several at once, two at a time), default and delete/restore actions for the library. */
 export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) => void } = {}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -65,6 +66,8 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const create = useMutation(trpc.library.add.mutationOptions());
   const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
   const removeM = useMutation(trpc.library.remove.mutationOptions());
+  // the window the library page (or the delete confirm) already fetched; no fetch of its own
+  const restoreWindow = useRestoreWindow("asset", false);
   const restoreM = useMutation(trpc.library.restore.mutationOptions());
   const updateM = useMutation(trpc.library.update.mutationOptions());
   const busy = setDefaultM.isPending || removeM.isPending || restoreM.isPending || updateM.isPending;
@@ -88,7 +91,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
         if (r.duplicate) {
           // nothing new was stored: say so, and point at the card that already has it
           patch(key, { state: "done", note: r.restored ? "restored" : "already added" });
-          toast(r.restored ? `Already in your library, restored: ${r.name}` : `Already in your library: ${r.name}`, { id: `bumper-dup-${r.id}` });
+          toast(r.restored ? `Already in your library, restored “${r.name}”` : `Already in your library: “${r.name}”`, { id: `bumper-dup-${r.id}` });
           dupRef.current?.(r.id);
         } else {
           patch(key, { state: "done" });
@@ -134,17 +137,17 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   };
   const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
     restoreM.mutateAsync({ id: a.id }).then(
-      () => (refresh(), toast(`Restored ${a.name}`), true),
+      () => (refresh(), toast(`Restored “${a.name}”`), true),
       (e) => (fail(e), false),
     );
   /** Soft delete with Undo / Delete forever / See deletions (the server keeps the file, so projects using it keep rendering). */
-  const remove = (a: LibraryAsset) =>
+  const deleteAsset = (a: LibraryAsset) =>
     removeM.mutateAsync({ id: a.id }).then(
       () => (
         refresh(),
         notifyDeleted({
           items: [{ kind: "asset", id: a.id, title: a.name }],
-          restorable: "for 30 days",
+          restorable: restoreWindow.restorable,
           storedBytes: a.sizeBytes,
           canPurge: !a.usedBy && !a.usedByClips && !a.usedByTemplates,
         }),
@@ -163,7 +166,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     const next = name.trim();
     if (!next || next === a.name) return Promise.resolve(false);
     return updateM.mutateAsync({ id: a.id, name: next }).then(
-      () => (refresh(), toast(`Renamed to ${next}`), true),
+      () => (refresh(), toast(`Renamed to “${next}”`), true),
       (e) => (fail(e), false),
     );
   };
@@ -173,7 +176,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       () => (refresh(), true),
       (e) => (fail(e), false),
     );
-  return { jobs, uploading, busy, uploadMany, dismiss, setDefault, remove, restore, setSeconds, rename, setTags };
+  return { jobs, uploading, busy, uploadMany, dismiss, setDefault, deleteAsset, restore, setSeconds, rename, setTags };
 }
 
 /** The library's audio file as an element the cards and the viewer share; at most one plays at a time. */
@@ -390,8 +393,8 @@ function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name
   );
 }
 
-/** Intro / outro / remove, in the same order on the card and in the viewer. */
-function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; withLabels?: boolean }) {
+/** Intro / outro / delete, in the same order on the card and in the viewer. */
+function AssetActions({ asset: a, introId, outroId, busy, onUse, onDelete, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; withLabels?: boolean }) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
     <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy || a.kind === "audio"} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
       {on ? "● " : ""}
@@ -402,9 +405,9 @@ function AssetActions({ asset: a, introId, outroId, busy, onUse, onRemove, withL
     <div className="grid grid-cols-3 gap-1">
       {slotBtn("intro", introId === a.id)}
       {slotBtn("outro", outroId === a.id)}
-      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Remove ${a.name}`} title="Remove" onClick={onRemove}>
+      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Delete ${a.name}`} title="Delete" onClick={onDelete}>
         <Trash2 className="h-3.5 w-3.5" />
-        {withLabels && "Remove"}
+        {withLabels && "Delete"}
       </button>
     </div>
   );
@@ -477,7 +480,7 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onRemove, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onRemove: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onDelete, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; onRename: (name: string) => void }) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -523,7 +526,7 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
                   <UsageList id={a.id} className="mt-2 max-h-[min(200px,30dvh)]" />
                 </div>
               )}
-              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onRemove={onRemove} withLabels />
+              <AssetActions asset={a} introId={introId} outroId={outroId} busy={busy} onUse={onUse} onDelete={onDelete} withLabels />
               <p className="text-center text-xs text-ink3">
                 New project with it as the{" "}
                 <Link to={`/new?intro=${a.id}`} className="text-ink2 hover:text-ink">
@@ -582,7 +585,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
             {p.clips.map((c) => (
               <div key={c.id} className="flex items-baseline gap-2 pl-3">
                 <Link to={`/p/${p.id}#clip=${c.id}`} className="min-w-0 flex-1 truncate text-ink2">
-                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled moment"}
+                  <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled clip"}
                 </Link>
                 <span className="shrink-0 text-ink3">
                   {c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s)).join(" + ")} · {c.via === "clip" ? "on the clip" : "from project"}
@@ -596,37 +599,31 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
   );
 }
 
-/** Confirm before removing an asset; lists what still uses it. */
-export function RemoveDialog({ asset, onClose, onConfirm }: { asset: LibraryAsset | null; onClose: () => void; onConfirm: (a: LibraryAsset) => void }) {
+/** Confirm before deleting a library item (library page and command palette); lists what still uses it. */
+export function DeleteAssetDialog({ asset, onClose, onConfirm }: { asset: Pick<LibraryAsset, "id" | "name" | "usedBy" | "usedByTemplates"> | null; onClose: () => void; onConfirm: () => void }) {
+  const { hint } = useRestoreWindow("asset", !!asset);
+  const used = asset ? asset.usedBy > 0 || asset.usedByTemplates > 0 : false;
   return (
-    <Modal open={!!asset} onOpenChange={(o) => !o && onClose()} title="Remove from your library?" width={460}>
-      {asset && (
-        <>
-          <p className="text-sm leading-relaxed text-ink2">
-            {asset.usedBy
-              ? `Removing it: ${asset.usedBy === 1 ? "this project keeps" : `these ${asset.usedBy} projects keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} You can restore it for 30 days.`
-              : asset.usedByTemplates
-                ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. You can restore it for 30 days.`
-                : `“${asset.name}” will be removed. You can restore it for 30 days.`}
-          </p>
-          {(asset.usedBy > 0 || asset.usedByTemplates > 0) && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
-          <div className="mt-1 flex justify-end gap-2">
-            <button className="btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="btn bg-err font-semibold text-white hover:brightness-110"
-              onClick={() => {
-                onConfirm(asset);
-                onClose();
-              }}
-            >
-              Remove
-            </button>
-          </div>
-        </>
-      )}
-    </Modal>
+    <ConfirmDialog
+      open={!!asset}
+      onOpenChange={(o) => !o && onClose()}
+      title="Delete from your library?"
+      width={460}
+      body={
+        !asset
+          ? ""
+          : asset.usedBy
+            ? `${asset.usedBy === 1 ? "The project using it keeps" : `The ${asset.usedBy} projects using it keep`} rendering with it (as intro, outro, overlay or music) until ${asset.usedBy === 1 ? "it picks" : "they pick"} another.${asset.usedByTemplates ? ` ${asset.usedByTemplates === 1 ? "A template" : `${asset.usedByTemplates} templates`} also use${asset.usedByTemplates === 1 ? "s" : ""} it: that layer is skipped when the template is applied.` : ""} ${hint()}`
+            : asset.usedByTemplates
+              ? `${asset.usedByTemplates === 1 ? "A template uses" : `${asset.usedByTemplates} templates use`} “${asset.name}”: that layer is skipped when the template is applied until you restore the file or pick another. ${hint()}`
+              : `“${asset.name}” is hidden from pickers and defaults. ${hint()}`
+      }
+      confirm="Delete"
+      danger
+      onConfirm={onConfirm}
+    >
+      {asset && used && <UsageList id={asset.id} className="max-h-[min(220px,35dvh)]" />}
+    </ConfirmDialog>
   );
 }
 
@@ -661,7 +658,7 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
   // music is for the audio lane, never a slot
   const assets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
+  const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
   const fixed = (projectId: string | null | undefined): FixedOption[] => [
     ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
     { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
@@ -840,12 +837,12 @@ export function ProjectBumpersModal({
   const iSec = pick.introSec === undefined ? introSec : (pick.introSec ?? undefined);
   const oSec = pick.outroSec === undefined ? outroSec : (pick.outroSec ?? undefined);
   const dirty = intro !== initial.intro || outro !== initial.outro || iSec !== introSec || oSec !== outroSec;
-  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "removed")) : "none");
+  const name = (id: string | undefined | null) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
   const fixed = (slotDefault: string | undefined): FixedOption[] => [
     { value: "default", label: `Default (${name(slotDefault)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
   ];
-  // a project may still use an asset that was removed since; keep it selectable as itself
+  // a project may still use an asset that was deleted since; keep it selectable as itself
   const row = (slot: "intro" | "outro", label: string, choice: Choice, sec: number | undefined, slotDefault: string | undefined) => (
     <SlotRow
       slot={slot}

@@ -63,7 +63,7 @@ function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean;
 /**
  * One picker for every intro / outro choice (Radix Popover + cmdk, like MultiCombobox): fixed options
  * on top, then the library with thumbnail, kind, length, size and badges. Typing fuzzy-filters.
- * `known` also holds removed assets so a project that still uses one shows its name.
+ * `known` also holds deleted assets so a project that still uses one shows its name.
  */
 export function BumperCombobox({
   value,
@@ -121,7 +121,7 @@ export function BumperCombobox({
             <span className="h-7 w-4 shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate">
-            {pickedFixed ? pickedFixed.label : pickedAsset ? `${pickedAsset.name}${removed ? " (removed)" : ""}` : loading ? <Skeleton className="h-3.5 w-28" /> : <span className="text-ink3">Choose…</span>}
+            {pickedFixed ? pickedFixed.label : pickedAsset ? `${pickedAsset.name}${removed ? " (deleted)" : ""}` : loading ? <Skeleton className="h-3.5 w-28" /> : <span className="text-ink3">Choose…</span>}
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
         </button>
