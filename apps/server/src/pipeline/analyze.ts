@@ -3,7 +3,7 @@ import { lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
-import { StageContext, modelsUsed } from "./common.js";
+import { StageContext, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
 import { chunkTranscript, excludeRanges, mapChunk, mapLimit, needsSecondLook, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
 import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
@@ -256,6 +256,7 @@ export async function analyze(ctx: StageContext) {
       // unprepared clips go through the one prepare path (which keeps a live prepare job); the rest re-queue their
       // current generation. Clips are locked (id order) before the project row is touched.
       await lockProjectClips(u, projectId);
+      if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq); // a newer re-analyze owns these clips now
       for (const c of await listClips(u.db, projectId)) {
         if (c.status === "done") continue;
         if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });

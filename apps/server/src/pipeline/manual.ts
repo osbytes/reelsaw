@@ -8,7 +8,7 @@ import { requestRender } from "./lifecycle.js";
  *
  * Runs as its own queue job (`clip.prepare`) so it is resumable; afterwards the clip is rendered.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import { schema } from "../db/index.js";
@@ -69,6 +69,21 @@ export function needsPrepare(c: { origin: string; status: string; reasoning: str
   return c.status === "preparing" || (c.origin !== "ai" && !c.reasoning && !c.scores);
 }
 export const prepareModeOf = (c: { origin: string }) => (c.origin === "manual-ai" ? ("ai" as const) : ("exact" as const));
+
+type Packaging = Pick<schema.Clip, "title" | "hook" | "caption" | "hashtags" | "emphasis" | "startSec" | "endSec">;
+
+/**
+ * What prepare may write: clips.update does not wait for prep, so a field the user changed while the model worked
+ * (`current` differs from `started`, the row the job read) keeps the user's value. Bounds move as a pair. The scores
+ * and reasoning are prep's own and always land (they also mark the clip prepared).
+ */
+export function preparedPatch(started: Packaging, current: Packaging, prepared: Packaging): Partial<Packaging> {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const out: Partial<Packaging> = {};
+  for (const k of ["title", "hook", "caption", "hashtags", "emphasis"] as const) if (same(started[k], current[k])) Object.assign(out, { [k]: prepared[k] });
+  if (started.startSec === current.startSec && started.endSec === current.endSec) Object.assign(out, { startSec: prepared.startSec, endSec: prepared.endSec });
+  return out;
+}
 
 export async function prepareClip(ctx: StageContext, clipId: string, mode: "exact" | "ai") {
   const { svc, db, projectId } = ctx;
@@ -131,25 +146,28 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const sc: SelectContext = { title: project.title, durationSec, minSec: 1, maxSec: 9999, focus: settings.focus };
   const scored = (await scoreCandidates(o, [{ id: 0, durationSec: pick.endSec - pick.startSec, text }], sc, 1, 1)).get(0);
 
-  // the project's layer template, placed against the final bounds; a clip that already has layers keeps them
-  const bounds = { startSec: Number(pick.startSec.toFixed(2)), endSec: Number(pick.endSec.toFixed(2)) };
-  const layers = clipLayers(clip).length ? null : layersForNewClip(await templateForNewClips(db, project.userId, settings.layerTemplateId, log), bounds);
+  const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
+  const prepared: Packaging = {
+    title: pick.title.slice(0, 120),
+    hook: pick.hook.slice(0, 80),
+    caption: (pick.caption ?? "").slice(0, 300),
+    hashtags: pick.hashtags.map((h) => h.replace(/^#/, "")).slice(0, 8),
+    emphasis: scored?.emphasis.length ? scored.emphasis : null,
+    startSec: Number(pick.startSec.toFixed(2)),
+    endSec: Number(pick.endSec.toFixed(2)),
+  };
   // packaging written, announced and the render queued in one commit
   await svc.tx(async (u) => {
-    await requestRender(svc, u, projectId, clipId, {
-      title: pick.title.slice(0, 120),
-      hook: pick.hook.slice(0, 80),
-      caption: (pick.caption ?? "").slice(0, 300),
-      hashtags: pick.hashtags.map((h) => h.replace(/^#/, "")).slice(0, 8),
-      ...bounds,
-      score: scored?.total ?? 50,
-      scores: scored?.scores ?? null,
-      emphasis: scored?.emphasis.length ? scored.emphasis : null,
-      reasoning: note.slice(0, 1000),
-      ...(layers ? { layers } : {}),
-    });
-    if (layers) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: clip.bumpers, layers }]);
-    await u.emit(projectId, "clip.created", { clipId, index: clip.index, title: pick.title });
+    // the row as it is now, locked: the user's edits since this job read it win (preparedPatch)
+    const [cur] = await u.db.select().from(schema.clips).where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt))).for("update");
+    if (!cur || !needsPrepare(cur)) return log.info("clip deleted or prepared meanwhile; nothing to write");
+    const patch = preparedPatch(clip, cur, prepared);
+    const bounds = { startSec: patch.startSec ?? cur.startSec, endSec: patch.endSec ?? cur.endSec };
+    // the project's layer template, placed against the final bounds; a clip that already has layers keeps them
+    const layers = clipLayers(cur).length ? null : layersForNewClip(template, bounds);
+    await requestRender(svc, u, projectId, clipId, { ...patch, score: scored?.total ?? 50, scores: scored?.scores ?? null, reasoning: note.slice(0, 1000), ...(layers ? { layers } : {}) });
+    if (layers) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: cur.bumpers, layers }]);
+    await u.emit(projectId, "clip.created", { clipId, index: cur.index, title: patch.title ?? cur.title });
   });
   void db;
 }

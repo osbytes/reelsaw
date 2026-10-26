@@ -21,6 +21,11 @@ export interface ProjectJob {
   userId?: string;
   /** "user" when a person asked for this job (create, retry, re-render, new clip); absent for pipeline hand-offs */
   by?: "user";
+  /**
+   * Stage jobs only: projects.stage_seq when queued, filled in by `enqueue`. The job commits only while it is still
+   * current (a retry or re-analyze bumped it: stale, exits quietly). Absent on jobs queued before it existed: current.
+   */
+  seq?: number;
 }
 export interface RenderJob extends ProjectJob {
   clipId: string;
@@ -157,7 +162,13 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     async enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
       const a = opts?.admission ?? (await admission(data, opts));
-      const payload = a.userId ? { ...data, userId: a.userId } : data;
+      let payload: JobData = a.userId ? { ...data, userId: a.userId } : data;
+      // every stage job carries the version it belongs to, read in the caller's transaction (after any bump it made)
+      if (!("clipId" in data) && data.seq === undefined) {
+        const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
+        const r = (await exec.executeSql(`select stage_seq as seq from projects where id = $1`, [data.projectId])).rows[0] as { seq?: number } | undefined;
+        if (r?.seq !== undefined) payload = { ...payload, seq: r.seq };
+      }
       // a plan's boost (ee) lifts the account above others with the same backlog, never above an idle account's first job by more than the boost
       return boss.send(queue, payload, { singletonKey, priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0), ...(opts?.db ? { db: opts.db } : {}) });
     },

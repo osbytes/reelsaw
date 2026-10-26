@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { schema, type Db, type Project } from "../db/index.js";
@@ -13,6 +13,32 @@ export class ProjectGoneError extends Error {
   }
 }
 
+/**
+ * A stage job whose version is no longer the project's (a retry, re-analyze or delete superseded it while it ran):
+ * the worker logs it at info and ends the job without writing, enqueueing or failing anything.
+ */
+export class StaleJobError extends Error {
+  constructor(id: string, seq: number | undefined) {
+    super(`project ${id}: stage work ${seq ?? "?"} was superseded`);
+  }
+}
+
+/** The project row a stage job of version `seq` may still write: not deleted, stage_seq unchanged (undefined: any). */
+export function currentStage(projectId: string, seq: number | undefined) {
+  const t = schema.projects;
+  return and(eq(t.id, projectId), isNull(t.deletedAt), seq === undefined ? undefined : eq(t.stageSeq, seq));
+}
+
+/**
+ * Lock the project row while this job's version is current; false for a stale job. Taken before the stage's results
+ * are written, so a superseding request (which bumps stage_seq on this row) either waits for the commit and then
+ * sees its results, or commits first and this job writes nothing. `for no key update`, as in finalizeProjectIfDone.
+ */
+export async function lockCurrentStage(db: Db, projectId: string, seq: number | undefined): Promise<boolean> {
+  const [r] = await db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq)).for("no key update");
+  return !!r;
+}
+
 /** Shared helpers for pipeline stages; thin wrappers over the injected services. */
 export class StageContext {
   constructor(
@@ -22,12 +48,17 @@ export class StageContext {
     readonly signal: AbortSignal,
     /** extra ids carried on every line of ctx.log: jobId, runSeq, clipId, queue */
     readonly ids: Record<string, string | number> = {},
+    /** projects.stage_seq this job belongs to; its state writes commit only while it is current (undefined: unversioned) */
+    readonly seq?: number,
   ) {}
 
-  /** A context whose logger also carries the job id and the project's current run sequence. */
-  static async open(svc: Services, projectId: string, stage: PipelineStage, signal: AbortSignal, ids: Record<string, string | number> = {}): Promise<StageContext> {
-    const [r] = await svc.database.db.select({ seq: schema.projects.runSeq }).from(schema.projects).where(eq(schema.projects.id, projectId));
-    return new StageContext(svc, projectId, stage, signal, { ...(r ? { runSeq: r.seq } : {}), ...ids });
+  /**
+   * A context whose logger also carries the job id and the project's current run sequence. `seq` is the stage job's
+   * version; a job queued before versions existed has none and takes the current one, so a deploy strands nothing.
+   */
+  static async open(svc: Services, projectId: string, stage: PipelineStage, signal: AbortSignal, ids: Record<string, string | number> = {}, seq?: number): Promise<StageContext> {
+    const [r] = await svc.database.db.select({ run: schema.projects.runSeq, stage: schema.projects.stageSeq }).from(schema.projects).where(eq(schema.projects.id, projectId));
+    return new StageContext(svc, projectId, stage, signal, { ...(r ? { runSeq: r.run } : {}), ...ids }, seq ?? r?.stage);
   }
 
   get db() {
@@ -61,10 +92,12 @@ export class StageContext {
 
   async start(status: ProjectStatus) {
     await this.svc.tx(async (u) => {
-      await u.db
+      const [row] = await u.db
         .update(schema.projects)
         .set({ status, stage: this.stage, stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
-        .where(eq(schema.projects.id, this.projectId));
+        .where(currentStage(this.projectId, this.seq))
+        .returning({ id: schema.projects.id });
+      if (!row) throw new StaleJobError(this.projectId, this.seq);
       await u.emit(this.projectId, "stage.started", { stage: this.stage, status });
     });
   }
@@ -75,7 +108,9 @@ export class StageContext {
     const now = Date.now();
     if (pct < 1 && now - this.lastProgressAt < 1500) return; // throttle writes
     this.lastProgressAt = now;
-    await this.db.update(schema.projects).set({ stageProgress: pct, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
+    // a superseded job's ticks must not move the newer run's bar
+    const [row] = await this.db.update(schema.projects).set({ stageProgress: pct, updatedAt: new Date() }).where(currentStage(this.projectId, this.seq)).returning({ id: schema.projects.id });
+    if (!row) return;
     // the column above is the state a reload reads; the tick itself is live-only (NOTIFY, no event row)
     await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
   }
@@ -87,6 +122,8 @@ export class StageContext {
    */
   async complete(extra: Record<string, unknown> = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
     await this.svc.tx(async (u) => {
+      // first, so the results below land only while this job's version is current (and a re-analyze waits for them)
+      if (!(await lockCurrentStage(u.db, this.projectId, this.seq))) throw new StaleJobError(this.projectId, this.seq);
       const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
       await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
@@ -137,17 +174,22 @@ export async function runFacts(db: Db, projectId: string): Promise<{ runSeq: num
   return { runSeq: r.seq, runReason: r.reason, ...(r.runSec !== null ? { runSec: r.runSec } : {}), ...(r.stage === "render" && r.stageSec !== null ? { renderSec: r.stageSec } : {}) };
 }
 
-export async function failProject(svc: Services, projectId: string, stage: PipelineStage, err: unknown) {
+/** Mark the run failed, unless the job that gave up was superseded (`seq` no longer current): then it was not this run's. */
+export async function failProject(svc: Services, projectId: string, stage: PipelineStage, err: unknown, seq?: number) {
   const message = err instanceof Error ? err.message : String(err);
   await svc.tx(async (u) => {
+    if (!(await lockCurrentStage(u.db, projectId, seq))) return svc.log.child({ module: stage, projectId }).info({ seq }, "stale job gave up; the newer run is left alone");
     const facts = await runFacts(u.db, projectId);
     await u.db.update(schema.projects).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
     await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), ...facts });
   });
 }
 
-export async function stageFailedAttempt(svc: Services, projectId: string, stage: PipelineStage, err: unknown, attempt: number, max: number) {
+export async function stageFailedAttempt(svc: Services, projectId: string, stage: PipelineStage, err: unknown, attempt: number, max: number, seq?: number) {
   const message = err instanceof Error ? err.message : String(err);
+  // a superseded job's failures are not the newer run's
+  const [cur] = await svc.database.db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq));
+  if (!cur) return;
   const durationSec = await stageElapsed(svc.database.db, projectId, stage);
   await svc.events.emit(projectId, "stage.failed", { stage, error: message.slice(0, 1000), attempt, max, ...(durationSec !== undefined ? { durationSec } : {}) });
 }

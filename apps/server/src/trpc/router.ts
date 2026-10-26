@@ -18,7 +18,7 @@ import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } f
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
+import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
@@ -1133,12 +1133,15 @@ const restRouter = router({
             const settings = vocabulary ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb` : sql`${schema.projects.settings} - 'vocabulary'`;
             await u.db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
           }
-          for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+          // a step of the refine being restarted that is still running is superseded too, so it runs again with the rest
+          const rerun = [...new Set([...steps, ...REFINE_STEPS.filter((s) => cur.refine[s] !== "done" && cur.refine[s] !== "failed")])];
+          for (const s of rerun) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+          await supersedeStages(u, p.id);
           await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
           const refine = { ...cur.refine };
           for (const s of steps) delete refine[s];
           await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
-          await enqueueRefine(svc, p.id, steps, u);
+          await enqueueRefine(svc, p.id, rerun, u);
         });
         return { ok: true, steps };
       }),

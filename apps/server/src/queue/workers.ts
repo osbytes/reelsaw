@@ -7,7 +7,7 @@ import { transcribe } from "../pipeline/transcribe.js";
 import { analyze } from "../pipeline/analyze.js";
 import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from "../pipeline/refine.js";
 import { renderClip, markClipFailed } from "../pipeline/render.js";
-import { StageContext, failProject, stageFailedAttempt, ProjectGoneError } from "../pipeline/common.js";
+import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError } from "../pipeline/common.js";
 import { ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
@@ -43,23 +43,30 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
     const max = svc.queue.retryLimitOf(queue);
     const attempt = job.retryCount + 1;
     const log = svc.log.child({ module: "worker", queue, jobId: job.id, projectId });
+    let seq = job.data.seq; // the version this job belongs to; StageContext.open resolves a missing one to the current
     return runTracked(job, queue, {}, async () => {
       try {
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
-        log.info({ attempt, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
+        log.info({ attempt, maxAttempts: max + 1, seq, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
         const t0 = Date.now();
         await withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
-          withLlmContext({ projectId, stage, jobId: job.id }, async () => fn(await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }))),
+          withLlmContext({ projectId, stage, jobId: job.id }, async () => {
+            const ctx = await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }, seq);
+            seq = ctx.seq;
+            return fn(ctx);
+          }),
         );
         log.info({ ms: Date.now() - t0 }, "job done");
       } catch (err) {
         if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
+        // cancelling a pg-boss job does not stop a running handler: the superseded one ends here, writing nothing
+        if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
         log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
         const last = job.retryCount >= max || err instanceof ResourceExhaustedError;
         if (last) {
           svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
-          await failProject(svc, projectId, stage, err);
-        } else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1);
+          await failProject(svc, projectId, stage, err, seq);
+        } else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1, seq);
         // disk will not free itself on the next attempt; returning marks the job done so it does not loop
         if (err instanceof ResourceExhaustedError) return;
         throw err; // let pg-boss apply the retry policy
@@ -82,19 +89,27 @@ export async function startWorkers(svc: Services) {
     const { projectId } = job.data;
     const max = svc.queue.retryLimitOf(queue);
     const log = svc.log.child({ module: "worker", queue, jobId: job.id, projectId });
+    let seq = job.data.seq;
     return runTracked(job, queue, {}, async () => {
       try {
-        log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1 }, "job start");
-        await withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () => withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => fn(await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }))));
+        log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, seq }, "job start");
+        await withSpan(`pipeline.refine.${step}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": job.retryCount + 1 }, () =>
+          withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => {
+            const ctx = await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }, seq);
+            seq = ctx.seq;
+            return fn(ctx);
+          }),
+        );
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
+        if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
         if (job.retryCount >= max) {
           svc.telemetry.captureException(err, { queue, step, projectId, jobId: job.id });
-          await refineStepFailed(svc, projectId, step, err);
+          await refineStepFailed(svc, projectId, step, err, seq);
           return; // handled: don't make pg-boss retry further
         }
-        await stageFailedAttempt(svc, projectId, "refine", err, job.retryCount + 1, max + 1);
+        await stageFailedAttempt(svc, projectId, "refine", err, job.retryCount + 1, max + 1, seq);
         throw err;
       }
     });

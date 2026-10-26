@@ -20,7 +20,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, startRun } from "../pipeline/lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine } from "../pipeline/refine.js";
 import { runFacts } from "../pipeline/common.js";
@@ -74,11 +74,13 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
       await requestRender(svc, u, p.id, c.id, {}, "retry");
     }
   } else if (queue === QUEUES.refineEntities) {
+    await supersedeStages(u, p.id);
     await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
     await enqueueRefine(svc, p.id, undefined, u);
   } else {
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
+    await supersedeStages(u, p.id); // a cancelled job that is still running must not commit, or fail this retry
     await startRun(u, p.id, { reason: "retry", status: "queued", continueActive: true });
     await u.enqueue(queue, { projectId: p.id });
   }
@@ -108,9 +110,10 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
     .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.status, [...IN_FLIGHT]), isNull(schema.clips.deletedAt)));
   const working = (WORKING as readonly string[]).includes(before.status);
   const facts = working ? await runFacts(u.db, projectId) : null;
+  // stage_seq too: a stage job still running stays stale after a restore, which resumes only through Retry
   await u.db
     .update(schema.projects)
-    .set({ deletedAt: new Date(), updatedAt: new Date(), ...(working ? { status: "failed" as const, error: stopped } : {}) })
+    .set({ deletedAt: new Date(), stageSeq: sql`${schema.projects.stageSeq} + 1`, updatedAt: new Date(), ...(working ? { status: "failed" as const, error: stopped } : {}) })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
   if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, ...facts });
@@ -319,6 +322,9 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
     const settings = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
     await lockProjectClips(u, p.id);
+    // before listing: an analyze committing its picks right now finishes first and they are replaced below, and one
+    // still working (or this re-analyze clicked twice) is superseded and inserts nothing
+    await supersedeStages(u, p.id);
     const clips = await listClips(u.db, p.id);
     const kept = clips.map((c) => ({ c, why: keepReason(c) })).filter((x) => x.why);
     const replaced = clips.filter((c) => !keepReason(c));
