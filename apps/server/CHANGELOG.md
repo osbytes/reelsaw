@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.26.0
+
+### Minor Changes
+
+- [#176](https://github.com/osbytes/reelsaw/pull/176) [`7d697db`](https://github.com/osbytes/reelsaw/commit/7d697dbd106e5156ac8f7e2becc9b255fa021fa6) Thanks [@dillonstreator](https://github.com/dillonstreator)! - With `OTEL_ENABLED=true` (or Sentry Application Metrics), the server now exports metrics for the pipeline, yt-dlp proxies and model calls, and not only span durations. Each stage, link download and transcription is measured in seconds of work per second of video, so a 30-second clip and a 2-hour talk can be compared. Proxy pools report attempts by proxy and outcome, circuit changes, health, in-flight downloads and download speed. Language model calls report latency, tokens and cost by model and pipeline step. Render slots and active jobs are reported as gauges. Span-duration metrics no longer carry project, clip or attempt attributes, which had made one series per project. The README lists every metric.
+
 ## 0.25.0
 
 ### Minor Changes
