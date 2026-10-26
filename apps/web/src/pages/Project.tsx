@@ -49,6 +49,9 @@ function useWidth() {
   return w;
 }
 
+/** A click that starts a mutation and isn't awaited by anything: a refusal (quota, already running, 5xx) becomes a toast, not a silent unhandled rejection. */
+const orToast = (p: Promise<unknown>, what: string) => p.catch((e: unknown) => void toast.error(`${what}: ${e instanceof Error ? e.message : "something went wrong"}`));
+
 export function ProjectPage() {
   const { id = "" } = useParams();
   const trpc = useTRPC();
@@ -506,12 +509,12 @@ export function ProjectPage() {
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">
               {failedClips.length > 0 && (
-                <DropdownMenu.Item className="menu-item block" onSelect={() => rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`)))}>
+                <DropdownMenu.Item className="menu-item block" onSelect={() => orToast(rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`))), "Couldn’t retry the failed clips")}>
                   Retry failed clips <span className="text-ink3">({failedClips.length})</span>
                 </DropdownMenu.Item>
               )}
               {(p.status === "failed" || p.status === "done") && (
-                <DropdownMenu.Item className="menu-item block" disabled={retry.isPending} onSelect={() => retry.mutateAsync({ id }).then(invalidate)}>
+                <DropdownMenu.Item className="menu-item block" disabled={retry.isPending} onSelect={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t restart")}>
                   Resume pipeline
                   <div className="text-xs text-ink3">From the last stage that didn’t finish</div>
                 </DropdownMenu.Item>
@@ -574,7 +577,7 @@ export function ProjectPage() {
           )}
           <p className="mt-1.5 text-xs text-ink3">Earlier results are kept. Retry picks up from this step.</p>
         </div>
-        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
           ↻ Retry
         </button>
       </div>
@@ -589,7 +592,7 @@ export function ProjectPage() {
         <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
           Keep waiting
         </button>
-        <button className="btn-ink shrink-0" onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+        <button className="btn-ink shrink-0" onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
           ↻ Restart this step
         </button>
       </div>
@@ -610,7 +613,7 @@ export function ProjectPage() {
               <button
                 className="text-xs font-semibold text-acc-text disabled:opacity-50"
                 disabled={setSourceText.isPending}
-                onClick={() => setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate)}
+                onClick={() => orToast(setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate), "Couldn’t change burned-in text")}
               >
                 {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
               </button>
@@ -645,7 +648,7 @@ export function ProjectPage() {
             {active ? (
               progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
             ) : p.sourceExpiredAt ? (
-              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
+              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
                 Source removed · fetch again
               </button>
             ) : p.status === "failed" ? (
@@ -785,7 +788,7 @@ export function ProjectPage() {
             progress={clipProgress[c.id]}
             active={activeClip === c.id}
             busy={rerender.isPending}
-            onRerender={() => rerender.mutateAsync({ id: c.id }).then(invalidate)}
+            onRerender={() => orToast(rerender.mutateAsync({ id: c.id }).then(invalidate), "Couldn’t retry the clip")}
             onSeek={() => {
               seekSource(c.startSec, c.id);
               if (compact) setMtab("transcript");
