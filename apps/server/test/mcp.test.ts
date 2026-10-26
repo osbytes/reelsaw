@@ -60,7 +60,7 @@ describe("mcp", () => {
 
   it("lists the tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "rerender_clips", "export_project", "delete_project", "purge_project", "search_assets", "set_default_bumper", "set_project_bumpers", "set_clip_bumpers", "restore_project", "restore_clip", "update_project", "delete_clip", "add_asset", "update_asset", "remove_asset", "restore_asset", "asset_usage", "list_layer_templates", "save_layer_template", "update_layer_template", "remove_layer_template", "restore_layer_template", "apply_layer_template", "list_deleted", "purge_clip", "purge_asset", "purge_layer_template"]) assert.ok(names.includes(n), n);
+    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "rerender_clips", "export_project", "delete_project", "purge_project", "search_assets", "set_default_bumper", "set_project_bumpers", "set_clip_bumpers", "restore_project", "restore_clip", "update_project", "delete_clip", "add_asset", "update_asset", "delete_asset", "restore_asset", "asset_usage", "list_layer_templates", "save_layer_template", "update_layer_template", "delete_layer_template", "refine_project", "restore_layer_template", "apply_layer_template", "list_deleted", "purge_clip", "purge_asset", "purge_layer_template"]) assert.ok(names.includes(n), n);
   });
 
   it("sees only the caller's projects", async () => {

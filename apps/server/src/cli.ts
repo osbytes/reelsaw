@@ -76,7 +76,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   library list [--kind video|image|audio] [--q text]
  *           | search <q…> [--source library|catalog|<provider>] [--kind video|image|audio] [--license cc0|by]
  *           | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex]
- *           | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | purge <id> | usage <id>
+ *           | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id>
  *           | default <intro|outro> <id|none> | reindex            [--user <email>]
  *                                           the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and
  *                                           sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled
@@ -98,7 +98,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
  *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
  *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
- *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
  *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
  *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
  *                                           (all of them without clip ids; --add keeps the clip's own layers, default replaces);
@@ -1035,7 +1035,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async library(svc) {
     const o = bumperArgs();
     const [sub, a, b] = o.pos;
-    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | remove <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
+    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
     if (sub === "reindex") {
       const r = await backfillAssetRefs(svc, { all: true });
       console.log(`reindexed ${r.projects} project(s), ${r.clips} clip(s), ${r.refs} reference(s)`);
@@ -1079,9 +1079,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "update" && a && tagList) {
       const r = await api.library.update({ id: a, tags: tagList });
       console.log(`updated ${a}: tags ${r.tags.join(",") || "-"}`);
-    } else if ((sub === "remove" || sub === "restore") && a) {
-      await api.library[sub]({ id: a });
-      console.log(`${sub === "remove" ? "removed" : "restored"} ${a}`);
+    } else if (sub === "delete" && a) {
+      await api.library.remove({ id: a });
+      console.log(`deleted ${a} (restore with: reelsaw library restore ${a})`);
+    } else if (sub === "restore" && a) {
+      await api.library.restore({ id: a });
+      console.log(`restored ${a}`);
     } else if (sub === "purge" && a) {
       const r = await api.library.purge({ id: a });
       console.log(r.message);
@@ -1209,7 +1212,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async templates(svc) {
     const { pos: p, rerender, addMode, layers } = bumperArgs();
     const usage =
-      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | remove <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
@@ -1255,10 +1258,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const t = await api.layerTemplates.update({ id: a, layers: parsed.data });
       console.log("updated:");
       show(t);
-    } else if (sub === "remove") {
+    } else if (sub === "delete") {
       if (!a) throw new Error(usage);
       const r = await api.layerTemplates.remove({ id: a });
-      console.log(`removed (restorable for 30 days: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`);
+      console.log(`deleted (restore with: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`);
     } else if (sub === "restore") {
       if (!a) throw new Error(usage);
       console.log("restored:");
