@@ -44,7 +44,9 @@ async function main() {
 
   if (config.RUN_HTTP) {
     const app = createApp(svc);
-    server = serve({ fetch: app.fetch, port: config.PORT }, (info) => log.info({ port: info.port, appUrl: config.APP_URL }, "http listening"));
+    // requestTimeout 0: Node's default (300 s) cuts off a multi-GB upload on an ordinary connection;
+    // headersTimeout and keep-alive still close idle sockets
+    server = serve({ fetch: app.fetch, port: config.PORT, serverOptions: { requestTimeout: 0 } }, (info) => log.info({ port: info.port, appUrl: config.APP_URL }, "http listening"));
     server.on("error", (err) => {
       log.fatal({ err, port: config.PORT }, "cannot listen");
       process.exit(1);

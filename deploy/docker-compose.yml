@@ -9,6 +9,14 @@ x-app: &app
   # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
   stop_grace_period: 330s
   restart: unless-stopped
+  # tini reaps ffmpeg children orphaned when yt-dlp is aborted
+  init: true
+  # Docker's default json-file log never rotates; every request writes an access line
+  logging:
+    driver: local
+    options:
+      max-size: 20m
+      max-file: "5"
   depends_on:
     db:
       condition: service_healthy
@@ -51,6 +59,9 @@ services:
   worker:
     <<: *app
     profiles: ["workers"]
+    # RUN_HTTP=false: the image's /api/health check would always fail
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgres://reelsaw:${POSTGRES_PASSWORD:-reelsaw}@db:5432/reelsaw
       DATA_DIR: /data

@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planSweep, parseClipFile, bumperPurgeable, BUMPER_PURGE_MS, SWEEP_GRACE_MS, HEAR_TMP_MAX_AGE_MS, type DbView, type ScratchProject } from "../src/storage/sweep.js";
+import { planSweep, parseClipFile, bumperPurgeable, BUMPER_PURGE_MS, SWEEP_GRACE_MS, TMP_MAX_AGE_MS, type DbView, type ScratchProject } from "../src/storage/sweep.js";
 import { chunk, mapLimit, keysetLoop, deadlineIn } from "../src/lib/batch.js";
 import { duplicateSourceBytes, videoIdentity, youtubeId } from "../src/storage/usage.js";
 
@@ -65,13 +65,14 @@ describe("planSweep", () => {
   it("never touches non-clip files of a live project (source, audio, subtitles)", () => {
     assert.deepEqual(plan([{ id: "p1", files: [f("source.mp4"), f("audio.mp3"), f("clips/c1.ass"), f("chunks/0.mp3")] }]), []);
   });
-  it("removes hear-* scratch older than a day and nothing else in tmp", () => {
+  it("removes the app's own scratch older than a day and nothing else in tmp", () => {
     const tmp = [
-      { name: "hear-a.mp4", bytes: 5, mtimeMs: NOW - HEAR_TMP_MAX_AGE_MS - 1 },
+      { name: "hear-a.mp4", bytes: 5, mtimeMs: NOW - TMP_MAX_AGE_MS - 1 },
       { name: "hear-b.mp4", bytes: 5, mtimeMs: NOW - 1000 },
-      { name: "export-x.zip", bytes: 5, mtimeMs: 0 },
+      { name: "export-1b2c", bytes: 5, mtimeMs: 0 },
+      { name: "project-clips.zip", bytes: 5, mtimeMs: 0 },
     ];
-    assert.deepEqual(plan([], view(), tmp).map((x) => x.path), ["tmp/hear-a.mp4"]);
+    assert.deepEqual(plan([], view(), tmp).map((x) => x.path), ["tmp/hear-a.mp4", "tmp/export-1b2c"]);
   });
 });
 

@@ -25,6 +25,12 @@ services:
     # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
     stop_grace_period: 330s
     restart: unless-stopped
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "5"
     depends_on:
       db:
         condition: service_healthy
@@ -54,7 +60,16 @@ services:
     # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
     stop_grace_period: 330s
     restart: unless-stopped
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "5"
     profiles: ["workers"]
+    # RUN_HTTP=false: the image's /api/health check would always fail
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
