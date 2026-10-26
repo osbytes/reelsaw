@@ -76,7 +76,10 @@ project already hit the problem it prevents.
   job renders a specific generation into files named for it, and commits only while that
   generation is still current. Otherwise it deletes its own output. Use the same pattern for any
   job that can be superseded while running, because cancelling a pg-boss job does not stop a
-  process that is already running.
+  process that is already running. Pipeline stages do the same with `projects.stage_seq`: retry,
+  re-analyze, refine and delete bump it, every stage job carries the value it was queued with,
+  and a stage writes (start, complete, fail) only while that value is still current and the
+  project is not deleted.
 - **Jobs are idempotent.** A job may run twice (retries, the reconciler, restarts). It checks
   for existing output and either skips or converges.
 - **The reconciler is a safety net, not the mechanism.** Correctness can't depend on it
