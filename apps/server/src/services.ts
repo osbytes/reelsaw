@@ -4,6 +4,8 @@ import { loadConfig, makePaths, ConfigError, type Config, type Paths } from "./c
 import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { reclaimScratch } from "./storage/sweep.js";
+import { createDiskLeaser, LEASE_STALE_MS, releaseWorkerLeases, volumeId } from "./disk-leases.js";
+import { workerIdOf } from "./ops/workers.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
@@ -339,6 +341,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));
+  // and claims its scratch against the volume's live leases first, so two jobs cannot both pass on the same free bytes (disk-leases.ts)
+  await step("disk leases", async () => {
+    const volume = await volumeId(paths.root);
+    const selfId = workerIdOf(config);
+    // a previous incarnation under this id (a restarted container keeps hostname:pid; WORKER_ID is pinned) can no longer be writing
+    await releaseWorkerLeases(svc, selfId);
+    resources.setLeaser(createDiskLeaser(svc, { volume, selfId, staleMs: LEASE_STALE_MS }), volume);
+    return volume;
+  });
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads
     svc.ee = await step("enterprise edition (billing)", async () => (await import("./ee/index.js")).createEE(svc));
@@ -347,13 +358,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   return svc;
 }
 
-export async function shutdownServices(s: Services) {
+export async function shutdownServices(s: Services, opts: { afterQueueStop?: () => Promise<void> } = {}) {
   s.logLevel.stop();
   s.updates.stop();
   s.settings.stop();
   s.models.stop();
   s.providers.stop();
   await s.queue.stop().catch((err) => s.log.error({ err }, "queue shutdown failed"));
+  // the jobs are done (or out of grace): now the heartbeat row and the disk leases it vouched for may go, before the database closes
+  await opts.afterQueueStop?.().catch((err) => s.log.warn({ err }, "post-queue shutdown step failed"));
   await s.faces?.release().catch(() => {});
   await s.text?.release().catch(() => {});
   await s.vad?.release().catch(() => {});

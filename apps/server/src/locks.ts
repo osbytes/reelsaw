@@ -21,6 +21,8 @@ export const txLock = {
   asset: (owner: string, contentHash: string) => `asset:${owner}:${contentHash}`,
   /** one import of the same catalog / provider item at a time, instance-wide, so two accounts converge on one shared row (library/service.ts createAsset) */
   sharedAsset: (provider: string, externalId: string, variant: string) => `shared-asset:${provider}:${externalId}:${variant}`,
+  /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
+  diskVolume: (volume: string) => `disk:${volume}`,
 } as const;
 
 /** The one lock with no subject: "which sign-up becomes the first admin" (auth.ts). Arbitrary constant. */
@@ -30,6 +32,6 @@ export const FIRST_ADMIN_LOCK = 7_203_104_001;
 export const TX_LOCK_SQL = "select pg_advisory_xact_lock(hashtext($1))";
 
 /** Take a named lock inside the current transaction (`u.db`, or a drizzle `tx`). */
-export async function takeTxLock(db: Db, key: string): Promise<void> {
+export async function takeTxLock(db: Pick<Db, "execute">, key: string): Promise<void> {
   await db.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`);
 }

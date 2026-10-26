@@ -23,9 +23,10 @@ function queueLabel(q: string) {
   return q.split(".").pop() ?? q;
 }
 
-function diskLine(w: { diskFreeMB: number; diskTotalMB: number }) {
+function diskLine(w: { diskFreeMB: number; diskTotalMB: number; diskLeasedMB: number }) {
   if (w.diskFreeMB < 0) return "disk n/a";
-  return `${gb(w.diskFreeMB)} free`;
+  // leased: free bytes jobs in flight on this volume have claimed for the scratch they are writing
+  return `${gb(w.diskFreeMB)} free${w.diskLeasedMB > 0 ? ` (${gb(w.diskLeasedMB)} leased)` : ""}`;
 }
 
 /** A worker process that dropped the media queues: short of disk with nothing left to evict (queue/disk-gate.ts). */

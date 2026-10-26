@@ -9,6 +9,7 @@ import { schema } from "../db/index.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
 import type { QueueName } from "../queue/boss.js";
 import { inflightJobs, listeningQueues } from "../queue/inflight.js";
+import { LEASE_STALE_MS, releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
 
@@ -44,6 +45,10 @@ export interface WorkerView {
   memTotalMB: number;
   diskFreeMB: number;
   diskTotalMB: number;
+  /** the filesystem its DATA_DIR is on; processes with the same volume share one disk (and its leases) */
+  volume: string | null;
+  /** MB of that free space already leased to jobs in flight on the volume (disk-leases.ts) */
+  diskLeasedMB: number;
   gpu: WorkerGpu | null;
   renders: WorkerRenders;
   queues: string[];
@@ -67,6 +72,8 @@ export function classifyWorkers(
     memTotalMB: number;
     diskFreeMB: number;
     diskTotalMB: number;
+    volume?: string | null;
+    diskLeasedMB?: number;
     gpu: WorkerGpu | null;
     renders: WorkerRenders;
     queues: string[] | null;
@@ -91,6 +98,8 @@ export function classifyWorkers(
       memTotalMB: r.memTotalMB,
       diskFreeMB: r.diskFreeMB,
       diskTotalMB: r.diskTotalMB,
+      volume: r.volume ?? null,
+      diskLeasedMB: r.diskLeasedMB ?? 0,
       gpu: r.gpu,
       renders: r.renders,
       queues: r.queues ?? [],
@@ -125,14 +134,15 @@ export async function listWorkers(svc: Services): Promise<{ items: WorkerView[];
 }
 
 /**
- * Pure: another live process that listens on `queue` and reported at least `requiredMB` free (an
- * unmeasurable disk, -1, counts as room: it never refuses work). Null when nobody does.
+ * Pure: another live process that listens on `queue` and reported at least `requiredMB` free net of
+ * what jobs in flight have leased on its volume (an unmeasurable disk, -1, counts as room: it never
+ * refuses work). Null when nobody does.
  */
-export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number }>, now: Date, selfId: string, queue: QueueName, requiredMB: number, staleMs = WORKER_STALE_MS): { workerId: string } | null {
+export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number; diskLeasedMB?: number }>, now: Date, selfId: string, queue: QueueName, requiredMB: number, staleMs = WORKER_STALE_MS): { workerId: string } | null {
   for (const r of rows) {
     if (r.id === selfId || now.getTime() - r.lastSeenAt.getTime() > staleMs) continue;
     if (!r.queues?.includes(queue)) continue;
-    if (r.diskFreeMB >= 0 && r.diskFreeMB < requiredMB) continue;
+    if (r.diskFreeMB >= 0 && r.diskFreeMB - (r.diskLeasedMB ?? 0) < requiredMB) continue;
     return { workerId: r.id };
   }
   return null;
@@ -141,7 +151,7 @@ export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; q
 /** Is there another worker this job could run on with `requiredMB` free? Read from the last heartbeats. */
 export async function workerWithRoom(svc: Services, queue: QueueName, requiredMB: number): Promise<{ workerId: string } | null> {
   const rows = await svc.database.db
-    .select({ id: schema.workerInstances.id, lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, diskFreeMB: schema.workerInstances.diskFreeMB })
+    .select({ id: schema.workerInstances.id, lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, diskFreeMB: schema.workerInstances.diskFreeMB, diskLeasedMB: schema.workerInstances.diskLeasedMB })
     .from(schema.workerInstances)
     .where(gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)));
   return pickWorkerWithRoom(rows, new Date(), workerIdOf(svc.config), queue, requiredMB);
@@ -159,65 +169,57 @@ export async function beat(svc: Services): Promise<void> {
   const renders: WorkerRenders = { running: r.running, limit: r.limit, max: svc.resources.maxRenders(), mode: r.mode };
   // what this process takes right now: everything, or without the disk queues while the gate holds them (queue/disk-gate.ts)
   const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
+  // disk promised to jobs in flight on this volume, by every process on it: what a hand-off subtracts from "free"
+  const lease = svc.resources.leases();
+  const diskLeasedMB = lease.volume ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb : lease.ownMB;
+  const row = {
+    role: processRole(svc.config),
+    hostname,
+    startedAt,
+    lastSeenAt: now,
+    version: svc.config.REELSAW_VERSION,
+    commit: svc.config.REELSAW_COMMIT,
+    pid: process.pid,
+    cpus: snap.cpus,
+    memTotalMB: snap.memTotalMB,
+    diskFreeMB: snap.diskFreeMB,
+    diskTotalMB: snap.diskTotalMB,
+    volume: lease.volume,
+    diskLeasedMB,
+    gpu: gpuJson,
+    renders,
+    queues,
+    processing: inflightJobs(),
+    updatedAt: now,
+  };
   await svc.database.db
     .insert(schema.workerInstances)
-    .values({
-      id,
-      role: processRole(svc.config),
-      hostname,
-      startedAt,
-      lastSeenAt: now,
-      version: svc.config.REELSAW_VERSION,
-      commit: svc.config.REELSAW_COMMIT,
-      pid: process.pid,
-      cpus: snap.cpus,
-      memTotalMB: snap.memTotalMB,
-      diskFreeMB: snap.diskFreeMB,
-      diskTotalMB: snap.diskTotalMB,
-      gpu: gpuJson,
-      renders,
-      queues,
-      processing: inflightJobs(),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: schema.workerInstances.id,
-      set: {
-        role: processRole(svc.config),
-        hostname,
-        startedAt,
-        lastSeenAt: now,
-        version: svc.config.REELSAW_VERSION,
-        commit: svc.config.REELSAW_COMMIT,
-        pid: process.pid,
-        cpus: snap.cpus,
-        memTotalMB: snap.memTotalMB,
-        diskFreeMB: snap.diskFreeMB,
-        diskTotalMB: snap.diskTotalMB,
-        gpu: gpuJson,
-        renders,
-        queues,
-        processing: inflightJobs(),
-        updatedAt: now,
-      },
-    });
+    .values({ id, ...row })
+    .onConflictDoUpdate({ target: schema.workerInstances.id, set: row });
   const cutoff = new Date(now.getTime() - WORKER_PRUNE_MS);
   await svc.database.db.delete(schema.workerInstances).where(and(lt(schema.workerInstances.lastSeenAt, cutoff), ne(schema.workerInstances.id, id)));
 }
 
 export async function forget(svc: Services): Promise<void> {
-  await svc.database.db.delete(schema.workerInstances).where(eq(schema.workerInstances.id, workerIdOf(svc.config)));
+  const id = workerIdOf(svc.config);
+  await releaseWorkerLeases(svc, id); // its jobs have stopped (main.ts calls this after the queue stop): nothing of theirs is still writing
+  await svc.database.db.delete(schema.workerInstances).where(eq(schema.workerInstances.id, id));
 }
 
-/** Repeat the beat every 15 s. The stop function deletes this process's row. Callers await `beat` once at boot so the first HTTP request already sees this process. */
-export function startHeartbeat(svc: Services): () => void {
+/**
+ * Repeat the beat every 15 s. The stop function deletes this process's row and its disk leases: call it only
+ * once the queue has stopped (running jobs finished or the grace ran out), so a job still writing during the
+ * shutdown grace keeps its claim and other processes on the volume do not take its bytes. Callers await `beat`
+ * once at boot so the first HTTP request already sees this process.
+ */
+export function startHeartbeat(svc: Services): () => Promise<void> {
   const log = svc.log.child({ module: "ops" });
   const tick = () =>
     beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
   const t = setInterval(tick, WORKER_HEARTBEAT_MS);
   t.unref();
-  return () => {
+  return async () => {
     clearInterval(t);
-    void forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
+    await forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
   };
 }

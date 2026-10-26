@@ -6,6 +6,7 @@ import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
 import { backfillAssetRefs } from "../library/refs.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
+import { pruneDiskLeases } from "../disk-leases.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
 import { flagAccounts, pruneRequestRate } from "../abuse.js";
@@ -101,6 +102,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         // the speech-to-text cache used to be pruned at boot only, which a long-running worker never reaches
         const asrDays = svc.config.ASR_CACHE_DAYS;
         if (asrDays > 0) await svc.asr.prune(asrDays).then((n) => n && svc.log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
+        await pruneDiskLeases(svc); // expired or orphaned claims (the live sum already ignores them)
         await purgeBumperAssets(svc);
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
         await flagAccounts(svc); // abuse flags for the Users page (abuse.ts)
