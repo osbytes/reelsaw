@@ -32,6 +32,7 @@ import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { reloadIfNewBuild } from "./lib/stale-chunk";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
@@ -303,6 +304,15 @@ function TelemetryBridge() {
   return null;
 }
 
+/** After a deploy, the first route change loads the new build instead of asking for chunks that are gone. */
+function NewBuildOnNavigate() {
+  const loc = useLocation();
+  useEffect(() => {
+    reloadIfNewBuild();
+  }, [loc.pathname]);
+  return null;
+}
+
 /** `/?deleted=1` used to scroll to the Projects footer; that list now lives at /deleted. */
 function HomePage() {
   const [search] = useSearchParams();
@@ -319,6 +329,7 @@ export function App() {
   return (
     <>
     <TelemetryBridge />
+    <NewBuildOnNavigate />
     <UploadsProvider>
     <CommandPaletteProvider>
     <Routes>

@@ -2,13 +2,16 @@ import { createContext, lazy, Suspense, useContext, useEffect, useState, type Re
 import { useShortcut } from "../lib/shortcuts";
 import { useSession } from "../lib/auth";
 import { isOnlyUrls } from "../lib/links";
+import { prefetchWhenIdle } from "../lib/stale-chunk";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /** Whitespace and newlines collapse to single spaces so a pasted list of links survives a one-line input. */
 const oneLine = (s: string) => s.trim().split(/\s+/).join(" ");
 
-// the palette (search, fuzzy ranking, actions) loads the first time it opens, not with the app
-const Palette = lazy(() => import("./CommandPaletteDialog").then((m) => ({ default: m.Palette })));
+// the palette (search, fuzzy ranking, actions) stays out of the first bundle; it prefetches once the
+// app is idle so ⌘K still opens after a deploy has replaced the chunk files
+const loadPalette = () => import("./CommandPaletteDialog");
+const Palette = lazy(() => loadPalette().then((m) => ({ default: m.Palette })));
 
 const Ctx = createContext<(q?: string) => void>(() => {});
 export const useCommandPalette = () => useContext(Ctx);
@@ -25,6 +28,9 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   }, [open]);
   const [q, setQ] = useState("");
   const { data: session } = useSession();
+  useEffect(() => {
+    if (session) prefetchWhenIdle(loadPalette);
+  }, [!!session]);
   const show = (initial = "") => {
     setQ(initial);
     setOpen(true);
