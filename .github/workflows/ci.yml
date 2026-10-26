@@ -72,6 +72,12 @@ jobs:
       # a PR that changes the app must say what changed (pnpm changeset); docs-only PRs add an empty one
       - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
         run: pnpm exec changeset status --since=origin/main
+      # a changeset that names only an ignored package (web, shared) bumps nothing, yet makes
+      # changesets/action open an empty Release PR on every push to main until it is retargeted
+      - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+        run: |
+          bad=$(grep -l '"@reelsaw/' .changeset/*.md | xargs grep -L '"@reelsaw/server"' || true)
+          [ -z "$bad" ] || { echo "changesets must name @reelsaw/server (web and shared are ignored): $bad"; exit 1; }
 
   # reelsaw.com (website/): its own pnpm root with its own lockfile, so it is checked on its own
   site:
