@@ -11,8 +11,10 @@ import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJ
 import { ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
-import { inflightJobs, trackJob } from "./inflight.js";
+import { inflightJobs, setListeningQueues, trackJob } from "./inflight.js";
 import { gauge, histogram, realtimeFactor, type MetricAttributes } from "../metrics.js";
+import { createDiskGate, type DiskGate } from "./disk-gate.js";
+import type { Logger } from "../log.js";
 
 type Job<T> = { id: string; data: T; retryCount: number; signal: AbortSignal };
 
@@ -80,7 +82,20 @@ function runTracked<T>(job: Job<ProjectJob>, queue: QueueName, extra: { clipId?:
   return trackJob({ jobId: job.id, queue, projectId: job.data.projectId, ...(extra.clipId ? { clipId: extra.clipId } : {}), startedAt: new Date().toISOString() }, fn);
 }
 
-function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn: (ctx: StageContext) => Promise<void>) {
+/**
+ * A job that could not get its disk on this worker, even after eviction. With another live worker
+ * that has the room it goes back to the queue (this worker pauses its disk queues first, so the
+ * retry lands there); the project sees a plain-language attempt. Null: nobody has the room, and the
+ * caller fails the run with the reason, as a single box always did.
+ */
+async function diskHandOff(gate: DiskGate, queue: QueueName, err: ResourceExhaustedError, log: Logger): Promise<Error | null> {
+  const other = await gate.handOff(queue, err.requiredMB);
+  if (!other) return null;
+  log.warn({ requiredMB: err.requiredMB, freeMB: err.freeMB, workerId: other.workerId }, "handing the job to a worker with disk");
+  return new Error(`Not enough disk on this worker (${err.freeMB} MB free, needs ${err.requiredMB}); another worker will pick it up.`);
+}
+
+function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: PipelineStage, fn: (ctx: StageContext) => Promise<void>) {
   return async (jobs: Job<ProjectJob>[]) => {
     const job = jobs[0]!;
     const { projectId } = job.data;
@@ -108,26 +123,40 @@ function projectStage(svc: Services, queue: QueueName, stage: PipelineStage, fn:
         // cancelling a pg-boss job does not stop a running handler: the superseded one ends here, writing nothing
         if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
         log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
-        const last = job.retryCount >= max || err instanceof ResourceExhaustedError;
+        // disk will not free itself on the next attempt here: fail the run, unless another worker has the room
+        const handOff = err instanceof ResourceExhaustedError && job.retryCount < max ? await diskHandOff(gate, queue, err, log) : null;
+        const last = job.retryCount >= max || (err instanceof ResourceExhaustedError && !handOff);
         if (last) {
           svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
           await failProject(svc, projectId, stage, err, seq);
-        } else await stageFailedAttempt(svc, projectId, stage, err, attempt, max + 1, seq);
-        // disk will not free itself on the next attempt; returning marks the job done so it does not loop
-        if (err instanceof ResourceExhaustedError) return;
-        throw err; // let pg-boss apply the retry policy
+        } else await stageFailedAttempt(svc, projectId, stage, handOff ?? err, attempt, max + 1, seq);
+        // returning marks the job done so a shortfall does not loop on this worker
+        if (err instanceof ResourceExhaustedError && !handOff) return;
+        throw handOff ?? err; // let pg-boss apply the retry policy
       }
     });
   };
 }
 
-export async function startWorkers(svc: Services) {
+export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate }> {
   const { boss } = svc.queue;
   const common = { pollingIntervalSeconds: 2 };
+  // every queue's registration, so the disk gate can take a queue off this process and put it back
+  const registrations = new Map<QueueName, () => Promise<void>>();
+  const work = async <T extends ProjectJob>(queue: QueueName, options: { pollingIntervalSeconds: number; localConcurrency: number }, handler: (jobs: Job<T>[]) => Promise<void>) => {
+    const register = () => boss.work<T>(queue, options, handler).then(() => undefined);
+    registrations.set(queue, register);
+    await register();
+  };
+  const diskGate = createDiskGate(svc, async (queue) => {
+    const register = registrations.get(queue);
+    if (register) await register();
+  });
+  setListeningQueues(() => diskGate.listening());
 
-  await boss.work<ProjectJob>(QUEUES.ingest, { ...common, localConcurrency: 2 }, projectStage(svc, QUEUES.ingest, "ingest", ingest));
-  await boss.work<ProjectJob>(QUEUES.transcribe, { ...common, localConcurrency: 2 }, projectStage(svc, QUEUES.transcribe, "transcribe", transcribe));
-  await boss.work<ProjectJob>(QUEUES.analyze, { ...common, localConcurrency: 2 }, projectStage(svc, QUEUES.analyze, "analyze", analyze));
+  await work<ProjectJob>(QUEUES.ingest, { ...common, localConcurrency: 2 }, projectStage(svc, diskGate, QUEUES.ingest, "ingest", ingest));
+  await work<ProjectJob>(QUEUES.transcribe, { ...common, localConcurrency: 2 }, projectStage(svc, diskGate, QUEUES.transcribe, "transcribe", transcribe));
+  await work<ProjectJob>(QUEUES.analyze, { ...common, localConcurrency: 2 }, projectStage(svc, diskGate, QUEUES.analyze, "analyze", analyze));
 
   // refine steps: independent, each marks itself failed (never the project) after its last retry
   const refineStage = (queue: QueueName, step: RefineStep, fn: (ctx: StageContext) => Promise<void>) => async (jobs: Job<ProjectJob>[]) => {
@@ -162,12 +191,12 @@ export async function startWorkers(svc: Services) {
       }
     });
   };
-  await boss.work<ProjectJob>(QUEUES.refineEntities, { ...common, localConcurrency: 2 }, refineStage(QUEUES.refineEntities, "entities", refineEntities));
-  await boss.work<ProjectJob>(QUEUES.refineDisfluency, { ...common, localConcurrency: 2 }, refineStage(QUEUES.refineDisfluency, "disfluency", refineDisfluency));
-  await boss.work<ProjectJob>(QUEUES.refineScenes, { ...common, localConcurrency: 1 }, refineStage(QUEUES.refineScenes, "scenes", refineScenes));
+  await work<ProjectJob>(QUEUES.refineEntities, { ...common, localConcurrency: 2 }, refineStage(QUEUES.refineEntities, "entities", refineEntities));
+  await work<ProjectJob>(QUEUES.refineDisfluency, { ...common, localConcurrency: 2 }, refineStage(QUEUES.refineDisfluency, "disfluency", refineDisfluency));
+  await work<ProjectJob>(QUEUES.refineScenes, { ...common, localConcurrency: 1 }, refineStage(QUEUES.refineScenes, "scenes", refineScenes));
 
   // clips carved out of the transcript by the user: AI packaging (and bounds for "ai" mode), then render
-  await boss.work<PrepareJob>(QUEUES.prepare, { ...common, localConcurrency: 2 }, async (jobs: Job<PrepareJob>[]) => {
+  await work<PrepareJob>(QUEUES.prepare, { ...common, localConcurrency: 2 }, async (jobs: Job<PrepareJob>[]) => {
     const job = jobs[0]!;
     const { projectId, clipId, mode } = job.data;
     const max = svc.queue.retryLimitOf(QUEUES.prepare);
@@ -183,6 +212,8 @@ export async function startWorkers(svc: Services) {
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
+        // short of disk even after eviction: with another worker that has room, pause this one so the retry lands there
+        if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.prepare, err.requiredMB);
         if (job.retryCount >= max) {
           svc.telemetry.captureException(err, { queue: QUEUES.prepare, projectId, clipId, jobId: job.id });
           await markClipFailed(svc, projectId, clipId, err);
@@ -193,7 +224,7 @@ export async function startWorkers(svc: Services) {
   });
 
   // slots up to the machine's ceiling; renderSlot() decides how many actually run (CPU and memory now)
-  await boss.work<RenderJob>(QUEUES.render, { ...common, localConcurrency: svc.resources.maxRenders() }, async (jobs: Job<RenderJob>[]) => {
+  await work<RenderJob>(QUEUES.render, { ...common, localConcurrency: svc.resources.maxRenders() }, async (jobs: Job<RenderJob>[]) => {
     const job = jobs[0]!;
     const { projectId, clipId, gen } = job.data;
     const max = svc.queue.retryLimitOf(QUEUES.render);
@@ -216,6 +247,7 @@ export async function startWorkers(svc: Services) {
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
+        if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.render, err.requiredMB);
         if (job.retryCount >= max) {
           svc.telemetry.captureException(err, { queue: QUEUES.render, projectId, clipId, jobId: job.id });
           await markClipFailed(svc, projectId, clipId, err, gen);
@@ -237,4 +269,7 @@ export async function startWorkers(svc: Services) {
   }, "Jobs this worker process is running, by queue");
 
   svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
+  // room is made (or the gate closes) before the first job lands, not after it fails
+  await diskGate.check().catch((err) => svc.log.warn({ module: "worker", err }, "disk gate check failed"));
+  return { diskGate };
 }

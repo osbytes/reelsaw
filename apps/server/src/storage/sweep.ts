@@ -5,12 +5,19 @@
  * `planSweep` is pure: given a listing of DATA_DIR and a view of the database it says which paths
  * are safe to delete. `sweepScratch` gathers both, runs the plan and logs every removal. The
  * reconciler runs it about hourly, `reelsaw storage sweep` runs it on demand.
+ *
+ * With an S3 store the scratch copies of sources and current renders are a cache of the bucket
+ * (`ensureLocal` pulls them back): the sweep evicts the ones of finished projects idle longer than
+ * SCRATCH_CACHE_HOURS, and `reclaimScratch` evicts least-recently-used ones until a job short of
+ * disk has room (resources.ts asks for it before failing). The local store hardlinks scratch and
+ * store, so there eviction would free nothing and is off.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
+import type { Logger } from "../log.js";
 import { keys } from "./index.js";
 import { QUEUES } from "../queue/boss.js";
 import { chunk, deadlineIn, expired, keysetLoop, mapLimit } from "../lib/batch.js";
@@ -50,8 +57,11 @@ export interface DbView {
   /** Clips that exist, with the file names their current rows point at. */
   clips: Map<string, { projectId: string; renderGen: number; referenced: Set<string> }>;
 }
+/** Scratch files that are a cache of a store object: evictable, `ensureLocal` brings them back. */
+export type CacheKind = "cache-source" | "cache-clip";
+export const CACHE_KINDS: ReadonlySet<Removal["kind"]> = new Set<Removal["kind"]>(["cache-source", "cache-clip"]);
 export interface Removal {
-  kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp";
+  kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp" | CacheKind;
   /** Relative to DATA_DIR. */
   path: string;
   bytes: number;
@@ -63,6 +73,8 @@ export interface Removal {
 }
 
 const CLIP_FILE = /^([^./]+)(?:\.(\d+))?\.(mp4|jpg)$/;
+/** The scratch copy of a project's source at the project root (`source.mp4`, a CLI's `source.cli`, a crashed download's `source.mp4.part`). */
+const SOURCE_FILE = /^source\.[^/]+$/;
 
 /** "clips/<clip>.<gen>.<mp4|jpg>" (gen 0 has no number), or null for any other file. */
 export function parseClipFile(rel: string): { clipId: string; gen: number; name: string } | null {
@@ -72,10 +84,16 @@ export function parseClipFile(rel: string): { clipId: string; gen: number; name:
   return c ? { clipId: c[1]!, gen: c[2] ? Number(c[2]) : 0, name: m[1]! } : null;
 }
 
-export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; db: DbView; now: number }): Removal[] {
-  const { db, now } = input;
+/**
+ * `cache`: also evict the scratch copies of stored files (sources, current renders) of projects that are
+ * not busy and whose copy was last used `idleMs` ago or longer (mtime; `ensureLocal` bumps it on a hit).
+ * Omitted (the local store, or SCRATCH_CACHE_HOURS=0) the plan only removes what nothing points at.
+ */
+export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; db: DbView; now: number; cache?: { idleMs: number } }): Removal[] {
+  const { db, now, cache } = input;
   const out: Removal[] = [];
   const settled = (mtimeMs: number) => now - mtimeMs >= SWEEP_GRACE_MS;
+  const idle = (mtimeMs: number) => !!cache && now - mtimeMs >= cache.idleMs;
   for (const p of input.projects) {
     const known = db.projects.get(p.id);
     if (!known) {
@@ -87,23 +105,42 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
     }
     if (known.busy) continue; // a live job may be rendering or about to commit a generation
     for (const f of p.files) {
+      const at = `projects/${p.id}/${f.rel}`;
+      if (SOURCE_FILE.test(f.rel)) {
+        // the store has the source (ingest put it there before it committed; a retry of a failed ingest re-fetches)
+        if (idle(f.mtimeMs)) out.push({ kind: "cache-source", path: at, bytes: f.bytes, projectId: p.id });
+        continue;
+      }
       const clip = parseClipFile(f.rel);
       if (!clip || !settled(f.mtimeMs)) continue;
       const row = db.clips.get(clip.clipId);
-      const at = `projects/${p.id}/${f.rel}`;
       if (!row || row.projectId !== p.id) {
         out.push({ kind: "clip-gone", path: at, bytes: f.bytes, projectId: p.id, clipId: clip.clipId, gen: clip.gen });
       } else if (clip.gen < row.renderGen && !row.referenced.has(clip.name)) {
         const key = clip.name.endsWith(".jpg") ? keys.thumb(p.id, clip.clipId, clip.gen) : keys.clip(p.id, clip.clipId, clip.gen);
         out.push({ kind: "stale-generation", path: at, bytes: f.bytes, projectId: p.id, clipId: clip.clipId, gen: clip.gen, storageKeys: [key] });
+      } else if (row.referenced.has(clip.name) && idle(f.mtimeMs)) {
+        // the row names it, so the store has it: a cache copy the app serves from the store anyway
+        out.push({ kind: "cache-clip", path: at, bytes: f.bytes, projectId: p.id, clipId: clip.clipId, gen: clip.gen });
       }
-      // gen >= renderGen, or named by the row: current (or newer than the row knows): keep
+      // gen >= renderGen and not named by the row: newer than the row knows: keep
     }
   }
   for (const f of input.tmp) {
     if (TMP_SCRATCH.test(f.name) && now - f.mtimeMs >= TMP_MAX_AGE_MS) out.push({ kind: "tmp", path: `tmp/${f.name}`, bytes: f.bytes });
   }
   return out;
+}
+
+/**
+ * How long a cache copy may sit unused before the sweep evicts it, or null when nothing is evictable:
+ * the local store (scratch and store are one hardlinked file) or SCRATCH_CACHE_HOURS=0. Read at the
+ * point of use: an admin can change the hours under Settings → System.
+ */
+export function cacheIdleMs(svc: Pick<Services, "storage" | "settings">): number | null {
+  if (svc.storage.driver !== "s3") return null;
+  const hours = svc.settings.get().SCRATCH_CACHE_HOURS;
+  return hours > 0 ? hours * 60 * 60_000 : null;
 }
 
 /** Bounds of one background sweep. A manual `reelsaw storage sweep` has no budget. */
@@ -193,6 +230,8 @@ export interface ScanResult {
 export async function scanScratch(svc: Services, opts: { now?: number; budgetMs?: number; after?: string | null } = {}): Promise<ScanResult> {
   const now = opts.now ?? Date.now();
   const deadline = deadlineIn(opts.budgetMs);
+  const idleMs = cacheIdleMs(svc);
+  const cache = idleMs === null ? undefined : { idleMs };
   // list the directories first, read the database second: a project created in between is seen
   const names = (await fs.readdir(svc.paths.projects, { withFileTypes: true }).catch(() => []))
     .filter((e) => e.isDirectory())
@@ -213,18 +252,19 @@ export async function scanScratch(svc: Services, opts: { now?: number; budgetMs?
     for (const id of ids) {
       if (expired(deadline)) {
         complete = false;
-        removals.push(...planSweep({ projects, tmp: [], db, now }));
+        removals.push(...planSweep({ projects, tmp: [], db, now, cache }));
         break outer;
       }
       const dir = svc.paths.project(id);
       const dirDeadline = Math.min(deadline, deadlineIn(opts.budgetMs ? SWEEP_DIR_BUDGET_MS : 0));
-      // a known project only needs its clips directory; an unknown one needs everything (to size and age it)
-      const w = db.projects.has(id) ? await walkDir(path.join(dir, "clips"), dir, dirDeadline) : await walkDir(dir, dir, dirDeadline);
+      // a known project only needs its clips directory (plus the root for the source copy when the cache is evictable);
+      // an unknown one needs everything (to size and age it)
+      const w = db.projects.has(id) && !cache ? await walkDir(path.join(dir, "clips"), dir, dirDeadline) : await walkDir(dir, dir, dirDeadline);
       projects.push({ id, files: w.files, partial: w.partial });
       scanned++;
       lastDir = id;
     }
-    removals.push(...planSweep({ projects, tmp: [], db, now }));
+    removals.push(...planSweep({ projects, tmp: [], db, now, cache }));
   }
   if (complete) {
     const entries = (await fs.readdir(svc.paths.tmp, { withFileTypes: true }).catch(() => [])).filter((e) => e.isFile() || e.isDirectory());
@@ -266,16 +306,7 @@ export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budg
   const scan = await scanScratch(svc, { budgetMs: opts.budgeted ? SWEEP_BUDGET_MS : 0, after: prior.cursor ?? null });
   const done: Removal[] = [];
   for (const r of scan.removals) {
-    if (!opts.dryRun) {
-      try {
-        await fs.rm(path.join(svc.paths.root, r.path), { recursive: true, force: true });
-        for (const k of r.storageKeys ?? []) await svc.storage.delete(k);
-      } catch (err) {
-        log.warn({ err, path: r.path }, "could not remove a leftover file");
-        continue;
-      }
-      log.info({ kind: r.kind, path: r.path, bytes: r.bytes, projectId: r.projectId, clipId: r.clipId, gen: r.gen }, "removed a leftover file nothing points at");
-    }
+    if (!opts.dryRun && !(await applyRemoval(svc, r, log))) continue;
     done.push(r);
   }
   const bytes = done.reduce((s, r) => s + r.bytes, 0);
@@ -287,6 +318,74 @@ export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budg
     }
   }
   return { removals: done, bytes, scanned: scan.scanned, complete: scan.complete };
+}
+
+/** Remove one planned path (and the store keys a stale generation still has), logging it. False when the removal failed. */
+async function applyRemoval(svc: Services, r: Removal, log: Logger): Promise<boolean> {
+  try {
+    await fs.rm(path.join(svc.paths.root, r.path), { recursive: true, force: true });
+    for (const k of r.storageKeys ?? []) await svc.storage.delete(k);
+  } catch (err) {
+    log.warn({ err, path: r.path }, "could not remove a leftover file");
+    return false;
+  }
+  const fields = { kind: r.kind, path: r.path, bytes: r.bytes, projectId: r.projectId, clipId: r.clipId, gen: r.gen };
+  if (CACHE_KINDS.has(r.kind)) log.info(fields, "evicted a scratch copy the store still has");
+  else log.info(fields, "removed a leftover file nothing points at");
+  return true;
+}
+
+/** Under disk pressure a copy counts as idle after this long: the project is finished and no job runs, so nothing is writing it. */
+export const RECLAIM_IDLE_MS = 5 * 60_000;
+export const RECLAIM_BATCH = 200;
+export const RECLAIM_BUDGET_MS = 60_000;
+
+/**
+ * Free at least `needBytes` of scratch for a job that is short of disk, evicting cache copies of the
+ * least recently active finished projects first (`projects.updated_at` order, so a project someone is
+ * editing today goes last). Leftovers found on the way go too. Stops as soon as enough is freed, at
+ * the end of the finished projects, or after RECLAIM_BUDGET_MS. Nothing to evict with the local store.
+ */
+export async function reclaimScratch(svc: Services, needBytes: number, opts: { dryRun?: boolean; now?: number } = {}): Promise<{ removals: Removal[]; bytes: number; enough: boolean }> {
+  const log = svc.log.child({ module: "sweep" });
+  const now = opts.now ?? Date.now();
+  const removals: Removal[] = [];
+  let bytes = 0;
+  if (cacheIdleMs(svc) === null) return { removals, bytes, enough: bytes >= needBytes };
+  type Cur = { at: string; id: string };
+  await keysetLoop<{ id: string; at: string }, Cur>({
+    size: RECLAIM_BATCH,
+    deadline: deadlineIn(RECLAIM_BUDGET_MS),
+    start: null,
+    fetch: async (cur, size) => {
+      if (bytes >= needBytes) return [];
+      // finished projects, least recently touched first; the timestamp travels as text (microseconds)
+      const res = await svc.database.db.execute(sql`
+        select id, updated_at::text as at from projects
+        where deleted_at is null and status in ('done', 'failed')
+          ${cur ? sql`and (updated_at, id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
+        order by updated_at, id limit ${size}`);
+      return res.rows as Array<{ id: string; at: string }>;
+    },
+    cursorOf: (r) => ({ at: r.at, id: r.id }),
+    handle: async (rows) => {
+      const ids = rows.map((r) => r.id);
+      const db = await loadDbView(svc, ids); // live jobs are re-checked here: a Retry since the select keeps its files
+      for (const id of ids) {
+        if (bytes >= needBytes) return;
+        const dir = svc.paths.project(id);
+        const w = await walkDir(dir, dir);
+        for (const r of planSweep({ projects: [{ id, files: w.files, partial: w.partial }], tmp: [], db, now, cache: { idleMs: RECLAIM_IDLE_MS } })) {
+          if (!opts.dryRun && !(await applyRemoval(svc, r, log))) continue;
+          removals.push(r);
+          bytes += r.bytes;
+        }
+      }
+    },
+  });
+  const enough = bytes >= needBytes;
+  log.info({ needBytes, bytes, files: removals.length, enough, dryRun: !!opts.dryRun }, enough ? "reclaimed scratch for a job short of disk" : "could not reclaim enough scratch");
+  return { removals, bytes, enough };
 }
 
 /** Delete one clip render (mp4 or jpg) from scratch, given its store key. The store copy is separate. */

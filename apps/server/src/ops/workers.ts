@@ -4,11 +4,11 @@
  * actually run work, not only the process that served the page.
  */
 import os from "node:os";
-import { eq, lt, and, ne, inArray } from "drizzle-orm";
+import { eq, gt, lt, and, ne, inArray } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
-import { QUEUES } from "../queue/boss.js";
-import { inflightJobs } from "../queue/inflight.js";
+import type { QueueName } from "../queue/boss.js";
+import { inflightJobs, listeningQueues } from "../queue/inflight.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
 
@@ -124,6 +124,29 @@ export async function listWorkers(svc: Services): Promise<{ items: WorkerView[];
   return { items, live: items.filter((w) => w.live).length, stale: items.filter((w) => !w.live).length };
 }
 
+/**
+ * Pure: another live process that listens on `queue` and reported at least `requiredMB` free (an
+ * unmeasurable disk, -1, counts as room: it never refuses work). Null when nobody does.
+ */
+export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number }>, now: Date, selfId: string, queue: QueueName, requiredMB: number, staleMs = WORKER_STALE_MS): { workerId: string } | null {
+  for (const r of rows) {
+    if (r.id === selfId || now.getTime() - r.lastSeenAt.getTime() > staleMs) continue;
+    if (!r.queues?.includes(queue)) continue;
+    if (r.diskFreeMB >= 0 && r.diskFreeMB < requiredMB) continue;
+    return { workerId: r.id };
+  }
+  return null;
+}
+
+/** Is there another worker this job could run on with `requiredMB` free? Read from the last heartbeats. */
+export async function workerWithRoom(svc: Services, queue: QueueName, requiredMB: number): Promise<{ workerId: string } | null> {
+  const rows = await svc.database.db
+    .select({ id: schema.workerInstances.id, lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, diskFreeMB: schema.workerInstances.diskFreeMB })
+    .from(schema.workerInstances)
+    .where(gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)));
+  return pickWorkerWithRoom(rows, new Date(), workerIdOf(svc.config), queue, requiredMB);
+}
+
 export async function beat(svc: Services): Promise<void> {
   const id = workerIdOf(svc.config);
   const hostname = os.hostname();
@@ -134,7 +157,8 @@ export async function beat(svc: Services): Promise<void> {
   const startedAt = new Date(now.getTime() - process.uptime() * 1000);
   const gpuJson: WorkerGpu | null = gpu ? { vendor: gpu.vendor, devices: gpu.devices, note: gpu.note } : null;
   const renders: WorkerRenders = { running: r.running, limit: r.limit, max: svc.resources.maxRenders(), mode: r.mode };
-  const queues = svc.config.RUN_WORKERS ? Object.values(QUEUES) : [];
+  // what this process takes right now: everything, or without the disk queues while the gate holds them (queue/disk-gate.ts)
+  const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
   await svc.database.db
     .insert(schema.workerInstances)
     .values({

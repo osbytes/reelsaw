@@ -98,6 +98,9 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         if (Date.now() - lastSweep < 60 * 60_000) return;
         lastSweep = Date.now();
         await sweepScratch(svc, { budgeted: true });
+        // the speech-to-text cache used to be pruned at boot only, which a long-running worker never reaches
+        const asrDays = svc.config.ASR_CACHE_DAYS;
+        if (asrDays > 0) await svc.asr.prune(asrDays).then((n) => n && svc.log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
         await purgeBumperAssets(svc);
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
         await flagAccounts(svc); // abuse flags for the Users page (abuse.ts)

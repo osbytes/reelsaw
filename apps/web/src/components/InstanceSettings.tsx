@@ -61,6 +61,7 @@ export const RETENTION_FIELDS: Field[] = [
   { key: "SOURCE_RETENTION_DAYS", label: "Keep source videos", kind: "int", unit: "days", zero: "forever" },
   { key: "CLIP_RETENTION_DAYS", label: "Keep rendered clips", kind: "int", unit: "days", zero: "forever" },
   { key: "DELETED_RETENTION_DAYS", label: "Keep deleted items restorable", kind: "int", unit: "days", zero: "forever" },
+  { key: "SCRATCH_CACHE_HOURS", label: "Keep worker copies of stored files", kind: "int", unit: "idle hours", zero: "forever" },
   { key: "EVENT_RETENTION_DAYS", label: "Keep project events", kind: "int", unit: "days", zero: "forever" },
   { key: "LLM_USAGE_RETENTION_DAYS", label: "Keep usage rows", kind: "int", unit: "days", zero: "forever" },
   { key: "ADMIN_EVENT_RETENTION_DAYS", label: "Keep the admin log", kind: "int", unit: "days", zero: "forever" },

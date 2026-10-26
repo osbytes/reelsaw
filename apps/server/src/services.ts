@@ -3,6 +3,7 @@ import { otel, type Otel } from "./otel.js";
 import { loadConfig, makePaths, ConfigError, type Config, type Paths } from "./config.js";
 import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
+import { reclaimScratch } from "./storage/sweep.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
@@ -336,6 +337,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, releases, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
   svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
+  // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
+  resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));
   if (config.REELSAW_EE) {
     // dynamic import on purpose: with REELSAW_EE unset the folder (and its licence) never loads
     svc.ee = await step("enterprise edition (billing)", async () => (await import("./ee/index.js")).createEE(svc));
