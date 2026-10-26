@@ -41,7 +41,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
       setOpen((o) => !o);
       setQ("");
     },
-    { enabled: !!session, inFields: true },
+    { enabled: !!session, inFields: true, inDialogs: true },
   );
   useEffect(() => {
     if (!session) return;
