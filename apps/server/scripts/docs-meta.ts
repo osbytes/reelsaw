@@ -129,7 +129,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ALIGNER: ["local", "wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search."],
   ALIGN_MODEL_DIR: ["local", "wav2vec2 model directory."],
   ONNX_EXECUTION_PROVIDER: ["local", "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`."],
-  ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot."],
+  ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot and by the hourly sweep."],
 
   STORAGE_DRIVER: ["storage", "`local` (inside DATA_DIR) or `s3`."],
   STORAGE_LOCAL_DIR: ["storage", "Directory for the local driver. Unset: DATA_DIR/storage."],
@@ -160,12 +160,13 @@ export const DOCS: Record<string, [GroupId, string]> = {
   LLM_USAGE_RETENTION_DAYS: ["limits", "Prune model-call usage rows after N days. 0 = keep."],
   ADMIN_EVENT_RETENTION_DAYS: ["limits", "Prune the admin event log after N days. 0 = keep."],
   DELETED_RETENTION_DAYS: ["limits", "Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever."],
+  SCRATCH_CACHE_HOURS: ["limits", "With `STORAGE_DRIVER=s3`, the copies of sources and rendered clips under `DATA_DIR/projects` are a cache of the bucket: the hourly sweep evicts the ones of finished projects idle this long (a job pulls them back when it needs them), and a job short of disk evicts the least recently used ones first before it gives up. 0 = keep them on the worker. Nothing to evict with the local store (scratch and store are one hardlinked file)."],
   EVENT_REPLAY_LIMIT: ["limits", "Events a project page replays when it connects (progress ticks never replay); older ones load on request."],
 
   MAX_CPU_PERCENT: ["resources", "Heavy steps wait while total CPU time is busier than this (measured, any OS)."],
   MIN_FREE_MEM_MB: ["resources", "Heavy steps wait while free memory is below this."],
-  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. Jobs that also need scratch fail immediately if free space is below this plus that scratch."],
-  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU or memory. Disk shortfalls fail immediately."],
+  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. A job that also needs scratch first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`); still short, it moves to another worker that has the room, or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows \"disk full\"); a single box fails the job instead."],
+  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU or memory. Disk shortfalls do not wait: eviction, hand-off or failure."],
   STALL_MINUTES: ["resources", "A running job with no progress event for this long is reported (log and UI) as stalled."],
   SHUTDOWN_GRACE_SECONDS: ["resources", "On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders."],
 

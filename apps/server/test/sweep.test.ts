@@ -65,6 +65,41 @@ describe("planSweep", () => {
   it("never touches non-clip files of a live project (source, audio, subtitles)", () => {
     assert.deepEqual(plan([{ id: "p1", files: [f("source.mp4"), f("audio.mp3"), f("clips/c1.ass"), f("chunks/0.mp3")] }]), []);
   });
+
+  describe("cache eviction (S3 store)", () => {
+    const IDLE = 24 * 3600_000;
+    const evict = (projects: ScratchProject[], db = view()) => planSweep({ projects, tmp: [], db, now: NOW, cache: { idleMs: IDLE } });
+    it("evicts the source copy and the current render of a finished project once idle long enough", () => {
+      const r = evict([{ id: "p1", files: [f("source.mp4", NOW - IDLE, 900), f("clips/c1.2.mp4", NOW - IDLE, 50), f("clips/c1.2.jpg", NOW - IDLE, 1)] }]);
+      assert.deepEqual(
+        r.map((x) => [x.kind, x.path, x.bytes]),
+        [
+          ["cache-source", "projects/p1/source.mp4", 900],
+          ["cache-clip", "projects/p1/clips/c1.2.mp4", 50],
+          ["cache-clip", "projects/p1/clips/c1.2.jpg", 1],
+        ],
+      );
+      assert.ok(r.every((x) => !x.storageKeys), "the store copy stays");
+    });
+    it("keeps a copy used more recently than the idle time (ensureLocal bumps mtime on a hit)", () => {
+      assert.deepEqual(evict([{ id: "p1", files: [f("source.mp4", NOW - IDLE + 1), f("clips/c1.2.mp4", NOW - IDLE + 1)] }]), []);
+    });
+    it("keeps everything of a busy project", () => {
+      const db = view({ projects: new Map([["p1", { busy: true }]]) });
+      assert.deepEqual(evict([{ id: "p1", files: [f("source.mp4", 0), f("clips/c1.2.mp4", 0)] }], db), []);
+    });
+    it("still removes stale generations (with their store keys) and leaves a newer-than-known one alone", () => {
+      const r = evict([{ id: "p1", files: [f("clips/c1.1.mp4", 0), f("clips/c1.3.mp4", 0)] }]);
+      assert.deepEqual(r.map((x) => [x.kind, x.path]), [["stale-generation", "projects/p1/clips/c1.1.mp4"]]);
+    });
+    it("also takes a crashed download's .part and a CLI pull, nothing else at the root", () => {
+      const r = evict([{ id: "p1", files: [f("source.mp4.part", 0), f("source.cli", 0), f("thumb.jpg", 0), f("audio.mp3", 0)] }]);
+      assert.deepEqual(r.map((x) => x.path), ["projects/p1/source.mp4.part", "projects/p1/source.cli"]);
+    });
+    it("is off without the cache option (local store, or SCRATCH_CACHE_HOURS=0)", () => {
+      assert.deepEqual(plan([{ id: "p1", files: [f("source.mp4", 0), f("clips/c1.2.mp4", 0)] }]), []);
+    });
+  });
   it("removes the app's own scratch older than a day and nothing else in tmp", () => {
     const tmp = [
       { name: "hear-a.mp4", bytes: 5, mtimeMs: NOW - TMP_MAX_AGE_MS - 1 },

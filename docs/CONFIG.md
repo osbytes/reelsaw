@@ -127,7 +127,7 @@ either; `pnpm docs:check` fails when this file is stale.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot. |
+| `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot and by the hourly sweep. |
 | `FACE_MODEL_PATH` | `./models/ultraface-rfb-320.onnx` | UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
 | `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |
 | `VAD` | `true` | Silero voice activity detection for tightening long pauses. false = never trim silence. |
@@ -174,6 +174,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever. Runtime setting: admins can change it under Settings → System without a restart. |
+| `SCRATCH_CACHE_HOURS` | `24` | With `STORAGE_DRIVER=s3`, the copies of sources and rendered clips under `DATA_DIR/projects` are a cache of the bucket: the hourly sweep evicts the ones of finished projects idle this long (a job pulls them back when it needs them), and a job short of disk evicts the least recently used ones first before it gives up. 0 = keep them on the worker. Nothing to evict with the local store (scratch and store are one hardlinked file). Runtime setting: admins can change it under Settings → System without a restart. |
 | `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
@@ -197,8 +198,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. |
 | `MAX_CPU_PERCENT` | `90` | Heavy steps wait while total CPU time is busier than this (measured, any OS). |
 | `MIN_FREE_MEM_MB` | `512` | Heavy steps wait while free memory is below this. |
-| `MIN_FREE_DISK_MB` | `2048` | Floor that must stay free. Jobs that also need scratch fail immediately if free space is below this plus that scratch. |
-| `RESOURCE_WAIT_MAX_SECONDS` | `900` | Longest a step waits for CPU or memory. Disk shortfalls fail immediately. |
+| `MIN_FREE_DISK_MB` | `2048` | Floor that must stay free. A job that also needs scratch first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`); still short, it moves to another worker that has the room, or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows "disk full"); a single box fails the job instead. |
+| `RESOURCE_WAIT_MAX_SECONDS` | `900` | Longest a step waits for CPU or memory. Disk shortfalls do not wait: eviction, hand-off or failure. |
 
 ### Logging, tracing and telemetry
 

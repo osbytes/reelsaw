@@ -28,6 +28,11 @@ function diskLine(w: { diskFreeMB: number; diskTotalMB: number }) {
   return `${gb(w.diskFreeMB)} free`;
 }
 
+/** A worker process that dropped the media queues: short of disk with nothing left to evict (queue/disk-gate.ts). */
+function diskPaused(w: { role: string; live: boolean; queues: string[] }) {
+  return w.live && w.role !== "api" && w.queues.length > 0 && !w.queues.includes("project.ingest");
+}
+
 function gpuLine(w: { gpu: { vendor: string; devices: string[]; note: string } | null }) {
   if (!w.gpu) return "no GPU";
   return w.gpu.devices[0] || w.gpu.vendor;
@@ -87,6 +92,11 @@ export function WorkersSection() {
                       {w.id}
                     </span>
                     <span className="chip shrink-0 bg-sunk text-ink2">{ROLE[w.role] ?? w.role}</span>
+                    {diskPaused(w) ? (
+                      <span className="chip shrink-0 bg-warn-soft text-warn" title="Not taking media jobs: disk is below the floor and nothing more can be evicted. Other workers take them; it resumes once free disk is back.">
+                        disk full
+                      </span>
+                    ) : null}
                     {w.thisProcess ? <span className="shrink-0 text-[11px] text-ink3">this process</span> : null}
                   </div>
                   <div className="mt-1 truncate text-xs text-ink2" title={specs}>

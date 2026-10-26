@@ -175,6 +175,13 @@ export const envSchema = z.object({
   SOURCE_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   CLIP_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   DELETED_RETENTION_DAYS: z.coerce.number().int().min(0).default(7), // deleted projects / replaced clips stay restorable this long, then rows and files go (0 = keep forever)
+  /**
+   * With an S3 store, the local copies of sources and rendered clips under DATA_DIR/projects are a cache of the
+   * bucket: the hourly sweep evicts the ones of finished projects idle this long, and a job short of disk evicts
+   * least-recently-used ones first before it gives up (storage/sweep.ts). 0 = never evict. The local store
+   * hardlinks scratch and store, so there is nothing to evict there.
+   */
+  SCRATCH_CACHE_HOURS: z.coerce.number().int().min(0).default(24),
   // history pruning (0 = keep forever). project_events always keeps each project's run skeleton (created / run.started / done).
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),

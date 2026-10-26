@@ -64,8 +64,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
  *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
  *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status
- *   storage [sweep [--dry-run]]            disk use: unique, scratch-only, duplicate-source, expired-but-present bytes;
- *                                           `sweep` removes leftover files nothing points at (the reconciler's hourly sweep)
+ *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes;
+ *                                           `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep);
+ *                                           `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
  *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
  *   logs    <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]
@@ -148,7 +149,7 @@ import { approveUser, setUserPassword, setUserRole, setUserWatermark } from "./a
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
 import { RUNTIME_KEYS, settingsPatchSchema, SettingsError } from "./instance-settings.js";
 import { sweepRetention } from "./retention.js";
-import { sweepScratch, purgeBumperAssets, readSweepState } from "./storage/sweep.js";
+import { sweepScratch, purgeBumperAssets, readSweepState, reclaimScratch } from "./storage/sweep.js";
 import { storageReport, formatBytes } from "./storage/usage.js";
 import { schema } from "./db/index.js";
 import { planClipCuts } from "./pipeline/render.js";
@@ -914,9 +915,25 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
       return;
     }
+    if (pos[0] === "reclaim") {
+      // what a job short of disk does on its own: evict the least recently used scratch copies until this many MB are freed
+      const mb = Number(pos[1] ?? 0);
+      if (!Number.isFinite(mb) || mb <= 0) throw new Error("usage: reelsaw storage reclaim <MB> [--dry-run]");
+      const dry = args.includes("--dry-run");
+      const r = await reclaimScratch(svc, mb * 1048576, { dryRun: dry });
+      table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "" })));
+      console.log(`${dry ? "would evict" : "evicted"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}${r.enough ? "" : " (not enough: nothing else is evictable)"}`);
+      if (svc.storage.driver !== "s3") console.log("the local store hardlinks scratch and store: nothing to evict (set SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS to free disk)");
+      return;
+    }
     const r = await storageReport(svc);
     console.log(`unique bytes under DATA_DIR (hardlinks counted once)  ${formatBytes(r.uniqueBytes)}`);
     console.log(`scratch-only leftovers (sweep would remove)          ${formatBytes(r.scratchOrphanBytes)} in ${r.scratchOrphanFiles} file(s)`);
+    console.log(
+      r.cacheIdleHours === null
+        ? `scratch copies of stored files                       not evictable (${svc.storage.driver === "s3" ? "SCRATCH_CACHE_HOURS=0" : "local store: scratch and store are one file"})`
+        : `scratch copies of stored files (S3 has them)         ${formatBytes(r.cacheBytes)} in ${r.cacheFiles} file(s); evicted after ${r.cacheIdleHours}h idle (SCRATCH_CACHE_HOURS), sooner when a job is short of disk`,
+    );
     console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
     console.log(`expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`);
     if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");

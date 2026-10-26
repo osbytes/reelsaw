@@ -77,7 +77,7 @@ class LocalStorage implements Storage {
     await linkOrCopy(localPath, dest);
   }
   async ensureLocal(key: string, localPath: string) {
-    if (await fileExists(localPath)) return localPath;
+    if (await fileExists(localPath)) return touched(localPath);
     const src = this.abs(key);
     if (!(await fileExists(src))) throw new Error(`storage object missing: ${key}`);
     await linkOrCopy(src, localPath);
@@ -152,7 +152,7 @@ class S3Storage implements Storage {
   }
 
   async ensureLocal(key: string, localPath: string) {
-    if (await fileExists(localPath)) return localPath;
+    if (await fileExists(localPath)) return touched(localPath);
     const { client, sdk } = await this.s3();
     const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
     if (!res.Body) throw new Error(`storage object missing: ${key}`);
@@ -235,6 +235,13 @@ export function withStorageLogging(inner: Storage, log: Logger): Storage {
     delete: (key) => timed("delete", key, () => inner.delete(key)),
     deletePrefix: (prefix) => timed("deletePrefix", prefix, () => inner.deletePrefix(prefix)),
   };
+}
+
+/** A cache hit bumps the file's mtime so the scratch sweep evicts by last use, not by first pull (storage/sweep.ts). */
+async function touched(file: string) {
+  const now = new Date();
+  await fsp.utimes(file, now, now).catch(() => {});
+  return file;
 }
 
 export function createStorage(config: Config, paths: Paths, log?: Logger): Storage {

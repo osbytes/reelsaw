@@ -144,6 +144,12 @@ Scale workers:
 docker compose --profile workers up -d --scale worker=2
 ```
 
+Each worker keeps its own scratch copies of the sources and renders it works on. With an S3 store
+they are a cache: idle copies of finished projects are evicted after `SCRATCH_CACHE_HOURS` (24), a
+job short of disk evicts the least recently used ones first, and a worker that still cannot make
+room hands the job to a worker that has it and stops taking media jobs until its disk recovers
+(Settings → System → Workers shows "disk full").
+
 Use MinIO for local S3 testing:
 
 ```bash
@@ -310,7 +316,9 @@ them), so a single-user box stays as it is:
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
   projects; rows and history stay, the project page offers "fetch again" and clips re-render.
-  `reelsaw retention` runs a sweep by hand.
+  `reelsaw retention` runs a sweep by hand. With an S3 store, `SCRATCH_CACHE_HOURS` (24) is how long
+  a worker keeps its local copies of stored files once a project is finished and idle; the bucket
+  copy stays and comes back when a job needs it.
 - **History pruning**: `EVENT_RETENTION_DAYS` (90), `LLM_USAGE_RETENTION_DAYS` (180) and
   `ADMIN_EVENT_RETENTION_DAYS` (365) delete old rows in batches once a day (0 keeps everything);
   a project's run skeleton (created, run started, done) is always kept.
@@ -512,7 +520,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
-| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |

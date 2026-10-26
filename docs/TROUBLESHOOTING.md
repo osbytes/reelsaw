@@ -24,7 +24,9 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 |---|---|---|
 | Shot changes missing (layout, snapping, text filter act as if one shot) | `reelsaw scenes <projectId>` | Project analysed before cuts were detected for every project, or dark footage under the old fixed threshold; `--store` the adaptive result |
 | Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes once pg-boss notices the missed heartbeat (heartbeat every 15 s, supervisor pass every 60 s) and the retry delay passes (15 s, doubling per retry): expect a minute or two, not seconds. Each restart burns a retry. |
-| Upload stuck on "Downloading…" then fails after ~15 min | worker log `Not enough disk` / older `Gave up waiting 900s for resources before ingest` | Worker volume smaller than `MIN_FREE_DISK_MB` plus the file (a ~4.6 GB disk cannot hold a 2 GB upload and still keep 2 GB free). Ingest used to wait the full 900 s, then retry, and the UI labelled every ingest "Downloading". |
+| Upload stuck on "Downloading…" then fails after ~15 min | worker log `Not enough disk` / older `Gave up waiting 900s for resources before ingest` | Worker volume smaller than `MIN_FREE_DISK_MB` plus the file (a ~4.6 GB disk cannot hold a 2 GB upload and still keep 2 GB free). Ingest used to wait the full 900 s, then retry, and the UI labelled every ingest "Downloading". With an S3 store the worker first evicts scratch copies the bucket has (`evicted scratch for a job short of disk`), then hands the job to a worker with room (`handing the job to a worker with disk`) before it fails. |
+| Worker volume fills up over weeks with an S3 store | `reelsaw storage` → "scratch copies of stored files"; `du -sh /data/projects` | Every source and render ever processed also sat on the worker as a cache the sweep never evicted. Now `SCRATCH_CACHE_HOURS` (24) evicts the copies of finished projects once idle; `reelsaw storage sweep` does it at once, `reelsaw storage reclaim <MB>` frees a given amount least-recently-used first. |
+| A worker shows "disk full" under Settings → System → Workers and takes no media jobs | worker log `paused disk queues on this worker` | Free disk fell under `MIN_FREE_DISK_MB`, nothing was left to evict (the local store, every copy in use, or the sweep already ran) and another worker had room. That worker takes ingest, transcribe, analyze, prepare and render; this one keeps the refine queues and resumes on its own 1 GB above the floor (`resumed disk queues`). Free space (retention, `reelsaw storage sweep`, a bigger volume) or add a worker. A single box never pauses: its jobs fail fast with `Not enough disk`. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Transcript filled with one looping word or the show's name list ("no no no…", "Chafing Dream Swag Bags…") | `reelsaw status` words around that time; many copies share one timestamp | Whisper decoder loop on a 10-minute chunk (often after a real short repeat, or the vocabulary `prompt` leaking at a chunk cut). Collapse keeps a short run; a repetitive chunk is retried without the prompt. Re-transcribe to recover the missing minutes. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under the run's gate (`candidates` artifact → `settings.gate`: rule, threshold, median, MAD). |
@@ -89,7 +91,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
-| `reelsaw storage [sweep [--dry-run]]` | disk use: unique, scratch-only, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at (the reconciler's hourly sweep) |
+| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
@@ -295,8 +297,26 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   duplicate sources (same YouTube id or URL in several projects) and sources marked expired but still on disk.
   `reelsaw storage sweep [--dry-run]` removes the leftovers: older render generations, files of deleted clips or
   projects, and `tmp/hear-*` older than a day. The reconciler runs the same sweep about hourly; it skips files
-  younger than an hour and any project with a live job or an unfinished status. The same sweep purges library intros/outros deleted over 30 days ago that no `asset_refs` row points at (row, its storage folder `bumpers/<id>/` or `assets/<id>/`, and the local cache; waits until the asset refs backfill has finished).  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
+  younger than an hour and any project with a live job or an unfinished status. The same sweep purges library intros/outros deleted over 30 days ago that no `asset_refs` row points at (row, its storage folder `bumpers/<id>/` or `assets/<id>/`, and the local cache; waits until the asset refs backfill has finished), and prunes the speech-to-text cache (`ASR_CACHE_DAYS`).  The upload object (`uploads/<id>`) is kept after ingest so Retry can restore an expired source; deleting the
   project deletes it.
+- **Scratch is a cache of the S3 store** (`storage/sweep.ts`, `queue/disk-gate.ts`). With `STORAGE_DRIVER=s3` the
+  worker's `projects/<id>/source.*` and `clips/<clip>.<gen>.mp4|jpg` are copies of bucket objects that `ensureLocal`
+  pulls back on demand (a cache hit bumps the file's mtime, so "idle" means unused). The hourly sweep evicts the
+  copies of finished projects with no live job idle longer than `SCRATCH_CACHE_HOURS` (`evicted a scratch copy the
+  store still has`), and `reelsaw storage` lists them as "scratch copies of stored files". A job short of disk
+  (`MIN_FREE_DISK_MB` plus its scratch) does not fail at once any more: the governor asks `reclaimScratch` to evict
+  least-recently-active finished projects (`projects.updated_at` order, 5 minutes idle is enough under pressure) until
+  the job fits, then re-measures. Still short, the stage job looks at the last heartbeats (`worker_instances`): if
+  another live worker listening on that queue reported the room, the job is thrown back for pg-boss to retry there
+  (`stage.failed` says "another worker will pick it up") and this worker pauses its media queues (ingest, transcribe,
+  analyze, prepare, render; `offWork`) so the retry cannot land on it; if nobody has the room the run fails with the
+  reason, as before. Every 30 s the gate re-measures: below the floor plus 1 GB it evicts proactively, so room is made
+  before a job arrives; under the floor with another worker that has room it pauses; back above the floor plus 1 GB it
+  registers the queues again. A worker never pauses when no other worker could take the jobs (a single box, or every
+  worker full): there a job fails fast with the disk message rather than sit on "queued". The heartbeat's `queues`
+  (Workers page, MCP `list_workers`, `reelsaw workers`) shows what a paused worker still takes. With the local store
+  nothing is evictable (scratch and store are one hardlinked file): `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS`
+  are what free disk.
 - **Background work is bounded and resumable.** The hourly sweep reads project directories in name order, 1,000 per
   database lookup, `stat`s 16 files at a time and stops after 60 s (10 s per directory); the rest continues next
   hour from a cursor in `instance_settings` (`sweep_state`; `reelsaw storage` shows it and the last run time). A

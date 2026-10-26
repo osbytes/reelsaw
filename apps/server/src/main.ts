@@ -41,6 +41,7 @@ async function main() {
   let server: ReturnType<typeof serve> | undefined;
   let stopReconciler: (() => void) | undefined;
   let stopHeartbeat: (() => void) | undefined;
+  let stopDiskGate: (() => void) | undefined;
 
   if (config.RUN_HTTP) {
     const app = createApp(svc);
@@ -54,7 +55,8 @@ async function main() {
     svc.updates.start();
   }
   if (config.RUN_WORKERS) {
-    await startWorkers(svc);
+    const { diskGate } = await startWorkers(svc);
+    stopDiskGate = () => diskGate.stop();
     if (svc.ee) await svc.ee.startWorkers();
     stopReconciler = startReconciler(svc);
   }
@@ -72,6 +74,7 @@ async function main() {
     setTimeout(() => process.exit(1), (config.SHUTDOWN_GRACE_SECONDS + 15) * 1000).unref();
     stopReconciler?.();
     stopHeartbeat?.();
+    stopDiskGate?.();
     server?.close();
     await shutdownServices(svc);
     process.exit(0);

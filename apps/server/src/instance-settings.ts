@@ -81,6 +81,7 @@ export const RUNTIME_SETTINGS = {
   SOURCE_RETENTION_DAYS: def("retention", int0, days("Delete stored source videos this many days after upload; the project stays and Retry re-fetches.")),
   CLIP_RETENTION_DAYS: def("retention", int0, days("Delete rendered clip files this many days after rendering; the clip stays and can be re-rendered.")),
   DELETED_RETENTION_DAYS: def("retention", int0, days("Deleted projects and replaced clips stay restorable this long, then rows and files go.")),
+  SCRATCH_CACHE_HOURS: def("retention", int0, "With an S3 store, drop a worker's local copies of the sources and rendered clips of finished projects after this many idle hours; a job pulls them back from the bucket when it needs them, and a worker short of disk drops the least recently used ones first. 0 = keep them on the worker. The local store needs nothing: scratch and store are the same file."),
   EVENT_RETENTION_DAYS: def("retention", int0, days("Prune project events older than this; each project keeps its run skeleton.")),
   LLM_USAGE_RETENTION_DAYS: def("retention", int0, days("Prune model and transcription usage rows older than this.")),
   ADMIN_EVENT_RETENTION_DAYS: def("retention", int0, days("Prune the admin event log after this many days.")),

@@ -1,7 +1,9 @@
 /** Render concurrency follows CPUs and free memory (pure; no stack needed). */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { diskShortReason, nvidiaDeviceNode, renderLimit, RENDER_MEM_MB, requiredDiskMB } from "../src/resources.js";
+import { createResourceGovernor, diskShortReason, nvidiaDeviceNode, renderLimit, RENDER_MEM_MB, requiredDiskMB, ResourceExhaustedError } from "../src/resources.js";
+import type { Config } from "../src/config.js";
+import type { Logger } from "../src/log.js";
 
 const base = { memAvailableMB: 64000, running: 0, minFreeMemMB: 512 };
 describe("renderLimit", () => {
@@ -50,5 +52,48 @@ describe("nvidiaDeviceNode", () => {
   });
   it("returns null when neither device node exists", async () => {
     assert.equal(await nvidiaDeviceNode(async () => false), null);
+  });
+});
+
+describe("acquire on a disk shortfall", () => {
+  // a floor no disk reaches: the governor is short of disk whatever the machine has
+  const config = { RENDER_CONCURRENCY: "auto", MAX_CPU_PERCENT: 100, MIN_FREE_MEM_MB: 0, MIN_FREE_DISK_MB: 1_000_000_000, RESOURCE_WAIT_MAX_SECONDS: 10 } as unknown as Config;
+  const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
+  it("asks the reclaimer once for the shortfall, then fails with what it needed and had", async () => {
+    const gov = createResourceGovernor(config, process.cwd(), log);
+    const asked: number[] = [];
+    gov.setReclaimer(async (needBytes) => {
+      asked.push(needBytes);
+      return { bytes: 0, enough: false };
+    });
+    const waits: string[] = [];
+    await assert.rejects(gov.acquire({ kind: "ingest", needDiskMB: 512, onWait: (r) => waits.push(r) }), (err: unknown) => {
+      assert.ok(err instanceof ResourceExhaustedError);
+      assert.equal(err.requiredMB, 1_000_000_512);
+      assert.ok(err.freeMB >= 0 && err.freeMB < err.requiredMB);
+      assert.match(err.message, /Not enough disk/);
+      return true;
+    });
+    assert.equal(asked.length, 1, "eviction runs once per acquire");
+    assert.ok(asked[0]! > 0 && asked[0]! <= 1_000_000_512 * 1048576);
+    assert.ok(waits.some((w) => w.startsWith("Freeing disk")), "the job's progress says what is happening");
+  });
+  it("fails at once without a reclaimer (nothing to evict)", async () => {
+    const gov = createResourceGovernor(config, process.cwd(), log);
+    await assert.rejects(gov.acquire({ kind: "render", needDiskMB: 1 }), ResourceExhaustedError);
+  });
+  it("reclaimTo asks for the gap to the target and reports free disk after", async () => {
+    const gov = createResourceGovernor(config, process.cwd(), log);
+    const asked: number[] = [];
+    gov.setReclaimer(async (needBytes) => {
+      asked.push(needBytes);
+      return { bytes: 0, enough: false };
+    });
+    const free = await gov.reclaimTo(1_000_000_000);
+    assert.ok(free >= 0);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0], (1_000_000_000 - free) * 1048576);
+    assert.equal(await gov.reclaimTo(0), free, "already above the target: no eviction");
+    assert.equal(asked.length, 1);
   });
 });

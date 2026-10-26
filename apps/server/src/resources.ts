@@ -96,10 +96,18 @@ export interface ResourceGovernor {
   /**
    * Resolve once CPU, memory and disk are under their thresholds (plus `needDiskMB` headroom).
    * Calls `onWait` when it has to wait so the job can report progress. Throws after the max wait
-   * so pg-boss can retry with backoff instead of holding the slot forever. Disk shortfalls throw
-   * immediately (`ResourceExhaustedError`): waiting does not free space.
+   * so pg-boss can retry with backoff instead of holding the slot forever. A disk shortfall asks
+   * the reclaimer (scratch cache eviction) once, then throws `ResourceExhaustedError` if still
+   * short: waiting does not free space.
    */
   acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<void>;
+  /**
+   * How a disk shortfall is answered: free at least `needBytes` of scratch (storage/sweep.ts
+   * `reclaimScratch`). Set once the store and database are up; absent, a shortfall fails at once.
+   */
+  setReclaimer(fn: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null): void;
+  /** Evict scratch until `diskFreeMB` is at least `targetMB` (the floor plus headroom), or nothing is left to evict. Resolves to the free MB after. */
+  reclaimTo(targetMB: number): Promise<number>;
   /** ffmpeg encode `-threads` value: the CPUs shared by the renders running right now. Filtergraph threads are always 1 (see `ffmpegThreadArgs`). */
   ffmpegThreads(): number;
   /**
@@ -130,10 +138,20 @@ export const CPUS_PER_RENDER = 2;
 export const RENDER_MEM_MB = 1200;
 const MAX_AUTO_RENDERS = 8;
 
-/** Disk (and only disk) will not improve by waiting; jobs should fail the run instead of retrying for 15 minutes. */
+/**
+ * Disk (and only disk) will not improve by waiting, and eviction could not make room: the job should fail
+ * the run on this worker (or move to a worker that has `requiredMB` free, queue/workers.ts) instead of
+ * retrying here for 15 minutes.
+ */
 export class ResourceExhaustedError extends Error {
   readonly code = "resource_exhausted" as const;
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** free MB this worker needs for the job (MIN_FREE_DISK_MB plus its scratch) */
+    readonly requiredMB: number,
+    /** free MB it has, after eviction */
+    readonly freeMB: number,
+  ) {
     super(message);
     this.name = "ResourceExhaustedError";
   }
@@ -171,6 +189,30 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
   let prevTimesAt = Date.now();
   let cpuPercent = 0;
   let gpu: GpuInfo | null = null;
+  let reclaimer: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null = null;
+  /** one eviction at a time: concurrent jobs short of disk share the run instead of walking the same directories */
+  let reclaiming: Promise<number> | null = null;
+
+  /** Ask the reclaimer for `needMB` more, then resample. Resolves to the free MB afterwards (-1 when unmeasurable). */
+  function reclaim(needMB: number): Promise<number> {
+    if (reclaiming) return reclaiming;
+    reclaiming = (async () => {
+      try {
+        if (reclaimer) {
+          const r = await reclaimer(needMB * 1048576);
+          log.info({ needMB, freedMB: Math.round(r.bytes / 1048576), enough: r.enough }, "evicted scratch for a job short of disk");
+        }
+      } catch (err) {
+        log.warn({ err, needMB }, "scratch eviction failed");
+      } finally {
+        lastAt = 0; // the next sample reads the disk again
+      }
+      return (await sample()).diskFreeMB;
+    })().finally(() => {
+      reclaiming = null;
+    });
+    return reclaiming;
+  }
 
   async function measureCpu() {
     // need a few hundred ms between readings for a meaningful ratio
@@ -227,9 +269,20 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
     snapshot: sample,
     gpu: () => gpu,
 
+    setReclaimer(fn) {
+      reclaimer = fn;
+    },
+
+    async reclaimTo(targetMB) {
+      const free = (await sample()).diskFreeMB;
+      if (free < 0 || free >= targetMB) return free;
+      return reclaim(targetMB - free);
+    },
+
     async acquire({ kind, needDiskMB = 0, signal, onWait }) {
       const started = Date.now();
       let waited = false;
+      let reclaimed = false;
       let lastReason = "";
       for (;;) {
         if (signal?.aborted) throw new Error("job aborted while waiting for resources");
@@ -237,6 +290,7 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         const reasons: string[] = [];
         if (!s.ok.cpu) reasons.push(`CPU ${s.cpuPercent}% busy on ${s.cpus} cpus`);
         if (!s.ok.memory) reasons.push(`${s.memAvailableMB} MB memory free`);
+        const required = requiredDiskMB(config.MIN_FREE_DISK_MB, needDiskMB);
         const disk = diskShortReason(s.diskFreeMB, config.MIN_FREE_DISK_MB, needDiskMB);
         if (disk) reasons.push(disk);
         if (!reasons.length) {
@@ -246,8 +300,16 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         const reason = reasons.join("; ");
         // disk never frees itself by waiting — including the extra scratch on top of MIN_FREE_DISK_MB.
         // waiting 900s then retrying looked like a "Downloading…" loop on a full worker volume.
+        // What can free it is evicting scratch copies the store still has: once, then give up here.
         if (disk) {
-          throw new ResourceExhaustedError(`Not enough disk in ${dataDir}: ${reason}. Free space or raise the volume size.`);
+          if (!reclaimed && reclaimer) {
+            reclaimed = true;
+            log.warn({ kind, reason }, "short of disk, evicting scratch");
+            onWait?.(`Freeing disk: ${reason}`);
+            await reclaim(required - s.diskFreeMB);
+            continue;
+          }
+          throw new ResourceExhaustedError(`Not enough disk in ${dataDir}: ${reason}. Free space or raise the volume size.`, required, s.diskFreeMB);
         }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000) {
           throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for resources before ${kind}: ${reason}`);
