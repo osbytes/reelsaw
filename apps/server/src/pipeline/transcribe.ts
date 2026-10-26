@@ -30,8 +30,8 @@ export async function transcribe(ctx: StageContext) {
   }
 
   await ctx.start("transcribing");
-  const sourcePath = await ctx.ensureSource(project);
   await ctx.acquire("transcribe", 512);
+  const sourcePath = await ctx.ensureSource(project); // leases the pull itself when the copy is missing
 
   const audioPath = path.join(dir, "audio.mp3");
   if (!(await exists(audioPath))) {

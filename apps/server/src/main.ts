@@ -40,7 +40,7 @@ async function main() {
 
   let server: ReturnType<typeof serve> | undefined;
   let stopReconciler: (() => void) | undefined;
-  let stopHeartbeat: (() => void) | undefined;
+  let stopHeartbeat: (() => Promise<void>) | undefined;
   let stopDiskGate: (() => void) | undefined;
 
   if (config.RUN_HTTP) {
@@ -73,10 +73,11 @@ async function main() {
     log.info({ graceSeconds: config.SHUTDOWN_GRACE_SECONDS }, "waiting for running jobs to finish");
     setTimeout(() => process.exit(1), (config.SHUTDOWN_GRACE_SECONDS + 15) * 1000).unref();
     stopReconciler?.();
-    stopHeartbeat?.();
     stopDiskGate?.();
     server?.close();
-    await shutdownServices(svc);
+    // the heartbeat (and the disk leases it vouches for) stays until the jobs have finished: a job still writing
+    // during the grace keeps its claim, so another process on the volume cannot start on the same bytes
+    await shutdownServices(svc, { afterQueueStop: () => stopHeartbeat?.() ?? Promise.resolve() });
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));

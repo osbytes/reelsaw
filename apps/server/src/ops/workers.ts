@@ -9,7 +9,7 @@ import { schema } from "../db/index.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
 import type { QueueName } from "../queue/boss.js";
 import { inflightJobs, listeningQueues } from "../queue/inflight.js";
-import { releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
+import { LEASE_STALE_MS, releaseWorkerLeases, volumeLeases } from "../disk-leases.js";
 import type { Services } from "../services.js";
 import type { Config } from "../config.js";
 
@@ -171,7 +171,7 @@ export async function beat(svc: Services): Promise<void> {
   const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
   // disk promised to jobs in flight on this volume, by every process on it: what a hand-off subtracts from "free"
   const lease = svc.resources.leases();
-  const diskLeasedMB = lease.volume ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: WORKER_STALE_MS, now })).mb : lease.ownMB;
+  const diskLeasedMB = lease.volume ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb : lease.ownMB;
   const row = {
     role: processRole(svc.config),
     hostname,
@@ -202,19 +202,24 @@ export async function beat(svc: Services): Promise<void> {
 
 export async function forget(svc: Services): Promise<void> {
   const id = workerIdOf(svc.config);
-  await releaseWorkerLeases(svc, id); // whatever its jobs still held: they are being stopped with it
+  await releaseWorkerLeases(svc, id); // its jobs have stopped (main.ts calls this after the queue stop): nothing of theirs is still writing
   await svc.database.db.delete(schema.workerInstances).where(eq(schema.workerInstances.id, id));
 }
 
-/** Repeat the beat every 15 s. The stop function deletes this process's row. Callers await `beat` once at boot so the first HTTP request already sees this process. */
-export function startHeartbeat(svc: Services): () => void {
+/**
+ * Repeat the beat every 15 s. The stop function deletes this process's row and its disk leases: call it only
+ * once the queue has stopped (running jobs finished or the grace ran out), so a job still writing during the
+ * shutdown grace keeps its claim and other processes on the volume do not take its bytes. Callers await `beat`
+ * once at boot so the first HTTP request already sees this process.
+ */
+export function startHeartbeat(svc: Services): () => Promise<void> {
   const log = svc.log.child({ module: "ops" });
   const tick = () =>
     beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
   const t = setInterval(tick, WORKER_HEARTBEAT_MS);
   t.unref();
-  return () => {
+  return async () => {
     clearInterval(t);
-    void forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
+    await forget(svc).catch((err) => log.warn({ err }, "worker heartbeat forget failed"));
   };
 }

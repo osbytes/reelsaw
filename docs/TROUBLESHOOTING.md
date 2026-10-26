@@ -325,10 +325,14 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   (`disk_leases`): the second job sees the first job's claim and waits for it (progress: "Waiting for resources:
   5000 MB free but 2048 MB leased to 1 job in flight, needs 4096 MB"), evicting idle cache copies once first; it
   gives up after `RESOURCE_WAIT_MAX_SECONDS` like a CPU or memory wait, and pg-boss retries. The stage releases
-  the lease when it ends (ingest as soon as the source is on disk, where `statfs` counts it). A lease counts
-  while its worker heartbeats and until it expires after the longest a stage job may run (3 h), so a crash leaks
-  nothing for long; a stopping process drops its leases with its heartbeat row and the hourly sweep deletes dead
-  rows. A volume is the filesystem `DATA_DIR` is on: every process mounting it (the app and the worker replicas
+  the lease when it ends (ingest as soon as the source is on disk, where `statfs` counts it); a transcribe,
+  analyze, refine or render that has to pull the source from the S3 store leases that pull the same way (the
+  local store hardlinks and writes nothing). A lease counts while its worker has heartbeated within 10 minutes
+  (longer than the 45 s hand-off staleness: a database hiccup must not let others over-commit the disk) and until
+  it expires after the longest a stage job may run (3 h), so a crash leaks nothing for long; a process drops its
+  own leases at boot (a restarted container keeps its id) and at shutdown once its jobs have stopped (not before:
+  a job still writing during the grace keeps its claim), and the hourly sweep deletes dead rows. A volume is the
+  filesystem `DATA_DIR` is on: every process mounting it (the app and the worker replicas
   of one host sharing the compose `data` volume) reads the same id from the `DATA_DIR/.volume-id` marker, written
   once at first boot; a worker on another host has its own volume and never contends. The heartbeat carries the
   volume's leased total (`diskLeasedMB`; Workers page "(2.0 GB leased)", `reelsaw workers`, `list_workers`), and a

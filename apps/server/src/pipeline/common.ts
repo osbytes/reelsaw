@@ -40,6 +40,15 @@ export async function lockCurrentStage(db: Db, projectId: string, seq: number | 
   return !!r;
 }
 
+/**
+ * Scratch a source of `knownBytes` needs on disk, with headroom for the container's own files (MB); a source of
+ * unknown size (a link not probed yet) is budgeted at 2 GB. What ingest and a pull from the store lease.
+ */
+export function sourceScratchMB(knownBytes?: number | null): number {
+  if (knownBytes && knownBytes > 0) return Math.max(128, Math.ceil(knownBytes / 1048576) + 128);
+  return 2048;
+}
+
 /** Shared helpers for pipeline stages; thin wrappers over the injected services. */
 export class StageContext {
   constructor(
@@ -85,20 +94,23 @@ export class StageContext {
   }
 
   private leases: DiskLease[] = [];
-  /**
-   * Wait for CPU, memory and disk, and lease the `needDiskMB` of scratch this stage is about to write
-   * (resources.ts): the claim keeps a second job from starting on the same free bytes. Held until `release()`,
-   * which the job wrapper calls when the stage ends; a stage may call it sooner, once its bytes are on disk.
-   */
-  async acquire(kind: string, needDiskMB: number, extra: Record<string, unknown> = {}): Promise<void> {
-    const lease = await this.svc.resources.acquire({
+  private lease(kind: string, needDiskMB: number, extra: Record<string, unknown>): Promise<DiskLease> {
+    return this.svc.resources.acquire({
       kind,
       needDiskMB,
       signal: this.signal,
       onWait: (r) => void this.progress(0, `Waiting for resources: ${r}`, extra).catch(() => {}),
       ids: { jobId: this.ids.jobId === undefined ? undefined : String(this.ids.jobId), projectId: this.projectId },
     });
-    this.leases.push(lease);
+  }
+
+  /**
+   * Wait for CPU, memory and disk, and lease the `needDiskMB` of scratch this stage is about to write
+   * (resources.ts): the claim keeps a second job from starting on the same free bytes. Held until `release()`,
+   * which the job wrapper calls when the stage ends; a stage may call it sooner, once its bytes are on disk.
+   */
+  async acquire(kind: string, needDiskMB: number, extra: Record<string, unknown> = {}): Promise<void> {
+    this.leases.push(await this.lease(kind, needDiskMB, extra));
   }
 
   /** Give back the disk leased by `acquire` (idempotent; a lease never outlives the job either way). */
@@ -106,10 +118,22 @@ export class StageContext {
     for (const lease of this.leases.splice(0)) await lease.release();
   }
 
-  /** Local scratch path for the source video, pulled from storage if missing on this node. */
+  /**
+   * Local scratch path for the source video, pulled from storage if missing on this node. With an S3 store
+   * that pull is the biggest write a transcribe or render makes (the whole source), so it is leased like an
+   * ingest's download and given back once the bytes are on disk; the local store hardlinks and writes nothing.
+   */
   async ensureSource(project: Project): Promise<string> {
     if (!project.sourceKey) throw new Error("Project has no source; ingest must run first");
     const local = path.join(await this.dir(), path.posix.basename(project.sourceKey));
+    if (this.svc.storage.driver === "s3" && !(await exists(local))) {
+      const lease = await this.lease(`${this.stage}.source`, sourceScratchMB(project.sourceBytes), {});
+      try {
+        return await this.svc.storage.ensureLocal(project.sourceKey, local);
+      } finally {
+        await lease.release();
+      }
+    }
     return this.svc.storage.ensureLocal(project.sourceKey, local);
   }
 

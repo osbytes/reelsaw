@@ -7,13 +7,12 @@ import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
-import { StageContext, exists } from "./common.js";
+import { StageContext, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
 
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
-  if (knownBytes && knownBytes > 0) return Math.max(128, Math.ceil(knownBytes / 1048576) + 128);
-  return 2048;
+  return sourceScratchMB(knownBytes);
 }
 
 export async function ingest(ctx: StageContext) {
