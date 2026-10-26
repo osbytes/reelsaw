@@ -6,9 +6,7 @@ export const GUIDES: Guide[] = [
     slug: "free-ai-clip-generator-no-watermark",
     metaTitle: "Free AI clip generator with no watermark (self-hosted)",
     metaDescription:
-      "Most free AI clip generators watermark your clips until you pay. Reelsaw is open-source software you can run yourself, so clips are free and never watermarked (its hosted Free plan watermarks like everyone else's). How each tool handles watermarks, checked " +
-      CHECKED +
-      ".",
+      "Most free AI clippers watermark clips until you pay. Self-hosted Reelsaw is open source, so clips are free and never watermarked. How the tools compare.",
     h1: "A free AI clip generator with no watermark, and why that is rare",
     intro: [
       "Every hosted clipping service pays for GPUs, storage and bandwidth on your behalf, so its free tier has to push you toward a plan. The watermark is how: it makes the free clips unusable in public while still showing you the product works.",
@@ -72,9 +70,9 @@ export const GUIDES: Guide[] = [
   },
   {
     slug: "open-source-video-clipper",
-    metaTitle: "Open-source AI video clippers: what the licence actually gets you",
+    metaTitle: "Open-source AI video clippers: what the licence gets you",
     metaDescription:
-      "Comparing open-source AI video clippers (Reelsaw, AGPL-3.0, TypeScript; OpenShorts, MIT, Python): what to check in the licence, the local-only path, the agent surface and the pipeline before you commit.",
+      "Open-source AI video clippers compared (Reelsaw, AGPL-3.0; OpenShorts, MIT): the licence, the local-only path, the agent surface and the pipeline.",
     h1: "Open-source video clippers: what 'open source' actually gets you",
     intro: [
       "'Open source' on a clipping tool can mean anything from a fully local pipeline to a thin client that still calls one vendor's API. The question that matters is whether you can run every step on your own hardware, with the models you choose. Reelsaw was built to answer yes to both; OpenShorts, the other open-source clipper with traction, can pick moments locally, but Gemini is still required for layout picking and silent videos.",
@@ -137,7 +135,7 @@ export const GUIDES: Guide[] = [
     slug: "youtube-to-shorts-converter",
     metaTitle: "YouTube to Shorts converter you run on your own machine",
     metaDescription:
-      "Paste a YouTube link, get vertical Shorts with word-highlight captions, a hook and a YouTube Data API upload body, all rendered on your own hardware with open-source software. No credits, no watermark when you self-host.",
+      "Paste a YouTube link, get vertical Shorts with word-highlight captions and a hook, rendered on your own hardware. Open source, no credits, no watermark.",
     h1: "YouTube to Shorts converter you can run on your own machine",
     intro: [
       "A YouTube link is the most common input to a clipping tool, and the first thing hosted services charge for is the minutes in it. Reelsaw takes the same link and does the whole job on your hardware: fetch, transcribe, pick moments, reframe to 9:16, caption, and hand back clips with upload metadata.",
@@ -186,9 +184,9 @@ export const GUIDES: Guide[] = [
   },
   {
     slug: "podcast-to-shorts",
-    metaTitle: "Podcast to shorts: two-speaker reframing, filler cuts, no meter",
+    metaTitle: "Podcast to shorts: speaker reframing, filler cuts, no meter",
     metaDescription:
-      "Turn two-hour podcast episodes into vertical clips with split-screen reframing that follows the active speaker, filler and false-start cuts you can review, and no per-minute price. Open source, self-hosted.",
+      "Turn long podcast episodes into vertical clips that follow the active speaker, with filler cuts you can review and no per-minute price. Open source.",
     h1: "Podcast to shorts without paying by the minute",
     intro: [
       "Podcasts are the worst case for per-minute pricing: long episodes, two or three faces, and a lot of 'um' between the good parts. Reelsaw was built around that shape: it chunks long transcripts without losing the middle, stacks speakers when it cannot pick one, and cuts fillers with cuts it has checked.",

@@ -11,7 +11,7 @@ import { socialMeta } from "@/lib/social-meta";
 export const revalidate = 3600;
 
 const title = "Releases";
-const description = "Every published Reelsaw version, with a 90-day map of commits. Days we tagged a release light up.";
+const description = "Every published Reelsaw version with its change notes, newest first, and a 90-day map of commits to the open-source repo. Days we tagged a release light up.";
 
 export const metadata: Metadata = {
   title,

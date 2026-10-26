@@ -3,7 +3,7 @@ import { PRIVACY } from "@/content/legal";
 import { LegalPage } from "@/components/legal";
 
 const title = "Privacy policy";
-const description = "What the hosted Reelsaw service collects (account, videos, transcripts, billing status, usage), who processes it (model providers, Stripe, object storage), how long it is kept, and your rights.";
+const description = "What hosted Reelsaw collects (account, videos, transcripts, billing, usage), who processes it (model providers, Stripe, storage), retention, your rights.";
 export const metadata: Metadata = { title, description, alternates: { canonical: "/privacy" }, openGraph: { title, description, url: "/privacy" }, twitter: { title, description } };
 
 export default function PrivacyPage() {

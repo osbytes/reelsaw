@@ -6,6 +6,17 @@
     <title>Reelsaw</title>
     <meta name="application-name" content="Reelsaw" />
     <meta name="description" content="Turn long videos into vertical 9:16 clips. Reelsaw transcribes, picks the moments, reframes speakers and burns in captions." />
+    <!-- The app is sign-in screens and private workspaces, on app.reelsaw.com and every self-hosted install alike.
+         Search should send people to reelsaw.com; robots.txt allows crawling so this tag is seen. -->
+    <meta name="robots" content="noindex" />
+    <!-- Link previews when someone pastes an app link into chat. No og:image or og:url: the host is not known at build time. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Reelsaw" />
+    <meta property="og:title" content="Reelsaw" />
+    <meta property="og:description" content="Turn long videos into vertical 9:16 clips. Reelsaw transcribes, picks the moments, reframes speakers and burns in captions." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Reelsaw" />
+    <meta name="twitter:description" content="Turn long videos into vertical 9:16 clips. Reelsaw transcribes, picks the moments, reframes speakers and burns in captions." />
     <!-- Same mark as website/app/icon.svg. Google Search ignores SVG and needs a square PNG larger than 48px (the 180 apple-touch icon); /favicon.ico is the crawler default. -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
     <link rel="icon" href="/apple-touch-icon.png" type="image/png" sizes="180x180" />

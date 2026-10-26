@@ -115,34 +115,37 @@ function SectionHeading({ eyebrow, title, body, id }: { eyebrow: string; title: 
 }
 
 function JsonLd() {
+  // The application sits under the source code (targetProduct), not at the top level. Google treats a
+  // top-level SoftwareApplication as a rich result candidate, and that requires aggregateRating or
+  // review, which an open-source project has no honest source for.
   const data = {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "SoftwareApplication",
-        name: SITE.name,
-        url: SITE.url,
-        description: SITE.description,
-        applicationCategory: "MultimediaApplication",
-        applicationSubCategory: "Video editing",
-        operatingSystem: "Docker (Linux, macOS, Windows)",
-        softwareHelp: `${SITE.github}#readme`,
-        downloadUrl: SITE.releases,
-        installUrl: `${SITE.url}/#install`,
-        license: "https://www.gnu.org/licenses/agpl-3.0.html",
-        isAccessibleForFree: true,
-        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        screenshot: `${SITE.url}/workspace.png`,
-        featureList: FEATURES.map((f) => f.title),
-        sameAs: [SITE.github, SITE.glama],
-      },
-      {
         "@type": "SoftwareSourceCode",
         name: SITE.name,
+        url: SITE.url,
         codeRepository: SITE.github,
         programmingLanguage: "TypeScript",
         runtimePlatform: "Node.js",
         license: "https://www.gnu.org/licenses/agpl-3.0.html",
+        sameAs: [SITE.github, SITE.glama],
+        targetProduct: {
+          "@type": "SoftwareApplication",
+          name: SITE.name,
+          url: SITE.url,
+          description: SITE.description,
+          applicationCategory: "MultimediaApplication",
+          applicationSubCategory: "Video editing",
+          operatingSystem: "Docker (Linux, macOS, Windows)",
+          softwareHelp: { "@type": "CreativeWork", name: "Reelsaw README", url: `${SITE.github}#readme` },
+          downloadUrl: SITE.releases,
+          installUrl: `${SITE.url}/#install`,
+          isAccessibleForFree: true,
+          offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+          screenshot: `${SITE.url}/workspace.png`,
+          featureList: FEATURES.map((f) => f.title),
+        },
       },
       {
         "@type": "WebSite",
