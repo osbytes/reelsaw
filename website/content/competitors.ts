@@ -18,9 +18,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Free, open-source Opus Clip alternative you self-host",
     metaDescription:
-      "Reelsaw vs Opus Clip: a self-hosted, AGPL-3.0 AI clipper with no watermark and no credits, compared feature by feature with Opus Clip's Free, Starter ($15/mo) and Pro ($29/mo) plans. Pricing checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs Opus Clip: a self-hosted, open-source AI clipper with no watermark and no credits, compared with Opus Clip's Free, $15 and $29 plans.",
     h1: "The open-source Opus Clip alternative you run yourself",
     intro: [
       "Opus Clip is the best-known AI clipping service: paste a link, get vertical clips with captions and B-roll, and pay by plan. Reelsaw does the clipping part of that job as software you install, so the questions are what you give up, what you gain, and what each actually costs.",
@@ -90,9 +88,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Open-source Klap alternative with no clip quota",
     metaDescription:
-      "Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14/mo billed yearly; Reelsaw is AGPL-3.0 software you self-host with no quota and no watermark. Feature-by-feature comparison, pricing checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs Klap: Klap sells 100 to 1,000 clips a month from $14/mo; Reelsaw is open source you self-host, with no quota and no watermark.",
     h1: "Klap alternative: unlimited clips on your own machine",
     intro: [
       "Klap prices by clips per month and bundles publishing to TikTok, Instagram and LinkedIn. Reelsaw is open-source software that turns long videos into vertical clips on hardware you control, and leaves publishing to you; a hosted plan meters source minutes, never clips.",
@@ -146,9 +142,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Open-source Vizard AI alternative, no credits, no watermark",
     metaDescription:
-      "Reelsaw vs Vizard AI: Vizard's free plan gives 60 upload minutes a month at 720p with 3-day storage; Creator is $29/mo or $14.50/mo billed yearly. Reelsaw is self-hosted AGPL-3.0 software with no credits and no watermark. Compared feature by feature, checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs Vizard AI: Vizard's free plan is 60 minutes a month at 720p, Creator $29/mo. Reelsaw is self-hosted open source, no credits, no watermark.",
     h1: "Vizard AI alternative without the credit meter",
     intro: [
       "Vizard is a hosted AI clipper with a free tier, scheduled posting and 4K export on paid plans. Reelsaw is the self-hosted route: the same transcribe, pick, reframe, caption pipeline, but as software you own and run.",
@@ -202,9 +196,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Open-source Submagic alternative for long-form clipping",
     metaDescription:
-      "Reelsaw vs Submagic: Submagic is a captions-first editor priced per video (from $19/mo, 2-minute videos on Starter); Reelsaw is self-hosted AGPL-3.0 software that clips hour-long sources with no quota. Compared, pricing checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs Submagic: a captions-first editor priced per video (from $19/mo) against self-hosted open source that clips hour-long sources with no quota.",
     h1: "Submagic alternative that starts from the long video",
     intro: [
       "Submagic is a captioning and polishing tool: you bring a short video and it adds captions, zooms, B-roll and sound. Clipping long sources into shorts (its Magic Clips) is a $19/mo add-on for 10 uploads, not a headline feature of Starter, Pro or Business.",
@@ -261,9 +253,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Open-source 2short.ai alternative with no monthly hours",
     metaDescription:
-      "Reelsaw vs 2short.ai: 2short meters AI analysis by hours per month (free 30 min, Lite $9.90, Pro $19.90, Premium $49.90); Reelsaw is self-hosted AGPL-3.0 software with no cap and no watermark. Checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs 2short.ai: 2short meters hours of analysis a month (free 30 min, paid from $9.90); Reelsaw is self-hosted open source, no cap, no watermark.",
     h1: "2short.ai alternative with no hours-per-month meter",
     intro: [
       "2short.ai is one of the cheaper hosted clippers: it meters the minutes of video it analyses and charges by the hour bucket. Reelsaw removes the meter by running on your hardware, so the comparison is mostly about convenience versus control.",
@@ -316,9 +306,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Open-source quso.ai (vidyo.ai) alternative with no credits",
     metaDescription:
-      "Reelsaw vs quso.ai (formerly vidyo.ai): quso meters credits (75 free a month, paid from $29/mo for 100); Reelsaw is self-hosted AGPL-3.0 software with no credits and no watermark. Feature comparison, pricing checked " +
-      CHECKED +
-      ".",
+      "Reelsaw vs quso.ai (formerly vidyo.ai): quso meters credits (75 free a month, from $29/mo); Reelsaw is self-hosted open source, no credits, no watermark.",
     h1: "quso.ai alternative with no credits to count",
     intro: [
       "quso.ai, formerly vidyo.ai, bundles clipping with a content planner, scheduling to seven platforms and an AI assistant, all metered in credits where one credit is roughly one processed minute. Reelsaw is a narrower, self-hosted tool: it clips, and it does not meter.",
@@ -371,7 +359,7 @@ export const COMPETITORS: Competitor[] = [
     checked: CHECKED,
     metaTitle: "Reelsaw vs OpenShorts: fully local, any AI provider",
     metaDescription:
-      "Both are open-source AI clippers with MCP servers. Reelsaw runs fully local with no API keys and lets you pick any provider for each model; OpenShorts still needs Gemini for layout picking and silent videos. Selection, filler cuts, editor and teams compared.",
+      "Both are open-source AI clippers with MCP. Reelsaw runs fully local with no API keys or any provider; OpenShorts needs Gemini for layouts and silent videos.",
     h1: "Reelsaw vs OpenShorts: fully local, and any model you want",
     intro: [
       "Reelsaw exists for two reasons: the whole pipeline should run on your own hardware with no API key, and every model in it should be swappable for any vendor. OpenShorts is the other open-source clipper, and it gets most of the way there: MIT core, Docker Compose, an MCP server, and a local or OpenAI-compatible option for moment picking. Gemini is still required for layout picking and for silent videos, so a key and a Google account stay in the loop for those steps.",
@@ -435,7 +423,7 @@ export const COMPETITORS: Competitor[] = [
     sources: [
       { href: "https://github.com/mutonby/openshorts", label: "OpenShorts README, checked " + CHECKED + " (Gemini requirement, providers, hardware, hosted pricing)" },
       { href: "https://www.openshorts.app/#/pricing", label: "OpenShorts hosted pricing, checked " + CHECKED },
-      { href: "https://reelsaw.com/pricing", label: "Reelsaw hosted pricing" },
+      { href: "/pricing", label: "Reelsaw hosted pricing" },
       { href: "https://github.com/osbytes/reelsaw#readme", label: "Reelsaw README and source" },
     ],
   },

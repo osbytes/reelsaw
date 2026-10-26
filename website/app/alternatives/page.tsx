@@ -11,7 +11,7 @@ import { socialMeta } from "@/lib/social-meta";
 
 const title = "Reelsaw vs Opus Clip, Klap, Vizard, Submagic and more";
 const description =
-  "Honest comparisons of Reelsaw, the open-source self-hosted AI clipper, with Opus Clip, Klap, Vizard, Submagic, 2short.ai, quso.ai and OpenShorts: prices, free tiers, watermarks and features, checked " + CHECKED + ".";
+  "Reelsaw, the open-source AI clipper, compared with Opus Clip, Klap, Vizard, Submagic, 2short.ai, quso.ai and OpenShorts: prices, free tiers and watermarks.";
 
 export const metadata: Metadata = {
   title,

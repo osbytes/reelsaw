@@ -1,0 +1,4 @@
+# Crawling is allowed so crawlers can read the noindex tag in index.html. Disallowing here would
+# hide that tag, and linked app URLs could still be listed without a description.
+User-agent: *
+Allow: /

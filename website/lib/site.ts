@@ -7,7 +7,7 @@ export const SITE = {
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "https://reelsaw.com").replace(/\/+$/, ""),
   title: "Reelsaw: AI video clipper you self-host or run hosted",
   description:
-    "Turn long videos into vertical 9:16 clips. Self-host with no meter, or use app.reelsaw.com (Free, then $12 / $29 / $59 a month). Open source (AGPL-3.0), fully local with no API keys or any AI provider, MCP on every plan.",
+    "Turn long videos into vertical 9:16 clips. Open source (AGPL-3.0): self-host with no meter and no API keys, or use app.reelsaw.com from $0. MCP included.",
   /** the hosted service (docs/specs/ee.md) */
   app: (process.env.NEXT_PUBLIC_HOSTED_URL ?? "https://app.reelsaw.com").replace(/\/+$/, ""),
   github: "https://github.com/osbytes/reelsaw",

@@ -7,7 +7,7 @@ import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
 
 const title = "Pricing: self-host for free, or let us host it";
-const description = "Reelsaw is AGPL-3.0 software you can run yourself for $0. The hosted service at app.reelsaw.com has a Free plan (first video up to 60 minutes, then 20 minutes a month), Starter at $12, Creator at $29 and Pro at $59 a month, metered in minutes of source video.";
+const description = "Self-host Reelsaw for $0, or use app.reelsaw.com: a Free plan, then Starter $12, Creator $29 and Pro $59 a month, metered in minutes of source video.";
 
 export const metadata: Metadata = {
   title,
