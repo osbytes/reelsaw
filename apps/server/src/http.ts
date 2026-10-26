@@ -49,6 +49,18 @@ const clientLogSchema = z.object({
 
 class UploadTooLarge extends Error {}
 
+/**
+ * Headers set after the handler ran. A Response.redirect() (or one passed through from fetch) has
+ * immutable headers: such a response goes out without these rather than failing.
+ */
+function afterHeaders(c: Context<AppEnv>, headers: Record<string, string>) {
+  try {
+    for (const [k, v] of Object.entries(headers)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+  } catch {
+    // immutable headers
+  }
+}
+
 export function createApp(svc: Services) {
   const { config, auth, storage, paths } = svc;
   const db = svc.database.db;
@@ -63,7 +75,7 @@ export function createApp(svc: Services) {
   if (webBuild) {
     app.use("/api/*", async (c, next) => {
       await next();
-      c.header("X-Reelsaw-Build", webBuild);
+      afterHeaders(c, { "X-Reelsaw-Build": webBuild });
     });
   }
   // an exception in a handler: the access line above logs it with `err`; the client gets the request id to quote
@@ -74,10 +86,17 @@ export function createApp(svc: Services) {
     if (who) c.set("userId", who.user.id);
     return who;
   };
+  // No page of this app is meant to be framed (the OAuth consent screen least of all), no response
+  // is meant to be sniffed into another type, and links out don't need the full URL.
+  app.use(async (c, next) => {
+    await next();
+    afterHeaders(c, { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "X-Frame-Options": "DENY" });
+  });
   app.use(
     "/api/*",
     cors({
-      origin: [config.APP_URL, "http://localhost:5173"],
+      // the Vite dev server only outside production: any local process on :5173 could otherwise call in with the user's cookie
+      origin: config.NODE_ENV === "production" ? [config.APP_URL] : [config.APP_URL, "http://localhost:5173"],
       credentials: true,
       allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version", "traceparent", "tracestate", "baggage", "last-event-id"],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -469,6 +488,7 @@ export function createApp(svc: Services) {
     });
     const shell = (c: Context<AppEnv>) => {
       c.header("Cache-Control", "no-cache");
+      c.header("Content-Security-Policy", "frame-ancestors 'none'");
       return c.html(index);
     };
     // before serveStatic, which would send the raw dist/index.html (no build id, no OTEL config) for these
