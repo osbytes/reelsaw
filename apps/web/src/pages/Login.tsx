@@ -73,6 +73,8 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
   const captcha = status.data?.captcha ?? null;
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const onToken = useCallback((t: string | null) => setCaptchaToken(t), []);
+  // a captcha token is single-use: after a failed attempt the widget must be solved again, so it remounts
+  const [captchaAttempt, setCaptchaAttempt] = useState(0);
   // arriving from an OAuth authorize redirect (MCP connector): after sign-in, hand the signed query back
   const oauthQuery = /(^|&)client_id=/.test(window.location.search.slice(1)) && /(^|&)sig=/.test(window.location.search.slice(1)) ? window.location.search.slice(1) : null;
   const canResend = status.data?.emailEnabled !== false && shouldOfferResendVerification({ errorCode, expiredLink, afterSignUp });
@@ -112,6 +114,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     if (res.error) {
       setBusy(false);
       setCaptchaToken(null);
+      setCaptchaAttempt((n) => n + 1);
       setErrorCode(res.error.code ?? null);
       return setError(res.error.message ?? "Something went wrong");
     }
@@ -122,6 +125,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
       const text = signupCreatedNotice(signupMode);
       setBusy(false);
       setCaptchaToken(null);
+      setCaptchaAttempt((n) => n + 1);
       setNotice(text);
       setAfterSignUp(true);
       setMode("login");
@@ -193,7 +197,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
           </p>
         )}
         {oauthQuery && <p className="text-xs leading-relaxed text-ink2">An application is asking to use Reelsaw on your behalf. Sign in to continue; you can review what it gets on the next screen.</p>}
-        {!expiredLink && captcha && <Captcha provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
+        {!expiredLink && captcha && <Captcha key={captchaAttempt} provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
         {(error || notice) && (
           <p className={`rounded-[10px] px-3 py-2 text-sm leading-relaxed text-ink ${error ? "bg-err-soft" : "bg-warn-soft"}`}>{error ?? notice}</p>
         )}

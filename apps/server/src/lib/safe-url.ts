@@ -34,7 +34,8 @@ export function isPrivateAddress(ip: string): boolean {
   const l = ip.toLowerCase();
   const mapped = /^(?:::ffff:|::)(\d+\.\d+\.\d+\.\d+)$/.exec(l); // IPv4-mapped / compatible
   if (mapped) return ipv4Blocked(mapped[1]!);
-  const hexMapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(l);
+  // WHATWG URL writes [::ffff:169.254.169.254] as [::ffff:a9fe:a9fe]; the deprecated compatible form too
+  const hexMapped = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(l);
   if (hexMapped) {
     const hi = parseInt(hexMapped[1]!, 16);
     const lo = parseInt(hexMapped[2]!, 16);

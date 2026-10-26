@@ -14,7 +14,7 @@ import { useTRPC } from "../lib/trpc";
 import { Modal, Select, Skeleton, SkeletonRegion, type SelectOption } from "./ui";
 import { ScrollArea } from "./scroll-area";
 
-/** The user's layer templates (live ones in `data.templates`, removed ones in `data.deleted`). */
+/** The user's layer templates (live ones in `data.templates`, deleted ones in `data.deleted`). */
 export function useLayerTemplates() {
   const trpc = useTRPC();
   return useQuery(trpc.layerTemplates.list.queryOptions());
@@ -26,15 +26,15 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**
  * Choose a layer template in a form. `value` "" is the lead option's value (default "None"); pass `lead` to replace
- * it. While the list loads the trigger keeps its size and is disabled; a chosen template that was removed since
- * stays visible as "Removed template".
+ * it. While the list loads the trigger keeps its size and is disabled; a chosen template that was deleted since
+ * stays visible as "Deleted template".
  */
 export function TemplateSelect({ value, onChange, lead, ariaLabel = "Layer template", className, size, manage = true, disabled }: { value: string; onChange: (id: string) => void; lead?: SelectOption[]; ariaLabel?: string; className?: string; size?: "sm" | "md"; manage?: boolean; disabled?: boolean }) {
   const list = useLayerTemplates();
   const live = list.data?.templates ?? [];
   const options: SelectOption[] = [...(lead ?? [{ value: "", label: "None" }]), ...live.map((t) => ({ value: t.id, label: t.name, hint: plural(t.layerCount, "layer") }))];
   const missing = value !== "" && !!list.data && !options.some((o) => o.value === value);
-  if (missing) options.push({ value, label: "Removed template", disabled: true });
+  if (missing) options.push({ value, label: "Deleted template", disabled: true });
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Select ariaLabel={ariaLabel} value={list.isPending ? "" : value} onValueChange={onChange} options={options} placeholder={list.isPending ? "Loading…" : live.length ? "Choose a template" : "No templates yet"} size={size} className={className} disabled={disabled || list.isPending} />
@@ -291,7 +291,7 @@ export function applyTemplateLocally(template: Template, mode: ApplyMode, layers
   }
   const added = resolved.layers.slice(0, room);
   const noRoom = resolved.skipped.length + (resolved.layers.length - added.length);
-  toast(`Applied ${template.name} · ${plural(added.length, "layer")}${noRoom ? ` (${noRoom} had no room on this clip)` : ""}`, { description: "Save the clip to render them." });
+  toast(`Applied “${template.name}” · ${plural(added.length, "layer")}${noRoom ? ` (${noRoom} had no room on this clip)` : ""}`, { description: "Save the clip to render them." });
   return { next: mode === "add" ? [...layers, ...added] : added, added, noRoom };
 }
 
@@ -307,7 +307,7 @@ export function SaveAsTemplateDialog({ open, onOpenChange, layers, range, defaul
     ...trpc.layerTemplates.create.mutationOptions(),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
-      toast(`Saved as a template · ${r.name}`, { description: "Fix its timings on the Templates page." });
+      toast(`Saved “${r.name}” as a template`, { description: "Fix its timings on the Templates page." });
       onOpenChange(false);
     },
     onError: (e) => toast.error(e.message),

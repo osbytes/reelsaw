@@ -48,7 +48,7 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
     c.set("log", httpLog.child({ requestId }));
     c.header(REQUEST_ID_HEADER, requestId);
     await next();
-    const path = c.req.path;
+    const path = redactPath(c.req.path);
     const status = c.res.status;
     const ms = Math.round(performance.now() - t0);
     const level = accessLevel(c.req.method, path, status, ms);
@@ -57,6 +57,11 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
     if (c.error) httpLog.error({ ...entry, err: c.error }, "request failed");
     else httpLog[level](entry, status >= 500 ? "request failed" : level === "warn" && status < 400 ? "slow request" : "request");
   };
+}
+
+/** Reset and verification links carry their token in the path; the access log keeps the route, not the secret. */
+export function redactPath(p: string): string {
+  return p.replace(/(\/(?:reset-password|verify-email)\/)[^/]+/g, "$1…");
 }
 
 /** tRPC error code -> level: our bugs at error, forbidden/limits at warn, ordinary client mistakes at debug. */

@@ -110,7 +110,7 @@ mode per layer, never the default.
 | list / get | Templates page | `layerTemplates.list` / `get` | `list_layer_templates` | `reelsaw templates list` / `show <id>` |
 | create (from layers or a clip) | editor "Save as template…", page "New template" | `create` / `fromClip` | `save_layer_template { name, clipId \| layers }` | `templates save <projectId> <clipId> <name…>` |
 | edit | template editor | `update` | `update_layer_template` | `templates rename <id> <name…>` / `templates set <id> --layers '<json>'` |
-| remove / restore / purge | page (toast: Undo / Delete forever / See deletions); restore and delete forever on Deleted (compact bar, Delete forever in ⋯) | `remove` / `restore` / `purge`; bulk `deleted.restore` / `deleted.purge` | `remove_layer_template` / `restore_layer_template` / `purge_layer_template` | `templates remove <id>` / `restore <id>` / `purge <id>` |
+| delete / restore / purge | page (toast: Undo / Delete forever / See deletions); restore and delete forever on Deleted (compact bar, Delete forever in ⋯) | `delete` / `restore` / `purge`; bulk `deleted.restore` / `deleted.purge` | `delete_layer_template` / `restore_layer_template` / `purge_layer_template` | `templates delete <id>` / `restore <id>` / `purge <id>` |
 | apply to clips | editor, selection bar | `applyToClips` | `apply_layer_template { templateId, projectId, clipIds?, mode, rerender }` | `templates apply <templateId> <projectId> [clipId…] [--add] [--rerender]` |
 | default for new clips | Settings, project settings | `me.updateProjectDefaults`, `projects.update { settings.layerTemplateId }` | `update_project { settings: { layerTemplateId } }` | `update-project` |
 

@@ -7,12 +7,13 @@ import { toast } from "sonner";
 import { DELETED_PATH, layerTemplateNameSchema, type TemplateLayer } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 import { useHashParams } from "../lib/hash";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 
-/** One row of the list (live or removed), as `layerTemplates.list` returns it. */
+/** One row of the list (live or deleted), as `layerTemplates.list` returns it. */
 interface TemplateRow {
   id: string;
   name: string;
@@ -28,7 +29,7 @@ const GRID = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-c
 
 /**
  * Layer templates (docs/specs/layer-templates.md): sets of layers that fit any clip length. New template opens the
- * template editor; rows offer Edit / Rename / Duplicate / Remove; removed ones are restorable from Deleted.
+ * template editor; rows offer Edit / Rename / Duplicate / Delete; deleted ones are restorable from Deleted.
  * Deep link: `#template=<id>` highlights a row.
  */
 export function TemplatesPage() {
@@ -41,7 +42,8 @@ export function TemplatesPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
   const create = useMutation(trpc.layerTemplates.create.mutationOptions());
   const update = useMutation(trpc.layerTemplates.update.mutationOptions({ onSuccess: () => invalidate() }));
-  const remove = useMutation(trpc.layerTemplates.remove.mutationOptions({ onSuccess: () => invalidate() }));
+  const remove = useMutation(trpc.layerTemplates.delete.mutationOptions({ onSuccess: () => invalidate() }));
+  const restoreWindow = useRestoreWindow("template");
   const notifyDeleted = useDeletedToast();
   const [renaming, setRenaming] = useState<TemplateRow | null>(null);
   const [draft, setDraft] = useState("");
@@ -132,8 +134,8 @@ export function TemplatesPage() {
                 <DropdownMenu.Item className="menu-item" disabled={create.isPending} onSelect={() => duplicate(t)}>
                   Duplicate
                 </DropdownMenu.Item>
-                <DropdownMenu.Item className="menu-item text-err" onSelect={() => setConfirm(t)}>
-                  Remove…
+                <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm(t)}>
+                  Delete…
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -201,11 +203,11 @@ export function TemplatesPage() {
 
         {deleted.length > 0 && (
           <p className="text-xs text-ink3">
-            {plural(deleted.length, "removed template")} restorable from{" "}
+            {plural(deleted.length, "deleted template")} restorable from{" "}
             <Link to={DELETED_PATH} className="text-acc-text no-underline hover:underline">
               Deleted
-            </Link>{" "}
-            for 30 days.
+            </Link>
+            {restoreWindow.restorable ? ` ${restoreWindow.restorable}` : ""}.
           </p>
         )}
       </main>
@@ -232,9 +234,9 @@ export function TemplatesPage() {
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title="Remove this template?"
-        body={<>“{confirm?.name}” is removed from your templates and from your project defaults. Clips that already have its layers keep them. You can restore it from Deleted for 30 days.</>}
-        confirm="Remove"
+        title="Delete this template?"
+        body={<>“{confirm?.name}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them. {restoreWindow.hint()}</>}
+        confirm="Delete"
         danger
         onConfirm={() => {
           const t = confirm;
@@ -244,7 +246,7 @@ export function TemplatesPage() {
             {
               onSuccess: (r) => {
                 if (r.clearedDefault) toast(`“${t.name}” is no longer the default for new projects`);
-                notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: "for 30 days" });
+                notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: restoreWindow.restorable });
               },
               onError: (err) => toast.error(err.message),
             },

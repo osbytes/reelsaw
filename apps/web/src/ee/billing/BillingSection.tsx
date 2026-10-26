@@ -54,7 +54,7 @@ export default function BillingSection() {
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
     const p = q.data.plans.find((x) => x.name === wanted);
     if (!p || !p.price) return;
-    if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already.`);
+    if (q.data.plan.name === wanted) return void toast(`You are on ${p.label} already`);
     setInterval_(wantedInterval);
     toast(`Taking you to Stripe for ${p.label}…`);
     checkout.mutate({ plan: wanted, interval: wantedInterval });
@@ -67,9 +67,9 @@ export default function BillingSection() {
   const polled = useRef(0);
   useEffect(() => {
     if (!outcome) return;
-    if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment.");
-    else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment.");
-    else if (outcome === "canceled") toast("Checkout canceled; nothing changed.");
+    if (outcome === "success") toast("Thanks! Your plan updates as soon as Stripe confirms the payment");
+    else if (outcome === "changed") toast("Plan change confirmed; it shows here in a moment");
+    else if (outcome === "canceled") toast("Checkout canceled; nothing changed");
     const planBefore = q.data?.plan.name;
     const t = window.setInterval(() => {
       polled.current += 1;
@@ -158,7 +158,7 @@ export default function BillingSection() {
                 {bar(d.usage.MAX_STORAGE_MB, storageCap)}
                 <span className="text-xs tabular-nums text-ink3">{storageCap ? `${gb(d.usage.MAX_STORAGE_MB)} of ${gb(storageCap)}` : `${gb(d.usage.MAX_STORAGE_MB)}, no cap`}</span>
                 <span className="text-xs text-ink3">
-                  Removed projects still count until you{" "}
+                  Deleted projects still count until you{" "}
                   <Link to={deletedProjectsPath()} className="text-acc-text no-underline hover:underline">
                     delete them forever
                   </Link>

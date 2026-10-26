@@ -62,7 +62,7 @@ export function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: "ban" | "remove"; row: Row } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "ban" | "delete"; row: Row } | null>(null);
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
   const q = useDebounced(search.trim(), 200);
@@ -82,7 +82,7 @@ export function AdminUsersPage() {
   const setRole = useMutation({ ...trpc.admin.users.setRole.mutationOptions(), onSuccess: done("Role changed"), onError: fail });
   const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
   const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
-  const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account removed"), onError: fail });
+  const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account deleted"), onError: fail });
   const busy = approve.isPending || setRole.isPending || ban.isPending || unban.isPending || remove.isPending;
   const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
   const total = list.data?.pages[0]?.total ?? 0;
@@ -137,7 +137,7 @@ export function AdminUsersPage() {
 
         <div className="min-h-10 text-[13px]">
           {list.error && <span className="text-err">✕ {list.error.message}</span>}
-          {list.data && !list.isPlaceholderData && rows.length === 0 && <span className="text-ink3">No accounts match.</span>}
+          {list.data && !list.isPlaceholderData && rows.length === 0 && <span className="text-ink3">{q ? `No accounts match “${q}”` : "No accounts match"}</span>}
           {(rows.length > 0 || list.isPending) && (
             <div className="rounded-[16px] border border-line bg-panel">
               <table className="w-full table-fixed border-separate border-spacing-0">
@@ -273,8 +273,8 @@ export function AdminUsersPage() {
                                     {r.role === "admin" ? "Make user" : "Make admin"}
                                     {self && <span className="menu-hint">not your own</span>}
                                   </DropdownMenu.Item>
-                                  <DropdownMenu.Item className="menu-item text-err" disabled={busy || self} onSelect={() => setConfirm({ kind: "remove", row: r })}>
-                                    Remove account…
+                                  <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
+                                    Delete account…
                                     {self && <span className="menu-hint">not your own</span>}
                                   </DropdownMenu.Item>
                                 </DropdownMenu.Content>
@@ -302,11 +302,11 @@ export function AdminUsersPage() {
 
         {limitsFor && <LimitsDialog row={limitsFor} onClose={() => setLimitsFor(null)} />}
         <ConfirmDialog
-          open={confirm?.kind === "remove"}
+          open={confirm?.kind === "delete"}
           onOpenChange={(o) => !o && setConfirm(null)}
-          title={`Remove ${confirm?.row.email ?? "this account"}?`}
-          body={<>Their {confirm?.row.projects ?? 0} project{confirm?.row.projects === 1 ? "" : "s"}, clips and files are deleted. This cannot be undone.</>}
-          confirm="Remove account"
+          title={`Delete ${confirm?.row.email ?? "this account"} forever?`}
+          body={<>Their {confirm?.row.projects ?? 0} project{confirm?.row.projects === 1 ? "" : "s"}, clips and files are deleted permanently. This cannot be undone.</>}
+          confirm="Delete account forever"
           danger
           onConfirm={() => {
             if (confirm) remove.mutate({ id: confirm.row.id });

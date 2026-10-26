@@ -12,7 +12,7 @@ import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
 
-const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library", template: "Template" };
+const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
 const GRID = "grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-x-3 sm:grid-cols-[2rem_5.5rem_minmax(0,1fr)_minmax(14rem,1.4fr)_2rem]";
 /**
  * Hidden until that row is hovered (or a coarse pointer, or keyboard focus). The full class
@@ -34,9 +34,9 @@ const firstError = (results: Array<{ ok: boolean; error?: string }>) => {
  * "in 3 days" reads faster than a date. The date itself is the row's tooltip (`foreverDate`).
  */
 function foreverLabel(purgeAt: string | null) {
-  if (!purgeAt) return "Kept until you delete it forever";
+  if (!purgeAt) return "kept until you delete it forever";
   const days = Math.ceil((new Date(purgeAt).getTime() - Date.now()) / 86_400_000);
-  if (days <= 0) return "Deleted forever within the hour";
+  if (days <= 0) return "deleted forever within the hour";
   return days === 1 ? "deleted forever within a day" : `deleted forever in ${days} days`;
 }
 
@@ -223,8 +223,8 @@ export function DeletedPage() {
                           <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => onRestore([r])}>
                             Restore
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item className="menu-item text-err" disabled={!r.canPurge || busy} title={heldWhy} onSelect={() => r.canPurge && setPending([r])}>
-                            Delete forever
+                          <DropdownMenu.Item className="menu-item-danger" disabled={!r.canPurge || busy} title={heldWhy} onSelect={() => r.canPurge && setPending([r])}>
+                            Delete forever…
                           </DropdownMenu.Item>
                         </DropdownMenu.Content>
                       </DropdownMenu.Portal>
@@ -250,12 +250,12 @@ export function DeletedPage() {
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
                       <DropdownMenu.Item
-                        className="menu-item text-err"
+                        className="menu-item-danger"
                         disabled={busy || held.length === selected.length}
                         title={held.length === selected.length ? "None of the selected items can be deleted forever yet" : held.length ? `${plural(held.length, "item")} still in use will be skipped` : undefined}
                         onSelect={() => setPending(selected.filter((r) => r.canPurge))}
                       >
-                        Delete forever
+                        Delete forever…
                       </DropdownMenu.Item>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
@@ -306,7 +306,7 @@ export function DeletedPage() {
                 setPending(null);
                 setSel([]);
                 refresh();
-                toast(r.failed ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}` : r.storedBytes ? `Deleted forever. ${formatBytes(r.storedBytes)} is free now.` : rows.length === 1 ? `Deleted “${rows[0]!.title}” forever` : `Deleted ${rows.length} items forever`);
+                toast(r.failed ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}` : r.storedBytes ? `Deleted forever · ${formatBytes(r.storedBytes)} freed` : rows.length === 1 ? `Deleted “${rows[0]!.title}” forever` : `Deleted ${rows.length} items forever`);
               },
               onError: (err) => toast.error(err.message),
             },

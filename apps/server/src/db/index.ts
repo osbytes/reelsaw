@@ -20,6 +20,9 @@ export interface Database {
   close(): Promise<void>;
 }
 
+/** pg_advisory_lock key for migrations (any constant no other lock uses). */
+const MIGRATE_LOCK = 727_011;
+
 export function createDatabase(connectionString: string, log: Logger): Database {
   const pool = new pg.Pool({ connectionString, max: 10 });
   pool.on("error", (err) => log.error({ err }, "pg pool error"));
@@ -41,7 +44,15 @@ export function createDatabase(connectionString: string, log: Logger): Database 
       const here = path.dirname(fileURLToPath(import.meta.url));
       const folder = ["../drizzle", "../../drizzle"].map((p) => path.resolve(here, p)).find((p) => existsSync(path.join(p, "meta/_journal.json")));
       if (!folder) throw new Error(`migrations folder not found near ${here}`);
-      await migrate(db, { migrationsFolder: folder });
+      // app and every scaled worker boot at once after a pull; one migrates, the rest wait and find nothing to do
+      const client = await pool.connect();
+      try {
+        await client.query("select pg_advisory_lock($1)", [MIGRATE_LOCK]);
+        await migrate(drizzle(client, { schema }), { migrationsFolder: folder });
+      } finally {
+        await client.query("select pg_advisory_unlock($1)", [MIGRATE_LOCK]).catch(() => {});
+        client.release();
+      }
     },
     close: () => pool.end(),
   };

@@ -18,7 +18,7 @@ import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } f
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun } from "../pipeline/lifecycle.js";
+import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
@@ -590,16 +590,16 @@ const libraryRouter = router({
           cursor: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(60).default(24),
           license: z.enum(["cc0", "by"]).optional(),
-          /** library only: the items removed in the last 30 days (restorable with `restore`) instead of the live ones */
-          removed: z.boolean().optional(),
+          /** library only: your deleted items (restorable with `restore`) instead of the live ones */
+          deleted: z.boolean().optional(),
         }),
       )
       .query(async ({ ctx, input }) => {
-        const { source, removed: _removed, ...rest } = input;
+        const { source, deleted: _deleted, ...rest } = input;
         if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
         const q = input.q.trim().toLowerCase();
         const lib = await listLibrary(ctx.svc, ctx.user.id);
-        const hits = (input.removed ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
+        const hits = (input.deleted ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
         const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
         const page = hits.slice(from, from + input.limit);
         return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
@@ -614,7 +614,7 @@ const libraryRouter = router({
       });
     }),
     /** Soft delete one of your uploads: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
-    remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         const gone = await u.db
           .update(schema.assets)
@@ -1124,18 +1124,24 @@ const restRouter = router({
           // transcript first, then the project row (vocabulary, startRun)
           const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
           if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+          // a refine already running restarts; anything else running (renders, picking) would have its status
+          // overwritten and never finalize, so wait for it
+          if (!["done", "failed", "refining"].includes(p.status)) throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
           if (input.vocabulary !== undefined) {
             const vocabulary = input.vocabulary || undefined;
             projectSettingsSchema.parse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
             const settings = vocabulary ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb` : sql`${schema.projects.settings} - 'vocabulary'`;
             await u.db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
           }
-          for (const s of steps) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+          // a step of the refine being restarted that is still running is superseded too, so it runs again with the rest
+          const rerun = [...new Set([...steps, ...REFINE_STEPS.filter((s) => cur.refine[s] !== "done" && cur.refine[s] !== "failed")])];
+          for (const s of rerun) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+          await supersedeStages(u, p.id);
           await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
           const refine = { ...cur.refine };
           for (const s of steps) delete refine[s];
           await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
-          await enqueueRefine(svc, p.id, steps, u);
+          await enqueueRefine(svc, p.id, rerun, u);
         });
         return { ok: true, steps };
       }),
@@ -1608,7 +1614,7 @@ const layerTemplatesRouter = router({
   get: protectedProcedure.input(z.object({ id: templateIdSchema })).query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
   create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
   update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
-  remove: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  delete: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   /** Hard-delete a removed template (no media files). */
   purge: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => purgeLayerTemplate(ctx.svc, ctx.user.id, input.id)),

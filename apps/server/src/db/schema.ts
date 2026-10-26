@@ -431,6 +431,11 @@ export const projects = pgTable(
     runSeq: integer("run_seq").notNull().default(0),
     runStartedAt: timestamp("run_started_at", { withTimezone: true }),
     runReason: text("run_reason").$type<RunReason>(),
+    /**
+     * Version of the project's stage work (ingest → analyze), like clips.render_gen: bumped when a retry, re-analyze,
+     * refine or delete supersedes it. Stage jobs carry it and commit only while it is current (see pipeline/common.ts).
+     */
+    stageSeq: integer("stage_seq").notNull().default(0),
     /** when the stage now running began; stage.completed / stage.failed durations come from it */
     stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),

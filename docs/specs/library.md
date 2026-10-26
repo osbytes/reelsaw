@@ -207,7 +207,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 | resolve ids (own, shared, removed-in-use) | `library.get { ids }` | `get_clip` / `get_project` already resolve names | |
 | search library, catalog, providers | `library.search { q, source?: "library" \| "catalog" \| <providerId>, kind?, cursor?, limit?, license? }`, `library.providers` | `search_assets` | `reelsaw library search <q> [--source] [--kind] [--license]` |
 | add (upload, URL, catalog / provider hit) | `library.add { uploadId \| url \| provider + externalId, name?, tags?, imageSeconds?, setDefault?, color? }` (exactly one source) | `add_asset` | `reelsaw library add <file\|url\|provider:externalId>` |
-| rename, tag, remove, restore, purge, usage | `library.update / remove / restore / purge / usage` | `update_asset`, `remove_asset`, `restore_asset`, `purge_asset`, `asset_usage` | `reelsaw library rename\|update\|remove\|restore\|purge\|usage` |
+| rename, tag, delete, restore, purge, usage | `library.update / delete / restore / purge / usage` | `update_asset`, `delete_asset`, `restore_asset`, `purge_asset`, `asset_usage` | `reelsaw library rename\|update\|delete\|restore\|purge\|usage` |
 | restorable deletes (projects, clips, library, templates) | `deleted.list` (Deleted page, one selectable list); bulk `deleted.restore` / `deleted.purge` | `list_deleted` (restore/purge loop the per-kind tools) | `reelsaw deleted [email]` (no email: projects across the install; with email: that account, same as the page) |
 | default intro / outro | `library.setDefault` | `set_default_bumper` | `reelsaw library default <intro\|outro> <id\|none>` |
 | rebuild the refs table | none (reconciler backfill, bounded ticks) | none | `reelsaw library reindex` |

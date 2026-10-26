@@ -52,7 +52,11 @@ export function useProjectEvents(id: string, h: Handlers) {
     ready.current = false;
     replays.current = 0;
     pending.current = new Set();
-    return () => window.clearTimeout(timer.current);
+    return () => {
+      window.clearTimeout(timer.current);
+      // schedule() arms a flush only while this is undefined; a cleared id left here stopped every refresh on the next project
+      timer.current = undefined;
+    };
   }, [id]);
 
   return useSubscription(

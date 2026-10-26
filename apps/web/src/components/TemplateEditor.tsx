@@ -34,7 +34,7 @@ import { useTRPC } from "../lib/trpc";
 import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
 import { useShortcut, useShortcuts, useSheetKey, MOD } from "../lib/shortcuts";
-import { useUnsavedFlag } from "../lib/unsaved";
+import { useLeaveGuard, useUnsavedFlag } from "../lib/unsaved";
 import { loadTextFonts } from "../lib/fonts";
 import { ScrollArea } from "./scroll-area";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, type Framing, type PreviewAssetOverlay } from "./VerticalPreview";
@@ -322,7 +322,7 @@ function TimingRow({ layer: l, window: w, len, onTiming }: { layer: TemplateLaye
  * fields of its kind (the clip editor's LayerCard), and the Timing row in place of from / to seconds.
  */
 function TemplateLayerCard({ layer: l, window: w, len, asset, selected, loading, onSelect, onPatch, onRemove }: { layer: TemplateLayer; window: [number, number] | null; len: number; asset: LibraryAsset | undefined; selected: boolean; loading: boolean; onSelect: () => void; onPatch: (patch: TemplatePatch, key?: string) => void; onRemove: () => void }) {
-  const removed = loading ? "…" : "Removed from the library";
+  const removed = loading ? "…" : "Deleted from the library";
   const kindLabel = l.kind === "text" ? "text" : l.kind === "audio" ? (isSoundEffect(asset) ? "Sound effect" : "Music") : (asset?.kind ?? "image");
   const sizeIdx = l.kind === "text" ? TEXT_SIZES.findIndex((sz) => Math.abs(sz.v - (l.size ?? TEXT_OVERLAY_DEFAULTS.size)) < 0.004) : -1;
   const pct = (v: number) => Math.round(v * 100);
@@ -502,7 +502,6 @@ export function TemplateEditor({ template, onExit }: Props) {
   const [safe, setSafe] = useState(true);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
-  const [guard, setGuard] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
   const clock = useMemo(() => createClock(0), []);
@@ -605,7 +604,7 @@ export function TemplateEditor({ template, onExit }: Props) {
         )}
         <OverlayMenuSeparator />
         <OverlayMenuItem icon={<Copy className="h-3.5 w-3.5" />} label="Duplicate" onSelect={() => duplicateLayer(l.id)} />
-        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="⌫" onSelect={() => removeLayer(l.id)} />
+        <OverlayMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Remove" kbd="Delete" onSelect={() => removeLayer(l.id)} />
       </>
     );
   };
@@ -654,7 +653,7 @@ export function TemplateEditor({ template, onExit }: Props) {
       resolved.layers.map((l) => {
         if (l.kind === "text") return { id: l.id, start: l.start, end: l.end, name: l.text, kind: "text" as const };
         const a = libraryAssets.get(l.assetId);
-        const nm = a?.name ?? (assetsLoading ? "…" : "removed");
+        const nm = a?.name ?? (assetsLoading ? "…" : "deleted");
         if (l.kind === "audio") return { id: l.id, start: l.start, end: l.end, name: nm, kind: "audio" as const };
         return { id: l.id, start: l.start, end: l.end, name: nm, kind: isAnimatedAsset(a) ? ("video" as const) : ("image" as const), thumbnailUrl: a?.thumbnailUrl };
       }),
@@ -760,7 +759,8 @@ export function TemplateEditor({ template, onExit }: Props) {
       return false;
     }
   }
-  const requestExit = () => (dirty ? setGuard(true) : onExit());
+  const guard = useLeaveGuard(dirty, onExit);
+  const requestExit = guard.requestExit;
   useUnsavedFlag("template-editor", dirty);
   useEffect(() => {
     const on = (e: BeforeUnloadEvent) => {
@@ -1046,20 +1046,20 @@ export function TemplateEditor({ template, onExit }: Props) {
         />
       ))}
 
-      <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
+      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">You have unsaved changes to this template.</p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setGuard(false)}>
+          <button className="btn-ghost" onClick={guard.stay}>
             Keep editing
           </button>
-          <button className="btn-danger" onClick={onExit}>
+          <button className="btn-danger" onClick={guard.leave}>
             Discard
           </button>
           <button
             className="btn-primary"
             disabled={busy || !nameOk}
             onClick={async () => {
-              if (await save()) onExit();
+              if (await save()) guard.leave();
             }}
           >
             Save &amp; leave

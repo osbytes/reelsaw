@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { ScrollArea } from "./scroll-area";
@@ -133,23 +133,47 @@ export function Modal({ open, onOpenChange, title, children, width = 420 }: { op
   );
 }
 
-export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger, onConfirm }: { open: boolean; onOpenChange: (o: boolean) => void; title: string; body: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void }) {
+/** Cancel / confirm over a one-paragraph body; `children` go under it (e.g. a list of what still uses the item). */
+/**
+ * A yes/no question before an action. When `onConfirm` returns a promise the dialog stays open with
+ * the button busy until it settles, and a failure shows here instead of vanishing with the dialog.
+ */
+export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger, onConfirm, children, width }: { open: boolean; onOpenChange: (o: boolean) => void; title: string; body: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void | Promise<unknown>; children?: ReactNode; width?: number }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+  const run = async () => {
+    const r = onConfirm();
+    if (!(r instanceof Promise)) return onOpenChange(false);
+    setBusy(true);
+    setError(null);
+    try {
+      await r;
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title={title}>
+    <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title={title} width={width}>
       <Dialog.Description asChild>
         <p className="text-sm leading-relaxed text-ink2">{body}</p>
       </Dialog.Description>
+      {children}
+      {error && (
+        <p role="alert" className="text-sm text-err">
+          {error}
+        </p>
+      )}
       <div className="mt-1 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={() => onOpenChange(false)}>
+        <button className="btn-ghost" disabled={busy} onClick={() => onOpenChange(false)}>
           Cancel
         </button>
-        <button
-          className={danger ? "btn bg-err font-semibold text-white hover:brightness-110" : "btn-ink"}
-          onClick={() => {
-            onConfirm();
-            onOpenChange(false);
-          }}
-        >
+        <button className={danger ? "btn-danger-solid" : "btn-ink"} disabled={busy} aria-busy={busy} onClick={() => void run()}>
           {confirm}
         </button>
       </div>

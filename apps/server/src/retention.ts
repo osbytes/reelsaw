@@ -3,7 +3,7 @@
  * CLIP_RETENTION_DAYS (0 = off). Rows stay, with a timestamp and an event, so the project still
  * reads as history and "Retry" / "Re-render" bring the files back. Runs from the reconciler.
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import { removeScratchSource } from "./storage/sweep.js";
@@ -37,7 +37,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
       handle: async (rows) => {
         for (const p of rows) {
           await svc.tx(async (u) => {
-            const [cur] = await u.db.update(schema.projects).set({ sourceExpiredAt: new Date(), sourceBytes: null }).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.sourceExpiredAt))).returning({ id: schema.projects.id });
+            const [cur] = await u.db.update(schema.projects).set({ sourceExpiredAt: new Date(), sourceBytes: null }).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.sourceExpiredAt), isNull(schema.projects.deletedAt), eq(schema.projects.sourceKey, p.sourceKey), inArray(schema.projects.status, ["done", "failed"]), lt(schema.projects.updatedAt, cutoff))).returning({ id: schema.projects.id });
             if (!cur) return;
             await u.emit(p.id, "source.expired", { days: config.SOURCE_RETENTION_DAYS });
             u.afterCommit(async () => {

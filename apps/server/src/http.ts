@@ -7,7 +7,7 @@ import { trpcServer } from "@hono/trpc-server";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { and, eq, isNull } from "drizzle-orm";
@@ -49,12 +49,35 @@ const clientLogSchema = z.object({
 
 class UploadTooLarge extends Error {}
 
+/**
+ * Headers set after the handler ran. A Response.redirect() (or one passed through from fetch) has
+ * immutable headers: such a response goes out without these rather than failing.
+ */
+function afterHeaders(c: Context<AppEnv>, headers: Record<string, string>) {
+  try {
+    for (const [k, v] of Object.entries(headers)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+  } catch {
+    // immutable headers
+  }
+}
+
 export function createApp(svc: Services) {
   const { config, auth, storage, paths } = svc;
   const db = svc.database.db;
   const app = new Hono<AppEnv>();
   // request id + access log (request-log.ts); every handler logs through c.get("log")
   app.use(requestLogger(svc.log));
+  // The built SPA's id (hash of its index.html). Every API response carries it, and the page carries
+  // the one it was served from, so a tab left open across a deploy notices and reloads on its next
+  // route change instead of asking for chunks that are gone (apps/web/src/lib/stale-chunk.ts).
+  const webIndex = config.WEB_DIST && fs.existsSync(path.join(config.WEB_DIST, "index.html")) ? fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8") : null;
+  const webBuild = webIndex ? createHash("sha256").update(webIndex).digest("hex").slice(0, 12) : null;
+  if (webBuild) {
+    app.use("/api/*", async (c, next) => {
+      await next();
+      afterHeaders(c, { "X-Reelsaw-Build": webBuild });
+    });
+  }
   // an exception in a handler: the access line above logs it with `err`; the client gets the request id to quote
   app.onError((err, c) => (err instanceof HTTPException ? err.getResponse() : c.json({ error: "internal error", requestId: c.get("requestId") }, 500)));
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
@@ -63,10 +86,17 @@ export function createApp(svc: Services) {
     if (who) c.set("userId", who.user.id);
     return who;
   };
+  // No page of this app is meant to be framed (the OAuth consent screen least of all), no response
+  // is meant to be sniffed into another type, and links out don't need the full URL.
+  app.use(async (c, next) => {
+    await next();
+    afterHeaders(c, { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "X-Frame-Options": "DENY" });
+  });
   app.use(
     "/api/*",
     cors({
-      origin: [config.APP_URL, "http://localhost:5173"],
+      // the Vite dev server only outside production: any local process on :5173 could otherwise call in with the user's cookie
+      origin: config.NODE_ENV === "production" ? [config.APP_URL] : [config.APP_URL, "http://localhost:5173"],
       credentials: true,
       allowHeaders: ["Content-Type", "Authorization", "x-api-key", "x-filename", "trpc-accept", "mcp-session-id", "mcp-protocol-version", "traceparent", "tracestate", "baggage", "last-event-id"],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -448,10 +478,24 @@ export function createApp(svc: Services) {
   // Client routes have no file extension (`/signup`). A missing `/favicon.ico` (or .png, .txt, …)
   // must 404, not return this HTML: crawlers request /favicon.ico by convention, and serving the
   // shell there is why app.reelsaw.com showed a generic globe in Google Search.
-  if (config.WEB_DIST && fs.existsSync(config.WEB_DIST)) {
-    const index = injectOtelBoot(fs.readFileSync(path.join(config.WEB_DIST, "index.html"), "utf8"), svc.otel.public);
+  // Hashed files under /assets/ never change, so they cache for a year; the HTML must revalidate
+  // every load or a tab boots an old chunk map after a deploy.
+  if (config.WEB_DIST && webIndex && webBuild) {
+    const index = injectOtelBoot(webIndex, svc.otel.public).replace("</head>", `<meta name="reelsaw-build" content="${webBuild}" /></head>`);
+    app.use("/assets/*", async (c, next) => {
+      await next();
+      if (c.res.ok) c.header("Cache-Control", "public, max-age=31536000, immutable");
+    });
+    const shell = (c: Context<AppEnv>) => {
+      c.header("Cache-Control", "no-cache");
+      c.header("Content-Security-Policy", "frame-ancestors 'none'");
+      return c.html(index);
+    };
+    // before serveStatic, which would send the raw dist/index.html (no build id, no OTEL config) for these
+    app.get("/", shell);
+    app.get("/index.html", shell);
     app.use("/*", serveStatic({ root: path.relative(process.cwd(), config.WEB_DIST) || "." }));
-    app.get("*", (c) => (isSpaIndexPath(c.req.path) ? c.html(index) : c.notFound()));
+    app.get("*", (c) => (isSpaIndexPath(c.req.path) ? shell(c) : c.notFound()));
   }
 
   return app;

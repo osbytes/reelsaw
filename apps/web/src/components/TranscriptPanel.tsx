@@ -155,7 +155,7 @@ export function TranscriptPanel({ projectId, language, segments, words, flags, c
       setPinnedFlag(null);
       setOpenFlag(null);
       await qc.invalidateQueries({ queryKey: trpc.transcripts.get.queryKey({ projectId }) });
-      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""} · restore it from Deleted`);
+      toast(`${f.subkind === "manual" ? "Cut" : "Fix"} deleted${r.rerendered ? ` · re-rendering ${r.rerendered} clip${r.rerendered === 1 ? "" : "s"}` : ""}`, { description: "You can also restore it from the transcript’s Deleted filter", action: { label: "Undo", onClick: () => void restoreOne(f.id) } });
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -1207,7 +1207,7 @@ function FlagWord({
             {onDelete &&
               (confirmDel ? (
                 <span className="flex items-center gap-1">
-                  <button className="btn bg-err px-2.5 py-1.5 text-xs font-semibold text-white hover:brightness-110" disabled={deleting} onClick={onDelete}>
+                  <button className="btn-danger-solid px-2.5 py-1.5 text-xs" disabled={deleting} onClick={onDelete}>
                     {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} {flag.subkind === "manual" ? "Delete cut" : "Delete fix"}
                   </button>
                   <button className="btn-quiet px-2 py-1.5 text-xs" onClick={() => setConfirmDel(false)}>

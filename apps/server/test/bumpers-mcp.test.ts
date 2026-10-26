@@ -135,7 +135,7 @@ describe("downloadAsUpload", () => {
     assert.deepEqual(await fs.readdir(h.dir), []);
   });
   it("private address ranges", () => {
-    for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:10.0.0.1"]) assert.ok(isPrivateAddress(ip), ip);
+    for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:10.0.0.1", new URL("http://[::ffff:169.254.169.254]/").hostname.slice(1, -1), "::a9fe:a9fe", "fe90::1"]) assert.ok(isPrivateAddress(ip), ip);
     for (const ip of ["8.8.8.8", "93.184.216.34", "2606:4700::1111"]) assert.ok(!isPrivateAddress(ip), ip);
   });
 });

@@ -172,7 +172,7 @@ export function NewProjectPage() {
     const sec = bump[`${slot}Sec`];
     if (c !== "none" && sec && libAssets.find((a) => a.id === c)?.kind === "image") bumperSettings[`${slot}Sec`] = Math.min(10, Math.max(1, sec));
   }
-  const defaultName = (id: string | undefined) => (id ? ([...libAssets, ...(library.data?.deleted ?? [])].find((a) => a.id === id)?.name ?? "removed") : "none");
+  const defaultName = (id: string | undefined) => (id ? ([...libAssets, ...(library.data?.deleted ?? [])].find((a) => a.id === id)?.name ?? "deleted") : "none");
   const fixed = (id: string | undefined): FixedOption[] => [
     { value: "default", label: `Your default (${defaultName(id)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },

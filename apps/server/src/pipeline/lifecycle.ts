@@ -150,6 +150,15 @@ export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOpti
 }
 
 /**
+ * Supersede the project's stage work (ingest → analyze): bump projects.stage_seq, so a stage job still running for
+ * the old value commits nothing, fails nothing and queues nothing (cancelling a pg-boss job does not stop it). Jobs the
+ * caller queues afterwards carry the new value. Lock clips (and the transcript) first: this takes the project row.
+ */
+export async function supersedeStages(u: UnitOfWork, projectId: string): Promise<void> {
+  await u.db.update(schema.projects).set({ stageSeq: sql`${schema.projects.stageSeq} + 1` }).where(eq(schema.projects.id, projectId));
+}
+
+/**
  * Lock a project's clips in id order, before anything touches the project row. Any transaction that re-renders
  * or deletes several clips calls this first, so it takes locks in the same order as a render completion (clip,
  * then project) instead of project first and clip second, which deadlocks against a completion.

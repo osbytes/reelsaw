@@ -19,7 +19,13 @@ import { assetRefsReady } from "../library/refs.js";
 
 /** Files younger than this are never touched: a worker may be writing or about to commit them. */
 export const SWEEP_GRACE_MS = 60 * 60_000;
-export const HEAR_TMP_MAX_AGE_MS = 24 * 60 * 60_000;
+/** A scratch entry in tmp/ older than this was left by a crash or a kill: no job runs that long. */
+export const TMP_MAX_AGE_MS = 24 * 60 * 60_000;
+/**
+ * What the app itself writes to tmp/ (files and per-run directories). Anything else there, such as
+ * the zip `reelsaw export` saves when no --out is given, belongs to the operator and stays.
+ */
+const TMP_SCRATCH = /^(hear|bumper|catalog|export|import|report|subtitle)-/;
 
 export interface ScratchFile {
   /** Path relative to the project directory, with forward slashes, e.g. "clips/<clip>.2.mp4". */
@@ -45,7 +51,7 @@ export interface DbView {
   clips: Map<string, { projectId: string; renderGen: number; referenced: Set<string> }>;
 }
 export interface Removal {
-  kind: "stale-generation" | "clip-gone" | "project-gone" | "hear-tmp";
+  kind: "stale-generation" | "clip-gone" | "project-gone" | "tmp";
   /** Relative to DATA_DIR. */
   path: string;
   bytes: number;
@@ -95,7 +101,7 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
     }
   }
   for (const f of input.tmp) {
-    if (f.name.startsWith("hear-") && now - f.mtimeMs >= HEAR_TMP_MAX_AGE_MS) out.push({ kind: "hear-tmp", path: `tmp/${f.name}`, bytes: f.bytes });
+    if (TMP_SCRATCH.test(f.name) && now - f.mtimeMs >= TMP_MAX_AGE_MS) out.push({ kind: "tmp", path: `tmp/${f.name}`, bytes: f.bytes });
   }
   return out;
 }
@@ -221,7 +227,7 @@ export async function scanScratch(svc: Services, opts: { now?: number; budgetMs?
     removals.push(...planSweep({ projects, tmp: [], db, now }));
   }
   if (complete) {
-    const entries = (await fs.readdir(svc.paths.tmp, { withFileTypes: true }).catch(() => [])).filter((e) => e.isFile() && e.name.startsWith("hear-"));
+    const entries = (await fs.readdir(svc.paths.tmp, { withFileTypes: true }).catch(() => [])).filter((e) => e.isFile() || e.isDirectory());
     const tmp = (
       await mapLimit(entries, SWEEP_STAT_CONCURRENCY, async (e) => {
         const st = await fs.stat(path.join(svc.paths.tmp, e.name)).catch(() => null);

@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { lookup as dnsLookup } from "node:dns/promises";
-import net from "node:net";
+import { assertPublicHttpUrl, isPrivateAddress, UnsafeUrlError } from "../lib/safe-url.js";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -273,15 +273,8 @@ export function requireOneSource(i: { url?: string; uploadId?: string; provider?
 const ALLOWED_EXTS: readonly string[] = Object.keys(ASSET_MIME);
 const TYPE_EXT: Record<string, string> = Object.fromEntries(Object.entries(ASSET_MIME).reverse().map(([ext, mime]) => [mime, ext]));
 
-export function isPrivateAddress(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number) as [number, number];
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
-  }
-  const v = ip.toLowerCase();
-  if (v.startsWith("::ffff:")) return isPrivateAddress(v.slice(7));
-  return v === "::" || v === "::1" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80");
-}
+/** One SSRF check for the whole server (lib/safe-url.ts): it knows hex-mapped IPv6, internal names and metadata hosts. */
+export { isPrivateAddress };
 
 export interface FetchDeps {
   fetch?: typeof fetch;
@@ -290,12 +283,13 @@ export interface FetchDeps {
 
 /** http(s) only, and never an address on a private network (the server must not become a proxy into its own). */
 async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["lookup"]>): Promise<URL> {
-  const u = new URL(raw);
-  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("Only http(s) links can be downloaded");
-  const host = u.hostname.replace(/^\[|\]$/g, "");
-  const addrs = net.isIP(host) ? [host] : await lookup(host);
-  if (!addrs.length || addrs.some(isPrivateAddress)) throw new Error("That address is not reachable from the server (private or unresolvable)");
-  return u;
+  try {
+    return await assertPublicHttpUrl(raw, { lookup: async (h) => (await lookup(h)).map((address) => ({ address })) });
+  } catch (err) {
+    // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
+    if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message)) throw new Error("That address is not reachable from the server (private or unresolvable)");
+    throw err;
+  }
 }
 
 /**
@@ -432,7 +426,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     /** the file itself (play the music, view the image or video); same auth as this server */
     url: abs(`/media/assets/${a.id}`),
   });
-  return { assets: lib.assets.map(row), removed: lib.deleted.map(row) };
+  return { assets: lib.assets.map(row), deleted: lib.deleted.map(row) };
 }
 
 // ---------- project coverage summaries (Projects list, projects.get, reelsaw status) ----------

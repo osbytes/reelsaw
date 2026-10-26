@@ -190,7 +190,7 @@ export function ProjectDefaultsSection() {
 function BumperDefaultsRow({ introId, outroId }: { introId?: string; outroId?: string }) {
   const lib = useBumperLibrary();
   const name = (id?: string): ReactNode =>
-    id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "removed")) : "none";
+    id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "deleted")) : "none";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-4">
       <div className="min-w-0 flex-1">

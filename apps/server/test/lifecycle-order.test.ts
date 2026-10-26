@@ -36,7 +36,7 @@ describe("lock order of API mutations against render completions", () => {
   const txLog = { ...(quiet as object), warn: (_o: unknown, msg: string) => void (/retrying/.test(msg) && retries++) } as never;
   const tx = (fn: Parameters<ReturnType<typeof createUnitOfWork>>[0]) => createUnitOfWork(pool, noQueue, txLog)(fn);
   const api = () =>
-    appRouter.createCaller({ svc, who: { user: { id: userId, role: "user" }, blocked: null } as never, req: new Request("http://test.local"), requestId: "test", log: quiet });
+    appRouter.createCaller({ svc, who: { user: { id: userId, role: "user", approvedAt: new Date() }, blocked: null } as never, req: new Request("http://test.local"), requestId: "test", log: quiet });
 
   before(async () => {
     pool = db();

@@ -78,7 +78,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
   return betterAuth({
     baseURL: config.APP_URL,
     secret: config.BETTER_AUTH_SECRET,
-    trustedOrigins: [config.APP_URL, "http://localhost:5173"],
+    trustedOrigins: config.NODE_ENV === "production" ? [config.APP_URL] : [config.APP_URL, "http://localhost:5173"],
     database: drizzleAdapter(db, {
       provider: "pg",
       schema: {

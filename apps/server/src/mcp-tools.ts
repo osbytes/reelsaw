@@ -5,7 +5,7 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS, REFINE_STEPS } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
@@ -17,8 +17,8 @@ Which tool when:
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
-Your library (search_assets, add_asset, update_asset, remove_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
-Layer templates (list_layer_templates, save_layer_template, update_layer_template, remove_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
+Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
+Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
 
@@ -50,6 +50,7 @@ export function fail(message: string) {
 const projectId = (from = "list_projects, search_clips or create_project") => z.string().describe(`Project id (from ${from})`);
 const clipId = (what = "Clip id") => z.string().describe(`${what} (from get_project or search_clips)`);
 const assetIdInput = (from = "search_assets") => z.string().min(1).max(100).describe(`Library asset id (from ${from})`);
+
 
 export const TOOLS = {
   list_projects: {
@@ -83,7 +84,7 @@ export const TOOLS = {
   },
   update_project: {
     title: "Update project",
-    description: "Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. Does not re-pick clips or re-render: reanalyze_project picks again with the new selection settings, refine_project applies refine toggles, rerender_clips applies style changes. Returns { changed, needsReanalyze, needsRefine, needsRerender, hint }.",
+    description: "Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. Does not re-pick clips or re-render: reanalyze_project picks again with the new selection settings, refine_project re-runs refine steps, rerender_clips applies style changes. Returns { changed, needsReanalyze, needsRefine, needsRerender, hint }.",
     inputSchema: {
       id: projectId(),
       title: z.string().trim().min(1).max(200).optional().describe("New title"),
@@ -258,6 +259,11 @@ export const TOOLS = {
     description: "Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. Finished clips, the transcript and the source are kept. Returns { queue } (the stage restarted); then wait_for_project. To pick different clips use reanalyze_project instead.",
     inputSchema: { id: projectId() },
   },
+  refine_project: {
+    title: "Refine project",
+    description: "Re-run refine steps on the existing transcript: entities (name spelling), disfluency (filler and repeat cuts), scenes (shot cuts); all three when steps is omitted. Optionally set the vocabulary (names and terms, comma separated; empty string clears it) first. Fixes you accepted or rejected may be replaced. Clips re-render afterwards. Returns { ok, steps }; then wait_for_project.",
+    inputSchema: { id: projectId(), steps: z.array(z.enum(REFINE_STEPS)).min(1).optional().describe("Which refine steps to re-run; default all"), vocabulary: z.string().max(1000).optional().describe("Names and terms the transcript should spell this way; empty string clears it") },
+  },
   reanalyze_project: {
     title: "Re-analyze project",
     description: "Pick clips again from the existing transcript (needs one), optionally with new settings. Clips you created or edited are kept; untouched AI picks are replaced and restorable with restore_clip for a while. Returns { kept, replaced } at once; the picking runs in the background, so follow with wait_for_project. To only save settings use update_project; to resume a failure use retry_project.",
@@ -277,7 +283,7 @@ export const TOOLS = {
       cursor: z.string().max(200).optional().describe("nextCursor from the previous page; omit for the first page"),
       limit: z.number().int().min(1).max(60).default(24).describe("Results per page (1-60, default 24)"),
       license: z.enum(["cc0", "by"]).optional().describe("freesound only: cc0 (default) or by (CC0 and CC-BY, attribution is stored)"),
-      removed: z.boolean().optional().describe("library only: list the items removed in the last 30 days instead (their ids go to restore_asset)"),
+      deleted: z.boolean().optional().describe("library only: list your deleted items instead (their ids go to restore_asset)"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -288,7 +294,7 @@ export const TOOLS = {
   },
   update_asset: {
     title: "Update library asset",
-    description: "Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, tags, durationSec, previousName }.",
+    description: "Rename one of your own library items, replace its tags, or change how long a still image shows (deleted items too; shared catalog and provider items cannot be changed). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, tags, durationSec, previousName }.",
     inputSchema: {
       assetId: assetIdInput(),
       name: bumperNameSchema.optional().describe("New name (1-120 chars)"),
@@ -297,21 +303,22 @@ export const TOOLS = {
     },
     annotations: { idempotentHint: true },
   },
-  remove_asset: {
-    title: "Remove library asset",
-    description: "Remove one of your uploads from the library and from your defaults. Projects and clips already using it keep rendering with it. Undo with restore_asset within 30 days; check asset_usage first. Returns { ok }.",
+  delete_asset: {
+    title: "Delete library asset",
+    description: "Delete one of your uploads: it leaves the library and your defaults and goes to Deleted. Projects and clips already using it keep rendering with it. Undo with restore_asset (list_deleted says how long it is kept); check asset_usage first. Returns { ok }.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { destructiveHint: true },
   },
+
   restore_asset: {
     title: "Restore library asset",
-    description: "Bring one of your removed library items back (the id from remove_asset or `reelsaw library list`); restoring an item that is not removed changes nothing. It does not become a default again. Returns { ok }.",
-    inputSchema: { assetId: assetIdInput("remove_asset") },
+    description: "Bring one of your deleted library items back (the id from delete_asset or list_deleted); restoring an item that is not deleted changes nothing. It does not become a default again. Returns { ok }.",
+    inputSchema: { assetId: assetIdInput("delete_asset") },
     annotations: { idempotentHint: true },
   },
   asset_usage: {
     title: "Where a library asset is used",
-    description: "Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }], templates: [{ id, name, layers }] }. A removed asset's layer is skipped when a template is applied. Check before removing one.",
+    description: "Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }], templates: [{ id, name, layers }] }. A deleted asset's layer is skipped when a template is applied. Check before deleting one.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },
@@ -336,7 +343,7 @@ export const TOOLS = {
   },
   list_layer_templates: {
     title: "List layer templates",
-    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = removed within 30 days). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = your deleted templates, restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },
@@ -351,15 +358,16 @@ export const TOOLS = {
     inputSchema: { templateId: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() },
     annotations: { idempotentHint: true },
   },
-  remove_layer_template: {
-    title: "Remove layer template",
-    description: "Remove a template and drop it from your project defaults; clips that already got its layers keep them. Restorable for 30 days (restore_layer_template). Returns { ok, clearedDefault } (it was your default and no longer is)",
+  delete_layer_template: {
+    title: "Delete layer template",
+    description: "Delete a template (it goes to Deleted) and drop it from your project defaults; clips that already got its layers keep them. Undo with restore_layer_template (list_deleted says how long it is kept). Returns { ok, clearedDefault } (it was your default and no longer is)",
     inputSchema: { templateId: templateIdSchema },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
+
   restore_layer_template: {
     title: "Restore layer template",
-    description: "Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). It does not become a default again. Returns the template.",
+    description: "Bring back a deleted layer template (the id from list_layer_templates deleted or list_deleted). It does not become a default again. Returns the template.",
     inputSchema: { templateId: templateIdSchema },
     annotations: { idempotentHint: true },
   },
@@ -417,13 +425,13 @@ export const TOOLS = {
   },
   purge_asset: {
     title: "Delete library item forever",
-    description: "Permanently remove an already-deleted library upload and its files so the storage is freed (find it with list_deleted). Refused while a project, clip or live template still names it. An item that is not deleted is refused: call remove_asset first. Returns { storedBytes, message }.",
+    description: "Permanently remove an already-deleted library upload and its files so the storage is freed (find it with list_deleted). Refused while a project, clip or live template still names it. An item that is not deleted is refused: call delete_asset first. Returns { storedBytes, message }.",
     inputSchema: { assetId: assetIdInput("list_deleted") },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   purge_layer_template: {
     title: "Delete layer template forever",
-    description: "Permanently remove an already-deleted layer template (find it with list_deleted). Templates hold no media files; this only drops the row. A template that is not deleted is refused: call remove_layer_template first. Returns { ok, message }.",
+    description: "Permanently remove an already-deleted layer template (find it with list_deleted). Templates hold no media files; this only drops the row. A template that is not deleted is refused: call delete_layer_template first. Returns { ok, message }.",
     inputSchema: { templateId: templateIdSchema },
     annotations: { destructiveHint: true, idempotentHint: true },
   },

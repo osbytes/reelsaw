@@ -130,7 +130,7 @@ export function QueueSection() {
     retry
       .mutateAsync({ ...filter, ids })
       .then((r) => {
-        toast.success(r.retried ? `Retried ${r.retried}${r.skipped ? ` · skipped ${r.skipped}` : ""}` : r.skipped ? `Nothing to retry (${r.skipped} skipped)` : "Nothing matched");
+        toast.success(r.retried ? `Retried ${r.retried}${r.skipped ? ` · skipped ${r.skipped}` : ""}` : r.skipped ? `Nothing to retry (${r.skipped} skipped)` : "No matches");
         invalidate();
         if (thenClose) closeFail();
       })
@@ -249,7 +249,7 @@ export function QueueSection() {
               ? items.length
                 ? `Showing ${items.length} of ${total}${truncated ? "+" : ""}`
                 : filtered
-                  ? "No failed work matches this filter."
+                  ? "No failed work matches this filter"
                   : "No failed projects or clips."
               : failures.error
                 ? failures.error.message
@@ -344,7 +344,7 @@ export function QueueSection() {
       <ConfirmDialog
         open={confirmBulk}
         onOpenChange={setConfirmBulk}
-        title="Retry matching failures"
+        title="Retry matching failures?"
         body={`Retry up to ${Math.min(PAGE, total)} failed ${Math.min(PAGE, total) === 1 ? "item" : "items"} that match this filter. Each one uses the same path as the owner Retry button, so live-job limits still apply.`}
         confirm="Retry matching"
         onConfirm={() => onRetry()}

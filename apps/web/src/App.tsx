@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2 } from "lucide-react";
@@ -32,6 +32,7 @@ import { ConsentPage } from "./pages/Consent";
 import { useMe, useSystemStatus } from "./lib/account";
 const ClipEditorPage = lazy(() => import("./pages/ClipEditor").then((m) => ({ default: m.ClipEditorPage })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { reloadIfNewBuild } from "./lib/stale-chunk";
 import { CommandPaletteProvider, useCommandPalette } from "./components/CommandPalette";
 import { UploadsProvider } from "./lib/uploads";
 import { Search } from "lucide-react";
@@ -303,6 +304,21 @@ function TelemetryBridge() {
   return null;
 }
 
+/** A fresh page per project: ⌘K from one project to another must not carry dialogs, run logs or timers across. */
+function KeyedProjectPage() {
+  const { id } = useParams();
+  return <ProjectPage key={id} />;
+}
+
+/** After a deploy, the first route change loads the new build instead of asking for chunks that are gone. */
+function NewBuildOnNavigate() {
+  const loc = useLocation();
+  useEffect(() => {
+    reloadIfNewBuild();
+  }, [loc.pathname]);
+  return null;
+}
+
 /** `/?deleted=1` used to scroll to the Projects footer; that list now lives at /deleted. */
 function HomePage() {
   const [search] = useSearchParams();
@@ -319,6 +335,7 @@ export function App() {
   return (
     <>
     <TelemetryBridge />
+    <NewBuildOnNavigate />
     <UploadsProvider>
     <CommandPaletteProvider>
     <Routes>
@@ -336,7 +353,7 @@ export function App() {
       <Route path={BILLING_PATH} element={<Protected><SettingsPage /></Protected>} />
       <Route path="/settings/system" element={<Protected admin><SettingsPage /></Protected>} />
       <Route path="/admin/users" element={<Protected admin><AdminUsersPage /></Protected>} />
-      <Route path="/p/:id" element={<Protected><ProjectPage /></Protected>} />
+      <Route path="/p/:id" element={<Protected><KeyedProjectPage /></Protected>} />
       <Route path="/p/:id/clips/:clipId" element={<Protected bare><ClipEditorPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

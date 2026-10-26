@@ -5,7 +5,7 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, modelsUsed, stageElapsed } from "./common.js";
+import { StageContext, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
@@ -90,12 +90,15 @@ export async function mergeRefine(
   projectId: string,
   step: RefineStep,
   result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
+  /** the step job's projects.stage_seq: a superseded step merges nothing and hands nothing to analyze */
+  seq?: number,
 ) {
   // one unit: merged flags, step status, progress event and (if last) the hand-off to analyze
   await svc.tx(async (u) => {
     const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
     if (!t) return;
+    if (!(await lockCurrentStage(tx, projectId, seq))) return svc.log.child({ module: "refine", projectId }).info({ step, seq }, "refine step superseded; result dropped"); // transcript, then project
     if (result.status === "failed" && result.error !== undefined) {
       // a step that gave up: its stage.failed commits with the "failed" status it announces
       const durationSec = await stageElapsed(tx, projectId, "refine");
@@ -188,7 +191,7 @@ export async function refineEntities(ctx: StageContext) {
   const skip = unsupportedLanguage("entities", t.language);
   if (skip) {
     ctx.log.info({ step: "entities", language: t.language, skipped: skip }, "refine step skipped");
-    return mergeRefine(svc, ctx.projectId, "entities", { status: "done", skipped: skip });
+    return mergeRefine(svc, ctx.projectId, "entities", { status: "done", skipped: skip }, ctx.seq);
   }
   await markRunning(ctx, "entities");
   const project = await ctx.project();
@@ -209,7 +212,7 @@ export async function refineEntities(ctx: StageContext) {
     "entity corrections",
   );
   ctx.log.info({ step: "entities", auto: res.applied.length, pending: res.flags.length - res.applied.length, candidates: res.candidates }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } });
+  await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } }, ctx.seq);
 }
 
 /**
@@ -243,7 +246,7 @@ export async function refineDisfluency(ctx: StageContext) {
   const skip = unsupportedLanguage("disfluency", t.language);
   if (skip) {
     ctx.log.info({ step: "disfluency", language: t.language, skipped: skip }, "refine step skipped");
-    return mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", skipped: skip });
+    return mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", skipped: skip }, ctx.seq);
   }
   await markRunning(ctx, "disfluency");
   const opts = await optionsFor(svc, svc.database.db, ctx.projectId);
@@ -265,7 +268,7 @@ export async function refineDisfluency(ctx: StageContext) {
   // every cut accepted or rejected, and why (bounded; the stage artifact keeps the full list)
   for (const e of trace.slice(0, 200)) ctx.log.trace({ wordIndex: e.wordIndex, text: e.text, subkind: e.subkind, source: e.source, why: e.why, prior: e.prior, verdict: e.verdict ?? null, outcome: e.outcome }, "disfluency decision");
   ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } });
+  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } }, ctx.seq);
 }
 
 export async function refineScenes(ctx: StageContext) {
@@ -293,12 +296,12 @@ export async function refineScenes(ctx: StageContext) {
   }
   ctx.log.debug({ cuts: sceneCuts.length, first: sceneCuts.slice(0, 12).map((c) => Number(c.toFixed(1))), skipped: !project.width ? "no video width" : undefined }, "scene cuts");
   ctx.log.info({ step: "scenes", cuts: sceneCuts.length, overlays: overlays.length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays, textProfile });
+  await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays, textProfile }, ctx.seq);
 }
 
 /** Called by the worker when a refine job has exhausted its retries. */
-export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown) {
+export async function refineStepFailed(svc: Services, projectId: string, step: RefineStep, err: unknown, seq?: number) {
   const message = err instanceof Error ? err.message : String(err);
   svc.log.child({ module: "refine", projectId }).error({ step, err }, "refine step gave up");
-  await mergeRefine(svc, projectId, step, { status: "failed", error: message });
+  await mergeRefine(svc, projectId, step, { status: "failed", error: message }, seq);
 }

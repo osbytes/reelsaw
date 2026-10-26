@@ -29,6 +29,7 @@ import { useMe } from "../lib/account";
 import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
+import { useRestoreWindow } from "../lib/retention";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
@@ -47,6 +48,9 @@ function useWidth() {
   }, []);
   return w;
 }
+
+/** A click that starts a mutation and isn't awaited by anything: a refusal (quota, already running, 5xx) becomes a toast, not a silent unhandled rejection. */
+const orToast = (p: Promise<unknown>, what: string) => p.catch((e: unknown) => void toast.error(`${what}: ${e instanceof Error ? e.message : "something went wrong"}`));
 
 export function ProjectPage() {
   const { id = "" } = useParams();
@@ -74,6 +78,7 @@ export function ProjectPage() {
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
+  const keepWindow = useRestoreWindow("project", confirm === "delete");
   const [actOpen, setActOpen] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -504,19 +509,19 @@ export function ProjectPage() {
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">
               {failedClips.length > 0 && (
-                <DropdownMenu.Item className="menu-item block" onSelect={() => rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`)))}>
+                <DropdownMenu.Item className="menu-item block" onSelect={() => orToast(rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`))), "Couldn’t retry the failed clips")}>
                   Retry failed clips <span className="text-ink3">({failedClips.length})</span>
                 </DropdownMenu.Item>
               )}
               {(p.status === "failed" || p.status === "done") && (
-                <DropdownMenu.Item className="menu-item block" disabled={retry.isPending} onSelect={() => retry.mutateAsync({ id }).then(invalidate)}>
+                <DropdownMenu.Item className="menu-item block" disabled={retry.isPending} onSelect={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t restart")}>
                   Resume pipeline
                   <div className="text-xs text-ink3">From the last stage that didn’t finish</div>
                 </DropdownMenu.Item>
               )}
               {p.transcript && !active && (
                 <DropdownMenu.Item className="menu-item block" onSelect={() => setConfirm("refine")}>
-                  Re-run refine
+                  Re-run refine…
                   <div className="text-xs text-ink3">Names, disfluencies, scene changes</div>
                 </DropdownMenu.Item>
               )}
@@ -527,7 +532,7 @@ export function ProjectPage() {
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item className="menu-item block" onSelect={() => setBumpersOpen(true)}>
-                Intro and outro
+                Intro and outro…
                 <div className="text-xs text-ink3">Default, none or a library item</div>
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => setTemplateOpen(true)}>
@@ -540,10 +545,10 @@ export function ProjectPage() {
               </DropdownMenu.Item>
               <DropdownMenu.Item className="menu-item block" onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}>
                 Report an issue…
-                <div className="text-xs text-ink3">Send the project's data and logs</div>
+                <div className="text-xs text-ink3">Send the project’s data and logs</div>
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
-              <DropdownMenu.Item className="menu-item text-err data-[highlighted]:bg-err-soft" onSelect={() => setConfirm("delete")}>
+              <DropdownMenu.Item className="menu-item-danger" onSelect={() => setConfirm("delete")}>
                 Delete project…
               </DropdownMenu.Item>
             </DropdownMenu.Content>
@@ -572,7 +577,7 @@ export function ProjectPage() {
           )}
           <p className="mt-1.5 text-xs text-ink3">Earlier results are kept. Retry picks up from this step.</p>
         </div>
-        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
           ↻ Retry
         </button>
       </div>
@@ -587,7 +592,7 @@ export function ProjectPage() {
         <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
           Keep waiting
         </button>
-        <button className="btn-ink shrink-0" onClick={() => retry.mutateAsync({ id }).then(invalidate)}>
+        <button className="btn-ink shrink-0" onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
           ↻ Restart this step
         </button>
       </div>
@@ -608,7 +613,7 @@ export function ProjectPage() {
               <button
                 className="text-xs font-semibold text-acc-text disabled:opacity-50"
                 disabled={setSourceText.isPending}
-                onClick={() => setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate)}
+                onClick={() => orToast(setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate), "Couldn’t change burned-in text")}
               >
                 {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
               </button>
@@ -643,7 +648,7 @@ export function ProjectPage() {
             {active ? (
               progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
             ) : p.sourceExpiredAt ? (
-              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => retry.mutateAsync({ id }).then(invalidate)} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
+              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
                 Source removed · fetch again
               </button>
             ) : p.status === "failed" ? (
@@ -783,7 +788,7 @@ export function ProjectPage() {
             progress={clipProgress[c.id]}
             active={activeClip === c.id}
             busy={rerender.isPending}
-            onRerender={() => rerender.mutateAsync({ id: c.id }).then(invalidate)}
+            onRerender={() => orToast(rerender.mutateAsync({ id: c.id }).then(invalidate), "Couldn’t retry the clip")}
             onSeek={() => {
               seekSource(c.startSec, c.id);
               if (compact) setMtab("transcript");
@@ -952,7 +957,7 @@ export function ProjectPage() {
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this project?"
-        body="The project, its transcript and every clip are hidden. Work in progress stops. You can undo this for a few days. Storage still counts until you delete it forever from Deleted."
+        body={`The project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() =>
