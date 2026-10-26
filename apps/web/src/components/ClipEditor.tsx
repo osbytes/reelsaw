@@ -22,7 +22,7 @@ import { ThemeToggle } from "../App";
 import { HeaderAlerts } from "./HeaderAlerts";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
-import { useUnsavedFlag } from "../lib/unsaved";
+import { useLeaveGuard, useUnsavedFlag } from "../lib/unsaved";
 import { reportClientError } from "../lib/diagnostics";
 import { cutState, cutStateTitle } from "../lib/cutState";
 import { useHistory } from "../lib/history";
@@ -610,7 +610,6 @@ export function ClipEditor(props: Props) {
   };
   const [kwDraft, setKwDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
-  const [guard, setGuard] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [txSel, setTxSel] = useState<{ start: number; end: number } | null>(null);
   const [layout, setLayoutRaw] = useState<Layout>(() => {
@@ -1225,7 +1224,8 @@ export function ClipEditor(props: Props) {
     }
   }
   const busy = update.isPending || updateStyle.isPending || applyFraming.isPending;
-  const requestExit = () => (changed ? setGuard(true) : onExit());
+  const guard = useLeaveGuard(changed, onExit);
+  const requestExit = guard.requestExit;
 
   useUnsavedFlag("clip-editor", changed);
   // warn on tab close with unsaved edits
@@ -2235,6 +2235,7 @@ export function ClipEditor(props: Props) {
             { id: clip.id },
             {
               onSuccess: (r) => {
+                guard.allowLeave();
                 onExit();
                 notifyDeleted({
                   items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
@@ -2334,22 +2335,22 @@ export function ClipEditor(props: Props) {
         />
       ))}
 
-      <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
+      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">
           You have {dirtyCount} unsaved change{dirtyCount === 1 ? "" : "s"} to this clip{needsRender ? ", and some need a re-render" : ""}.
         </p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setGuard(false)}>
+          <button className="btn-ghost" onClick={guard.stay}>
             Keep editing
           </button>
-          <button className="btn-danger" onClick={onExit}>
+          <button className="btn-danger" onClick={guard.leave}>
             Discard
           </button>
           <button
             className="btn-primary"
             disabled={busy}
             onClick={async () => {
-              if (await save(needsRender)) onExit();
+              if (await save(needsRender)) guard.leave();
             }}
           >
             Save &amp; leave

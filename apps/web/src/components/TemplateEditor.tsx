@@ -34,7 +34,7 @@ import { useTRPC } from "../lib/trpc";
 import { useHistory } from "../lib/history";
 import { createClock, useClock, type Clock } from "../lib/playback";
 import { useShortcut, useShortcuts, useSheetKey, MOD } from "../lib/shortcuts";
-import { useUnsavedFlag } from "../lib/unsaved";
+import { useLeaveGuard, useUnsavedFlag } from "../lib/unsaved";
 import { loadTextFonts } from "../lib/fonts";
 import { ScrollArea } from "./scroll-area";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, type Framing, type PreviewAssetOverlay } from "./VerticalPreview";
@@ -502,7 +502,6 @@ export function TemplateEditor({ template, onExit }: Props) {
   const [safe, setSafe] = useState(true);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ kind: "asset" | "audio"; t: number } | null>(null);
-  const [guard, setGuard] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
   const clock = useMemo(() => createClock(0), []);
@@ -760,7 +759,8 @@ export function TemplateEditor({ template, onExit }: Props) {
       return false;
     }
   }
-  const requestExit = () => (dirty ? setGuard(true) : onExit());
+  const guard = useLeaveGuard(dirty, onExit);
+  const requestExit = guard.requestExit;
   useUnsavedFlag("template-editor", dirty);
   useEffect(() => {
     const on = (e: BeforeUnloadEvent) => {
@@ -1046,20 +1046,20 @@ export function TemplateEditor({ template, onExit }: Props) {
         />
       ))}
 
-      <Modal open={guard} onOpenChange={setGuard} title="Unsaved changes">
+      <Modal open={guard.open} onOpenChange={(o) => !o && guard.stay()} title="Unsaved changes">
         <p className="text-sm leading-relaxed text-ink2">You have unsaved changes to this template.</p>
         <div className="mt-1 flex flex-wrap justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setGuard(false)}>
+          <button className="btn-ghost" onClick={guard.stay}>
             Keep editing
           </button>
-          <button className="btn-danger" onClick={onExit}>
+          <button className="btn-danger" onClick={guard.leave}>
             Discard
           </button>
           <button
             className="btn-primary"
             disabled={busy || !nameOk}
             onClick={async () => {
-              if (await save()) onExit();
+              if (await save()) guard.leave();
             }}
           >
             Save &amp; leave
