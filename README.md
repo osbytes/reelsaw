@@ -85,7 +85,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 - **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; a worker that stops heartbeating (every 15 s) has its job re-queued by pg-boss within about a minute or two, and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
 - **Storage and install** – local volume or `s3` (AWS S3, MinIO, Cloudflare R2, Backblaze B2…); superseded renders, expired sources and orphaned files are swept hourly (`reelsaw storage` reports, `reelsaw storage sweep` runs it). One-line installers for macOS/Linux (bash) and Windows (PowerShell), and **Report an issue** saves a zip of a project's data, decisions and logs, with secrets left out.
-- **Observable and fail-fast** – every service is built in `main` and self-checks, so the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable or the DB is down. `LLM_TRACE=logs` or `langfuse` captures every prompt/response (tokens, latency, project/clip/stage), and `OTEL_ENABLED=true` turns on OTLP traces and metrics for HTTP, Postgres, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp and each stage.
+- **Observable and fail-fast** – every service is built in `main` and self-checks, so the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable or the DB is down. `LLM_TRACE=logs` or `langfuse` captures every prompt/response (tokens, latency, project/clip/stage), and `OTEL_ENABLED=true` turns on OTLP traces and metrics for HTTP, Postgres, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp and each stage, with stage, download and transcription time per second of video and per-proxy download health.
 
 ## Contributing
 
@@ -681,7 +681,31 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318   # OTLP/HTTP; traces + m
 OTEL_SERVICE_NAME=reelsaw
 ```
 
-Sentry's OTLP endpoint takes traces and logs (`…/integration/otlp`, plus `OTEL_EXPORTER_OTLP_HEADERS`). Each pino line that passes its level is exported to `/v1/logs`, with the active trace id attached; prompt, transcript and address fields stay in the local log. Sentry does not ingest OTLP metrics. With `SENTRY_DSN` set and `OTEL_METRICS_ENABLED` left on, the server sends Node runtime gauges (memory, CPU, event loop) and a `reelsaw.span.duration` distribution for each pipeline and ffmpeg span through the DSN instead. Set `OTEL_METRICS_ENABLED=false` to keep traces and logs and drop those metrics.
+Sentry's OTLP endpoint takes traces and logs (`…/integration/otlp`, plus `OTEL_EXPORTER_OTLP_HEADERS`). Each pino line that passes its level is exported to `/v1/logs`, with the active trace id attached; prompt, transcript and address fields stay in the local log. Sentry does not ingest OTLP metrics. With `SENTRY_DSN` set and `OTEL_METRICS_ENABLED` left on, the server sends Node runtime gauges (memory, CPU, event loop) and the metrics below through the DSN instead. Set `OTEL_METRICS_ENABLED=false` to keep traces and logs and drop those metrics.
+
+Metrics. Durations are seconds. Attributes are bounded sets (stage, proxy id, model, outcome), never a project, clip or user id. Work grows with the video, so the stage, download and transcription numbers each come with a *realtime factor*: wall seconds per second of media (0.25 = a 1-hour video takes 15 minutes), comparable across a 30-second clip and a 2-hour talk.
+
+| Metric | Unit | Attributes | What it answers |
+| --- | --- | --- | --- |
+| `reelsaw.pipeline.stage.duration` | s | `stage`, `outcome` (ok, error, superseded, gone), `encoder` on render | How long each stage job takes and how often it fails |
+| `reelsaw.pipeline.media.duration` | s | `stage`, `encoder` | Source length per finished job (clip length for prepare and render) |
+| `reelsaw.pipeline.realtime_factor` | 1 | `stage`, `encoder` | Stage seconds per second of media; render excludes the wait for a slot |
+| `reelsaw.ytdlp.download.duration` | s | `proxy`, `outcome`, `fallback` | One link download through the pool, fallbacks and waits included |
+| `reelsaw.ytdlp.download.realtime_factor` | 1 | `proxy` | Download seconds per second of video, by the proxy that served it |
+| `reelsaw.ytdlp.download.throughput` | By/s | `proxy` | Source bytes per second, by proxy |
+| `reelsaw.ytdlp.attempts` | {attempt} | `proxy`, `outcome` (ok, proxy, content, other, abort, busy, circuit_open), `panic` | Which candidate was tried and why it failed: `proxy` faults count against the exit, `content` against the video |
+| `reelsaw.ytdlp.attempt.duration` | s | `proxy`, `outcome` | Wall time of one yt-dlp process through one candidate |
+| `reelsaw.ytdlp.proxy.circuit.changes` | {change} | `proxy`, `state` | Circuit opens (cooling), half-opens and closes |
+| `reelsaw.ytdlp.proxy.healthy` / `.in_flight` / `.success_rate` | gauge | `proxy` | Circuit closed (1) or cooling (0), running downloads, last-20 success rate |
+| `reelsaw.stt.duration` / `.audio.duration` / `.realtime_factor` | s, s, 1 | `provider`, `model`, `outcome` | Transcription time, audio per call, seconds per audio second |
+| `gen_ai.client.operation.duration` | s | `gen_ai.request.model`, `reelsaw.stage`, `reelsaw.call`, `outcome` | Language model latency per pipeline step |
+| `gen_ai.client.token.usage` | {token} | `gen_ai.request.model`, `gen_ai.token.type`, `reelsaw.stage`, `reelsaw.call` | Tokens per call |
+| `reelsaw.llm.cost` | USD | `gen_ai.request.model`, `reelsaw.stage` | Provider-reported cost (AI Gateway) |
+| `reelsaw.render.slots` | gauge | `state` (running, limit) | Renders running in a worker and the limit CPU and memory allow |
+| `reelsaw.worker.jobs.active` | gauge | `queue` | Jobs a worker process is running |
+| `reelsaw.span.duration` | s | `span`, `status` | Every `withSpan`: each stage and each `exec ffmpeg`, `exec ffprobe`, `exec yt-dlp` |
+
+Over OTLP, the auto-instrumentation adds `http.server.request.duration`, and pg-boss adds `messaging.process.duration` and `pgboss.queue.jobs` (backlog by queue and state). A proxy dashboard: `reelsaw.ytdlp.download.realtime_factor` p50/p95 by `proxy`, `reelsaw.ytdlp.attempts` rate by `proxy` and `outcome`, and `reelsaw.ytdlp.proxy.healthy` by `proxy`.
 
 Spans: inbound HTTP (`/api/health` excluded), Postgres queries, outbound fetch to AI vendors, `pipeline.<stage>` per job with `reelsaw.project_id` / `reelsaw.clip_id` / `reelsaw.attempt`, `exec ffmpeg|ffprobe|yt-dlp`, and the AI SDK's own `ai.generateText` / `ai.transcribe` spans (inputs/outputs not recorded). pg-boss propagates trace context from `send()` into the worker span, so one trace follows a project from the create mutation through every stage.
 

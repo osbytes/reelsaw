@@ -15,8 +15,9 @@
  */
 import { createRequire } from "node:module";
 import { trace, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
-import { applyServerSampler, publicFromResolved, resolveOtlp, type OtelPublic } from "./otel-config.js";
+import { applyServerSampler, publicFromResolved, resolveOtlp, spanMetricAttributes, type OtelPublic } from "./otel-config.js";
 import { setOtelLogsEnabled } from "./otel-log.js";
+import { histogram } from "./metrics.js";
 
 export type { OtelPublic } from "./otel-config.js";
 export { resolveOtlp } from "./otel-config.js";
@@ -27,18 +28,9 @@ export interface Otel {
   enabled: boolean;
   /** browser-safe OTLP config for system.status; null when off or headers are not public */
   public: OtelPublic;
-  /** Sentry SDK metrics (runtime gauges + span durations). OTLP metrics stay off for that endpoint. */
+  /** Sentry SDK metrics (runtime gauges + metrics.ts). OTLP metrics stay off for that endpoint. */
   sentryMetrics: boolean;
   shutdown(): Promise<void>;
-}
-
-export type SpanMetric = (info: { name: string; durationMs: number; ok: boolean; attributes: Attributes }) => void;
-
-let spanMetric: SpanMetric | null = null;
-
-/** Registered by telemetry.ts once Sentry is initialised. No-op until then, and never throws into the span. */
-export function setSpanMetric(fn: SpanMetric | null): void {
-  spanMetric = fn;
 }
 
 function start(): Otel {
@@ -132,12 +124,8 @@ export async function withSpan<T>(name: string, attributes: Attributes, fn: (spa
       span.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
       throw err;
     } finally {
-      // Record while the span is still current so Sentry can attach its trace id. Never fail the work.
-      try {
-        spanMetric?.({ name, durationMs: performance.now() - t0, ok, attributes });
-      } catch {
-        /* metric export must not change the span's result */
-      }
+      // Recorded while the span is still current so Sentry can attach its trace id. histogram() never throws.
+      histogram("reelsaw.span.duration", (performance.now() - t0) / 1000, "s", spanMetricAttributes(name, ok, attributes));
       span.end();
     }
   });

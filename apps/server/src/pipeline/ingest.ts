@@ -8,6 +8,7 @@ import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { StageContext, exists } from "./common.js";
+import { histogram, realtimeFactor } from "../metrics.js";
 
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
@@ -34,6 +35,8 @@ export async function ingest(ctx: StageContext) {
   let meta: Record<string, unknown> = project.sourceMeta ?? {};
   let sourcePath: string | undefined;
   let sourceKey = project.sourceKey ?? undefined;
+  /** a link's download, measured once the probe knows the video's length */
+  let download: { proxy: string; sec: number } | undefined;
 
   if (stored && sourceKey) {
     sourcePath = await svc.storage.ensureLocal(sourceKey, path.join(dir, path.posix.basename(sourceKey)));
@@ -43,7 +46,8 @@ export async function ingest(ctx: StageContext) {
       await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
       let stderrTail = "";
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
-      const { stdout } = await svc.media.ytdlp(
+      const t0 = performance.now();
+      const { stdout, proxyId } = await svc.media.ytdlp(
         [
           "--no-playlist",
           "--no-warnings",
@@ -78,6 +82,7 @@ export async function ingest(ctx: StageContext) {
       ).catch((err: Error) => {
         throw new Error(describeDownloadFailure(err, stderrTail));
       });
+      download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
       if (jsonLine) {
         const info = JSON.parse(jsonLine) as Record<string, unknown>;
@@ -117,6 +122,7 @@ export async function ingest(ctx: StageContext) {
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
   ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");
+  if (download) recordDownload(download.proxy, download.sec, probe.durationSec, sourceBytes);
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
   const title = generic ? ((meta.title as string | undefined) ?? project.title) : project.title;
@@ -137,6 +143,16 @@ export async function ingest(ctx: StageContext) {
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;
+}
+
+/**
+ * Proxy performance normalised by the video: a 2-hour talk takes longer than a 30-second clip through
+ * any exit, so compare download seconds per second of video, and bytes per second, by proxy.
+ */
+export function recordDownload(proxy: string, sec: number, videoSec: number, bytes: number) {
+  const rtf = realtimeFactor(sec, videoSec);
+  if (rtf !== null) histogram("reelsaw.ytdlp.download.realtime_factor", rtf, "1", { proxy }, "Download wall seconds per second of video, by the proxy that served it");
+  if (sec > 0 && bytes > 0) histogram("reelsaw.ytdlp.download.throughput", bytes / sec, "By/s", { proxy }, "Downloaded source bytes per wall second, by proxy");
 }
 
 /**
