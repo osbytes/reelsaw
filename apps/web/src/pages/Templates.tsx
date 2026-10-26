@@ -42,7 +42,7 @@ export function TemplatesPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
   const create = useMutation(trpc.layerTemplates.create.mutationOptions());
   const update = useMutation(trpc.layerTemplates.update.mutationOptions({ onSuccess: () => invalidate() }));
-  const remove = useMutation(trpc.layerTemplates.remove.mutationOptions({ onSuccess: () => invalidate() }));
+  const remove = useMutation(trpc.layerTemplates.delete.mutationOptions({ onSuccess: () => invalidate() }));
   const restoreWindow = useRestoreWindow("template");
   const notifyDeleted = useDeletedToast();
   const [renaming, setRenaming] = useState<TemplateRow | null>(null);

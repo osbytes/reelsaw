@@ -283,7 +283,7 @@ export const TOOLS = {
       cursor: z.string().max(200).optional().describe("nextCursor from the previous page; omit for the first page"),
       limit: z.number().int().min(1).max(60).default(24).describe("Results per page (1-60, default 24)"),
       license: z.enum(["cc0", "by"]).optional().describe("freesound only: cc0 (default) or by (CC0 and CC-BY, attribution is stored)"),
-      removed: z.boolean().optional().describe("library only: list your deleted items instead (their ids go to restore_asset)"),
+      deleted: z.boolean().optional().describe("library only: list your deleted items instead (their ids go to restore_asset)"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -294,7 +294,7 @@ export const TOOLS = {
   },
   update_asset: {
     title: "Update library asset",
-    description: "Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, tags, durationSec, previousName }.",
+    description: "Rename one of your own library items, replace its tags, or change how long a still image shows (deleted items too; shared catalog and provider items cannot be changed). Only labels change; nothing re-renders, except that a new image length applies on each project's next render. Returns { id, name, tags, durationSec, previousName }.",
     inputSchema: {
       assetId: assetIdInput(),
       name: bumperNameSchema.optional().describe("New name (1-120 chars)"),
@@ -318,7 +318,7 @@ export const TOOLS = {
   },
   asset_usage: {
     title: "Where a library asset is used",
-    description: "Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }], templates: [{ id, name, layers }] }. A removed asset's layer is skipped when a template is applied. Check before removing one.",
+    description: "Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. Returns { projects: [{ id, title, slots, clips: [{ id, index, title, slots, via, overlays, music }] }], templates: [{ id, name, layers }] }. A deleted asset's layer is skipped when a template is applied. Check before deleting one.",
     inputSchema: { assetId: assetIdInput() },
     annotations: { readOnlyHint: true },
   },
@@ -343,7 +343,7 @@ export const TOOLS = {
   },
   list_layer_templates: {
     title: "List layer templates",
-    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = removed within 30 days). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = your deleted templates, restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },
@@ -367,7 +367,7 @@ export const TOOLS = {
 
   restore_layer_template: {
     title: "Restore layer template",
-    description: "Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). It does not become a default again. Returns the template.",
+    description: "Bring back a deleted layer template (the id from list_layer_templates deleted or list_deleted). It does not become a default again. Returns the template.",
     inputSchema: { templateId: templateIdSchema },
     annotations: { idempotentHint: true },
   },

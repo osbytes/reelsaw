@@ -590,16 +590,16 @@ const libraryRouter = router({
           cursor: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(60).default(24),
           license: z.enum(["cc0", "by"]).optional(),
-          /** library only: the items removed in the last 30 days (restorable with `restore`) instead of the live ones */
-          removed: z.boolean().optional(),
+          /** library only: your deleted items (restorable with `restore`) instead of the live ones */
+          deleted: z.boolean().optional(),
         }),
       )
       .query(async ({ ctx, input }) => {
-        const { source, removed: _removed, ...rest } = input;
+        const { source, deleted: _deleted, ...rest } = input;
         if (source !== "library") return catalogSearch(ctx.svc, { ...rest, provider: !source || source === "catalog" ? undefined : source });
         const q = input.q.trim().toLowerCase();
         const lib = await listLibrary(ctx.svc, ctx.user.id);
-        const hits = (input.removed ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
+        const hits = (input.deleted ? lib.deleted : lib.assets).filter((r) => (!input.kind || r.kind === input.kind) && (!q || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q))));
         const from = input.cursor ? Math.max(0, Number(input.cursor) || 0) : 0;
         const page = hits.slice(from, from + input.limit);
         return { provider: "library", items: page.map(libraryHit), nextCursor: from + input.limit < hits.length ? String(from + input.limit) : undefined, unavailable: undefined as string | undefined };
@@ -614,7 +614,7 @@ const libraryRouter = router({
       });
     }),
     /** Soft delete one of your uploads: hidden from the library and cleared from the defaults; projects that use it keep rendering with it. */
-    remove: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    delete: protectedProcedure.input(z.object({ id: z.string().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       return ctx.svc.tx(async (u) => {
         const gone = await u.db
           .update(schema.assets)
@@ -1611,7 +1611,7 @@ const layerTemplatesRouter = router({
   get: protectedProcedure.input(z.object({ id: templateIdSchema })).query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
   create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
   update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
-  remove: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
+  delete: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   /** Hard-delete a removed template (no media files). */
   purge: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => purgeLayerTemplate(ctx.svc, ctx.user.id, input.id)),

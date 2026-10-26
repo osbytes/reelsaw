@@ -425,7 +425,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
 | `search_assets` | Find assets. |
 | `add_asset` | Add from exactly one source: a public url or an uploadId (video, image, GIF, SVG or sound) becomes one of your library uploads; a search_assets catalog / provider hit (provider + externalId) materializes one instance-shared copy (checksum verified, license recorded; not listed in your library). |
-| `update_asset` | Rename one of your own library items, replace its tags, or change how long a still image shows (removed items too; shared catalog and provider items cannot be changed). |
+| `update_asset` | Rename one of your own library items, replace its tags, or change how long a still image shows (deleted items too; shared catalog and provider items cannot be changed). |
 | `delete_asset` | Delete one of your uploads: it leaves the library and your defaults and goes to Deleted. |
 | `restore_asset` | Bring one of your deleted library items back (the id from delete_asset or list_deleted); restoring an item that is not deleted changes nothing. |
 | `asset_usage` | Where a library item is used: as intro, outro, overlay or music on projects and clips (replaced clips left out), and in layer templates. |
@@ -436,7 +436,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `save_layer_template` | Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge) or layers (each with a timing, see list_layer_templates). |
 | `update_layer_template` | Rename a layer template and/or replace its layers (the whole list, each with a timing); a field left out is untouched. |
 | `delete_layer_template` | Delete a template (it goes to Deleted) and drop it from your project defaults; clips that already got its layers keep them. |
-| `restore_layer_template` | Bring back a layer template removed in the last 30 days (the id from list_layer_templates deleted). |
+| `restore_layer_template` | Bring back a deleted layer template (the id from list_layer_templates deleted or list_deleted). |
 | `apply_framing` | Make one clip's framing the whole project's, for a recording whose layout never changes (a slide deck with a webcam tile, a fixed camera): the clip's section at `at` (else its first framed section) gives the mode and its nudge / subject / crop, which become the project's reframe and reframeAdjust; every clip's own sections are cleared (unless keepOverrides) and the finished clips re-render. |
 | `apply_layer_template` | Write a template's layers onto clips of one project (up to 200 clipIds, or all), fitted to each clip's length. |
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |

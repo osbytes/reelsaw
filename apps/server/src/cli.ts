@@ -1049,7 +1049,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const keep = (x: (typeof lib.assets)[number]) => (!o.kind || x.kind === o.kind) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
       const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", owner: x.owner, tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips, templates: x.usedByTemplates });
       table(lib.assets.filter(keep).map(row));
-      const removed = lib.removed.filter(keep);
+      const removed = lib.deleted.filter(keep);
       if (removed.length) {
         console.log("\nremoved (restorable for 30 days)");
         table(removed.map(row));
@@ -1080,7 +1080,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const r = await api.library.update({ id: a, tags: tagList });
       console.log(`updated ${a}: tags ${r.tags.join(",") || "-"}`);
     } else if (sub === "delete" && a) {
-      await api.library.remove({ id: a });
+      await api.library.delete({ id: a });
       console.log(`deleted ${a} (restore with: reelsaw library restore ${a})`);
     } else if (sub === "restore" && a) {
       await api.library.restore({ id: a });
@@ -1223,7 +1223,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       else table(r.templates.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
-        table(r.deleted.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, removed: t.deletedAt })));
+        table(r.deleted.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, deleted: t.deletedAt })));
       }
     } else if (sub === "show") {
       if (!a) throw new Error(usage);
@@ -1260,7 +1260,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       show(t);
     } else if (sub === "delete") {
       if (!a) throw new Error(usage);
-      const r = await api.layerTemplates.remove({ id: a });
+      const r = await api.layerTemplates.delete({ id: a });
       console.log(`deleted (restore with: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`);
     } else if (sub === "restore") {
       if (!a) throw new Error(usage);

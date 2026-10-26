@@ -356,7 +356,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("search_assets", TOOLS.search_assets, (input) => run(() => api.library.search(input)));
   server.registerTool("add_asset", TOOLS.add_asset, (input) => run(async () => ({ ...(await api.library.add(input)), isDefault: input.setDefault ?? null })));
   server.registerTool("update_asset", TOOLS.update_asset, ({ assetId, ...patch }) => run(() => api.library.update({ id: assetId, ...patch })));
-  server.registerTool("delete_asset", TOOLS.delete_asset, ({ assetId }) => run(() => api.library.remove({ id: assetId })));
+  server.registerTool("delete_asset", TOOLS.delete_asset, ({ assetId }) => run(() => api.library.delete({ id: assetId })));
   server.registerTool("restore_asset", TOOLS.restore_asset, ({ assetId }) => run(() => api.library.restore({ id: assetId })));
   server.registerTool("purge_asset", TOOLS.purge_asset, ({ assetId }) => run(() => api.library.purge({ id: assetId })));
   server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
@@ -368,7 +368,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers! })));
   });
   server.registerTool("update_layer_template", TOOLS.update_layer_template, ({ templateId, ...patch }) => run(() => api.layerTemplates.update({ id: templateId, ...patch })));
-  server.registerTool("delete_layer_template", TOOLS.delete_layer_template, ({ templateId }) => run(() => api.layerTemplates.remove({ id: templateId })));
+  server.registerTool("delete_layer_template", TOOLS.delete_layer_template, ({ templateId }) => run(() => api.layerTemplates.delete({ id: templateId })));
   server.registerTool("restore_layer_template", TOOLS.restore_layer_template, ({ templateId }) => run(() => api.layerTemplates.restore({ id: templateId })));
   server.registerTool("apply_layer_template", TOOLS.apply_layer_template, (input) => run(() => api.layerTemplates.applyToClips(input)));
   server.registerTool("apply_framing", TOOLS.apply_framing, ({ clipId, at, keepOverrides, rerender }) =>

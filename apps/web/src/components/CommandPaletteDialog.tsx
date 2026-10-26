@@ -96,7 +96,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const create = useMutation(trpc.projects.create.mutationOptions());
   const setBumpers = useMutation(trpc.projects.setBumpers.mutationOptions());
   const setDefault = useMutation(trpc.library.setDefault.mutationOptions());
-  const removeAsset = useMutation(trpc.library.remove.mutationOptions());
+  const removeAsset = useMutation(trpc.library.delete.mutationOptions());
   const assetWindow = useRestoreWindow("asset", open);
   const defaults = useMe().data?.projectDefaults;
   // seconds for an image picked in a Set intro / outro list; empty = the item's own length

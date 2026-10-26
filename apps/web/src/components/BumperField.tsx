@@ -65,7 +65,7 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
   const notifyDeleted = useDeletedToast();
   const create = useMutation(trpc.library.add.mutationOptions());
   const setDefaultM = useMutation(trpc.library.setDefault.mutationOptions());
-  const removeM = useMutation(trpc.library.remove.mutationOptions());
+  const removeM = useMutation(trpc.library.delete.mutationOptions());
   // the window the library page (or the delete confirm) already fetched; no fetch of its own
   const restoreWindow = useRestoreWindow("asset", false);
   const restoreM = useMutation(trpc.library.restore.mutationOptions());

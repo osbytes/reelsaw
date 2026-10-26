@@ -426,7 +426,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     /** the file itself (play the music, view the image or video); same auth as this server */
     url: abs(`/media/assets/${a.id}`),
   });
-  return { assets: lib.assets.map(row), removed: lib.deleted.map(row) };
+  return { assets: lib.assets.map(row), deleted: lib.deleted.map(row) };
 }
 
 // ---------- project coverage summaries (Projects list, projects.get, reelsaw status) ----------
