@@ -5,6 +5,7 @@ import { schema, type Db, type Project } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
+import type { DiskLease } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
 
 export class ProjectGoneError extends Error {
@@ -81,6 +82,28 @@ export class StageContext {
     const dir = this.svc.paths.project(this.projectId);
     await fs.mkdir(dir, { recursive: true });
     return dir;
+  }
+
+  private leases: DiskLease[] = [];
+  /**
+   * Wait for CPU, memory and disk, and lease the `needDiskMB` of scratch this stage is about to write
+   * (resources.ts): the claim keeps a second job from starting on the same free bytes. Held until `release()`,
+   * which the job wrapper calls when the stage ends; a stage may call it sooner, once its bytes are on disk.
+   */
+  async acquire(kind: string, needDiskMB: number, extra: Record<string, unknown> = {}): Promise<void> {
+    const lease = await this.svc.resources.acquire({
+      kind,
+      needDiskMB,
+      signal: this.signal,
+      onWait: (r) => void this.progress(0, `Waiting for resources: ${r}`, extra).catch(() => {}),
+      ids: { jobId: this.ids.jobId === undefined ? undefined : String(this.ids.jobId), projectId: this.projectId },
+    });
+    this.leases.push(lease);
+  }
+
+  /** Give back the disk leased by `acquire` (idempotent; a lease never outlives the job either way). */
+  async release(): Promise<void> {
+    for (const lease of this.leases.splice(0)) await lease.release();
   }
 
   /** Local scratch path for the source video, pulled from storage if missing on this node. */

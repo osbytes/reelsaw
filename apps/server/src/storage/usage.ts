@@ -7,6 +7,8 @@ import path from "node:path";
 import { isNotNull } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
+import { volumeLeases } from "../disk-leases.js";
+import { WORKER_STALE_MS, workerIdOf } from "../ops/workers.js";
 import { CACHE_KINDS, cacheIdleMs, planScratchSweep } from "./sweep.js";
 
 /** The YouTube video id in a watch / short / embed / youtu.be URL, else null. */
@@ -80,6 +82,11 @@ export interface StorageReport {
   cacheFiles: number;
   /** null: nothing is evictable (local store, or SCRATCH_CACHE_HOURS=0) */
   cacheIdleHours: number | null;
+  /** the filesystem DATA_DIR is on (disk-leases.ts); null before the leaser is set up */
+  volume: string | null;
+  /** free space already claimed by jobs in flight on that volume, by every process on it: counted as used before the bytes land */
+  leasedMB: number;
+  leasedJobs: number;
   duplicateSourceBytes: number;
   duplicateSourceGroups: number;
   expiredButPresentBytes: number;
@@ -94,6 +101,8 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const orphans = planned.filter((r) => !CACHE_KINDS.has(r.kind));
   const cache = planned.filter((r) => CACHE_KINDS.has(r.kind));
   const idleMs = cacheIdleMs(svc);
+  const lease = svc.resources.leases();
+  const leased = lease.volume ? await volumeLeases(db, { volume: lease.volume, selfId: workerIdOf(svc.config), staleMs: WORKER_STALE_MS }) : { mb: lease.ownMB, jobs: lease.own };
 
   const live = await db
     .select({ url: schema.projects.sourceUrl, bytes: schema.projects.sourceBytes })
@@ -126,6 +135,9 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
     cacheBytes: cache.reduce((s, r) => s + r.bytes, 0),
     cacheFiles: cache.length,
     cacheIdleHours: idleMs === null ? null : idleMs / 3_600_000,
+    volume: lease.volume,
+    leasedMB: leased.mb,
+    leasedJobs: leased.jobs,
     duplicateSourceBytes: dup.bytes,
     duplicateSourceGroups: dup.groups,
     expiredButPresentBytes: expiredBytes,

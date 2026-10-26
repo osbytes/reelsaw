@@ -148,7 +148,11 @@ Each worker keeps its own scratch copies of the sources and renders it works on.
 they are a cache: idle copies of finished projects are evicted after `SCRATCH_CACHE_HOURS` (24), a
 job short of disk evicts the least recently used ones first, and a worker that still cannot make
 room hands the job to a worker that has it and stops taking media jobs until its disk recovers
-(Settings → System → Workers shows "disk full").
+(Settings → System → Workers shows "disk full"). A job leases the scratch it is about to write
+against its volume's live leases before the first byte lands, so two large ingests on one box
+cannot both pass the free-space check and both run out mid-download: the second waits for the
+first. Processes sharing a volume (the app and worker replicas of one host) share one ledger;
+a worker on another host never contends.
 
 Use MinIO for local S3 testing:
 
@@ -458,7 +462,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `check_for_update` | Admins only: is a newer Reelsaw published? |
 | `list_releases` | Published Reelsaw versions from GitHub (reelsaw.com/releases): tag, date, a short summary and the change notes. |
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
-| `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, or a combined app), with CPU, memory, disk (free/total MB; -1 free means unmeasurable), GPU, render slots, the queues it listens on, and the jobs it last reported. |
+| `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = free space jobs in flight have claimed on its volume), GPU, render slots, the queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage, plus the jobs currently in flight (project title, attempt, started). |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
@@ -520,7 +524,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
-| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
+| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |

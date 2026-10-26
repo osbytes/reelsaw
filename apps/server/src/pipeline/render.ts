@@ -218,7 +218,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     await finalizeProjectIfDone(svc, projectId);
     return;
   }
-  await svc.resources.acquire({ kind: "render", needDiskMB: 512, signal: ctx.signal, onWait: (r) => void ctx.progress(0, `Waiting for resources: ${r}`, { clipId }).catch(() => {}) });
+  await ctx.acquire("render", 512, { clipId });
   const sourcePath = await ctx.ensureSource(project);
   const clipsDir = path.join(await ctx.dir(), "clips");
   await fs.mkdir(clipsDir, { recursive: true });

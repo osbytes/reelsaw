@@ -26,6 +26,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Clip "stuck rendering" | `reelsaw status` → live jobs, `retries` | Container restarted mid-job; it resumes once pg-boss notices the missed heartbeat (heartbeat every 15 s, supervisor pass every 60 s) and the retry delay passes (15 s, doubling per retry): expect a minute or two, not seconds. Each restart burns a retry. |
 | Upload stuck on "Downloading…" then fails after ~15 min | worker log `Not enough disk` / older `Gave up waiting 900s for resources before ingest` | Worker volume smaller than `MIN_FREE_DISK_MB` plus the file (a ~4.6 GB disk cannot hold a 2 GB upload and still keep 2 GB free). Ingest used to wait the full 900 s, then retry, and the UI labelled every ingest "Downloading". With an S3 store the worker first evicts scratch copies the bucket has (`evicted scratch for a job short of disk`), then hands the job to a worker with room (`handing the job to a worker with disk`) before it fails. |
 | Worker volume fills up over weeks with an S3 store | `reelsaw storage` → "scratch copies of stored files"; `du -sh /data/projects` | Every source and render ever processed also sat on the worker as a cache the sweep never evicted. Now `SCRATCH_CACHE_HOURS` (24) evicts the copies of finished projects once idle; `reelsaw storage sweep` does it at once, `reelsaw storage reclaim <MB>` frees a given amount least-recently-used first. |
+| Two large ingests started together, one (or both) failed with `ENOSPC` / "No space left on device" mid-download | `reelsaw storage` → "leased to jobs in flight"; worker log `leased disk` (debug), `waiting for resources` with `leased to N jobs in flight` | Before disk leases both passed the free-space check on the same bytes. Now a job claims its scratch against the volume's live leases (`disk_leases`, one advisory lock per volume) before it writes: the second job waits for the first to finish (progress says "Waiting for resources: … leased to 1 job in flight") and gives up only after `RESOURCE_WAIT_MAX_SECONDS`, when pg-boss retries it. Seeing this on a current version means a process outside Reelsaw is filling the volume. |
 | A worker shows "disk full" under Settings → System → Workers and takes no media jobs | worker log `paused disk queues on this worker` | Free disk fell under `MIN_FREE_DISK_MB`, nothing was left to evict (the local store, every copy in use, or the sweep already ran) and another worker had room. That worker takes ingest, transcribe, analyze, prepare and render; this one keeps the refine queues and resumes on its own 1 GB above the floor (`resumed disk queues`). Free space (retention, `reelsaw storage sweep`, a bigger volume) or add a worker. A single box never pauses: its jobs fail fast with `Not enough disk`. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Transcript filled with one looping word or the show's name list ("no no no…", "Chafing Dream Swag Bags…") | `reelsaw status` words around that time; many copies share one timestamp | Whisper decoder loop on a 10-minute chunk (often after a real short repeat, or the vocabulary `prompt` leaking at a chunk cut). Collapse keeps a short run; a repetitive chunk is retried without the prompt. Re-transcribe to recover the missing minutes. |
@@ -91,7 +92,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
 | `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
 | `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
-| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
+| `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
 | `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
 | `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
@@ -317,6 +318,22 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   (Workers page, MCP `list_workers`, `reelsaw workers`) shows what a paused worker still takes. With the local store
   nothing is evictable (scratch and store are one hardlinked file): `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS`
   are what free disk.
+- **A job leases its scratch before it writes it** (`disk-leases.ts`). `statfs` sees only bytes already on disk,
+  so two ingests of large videos that both passed the free-space check on the same box used to both run out
+  mid-download. Now `acquire` checks the job's need (`MIN_FREE_DISK_MB` plus its scratch) against the volume's
+  live leases and records its own claim in the same transaction, under `pg_advisory_xact_lock` per volume
+  (`disk_leases`): the second job sees the first job's claim and waits for it (progress: "Waiting for resources:
+  5000 MB free but 2048 MB leased to 1 job in flight, needs 4096 MB"), evicting idle cache copies once first; it
+  gives up after `RESOURCE_WAIT_MAX_SECONDS` like a CPU or memory wait, and pg-boss retries. The stage releases
+  the lease when it ends (ingest as soon as the source is on disk, where `statfs` counts it). A lease counts
+  while its worker heartbeats and until it expires after the longest a stage job may run (3 h), so a crash leaks
+  nothing for long; a stopping process drops its leases with its heartbeat row and the hourly sweep deletes dead
+  rows. A volume is the filesystem `DATA_DIR` is on: every process mounting it (the app and the worker replicas
+  of one host sharing the compose `data` volume) reads the same id from the `DATA_DIR/.volume-id` marker, written
+  once at first boot; a worker on another host has its own volume and never contends. The heartbeat carries the
+  volume's leased total (`diskLeasedMB`; Workers page "(2.0 GB leased)", `reelsaw workers`, `list_workers`), and a
+  hand-off counts it as used when it looks for a worker with room. `reelsaw storage` shows "leased to jobs in
+  flight on this volume".
 - **Background work is bounded and resumable.** The hourly sweep reads project directories in name order, 1,000 per
   database lookup, `stat`s 16 files at a time and stops after 60 s (10 s per directory); the rest continues next
   hour from a cursor in `instance_settings` (`sweep_state`; `reelsaw storage` shows it and the last run time). A

@@ -13,7 +13,8 @@ import type { Logger } from "./log.js";
  *   CPU    – utilisation measured from os.cpus() time deltas (load average is 0 on Windows);
  *            os.availableParallelism() for the CPU count (libuv honours affinity and container quotas)
  *   memory – process.availableMemory() / process.constrainedMemory() (libuv: cgroup-aware on Linux)
- *   disk   – fs.statfs() on the data directory
+ *   disk   – fs.statfs() on the data directory, net of the disk leased to jobs in flight (disk-leases.ts):
+ *            statfs sees only bytes already written, so a job claims its scratch before writing it
  */
 export interface ResourceSnapshot {
   at: string;
@@ -94,18 +95,29 @@ export interface ResourceGovernor {
   /** the GPU found at boot, or null; see detectGpu */
   gpu(): GpuInfo | null;
   /**
-   * Resolve once CPU, memory and disk are under their thresholds (plus `needDiskMB` headroom).
-   * Calls `onWait` when it has to wait so the job can report progress. Throws after the max wait
-   * so pg-boss can retry with backoff instead of holding the slot forever. A disk shortfall asks
-   * the reclaimer (scratch cache eviction) once, then throws `ResourceExhaustedError` if still
-   * short: waiting does not free space.
+   * Resolve once CPU, memory and disk are under their thresholds (plus `needDiskMB` headroom), holding a
+   * lease on that `needDiskMB` until the caller releases it (a stage: when it ends, StageContext.release).
+   * The check and the lease are one step against the volume's live total, so two jobs cannot both pass
+   * on the same free bytes and both fail mid-write. Calls `onWait` when it has to wait so the job can
+   * report progress. Throws after the max wait so pg-boss can retry with backoff instead of holding
+   * the slot forever. A disk shortfall asks the reclaimer (scratch cache eviction) once; still short
+   * because of the bytes on disk it throws `ResourceExhaustedError` (waiting does not free space),
+   * short only because of other jobs' leases it waits for them like for CPU and memory.
    */
-  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void }): Promise<void>;
+  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void; ids?: { jobId?: string; projectId?: string } }): Promise<DiskLease>;
   /**
    * How a disk shortfall is answered: free at least `needBytes` of scratch (storage/sweep.ts
    * `reclaimScratch`). Set once the store and database are up; absent, a shortfall fails at once.
    */
   setReclaimer(fn: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null): void;
+  /**
+   * The shared ledger of disk leases for `volume` (disk-leases.ts): every process on that filesystem checks
+   * and records its claims there. Until it is set (boot, tests, a process without a database) this process's
+   * own leases are the whole picture.
+   */
+  setLeaser(fn: DiskLeaser | null, volume?: string): void;
+  /** the volume this process leases on (null until setLeaser) and the leases it holds right now */
+  leases(): { volume: string | null; ownMB: number; own: number };
   /** Evict scratch until `diskFreeMB` is at least `targetMB` (the floor plus headroom), or nothing is left to evict. Resolves to the free MB after. */
   reclaimTo(targetMB: number): Promise<number>;
   /** ffmpeg encode `-threads` value: the CPUs shared by the renders running right now. Filtergraph threads are always 1 (see `ffmpegThreadArgs`). */
@@ -162,6 +174,40 @@ export function requiredDiskMB(minFreeMB: number, extraMB: number) {
   return minFreeMB + extraMB;
 }
 
+/** Disk a job holds for the scratch it is about to write; `release` gives it back (idempotent). */
+export interface DiskLease {
+  readonly mb: number;
+  release(): Promise<void>;
+}
+
+export interface DiskLeaseRequest {
+  /** scratch the job will write */
+  mb: number;
+  /** MIN_FREE_DISK_MB plus `mb`: what must be free, net of live leases, for the job to start */
+  requiredMB: number;
+  /** free MB on the volume as this process measured it (never -1: an unmeasurable disk is not leased) */
+  freeMB: number;
+  kind: string;
+  jobId?: string;
+  projectId?: string;
+}
+export type DiskLeaseResult = { ok: true; release: () => Promise<void> } | { ok: false; leasedMB: number; jobs: number };
+/** Check the request against the volume's live leases and record it, as one atomic step (disk-leases.ts). */
+export type DiskLeaser = (req: DiskLeaseRequest) => Promise<DiskLeaseResult>;
+
+/**
+ * Pure: may a job that needs `requiredMB` free start when `freeMB` is free on disk and `leasedMB` of that is
+ * already promised to jobs in flight (whose scratch statfs does not see yet)? An unmeasurable disk (-1) never refuses.
+ */
+export function leaseFits(p: { freeMB: number; leasedMB: number; requiredMB: number }): boolean {
+  return p.freeMB < 0 || p.freeMB - p.leasedMB >= p.requiredMB;
+}
+
+/** Progress / log text for a job held back by other jobs' leases rather than by the bytes on disk. */
+export function leaseShortReason(freeMB: number, leasedMB: number, jobs: number, requiredMB: number): string {
+  return `${freeMB} MB free but ${leasedMB} MB leased to ${jobs} job${jobs === 1 ? "" : "s"} in flight, needs ${requiredMB} MB`;
+}
+
 /** Null when disk is unmeasured (`diskFreeMB < 0`) or there is enough. */
 export function diskShortReason(diskFreeMB: number, minFreeMB: number, extraMB: number): string | null {
   if (diskFreeMB < 0) return null;
@@ -192,6 +238,42 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
   let reclaimer: ((needBytes: number) => Promise<{ bytes: number; enough: boolean }>) | null = null;
   /** one eviction at a time: concurrent jobs short of disk share the run instead of walking the same directories */
   let reclaiming: Promise<number> | null = null;
+  let leaser: DiskLeaser | null = null;
+  let volume: string | null = null;
+  /** leases this process holds: lease id → MB (what the heartbeat reports; the whole ledger without a leaser) */
+  const own = new Map<number, number>();
+  let nextLease = 1;
+  const ownMB = () => [...own.values()].reduce((a, b) => a + b, 0);
+
+  /**
+   * Claim `req.mb` against the volume's live leases, atomically with the check. Without a shared ledger the
+   * check and the reservation are one synchronous step on this process's own map, so two concurrent
+   * acquires cannot both pass on the same bytes either.
+   */
+  async function takeLease(req: DiskLeaseRequest): Promise<DiskLeaseResult> {
+    if (leaser) return leaser(req);
+    const held = ownMB();
+    if (!leaseFits({ freeMB: req.freeMB, leasedMB: held, requiredMB: req.requiredMB })) return { ok: false, leasedMB: held, jobs: own.size };
+    return { ok: true, release: async () => {} };
+  }
+
+  /** The lease handed to the caller: drops the entry from `own` and the ledger once, whichever way it ends. */
+  function leaseHandle(mb: number, release: () => Promise<void>): DiskLease {
+    if (mb <= 0) return { mb: 0, release: async () => {} };
+    const id = nextLease++;
+    own.set(id, mb);
+    let done = false;
+    return {
+      mb,
+      async release() {
+        if (done) return;
+        done = true;
+        own.delete(id);
+        lastAt = 0; // the next sample reads the disk again: the scratch is real (or gone) now
+        await release().catch((err) => log.warn({ err, mb }, "could not release a disk lease; it expires on its own"));
+      },
+    };
+  }
 
   /** Ask the reclaimer for `needMB` more, then resample. Resolves to the free MB afterwards (-1 when unmeasurable). */
   function reclaim(needMB: number): Promise<number> {
@@ -273,13 +355,22 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       reclaimer = fn;
     },
 
+    setLeaser(fn, vol) {
+      leaser = fn;
+      volume = fn ? (vol ?? null) : null;
+    },
+
+    leases() {
+      return { volume, ownMB: ownMB(), own: own.size };
+    },
+
     async reclaimTo(targetMB) {
       const free = (await sample()).diskFreeMB;
       if (free < 0 || free >= targetMB) return free;
       return reclaim(targetMB - free);
     },
 
-    async acquire({ kind, needDiskMB = 0, signal, onWait }) {
+    async acquire({ kind, needDiskMB = 0, signal, onWait, ids }) {
       const started = Date.now();
       let waited = false;
       let reclaimed = false;
@@ -293,23 +384,33 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         const required = requiredDiskMB(config.MIN_FREE_DISK_MB, needDiskMB);
         const disk = diskShortReason(s.diskFreeMB, config.MIN_FREE_DISK_MB, needDiskMB);
         if (disk) reasons.push(disk);
+        /** short only because of other jobs' leases: the bytes are free, but promised */
+        let leased: { leasedMB: number; jobs: number } | null = null;
         if (!reasons.length) {
-          if (waited) log.info({ kind, waitedSec: Math.round((Date.now() - started) / 1000) }, "resources available, proceeding");
-          return;
+          // everything fits on paper: claim the scratch now, in the same step as the check against the
+          // leases already out, so a second job cannot pass on the bytes this one is about to write
+          const r = needDiskMB > 0 && s.diskFreeMB >= 0 ? await takeLease({ mb: needDiskMB, requiredMB: required, freeMB: s.diskFreeMB, kind, ...ids }) : ({ ok: true, release: async () => {} } as const);
+          if (r.ok) {
+            if (waited) log.info({ kind, waitedSec: Math.round((Date.now() - started) / 1000) }, "resources available, proceeding");
+            return leaseHandle(needDiskMB > 0 && s.diskFreeMB >= 0 ? needDiskMB : 0, r.release);
+          }
+          leased = r;
+          reasons.push(leaseShortReason(s.diskFreeMB, r.leasedMB, r.jobs, required));
         }
         const reason = reasons.join("; ");
         // disk never frees itself by waiting — including the extra scratch on top of MIN_FREE_DISK_MB.
         // waiting 900s then retrying looked like a "Downloading…" loop on a full worker volume.
         // What can free it is evicting scratch copies the store still has: once, then give up here.
-        if (disk) {
+        // Space other jobs have leased is different: it comes back when they end, so that one waits.
+        if (disk || leased) {
           if (!reclaimed && reclaimer) {
             reclaimed = true;
             log.warn({ kind, reason }, "short of disk, evicting scratch");
             onWait?.(`Freeing disk: ${reason}`);
-            await reclaim(required - s.diskFreeMB);
+            await reclaim(required - (s.diskFreeMB - (leased?.leasedMB ?? 0)));
             continue;
           }
-          throw new ResourceExhaustedError(`Not enough disk in ${dataDir}: ${reason}. Free space or raise the volume size.`, required, s.diskFreeMB);
+          if (disk) throw new ResourceExhaustedError(`Not enough disk in ${dataDir}: ${reason}. Free space or raise the volume size.`, required, s.diskFreeMB);
         }
         if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000) {
           throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for resources before ${kind}: ${reason}`);

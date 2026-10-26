@@ -113,7 +113,11 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
             withLlmContext({ projectId, stage, jobId: job.id }, async () => {
               const ctx = await StageContext.open(svc, projectId, stage, job.signal, { jobId: job.id, queue }, seq);
               seq = ctx.seq;
-              return fn(ctx);
+              try {
+                return await fn(ctx);
+              } finally {
+                await ctx.release(); // the disk it leased, however the stage ended
+              }
             }),
           ),
         );
@@ -173,7 +177,11 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
             withLlmContext({ projectId, stage: `refine.${step}`, jobId: job.id }, async () => {
               const ctx = await StageContext.open(svc, projectId, "refine", job.signal, { jobId: job.id, queue, step }, seq);
               seq = ctx.seq;
-              return fn(ctx);
+              try {
+                return await fn(ctx);
+              } finally {
+                await ctx.release();
+              }
             }),
           ),
         );
@@ -207,7 +215,16 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
         if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "prepare", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
         await measured(svc, "prepare", { projectId, clipId }, () =>
-          withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () => withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => prepareClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.prepare }), clipId, mode))),
+          withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () =>
+            withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => {
+              const ctx = await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.prepare });
+              try {
+                await prepareClip(ctx, clipId, mode);
+              } finally {
+                await ctx.release();
+              }
+            }),
+          ),
         );
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
@@ -237,9 +254,14 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
         try {
           await measured(svc, "render", { projectId, clipId }, () =>
-            withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () =>
-              renderClip(await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.render }), clipId, gen),
-            ),
+            withSpan("pipeline.render", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId, "reelsaw.attempt": job.retryCount + 1 }, async () => {
+              const ctx = await StageContext.open(svc, projectId, "render", job.signal, { jobId: job.id, clipId, queue: QUEUES.render });
+              try {
+                await renderClip(ctx, clipId, gen);
+              } finally {
+                await ctx.release();
+              }
+            }),
           );
         } finally {
           release();

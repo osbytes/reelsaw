@@ -31,7 +31,7 @@ export async function transcribe(ctx: StageContext) {
 
   await ctx.start("transcribing");
   const sourcePath = await ctx.ensureSource(project);
-  await svc.resources.acquire({ kind: "transcribe", needDiskMB: 512, signal: ctx.signal, onWait: (r) => void ctx.progress(0, `Waiting for resources: ${r}`).catch(() => {}) });
+  await ctx.acquire("transcribe", 512);
 
   const audioPath = path.join(dir, "audio.mp3");
   if (!(await exists(audioPath))) {

@@ -725,6 +725,10 @@ export const workerInstances = pgTable(
     /** -1 when this filesystem cannot report free space (same as ResourceSnapshot) */
     diskFreeMB: integer("disk_free_mb").notNull().default(-1),
     diskTotalMB: integer("disk_total_mb").notNull().default(0),
+    /** the filesystem DATA_DIR is on (the `.volume-id` marker, disk-leases.ts); processes sharing it share disk leases */
+    volume: text("volume"),
+    /** MB leased to jobs in flight on that volume (every process on it), as of this beat */
+    diskLeasedMB: integer("disk_leased_mb").notNull().default(0),
     gpu: jsonb("gpu").$type<WorkerGpu | null>(),
     renders: jsonb("renders").$type<WorkerRenders>().notNull(),
     queues: text("queues").array().notNull().default(sql`'{}'::text[]`),
@@ -734,3 +738,28 @@ export const workerInstances = pgTable(
   (t) => [index("worker_instances_last_seen_idx").on(t.lastSeenAt)],
 );
 export type WorkerInstanceRow = typeof workerInstances.$inferSelect;
+
+/**
+ * Disk a job in flight has claimed on a volume (the filesystem DATA_DIR is on, identified by the
+ * `.volume-id` marker every process sharing it reads). resources.ts takes one, atomically against the
+ * volume's live total, before a stage writes its scratch, and the stage gives it back when it ends; a
+ * lease counts while its worker heartbeats and until it expires (the longest a stage job may run), so
+ * a crash leaks nothing for long. disk-leases.ts.
+ */
+export const diskLeases = pgTable(
+  "disk_leases",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    volume: text("volume").notNull(),
+    workerId: text("worker_id").notNull(),
+    jobId: text("job_id"),
+    projectId: text("project_id"),
+    /** the stage that took it: ingest, transcribe, render */
+    kind: text("kind").notNull(),
+    mb: integer("mb").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("disk_leases_volume_idx").on(t.volume, t.expiresAt), index("disk_leases_worker_idx").on(t.workerId)],
+);
+export type DiskLeaseRow = typeof diskLeases.$inferSelect;

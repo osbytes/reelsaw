@@ -165,8 +165,8 @@ export const DOCS: Record<string, [GroupId, string]> = {
 
   MAX_CPU_PERCENT: ["resources", "Heavy steps wait while total CPU time is busier than this (measured, any OS)."],
   MIN_FREE_MEM_MB: ["resources", "Heavy steps wait while free memory is below this."],
-  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. A job that also needs scratch first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`); still short, it moves to another worker that has the room, or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows \"disk full\"); a single box fails the job instead."],
-  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU or memory. Disk shortfalls do not wait: eviction, hand-off or failure."],
+  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. A job that also needs scratch checks the floor plus that scratch against free space net of what jobs in flight have already leased on the volume, and leases its own in the same step, so two jobs cannot both pass on the same bytes; short of disk it first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`), then waits for other jobs' leases to come back, or, short of real bytes, moves to another worker that has the room or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows \"disk full\"); a single box fails the job instead."],
+  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU, memory, or disk other jobs have leased but not written yet. A shortfall of real bytes does not wait: eviction, hand-off or failure."],
   STALL_MINUTES: ["resources", "A running job with no progress event for this long is reported (log and UI) as stalled."],
   SHUTDOWN_GRACE_SECONDS: ["resources", "On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders."],
 

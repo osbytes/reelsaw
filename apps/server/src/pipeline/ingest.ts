@@ -25,12 +25,7 @@ export async function ingest(ctx: StageContext) {
   const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
   const upload = !stored && project.sourceType === "upload" ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) }) : undefined;
   if (!stored && project.sourceType === "upload" && !upload) throw new Error("Uploaded source file is missing");
-  await svc.resources.acquire({
-    kind: "ingest",
-    needDiskMB: ingestScratchMB(stored ? project.sourceBytes : upload?.sizeBytes),
-    signal: ctx.signal,
-    onWait: (r) => void ctx.progress(0, `Waiting for resources: ${r}`).catch(() => {}),
-  });
+  await ctx.acquire("ingest", ingestScratchMB(stored ? project.sourceBytes : upload?.sizeBytes));
 
   let meta: Record<string, unknown> = project.sourceMeta ?? {};
   let sourcePath: string | undefined;
@@ -121,6 +116,7 @@ export async function ingest(ctx: StageContext) {
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
+  await ctx.release(); // the source is on disk, where free-space checks count it: the lease has done its job
   ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");
   if (download) recordDownload(download.proxy, download.sec, probe.durationSec, sourceBytes);
 
