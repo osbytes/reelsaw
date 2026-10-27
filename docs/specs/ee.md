@@ -170,7 +170,8 @@ Haiku-class selection and refinement), before compute and storage.
    ASS file as the captions, so no new ffmpeg filter. A paid plan removes it (`watermark: false`
    in `plans.ts`); an admin can force it on or off per user (Users → Limits, `user_settings.watermark`).
    Same chain as the quotas: override, plan, instance setting. Decided at render time and recorded
-   on the clip (`clips.watermark`), so a re-render after an upgrade drops it and the card says so.
+   on the clip (`clips.watermark`), so a re-render after an upgrade drops it and the card says so. The flag is the other way round too: a lapse
+   or downgrade does not re-watermark clips already rendered; only new renders get the watermark.
 
 ## Part A: a monthly allowance in the core
 

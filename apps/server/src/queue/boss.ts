@@ -43,8 +43,8 @@ export interface TxOpts {
 
 /**
  * What the queue knows about a job's owner at enqueue time, from one statement: the owner, how many of
- * their jobs are queued or running (any queue), and how many renders / new clips they asked for in the
- * last hour. Jobs enqueued before `userId` was carried in job data are not counted.
+ * their jobs are queued or running (any queue), and how many renders, new clips and re-runs (analysis, refinement) they
+ * asked for in the last hour. Jobs enqueued before `userId` was carried in job data are not counted.
  */
 export interface Admission {
   userId: string | null;
@@ -60,8 +60,8 @@ export interface Admission {
  */
 export const fairPriority = (live: number) => -Math.min(Math.max(0, live), 1000);
 
-/** queues whose user-requested jobs count toward MAX_RERENDERS_PER_HOUR */
-export const USER_RENDER_QUEUES: QueueName[] = [QUEUES.render, QUEUES.prepare];
+/** queues whose user-requested jobs count toward MAX_RERENDERS_PER_HOUR: renders and new clips, and re-runs of analysis and refinement */
+export const USER_RERUN_QUEUES: QueueName[] = [QUEUES.render, QUEUES.prepare, QUEUES.analyze, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes];
 
 // Jobs lose their heartbeat within seconds of a worker crash, which lets pg-boss
 // hand them to another worker long before the hard expiry hits.
@@ -120,7 +120,7 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
          (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid) as live,
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
        from o`,
-      [data.projectId, data.userId ?? null, USER_RENDER_QUEUES],
+      [data.projectId, data.userId ?? null, USER_RERUN_QUEUES],
     );
     const r = res.rows[0] as Admission | undefined;
     return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };

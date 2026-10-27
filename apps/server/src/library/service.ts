@@ -25,6 +25,7 @@ import { keys } from "../storage/index.js";
 import { ASSET_MIME, BUMPER_MAX_BYTES, BUMPER_IMAGE_SEC, resolveClipBumpers, bumperKind, assetKind, assetMime, bumperProblem, ensureBumperThumb, sha256File } from "../pipeline/bumpers.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { takeTxLock, txLock } from "../locks.js";
+import { assertStorageRoom } from "../quota.js";
 import { assetVisibleTo } from "./visible.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { dropAssetStorage } from "../storage/sweep.js";
@@ -293,6 +294,22 @@ async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["looku
 }
 
 /**
+ * The uploads row for an object already in storage, inserted only when the account has room (MAX_STORAGE_MB, checked under
+ * its quota lock in the same transaction). Without room the object is removed again and the storage refusal is thrown.
+ */
+export async function insertUploadWithinQuota(svc: Services, row: typeof schema.uploads.$inferInsert): Promise<void> {
+  try {
+    await svc.tx(async (u) => {
+      await assertStorageRoom(svc, u, row.userId, row.sizeBytes);
+      await u.db.insert(schema.uploads).values(row);
+    });
+  } catch (err) {
+    await svc.storage.delete(row.storageKey).catch((e) => svc.log.warn({ err: e, storageKey: row.storageKey }, "could not remove an upload object that was refused"));
+    throw err;
+  }
+}
+
+/**
  * Download `url` into the uploads table exactly as POST /api/upload would (same storage key, same row), so
  * `bumpers.create` takes it from there with its own type, size and ffprobe checks. Max 50 MB, 60 s, 3 redirects.
  */
@@ -338,7 +355,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
     const filename = (base && path.extname(base).toLowerCase() === ext ? base : `${base || "bumper"}${ext}`).slice(0, 200);
     const storageKey = keys.upload(id, ext);
     await svc.storage.putFile(storageKey, dest);
-    await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: size });
+    await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: size });
     svc.log.child({ module: "bumpers", userId }).info({ uploadId: id, host: target.host, bytes: size }, "bumper downloaded from a link");
     return { uploadId: id, filename, sizeBytes: size };
   } finally {
@@ -358,7 +375,7 @@ export async function uploadLocalFile(svc: Services, userId: string, file: strin
   const filename = path.basename(file).slice(0, 200);
   const storageKey = keys.upload(id, ext);
   await svc.storage.putFile(storageKey, file);
-  await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: st.size });
+  await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: st.size });
   return { uploadId: id, filename, sizeBytes: st.size };
 }
 

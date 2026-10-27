@@ -171,6 +171,7 @@ export const ADMIN_EVENT_TYPES = [
   "billing.payment_failed",
   "billing.canceled",
   "billing.complimentary",
+  "billing.unknown_price",
 ] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
