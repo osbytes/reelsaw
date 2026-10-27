@@ -57,7 +57,8 @@ in `apps/server/CHANGELOG.md`):
    `docker build -t reelsaw:rc --target runtime .`, `sh scripts/check-image.sh reelsaw:rc`, boot
    `deploy/` in a scratch directory with only a `.env` pointing at `reelsaw:rc`, open the app.
 3. Merge. `version.yml` runs `pnpm release:tag`, which pushes `vX.Y.Z`. `release.yml` builds
-   amd64 + arm64, checks the image, publishes `ghcr.io/osbytes/reelsaw:X.Y.Z`, `:X.Y` and
+   amd64 + arm64 (layers cached in `ghcr.io/osbytes/reelsaw:buildcache`, shared by every tag and
+   read by CI's stack job), checks the image, publishes `ghcr.io/osbytes/reelsaw:X.Y.Z`, `:X.Y` and
    `:latest`, and attaches `reelsaw-X.Y.Z.zip` to the GitHub release. The release notes are the
    changelog section (`scripts/release-notes.mjs`; maintainers' "Thanks @…!" credits are dropped,
    outside contributors' stay).
