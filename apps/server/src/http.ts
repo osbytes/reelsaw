@@ -206,6 +206,13 @@ export function createApp(svc: Services) {
       const quota = err instanceof QuotaError ? err.quota : undefined;
       return c.json({ error: (err as Error).message, ...(quota ? { quota } : {}) }, 429);
     }
+    // refuse before writing a byte rather than fill the disk the pipeline needs (a read, not a lease: the file is gone after the copy to the store)
+    const freeMB = (await svc.resources.snapshot()).diskFreeMB;
+    const needMB = svc.config.MIN_FREE_DISK_MB + Math.ceil(length / 1048576);
+    if (freeMB >= 0 && freeMB < needMB) {
+      c.get("log").warn({ bytes: length, freeMB, needMB }, "upload rejected: not enough disk");
+      return c.json({ error: "This server is low on disk space right now. Try again later, or ask the administrator to free some space." }, 507);
+    }
     if (!c.req.raw.body) return c.json({ error: "empty body" }, 400);
     const id = randomUUID();
     const ext = path.extname(filename).toLowerCase() || ".mp4";

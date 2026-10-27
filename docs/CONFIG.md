@@ -151,7 +151,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `S3_FORCE_PATH_STYLE` | `false` | Path-style addressing; required for MinIO. |
 | `S3_PREFIX` | unset | Optional key prefix inside the bucket. |
 | `S3_PUBLIC_URL` | unset | Serve clips from a public bucket or CDN at this base URL instead of presigned URLs. |
-| `S3_PRESIGN_EXPIRES` | `3600` | Presigned URL lifetime in seconds. |
+| `S3_PRESIGN_EXPIRES` | `3600` | Presigned URL lifetime in seconds (at most 604800, the 7-day SigV4 limit). |
 | `CLEANUP_WORKDIR` | `true` | Delete audio, chunks and subtitle intermediates when a project finishes. |
 
 ### Quotas, retention and history
@@ -171,8 +171,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | `WATERMARK_NON_ADMINS` | `true` | Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits). Runtime setting: admins can change it under Settings → System without a restart. |
 | `WATERMARK_TEXT` | `reelsaw.com` | The watermark text, shown under the logo. Runtime setting: admins can change it under Settings → System without a restart. |
 | `WATERMARK_LOGO_PATH` | `./assets/watermark.png` | PNG composited above the watermark text (top-left under the platform top band, 18% of the frame width, 95% opacity). An unreadable file logs a warning and leaves the text watermark alone. |
-| `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay and Retry re-fetches. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
-| `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips older than this. Rows stay and re-render brings them back. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `SOURCE_RETENTION_DAYS` | `0` | Delete stored sources older than this. Rows stay; Retry on the project fetches the source again, after which clips can be re-rendered (until then a render fails with a message saying so). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `CLIP_RETENTION_DAYS` | `0` | Delete rendered clips and thumbnails older than this, from the store and local disk. Rows stay; re-rendering a clip brings it back. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `DELETED_RETENTION_DAYS` | `7` | Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever. Runtime setting: admins can change it under Settings → System without a restart. |
 | `SCRATCH_CACHE_HOURS` | `24` | With `STORAGE_DRIVER=s3`, the copies of sources and rendered clips under `DATA_DIR/projects` are a cache of the bucket: the hourly sweep evicts the ones of finished projects idle this long (a job pulls them back when it needs them), and a job short of disk evicts the least recently used ones first before it gives up. 0 = keep them on the worker. Nothing to evict with the local store (scratch and store are one hardlinked file). Runtime setting: admins can change it under Settings → System without a restart. |
 | `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |

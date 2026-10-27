@@ -8,6 +8,16 @@ import type { Logger } from "../log.js";
 import type { DiskLease } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
 
+/**
+ * The stored source was removed by retention (SOURCE_RETENTION_DAYS). Retrying the job cannot bring it
+ * back, so workers fail the clip or step at once and point at the project's Retry, which fetches it again.
+ */
+export class SourceExpiredError extends Error {
+  constructor(days: number) {
+    super(`The source video was removed after ${days} days of inactivity (SOURCE_RETENTION_DAYS). Use Retry on the project to fetch it again, then re-render.`);
+  }
+}
+
 export class ProjectGoneError extends Error {
   constructor(id: string) {
     super(`project ${id} no longer exists`);
@@ -124,6 +134,7 @@ export class StageContext {
    * ingest's download and given back once the bytes are on disk; the local store hardlinks and writes nothing.
    */
   async ensureSource(project: Project): Promise<string> {
+    if (project.sourceExpiredAt) throw new SourceExpiredError(this.svc.settings.get().SOURCE_RETENTION_DAYS);
     if (!project.sourceKey) throw new Error("Project has no source; ingest must run first");
     const local = path.join(await this.dir(), path.posix.basename(project.sourceKey));
     if (this.svc.storage.driver === "s3" && !(await exists(local))) {

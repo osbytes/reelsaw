@@ -23,6 +23,7 @@ import { QUEUES } from "../queue/boss.js";
 import { chunk, deadlineIn, expired, keysetLoop, mapLimit } from "../lib/batch.js";
 import { getState, setState } from "../lib/state.js";
 import { assetRefsReady } from "../library/refs.js";
+import { volumeId } from "../disk-leases.js";
 
 /** Files younger than this are never touched: a worker may be writing or about to commit them. */
 export const SWEEP_GRACE_MS = 60 * 60_000;
@@ -122,6 +123,10 @@ export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; d
       } else if (row.referenced.has(clip.name) && idle(f.mtimeMs)) {
         // the row names it, so the store has it: a cache copy the app serves from the store anyway
         out.push({ kind: "cache-clip", path: at, bytes: f.bytes, projectId: p.id, clipId: clip.clipId, gen: clip.gen });
+      } else if (clip.gen === row.renderGen && row.referenced.size === 0) {
+        // the row names no file at all (retention cleared them) and no job is live: left over from a removal that did not finish
+        const key = clip.name.endsWith(".jpg") ? keys.thumb(p.id, clip.clipId, clip.gen) : keys.clip(p.id, clip.clipId, clip.gen);
+        out.push({ kind: "stale-generation", path: at, bytes: f.bytes, projectId: p.id, clipId: clip.clipId, gen: clip.gen, storageKeys: [key] });
       }
       // gen >= renderGen and not named by the row: newer than the row knows: keep
     }
@@ -148,7 +153,11 @@ export const SWEEP_CHUNK = 1000; // directories per database lookup (one array p
 export const SWEEP_STAT_CONCURRENCY = 16;
 export const SWEEP_BUDGET_MS = 60_000; // total per run; the rest continues next hour from the persisted cursor
 export const SWEEP_DIR_BUDGET_MS = 10_000; // per project directory
-const SWEEP_STATE = "sweep_state";
+/**
+ * The cursor belongs to the DATA_DIR it walked, and each host has its own: one row per volume (the `.volume-id`
+ * marker disk leases use), so a host resumes its own scan instead of another host's directory name.
+ */
+const sweepStateKey = async (svc: Services) => `sweep_state:${await volumeId(svc.paths.root)}`;
 
 /** List a directory's files, `stat`ing 16 at a time. `partial` = the deadline hit before every entry was seen. */
 export async function walkDir(dir: string, base: string, deadline = Infinity): Promise<{ files: ScratchFile[]; partial: boolean }> {
@@ -292,7 +301,7 @@ export interface SweepState {
   lastComplete: boolean;
   lastRemoved: number;
 }
-export const readSweepState = (svc: Services) => getState<SweepState & Record<string, unknown>>(svc.database.db, SWEEP_STATE);
+export const readSweepState = async (svc: Services) => getState<SweepState & Record<string, unknown>>(svc.database.db, await sweepStateKey(svc));
 
 /**
  * Plans and executes a sweep, logging each removal with its ids and size. Background runs
@@ -314,7 +323,7 @@ export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budg
     log.info({ directories: scan.scanned, files: done.length, bytes, complete: scan.complete, ms: Date.now() - started }, "scratch sweep finished");
     if (opts.budgeted) {
       const state: SweepState = { cursor: scan.lastDir, lastRunAt: new Date().toISOString(), lastRunMs: Date.now() - started, lastScanned: scan.scanned, lastComplete: scan.complete, lastRemoved: done.length };
-      await setState(svc.database.db, SWEEP_STATE, { ...state });
+      await setState(svc.database.db, await sweepStateKey(svc), { ...state });
     }
   }
   return { removals: done, bytes, scanned: scan.scanned, complete: scan.complete };

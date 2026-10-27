@@ -16,6 +16,9 @@ describe("retryQueueFor", () => {
   it("renders when analyze failed but AI picks are there", () => {
     assert.equal(retryQueueFor({ ...base, clips: [{ origin: "ai" }], stage: "analyze" }), QUEUES.render);
   });
+  it("fetches the source again first when retention removed it", () => {
+    assert.equal(retryQueueFor({ ...base, clips: [{ origin: "ai" }], stage: "render", sourceExpired: true }), QUEUES.ingest);
+  });
   it("falls back to the furthest finished stage without clips", () => {
     assert.equal(retryQueueFor(base), QUEUES.analyze);
     assert.equal(retryQueueFor({ ...base, refineDone: false }), QUEUES.refineEntities);

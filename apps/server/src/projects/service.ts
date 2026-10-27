@@ -41,9 +41,10 @@ export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc
 /**
  * Where a retry resumes, from what the project already has. Live clips mean render, except when the project failed in
  * analyze and none of them is an AI pick: only clips the user made or kept survived a failed re-analyze, so picking
- * moments still has to run.
+ * moments still has to run. A source that retention removed is fetched again first, whatever else exists.
  */
-export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; transcript: boolean; refineDone: boolean; stage: string | null; sourceKey: string | null }): QueueName {
+export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; transcript: boolean; refineDone: boolean; stage: string | null; sourceKey: string | null; sourceExpired?: boolean }): QueueName {
+  if (s.sourceExpired) return QUEUES.ingest;
   const picked = s.clips.some((c) => c.origin === "ai");
   if (s.clips.length && !(s.stage === "analyze" && !picked)) return QUEUES.render;
   if (s.transcript && s.refineDone) return QUEUES.analyze;
@@ -59,7 +60,7 @@ export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; tra
  */
 export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
   const [p] = await u.db
-    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, stage: schema.projects.stage, status: schema.projects.status })
+    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, sourceExpiredAt: schema.projects.sourceExpiredAt, stage: schema.projects.stage, status: schema.projects.status })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) return null;
@@ -74,7 +75,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-  const queue = retryQueueFor({ clips, transcript: !!transcript, refineDone, stage: p.stage, sourceKey: p.sourceKey });
+  const queue = retryQueueFor({ clips, transcript: !!transcript, refineDone, stage: p.stage, sourceKey: p.sourceKey, sourceExpired: !!p.sourceExpiredAt });
 
   if (queue === QUEUES.render) {
     await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });

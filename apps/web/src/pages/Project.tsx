@@ -648,7 +648,7 @@ export function ProjectPage() {
             {active ? (
               progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
             ) : p.sourceExpiredAt ? (
-              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
+              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space. Fetch it again, then re-render the clips you need.`}>
                 Source removed · fetch again
               </button>
             ) : p.status === "failed" ? (

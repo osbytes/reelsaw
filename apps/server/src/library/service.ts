@@ -196,6 +196,12 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
     const storageKey = keys.asset(id, ext);
     const contentHash = await sha256File(local);
+    // the object goes in first (as in the upload route): a row must never point at a missing file, and a failed
+    // transaction or a duplicate leaves an unreferenced object that is removed below
+    await svc.storage.putFile(storageKey, local);
+    // the picker thumbnail (none for audio); if this fails the media route makes it on first request
+    const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
+    let stored = false;
     const row = await svc.tx(async (u) => {
       const keep = async (asset: typeof schema.assets.$inferSelect, restored: boolean) => {
         if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, asset.id);
@@ -234,25 +240,20 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           height: probe.height ?? 0,
           hasAudio: kind === "audio" || (kind === "video" && probe.hasAudio),
           sourceKey: storageKey,
+          thumbnailKey: thumbKey,
           sizeBytes: up.sizeBytes,
           contentHash,
         })
         .returning();
       if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, id);
-      // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
-      u.afterCommit(async () => {
-        try {
-          await svc.storage.putFile(storageKey, local);
-          // the picker thumbnail (none for audio); if this fails the media route makes it on first request
-          const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
-          if (thumbKey) await svc.database.db.update(schema.assets).set({ thumbnailKey: thumbKey }).where(eq(schema.assets.id, id)).catch(() => {});
-        } finally {
-          await fs.rm(local, { force: true }).catch(() => {});
-        }
+      u.afterCommit(() => {
+        stored = true; // set by the commit itself: a retried attempt of this unit never leaves it true
       });
       return { asset: asset!, duplicate: false as const, restored: false };
+    }).finally(async () => {
+      if (!stored) await dropAssetStorage(svc, storageKey).catch((err) => svc.log.warn({ err, assetId: id }, "could not remove the unreferenced library object"));
     });
-    if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
+    await fs.rm(local, { force: true }).catch(() => {});
     const a = row.asset;
     return { id: a.id, name: a.name, kind: a.kind, mime: a.mime, durationSec: a.durationSec, width: a.width, height: a.height, hasAudio: a.hasAudio, duplicate: row.duplicate, restored: row.restored };
   } catch (err) {

@@ -6,6 +6,7 @@ import { sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
 import { backfillAssetRefs } from "../library/refs.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
+import { sweepAbandonedUploads } from "../storage/uploads.js";
 import { pruneDiskLeases } from "../disk-leases.js";
 import { schema } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -183,6 +184,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         if (asrDays > 0) await svc.asr.prune(asrDays).then((n) => n && svc.log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
         await pruneDiskLeases(svc); // expired or orphaned claims (the live sum already ignores them)
         await purgeBumperAssets(svc);
+        await sweepAbandonedUploads(svc); // uploads no project ever used, after 24 h
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
         await flagAccounts(svc); // abuse flags for the Users page (abuse.ts)
         await pruneRequestRate(svc.database.db);
