@@ -665,6 +665,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!p) throw new Error("project not found");
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
+    if (p.stageDetail) console.log(`  parts: ${p.stageDetail.done} of ${p.stageDetail.total}${p.stageDetail.etaSec !== null ? `, about ${formatTime(p.stageDetail.etaSec)} left` : ""}`);
     if (p.error) console.log(`  error: ${p.error}`);
     if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);

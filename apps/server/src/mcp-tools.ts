@@ -95,7 +95,7 @@ export const TOOLS = {
   },
   wait_for_project: {
     title: "Wait for project",
-    description: "Block until the project is done or failed, or timeoutSeconds pass. Returns { id, status, stage, stageProgress, error, clips: [{ id, title, status }] }; on timeout the same with hint \"Still running\": call it again. Use get_project instead for a non-blocking look with full clip details.",
+    description: "Block until the project is done or failed, or timeoutSeconds pass. Returns { id, status, stage, stageProgress, stageDetail ({ done, total, etaSec } while a stage works in parts, else null), error, clips: [{ id, title, status }] }; on timeout the same with hint \"Still running\": call it again. Use get_project instead for a non-blocking look with full clip details.",
     inputSchema: {
       id: projectId("create_project or list_projects"),
       timeoutSeconds: z.number().int().min(1).max(120).default(60).describe("Longest to wait, seconds (1-120, default 60)"),
