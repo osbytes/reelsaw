@@ -74,10 +74,12 @@ const EXPECTED = [
   "set_instance_settings",
   "set_project_bumpers",
   "set_project_defaults",
+  "set_project_source_text",
   "update_asset",
   "update_clip",
   "update_layer_template",
   "update_project",
+  "update_project_style",
   "wait_for_project",
 ];
 

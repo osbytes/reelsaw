@@ -635,6 +635,31 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
   );
 
   server.registerTool(
+    "set_project_source_text",
+    TOOLS.set_project_source_text,
+    ({ id, sourceText }) =>
+      run(async () => {
+        const r = await api.projects.setSourceText({ id, sourceText });
+        return { changed: ["sourceText"], needsRerender: false, rerendered: r.rerendered, hint: r.rerendered ? `Re-rendering ${r.rerendered} clip(s); follow with wait_for_project.` : "No finished clips to re-render; the next render uses it." };
+      }),
+  );
+
+  server.registerTool(
+    "update_project_style",
+    TOOLS.update_project_style,
+    ({ id, style, keepOverrides, rerender }) =>
+      run(async () => {
+        const r = await api.projects.updateStyle({ id, style, keepOverrides, rerender });
+        return {
+          changed: Object.keys(style),
+          needsRerender: !rerender,
+          rerendered: r.rerendered,
+          hint: r.rerendered ? `Re-rendering ${r.rerendered} clip(s); follow with wait_for_project.` : rerender ? "No finished clips to re-render; the next render uses it." : "Saved; call rerender_clips to apply it to finished clips.",
+        };
+      }),
+  );
+
+  server.registerTool(
     "billing_portal_url",
     TOOLS.billing_portal_url,
     () => run(() => api.billing.portal()),
