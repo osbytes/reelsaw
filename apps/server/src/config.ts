@@ -196,6 +196,8 @@ export const envSchema = z.object({
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
   ADMIN_EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
+  // the decision log (user_decisions) is training and eval data: kept by default
+  DECISION_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   // checkpoints of finished projects (job_steps) are dropped this many days after the project last changed (0 = keep)
   STEP_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
   // bot protection on sign-up / sign-in (Better Auth captcha plugin)

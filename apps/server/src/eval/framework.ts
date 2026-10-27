@@ -81,6 +81,8 @@ export interface Suite {
    * Offline runs then use `baselines/<suite>.offline.json`, and are not compared when it is missing.
    */
   offlineBaseline?: boolean;
+  /** never compared with or written to a baseline: its cases come from outside the repo (the `decisions` replay of user data) */
+  noBaseline?: boolean;
   run(ctx: EvalContext): Promise<CaseResult[]>;
   summarize?(results: CaseResult[]): Record<string, SummaryMetric>;
 }

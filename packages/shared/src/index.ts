@@ -1268,3 +1268,4 @@ export * from "./quota.js";
 export * from "./accounts.js";
 export * from "./captions-format.js";
 export * from "./releases.js";
+export * from "./decisions.js";

@@ -53,7 +53,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]
  *                                           edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip)
  *   purge [--dry-run]                       remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
- *   purge-project <projectId>               delete one already-deleted project forever (frees storage; minutes stay counted)
+ *   purge-project <projectId> [--forget-decisions]   delete one already-deleted project forever (frees storage; minutes stay counted); its decisions stay in the decision log unless --forget-decisions
+ *   decisions <email> [--kind k] [--project id]      the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions)
+ *   decisions export <email> [--out f.jsonl] [--since iso]   the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite)
+ *   decisions forget <email> [--project id]          delete the account's decisions, or one project's (forget_decisions)
+ *   decisions backfill [--dry-run]                   write decisions still held in transcripts from before the log existed
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
@@ -159,7 +163,8 @@ import { summarizeQueue } from "./ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { backfillDecisions, decisionSummary, EXPORT_MAX, exportDecisions, forgetDecisions, listDecisions } from "./decisions/service.js";
 import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
@@ -189,7 +194,7 @@ import { listDeleted } from "./deleted.js";
 import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectSourceText, updateProject, updateProjectStyle } from "./projects/service.js";
 import { createClip, readClip, rerenderClip, rerenderClips, updateClip } from "./clips/service.js";
 import { createExportZip, exportPlan } from "./export.js";
-import { CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { DECISION_KINDS, CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -540,9 +545,72 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
   /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
   async "purge-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId>   (reelsaw deleted lists them; they must already be deleted)");
-    const r = await purgeOwnedProject(svc, null, pos[0]);
+    if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId> [--forget-decisions]   (reelsaw deleted lists them; they must already be deleted)");
+    const r = await purgeOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.message);
+  },
+  /**
+   * The decision log (docs/specs/decision-log.md), same service as Settings → Learning and the *_decisions tools:
+   *   reelsaw decisions <email> [--kind fix.reject] [--project <id>] [--limit 50]
+   *   reelsaw decisions export <email> [--out f.decisions.jsonl] [--since <iso>] [--kind <k>]   (JSON lines, for evals)
+   *   reelsaw decisions forget <email> [--project <id>]
+   *   reelsaw decisions backfill [--dry-run]    (decisions still held in transcripts, from before the log existed)
+   */
+  async decisions(svc) {
+    const db = svc.database.db;
+    const sub = ["export", "forget", "backfill"].includes(pos[0] ?? "") ? pos[0] : undefined;
+    const usage = "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | backfill [--dry-run]";
+    const kindArg = flag("kind");
+    const kind = kindArg ? DECISION_KINDS.find((k) => k === kindArg) : undefined;
+    if (kindArg && !kind) throw new Error(`--kind must be one of ${DECISION_KINDS.join(", ")}`);
+    if (sub === "backfill") {
+      const dry = args.includes("--dry-run");
+      const r = await backfillDecisions(svc, { dryRun: dry });
+      console.log(`${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; projects that already had decisions were skipped`);
+      return;
+    }
+    const email = sub ? pos[1] : pos[0];
+    if (!email) throw new Error(usage);
+    const u = await userByEmail(svc, email);
+    if (sub === "forget") {
+      const n = await svc.tx((tx) => forgetDecisions(tx.db, u.id, { projectId: flag("project") }));
+      console.log(`forgot ${n} decision(s) of ${u.email}${flag("project") ? ` about ${flag("project")}` : ""}`);
+      return;
+    }
+    if (sub === "export") {
+      const out = flag("out");
+      const since = flag("since");
+      const lines: string[] = [];
+      let cursor: number | undefined;
+      let cases = 0;
+      for (;;) {
+        const page = await exportDecisions(db, u.id, { cursor, limit: EXPORT_MAX, since: since ? new Date(since) : undefined, kind });
+        lines.push(...page.items.map((d) => JSON.stringify(d)));
+        cases += page.cases.disfluency.length;
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      if (!out) {
+        for (const l of lines) console.log(l);
+        return;
+      }
+      await writeFile(out, lines.length ? lines.join("\n") + "\n" : "");
+      console.log(`wrote ${lines.length} decision(s) of ${u.email} to ${out} (${cases} disfluency case(s)); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`);
+      return;
+    }
+    const s = await decisionSummary(db, u.id);
+    console.log(`${u.email}: learning ${s.enabled ? "on" : "off"}; ${s.total} decision(s) about ${s.projects} project(s)${s.total ? ` (${Object.entries(s.byKind).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`);
+    const page = await listDecisions(db, u.id, { kind, projectId: flag("project"), limit: Number(flag("limit") ?? 50) || 50 });
+    if (!page.items.length) return;
+    const what = (d: (typeof page.items)[number]) => {
+      const c = d.context;
+      if (Array.isArray(c.words) && c.target && typeof c.target === "object" && "index" in c.target && "span" in c.target && typeof c.target.index === "number" && typeof c.target.span === "number") {
+        return c.words.slice(c.target.index, c.target.index + c.target.span).map((w: { text?: string }) => w.text ?? "").join(" ").slice(0, 40);
+      }
+      return Array.isArray(c.fields) ? c.fields.join(",") : String(d.before?.title ?? d.after?.title ?? "").slice(0, 40);
+    };
+    table(page.items.map((d) => ({ id: d.id, at: d.createdAt.slice(0, 16), kind: d.kind, explicit: d.explicit ? "yes" : "no", project: d.projectId.slice(0, 8), what: what(d) })));
+    if (page.nextCursor) console.log(`showing ${page.items.length} of ${page.total}; --limit raises it (max 200)`);
   },
   abuse: async (svc) => {
     if (args.includes("--run")) {
@@ -1679,7 +1747,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

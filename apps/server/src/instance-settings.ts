@@ -87,6 +87,7 @@ export const RUNTIME_SETTINGS = {
   EVENT_RETENTION_DAYS: def("retention", int0, days("Prune project events older than this; each project keeps its run skeleton.")),
   LLM_USAGE_RETENTION_DAYS: def("retention", int0, days("Prune model and transcription usage rows older than this.")),
   ADMIN_EVENT_RETENTION_DAYS: def("retention", int0, days("Prune the admin event log after this many days.")),
+  DECISION_RETENTION_DAYS: def("retention", int0, days("Prune users' recorded decisions (accepts, rejects, edits Reelsaw learns from) older than this. They outlive deleted projects until then.")),
   STEP_RETENTION_DAYS: def("retention", int0, days("Drop the saved checkpoints (finding-moments windows) of a finished project this many days after it last changed; a Retry sooner than that reuses them.")),
 
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),

@@ -85,7 +85,11 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact\|ai]` | add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them (same as clips.create and create_clip) |
 | `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender\|--no-rerender]` | edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip) |
 | `reelsaw purge [--dry-run]` | remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
-| `reelsaw purge-project <projectId>` | delete one already-deleted project forever (frees storage; minutes stay counted) |
+| `reelsaw purge-project <projectId> [--forget-decisions]` | delete one already-deleted project forever (frees storage; minutes stay counted); its decisions stay in the decision log unless --forget-decisions |
+| `reelsaw decisions <email> [--kind k] [--project id]` | the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions) |
+| `reelsaw decisions export <email> [--out f.jsonl] [--since iso]` | the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite) |
+| `reelsaw decisions forget <email> [--project id]` | delete the account's decisions, or one project's (forget_decisions) |
+| `reelsaw decisions backfill [--dry-run]` | write decisions still held in transcripts from before the log existed |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -616,6 +620,6 @@ Next:
 
 ## 8. Evals and regression cases
 
-Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `decisions`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
 regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
 pull more data from: [EVALS.md](EVALS.md).

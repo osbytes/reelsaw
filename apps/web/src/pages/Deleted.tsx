@@ -73,6 +73,18 @@ function detailOf(r: Row) {
   return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt)].filter(Boolean).join(" · ");
 }
 
+function ForgetDecisionsOption({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2.5">
+      <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--acc)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="min-w-0">
+        <span className="block text-sm">Also forget what Reelsaw learned from it</span>
+        <span className="block text-xs text-ink3">Your accepted and rejected fixes and clip edits are kept so Reelsaw keeps learning, unless you tick this.</span>
+      </span>
+    </label>
+  );
+}
+
 /**
  * Restorable deletes in one selectable list: projects, clips of live projects, library items and
  * templates. Each row says when it was deleted and when it is deleted forever. The header checkbox stays
@@ -89,6 +101,7 @@ export function DeletedPage() {
   const purge = useMutation(trpc.deleted.purge.mutationOptions());
   const [sel, setSel] = useState<string[]>([]);
   const [pending, setPending] = useState<Row[] | null>(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
 
   const highlightedKind = (["project", "clip", "asset", "template"] as const).find((k) => hash.get(k));
   const highlightedId = highlightedKind ? hash.get(highlightedKind) : "";
@@ -267,7 +280,10 @@ export function DeletedPage() {
       </main>
       <ConfirmDialog
         open={!!pending}
-        onOpenChange={(o) => !o && setPending(null)}
+        onOpenChange={(o) => {
+          if (!o) setPending(null);
+          setForgetDecisions(false);
+        }}
         title={pending && pending.length > 1 ? `Delete ${pending.length} items forever?` : "Delete forever?"}
         body={
           pending && pending.length > 1 ? (
@@ -300,7 +316,7 @@ export function DeletedPage() {
           const rows = pending;
           if (!rows?.length) return;
           purge.mutate(
-            { items: rows.map((r) => ({ kind: r.kind, id: r.id })) },
+            { items: rows.map((r) => ({ kind: r.kind, id: r.id })), forgetDecisions: forgetDecisions && rows.some((r) => r.kind === "project") },
             {
               onSuccess: (r) => {
                 setPending(null);
@@ -312,7 +328,9 @@ export function DeletedPage() {
             },
           );
         }}
-      />
+      >
+        {pending?.some((r) => r.kind === "project") && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
+      </ConfirmDialog>
     </ScrollArea>
   );
 }

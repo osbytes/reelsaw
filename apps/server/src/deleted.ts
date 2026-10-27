@@ -229,8 +229,8 @@ async function restoreOne(svc: Services, actor: Actor & { id: string }, item: { 
   return restoreLayerTemplate(svc, actor.id, item.id);
 }
 
-async function purgeOne(svc: Services, actor: Actor & { id: string }, item: { kind: DeletedKind; id: string }) {
-  if (item.kind === "project") return purgeOwnedProject(svc, actor, item.id);
+async function purgeOne(svc: Services, actor: Actor & { id: string }, item: { kind: DeletedKind; id: string }, o: { forgetDecisions?: boolean }) {
+  if (item.kind === "project") return purgeOwnedProject(svc, actor, item.id, o);
   if (item.kind === "clip") return purgeOwnedClip(svc, actor, item.id);
   if (item.kind === "asset") return purgeOwnedAsset(svc, actor.id, item.id);
   return purgeLayerTemplate(svc, actor.id, item.id);
@@ -269,14 +269,14 @@ export async function restoreDeleted(svc: Services, actor: Actor & { id: string 
  * Remove several already-deleted rows for good (the selection bar). Each kind uses its existing service;
  * a referenced library item is refused and the rest continue. tRPC `deleted.purge`; MCP loops the per-kind tools.
  */
-export async function purgeDeleted(svc: Services, actor: Actor & { id: string }, items: Array<{ kind: DeletedKind; id: string }>) {
+export async function purgeDeleted(svc: Services, actor: Actor & { id: string }, items: Array<{ kind: DeletedKind; id: string }>, o: { forgetDecisions?: boolean } = {}) {
   const refs = uniqueRefs(items);
   if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
   const results: Array<{ kind: DeletedKind; id: string; ok: boolean; storedBytes: number; error?: string }> = [];
   let firstError: unknown;
   for (const it of refs) {
     try {
-      const r = await purgeOne(svc, actor, it);
+      const r = await purgeOne(svc, actor, it, o);
       results.push({ kind: it.kind, id: it.id, ok: true, storedBytes: storedOf(r) });
     } catch (e) {
       firstError ??= e;

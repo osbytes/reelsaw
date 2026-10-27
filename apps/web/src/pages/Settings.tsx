@@ -7,6 +7,7 @@ import { ApiKeysSection } from "../components/ApiKeys";
 import { AccountSection } from "../components/AccountSection";
 import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
+import { LearningSection } from "../components/LearningSection";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
 import { WorkersOnlineLine, WorkersSection } from "../components/WorkersSection";
@@ -115,6 +116,7 @@ export function SettingsPage() {
           <>
             <AccountSection />
             <ProjectDefaultsSection />
+            <LearningSection />
             <ApiKeysSection mcpUrl={`${window.location.origin}/api/mcp`} />
             <ConnectedAppsSection />
           </>
