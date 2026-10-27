@@ -15,6 +15,7 @@ import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
 import type { StageContext } from "./common.js";
 import { snapCandidate } from "./analyze.js";
+import { callSignal } from "./steps.js";
 import { extractJson, mapChunk, normalizeCandidate, scoreCandidates, type LlmOpts, type SelectContext, type Chunk } from "./select.js";
 import { fmtTs } from "./transcript.js";
 import { clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
@@ -46,7 +47,7 @@ Write:
 
 Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":["..."]}`;
   try {
-    const { output } = await generateText({ model: o.model, prompt, abortSignal: o.signal, maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
+    const { output } = await generateText({ model: o.model, prompt, abortSignal: callSignal(o.signal, o.timeoutMs), maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
     return output;
   } catch (err) {
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
@@ -96,7 +97,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const segments = transcript.segments;
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? clip.endSec;
   const log = ctx.log.child({ clipId, mode });
-  const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log };
+  const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log, timeoutMs: ctx.unitTimeoutMs(svc.models.get().language) };
   const selLen = clip.endSec - clip.startSec;
 
   let pick: ClipCandidate = { title: clip.title, hook: clip.hook, startSec: clip.startSec, endSec: clip.endSec, score: 50, reasoning: clip.reasoning, caption: "", hashtags: [] };

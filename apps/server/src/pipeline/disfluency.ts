@@ -16,6 +16,7 @@
  * a wrong jump cut is worse than a missed "um".
  */
 import { generateText, Output, type LanguageModel } from "ai";
+import { callSignal } from "./steps.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
@@ -49,6 +50,8 @@ const endsClause = (w: Word | undefined) => !!w && /[,;:]["')\]]?$/.test(w.text)
 export interface DisfluencyOptions {
   log?: Logger;
   signal?: AbortSignal;
+  /** limit on each model call, ms */
+  timeoutMs?: number;
   telemetry?: boolean;
   autoConfidence?: number;
   /** word indices already covered by other flags; never overlap them */
@@ -249,7 +252,7 @@ export async function findModelCandidates(model: LanguageModel, words: Word[], o
         model,
         temperature: 0,
         maxRetries: 1,
-        abortSignal: opts.signal,
+        abortSignal: callSignal(opts.signal, opts.timeoutMs),
         output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
         telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
         prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
@@ -327,7 +330,7 @@ export async function verifyCandidates(model: LanguageModel, words: Word[], cand
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: opts.signal,
+      abortSignal: callSignal(opts.signal, opts.timeoutMs),
       output: Output.object({ schema: verdictSchema, name: "verdicts" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies.verify", recordInputs: false, recordOutputs: false },
       prompt: verifyPrompt(
