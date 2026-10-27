@@ -231,7 +231,7 @@ export const COMPETITORS: Competitor[] = [
       cap: "15, 40 or 100 videos a month; 2, 5 or 30 minutes per video",
       accounts: "Multi-account publishing on Business",
     },
-    betterAt: ["Caption design: animated styles, emojis, zooms and sound effects on a short you already cut.", "B-roll and clean-audio passes on the same video.", "Polish on a single short in a few clicks."],
+    betterAt: ["Caption design: animated styles, emojis, zooms and auto sound effects on a short you already cut.", "B-roll and clean-audio passes on the same video.", "Polish on a single short in a few clicks."],
     pickThem: ["You already have the short and want it to look like it was edited by hand.", "You post from the tool and want analytics there too.", "Your videos are under the plan's per-video length cap."],
     pickReelsaw: ["Your input is the full episode, not a finished short.", "A 30-minute per-video ceiling, even on the top plan, is too low.", "You want zero per-video cost on your own machine, or hosted minutes of source instead of a per-video cap.", "You want an agent to run the whole thing through MCP."],
     faqs: [
