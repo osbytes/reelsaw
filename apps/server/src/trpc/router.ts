@@ -18,7 +18,7 @@ import { splitDeleted, archiveDeletedFlags, takeArchivedFlag, changedColumns } f
 import { QUEUES, type QueueName } from "../queue/boss.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
-import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, startRun, supersedeStages } from "../pipeline/lifecycle.js";
+import { lockProjectClips, requestPrepare, requestRender, requestRenders, RenderManyMissing, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { listClips } from "../pipeline/analyze.js";
 import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
@@ -1141,7 +1141,8 @@ const restRouter = router({
           const refine = { ...cur.refine };
           for (const s of steps) delete refine[s];
           await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
-          await enqueueRefine(svc, p.id, rerun, u);
+          const started = await enqueueRefine(svc, p.id, await stageSeqOf(u.db, p.id), rerun, u, { onlyIfIdle: true });
+          if (!started) throw new TRPCError({ code: "CONFLICT", message: "The project is busy; wait for it to finish before refining." });
         });
         return { ok: true, steps };
       }),

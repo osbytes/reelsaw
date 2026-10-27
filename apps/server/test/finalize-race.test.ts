@@ -94,4 +94,10 @@ describe("finalizeProjectIfDone under concurrency", { skip: notReady ?? false },
     await Promise.all([h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId)), h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId))]);
     assert.equal(await h.eventCount(projectId, "project.done"), 1);
   });
+  it("a rendering project whose last clip was deleted finishes as done with no clips", async () => {
+    const projectId = await h.makeProject(userId, "rendering");
+    await h.tx((u) => finalizeProjectIfDone(h.svc, u, projectId));
+    assert.equal((await state(projectId)).status, "done");
+    assert.equal(await h.eventCount(projectId, "project.done"), 1);
+  });
 });

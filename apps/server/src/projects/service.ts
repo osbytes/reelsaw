@@ -20,7 +20,7 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, startRun, supersedeStages } from "../pipeline/lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { enqueueRefine } from "../pipeline/refine.js";
 import { runFacts } from "../pipeline/common.js";
@@ -39,13 +39,27 @@ const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc)} day${days(svc) === 1 ? "" : "s"}` : "until it is purged");
 
 /**
+ * Where a retry resumes, from what the project already has. Live clips mean render, except when the project failed in
+ * analyze and none of them is an AI pick: only clips the user made or kept survived a failed re-analyze, so picking
+ * moments still has to run.
+ */
+export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; transcript: boolean; refineDone: boolean; stage: string | null; sourceKey: string | null }): QueueName {
+  const picked = s.clips.some((c) => c.origin === "ai");
+  if (s.clips.length && !(s.stage === "analyze" && !picked)) return QUEUES.render;
+  if (s.transcript && s.refineDone) return QUEUES.analyze;
+  if (s.transcript) return QUEUES.refineEntities;
+  if (s.sourceKey) return QUEUES.transcribe;
+  return QUEUES.ingest;
+}
+
+/**
  * Resume a project from the furthest completed stage (each stage skips work that already exists).
  * Same path as the owner's Retry button; admin bulk retry and MCP retry_project call this too.
  * Lock order is transcript → clip → project. Returns null when the project is gone or deleted.
  */
 export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
   const [p] = await u.db
-    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey })
+    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, stage: schema.projects.stage, status: schema.projects.status })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) return null;
@@ -55,13 +69,12 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     .where(eq(schema.transcripts.projectId, p.id))
     .for("update");
   await lockProjectClips(u, p.id);
+  // deleted while we waited for the locks (deleting locks the clips first, so it is settled now): resume nothing
+  const [live] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.deletedAt))).for("no key update");
+  if (!live) return null;
   const clips = await listClips(u.db, p.id);
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-  let queue: QueueName = QUEUES.ingest;
-  if (clips.length) queue = QUEUES.render;
-  else if (transcript && refineDone) queue = QUEUES.analyze;
-  else if (transcript) queue = QUEUES.refineEntities;
-  else if (p.sourceKey) queue = QUEUES.transcribe;
+  const queue = retryQueueFor({ clips, transcript: !!transcript, refineDone, stage: p.stage, sourceKey: p.sourceKey });
 
   if (queue === QUEUES.render) {
     await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
@@ -77,7 +90,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     await supersedeStages(u, p.id);
     await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-    await enqueueRefine(svc, p.id, undefined, u);
+    await enqueueRefine(svc, p.id, await stageSeqOf(u.db, p.id), undefined, u);
   } else {
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
     await supersedeStages(u, p.id); // a cancelled job that is still running must not commit, or fail this retry
@@ -304,7 +317,7 @@ export async function deletedClips(db: Db, projectId: string) {
     .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, startSec: schema.clips.startSec, endSec: schema.clips.endSec, status: schema.clips.status, deletedAt: schema.clips.deletedAt })
     .from(schema.clips)
     .where(and(eq(schema.clips.projectId, projectId), isNotNull(schema.clips.deletedAt)))
-    .orderBy(sql`${schema.clips.deletedAt} desc`, schema.clips.index)
+    .orderBy(sql`${schema.clips.deletedAt} desc`, schema.clips.index, schema.clips.createdAt, schema.clips.id)
     .limit(200);
 }
 
@@ -320,7 +333,11 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
-    const settings = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
+    // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
+    // meanwhile by another request is not overwritten with this read of the whole object
+    const merged = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
+    const write = Object.fromEntries(Object.keys(patch ?? {}).map((k) => [k, merged[k as keyof ProjectSettings]]));
+    const settings = sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`;
     await lockProjectClips(u, p.id);
     // before listing: an analyze committing its picks right now finishes first and they are replaced below, and one
     // still working (or this re-analyze clicked twice) is superseded and inserts nothing

@@ -1,11 +1,11 @@
 import { detectOverlays } from "./overlays.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { StageContext, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
@@ -38,9 +38,21 @@ async function optionsFor(svc: Services, db: Db, projectId: string): Promise<Ref
   return resolveRefineOptions(svc.settings.get(), p?.settings ?? {});
 }
 
-/** Mark the project as refining and queue every enabled step that is not already done. */
-export async function enqueueRefine(svc: Services, projectId: string, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork): Promise<void> {
-  if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, steps, tx));
+export interface EnqueueRefineOptions {
+  /**
+   * A user-initiated call: flip the project to refining only while it is idle (done / failed) or already refining, and
+   * return false (nothing written, nothing queued) when something else is running. Pipeline callers flip unconditionally.
+   */
+  onlyIfIdle?: boolean;
+}
+
+/**
+ * Mark the project as refining and queue every enabled step that is not already done. `seq` is the stage version the
+ * caller belongs to: the project flip commits only while it is current (StaleJobError otherwise); undefined takes any.
+ * Returns false only for `onlyIfIdle` when the project was busy.
+ */
+export async function enqueueRefine(svc: Services, projectId: string, seq: number | undefined, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork, o: EnqueueRefineOptions = {}): Promise<boolean> {
+  if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, seq, steps, tx, o));
   const db = u.db;
   const [t] = await db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
   if (!t) throw new Error("no transcript to refine");
@@ -49,11 +61,21 @@ export async function enqueueRefine(svc: Services, projectId: string, steps: rea
   const toRun = steps.filter((s) => refineStepOn(opts, s) && refine[s] !== "done");
   for (const s of REFINE_STEPS) if (!refineStepOn(opts, s)) refine[s] = "done"; // disabled steps count as done
   for (const s of toRun) refine[s] = "queued";
+  const idle = o.onlyIfIdle ? inArray(schema.projects.status, ["done", "failed", "refining"]) : undefined;
+  const [flipped] = await db
+    .update(schema.projects)
+    .set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
+    .where(and(currentStage(projectId, seq), idle))
+    .returning({ id: schema.projects.id });
+  if (!flipped) {
+    if (o.onlyIfIdle && (await db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq))).length) return false;
+    throw new StaleJobError(projectId, seq);
+  }
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
-  await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
   await u.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
   for (const s of toRun) await u.enqueue(REFINE_QUEUE[s], { projectId });
   if (!toRun.length) await finishIfComplete(svc, projectId, u);
+  return true;
 }
 
 function overlaps(a: TranscriptFlag, b: TranscriptFlag) {

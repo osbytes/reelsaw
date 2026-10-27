@@ -229,7 +229,7 @@ export async function createReportZip(
         const [transcript, chunks, clips, events, artifacts] = await Promise.all([
           db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, project.id) }),
           db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, project.id), orderBy: asc(schema.transcriptChunks.index) }),
-          db.query.clips.findMany({ where: eq(schema.clips.projectId, project.id), orderBy: asc(schema.clips.index) }),
+          db.query.clips.findMany({ where: eq(schema.clips.projectId, project.id), orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)] }),
           db.query.projectEvents.findMany({ where: eq(schema.projectEvents.projectId, project.id), orderBy: asc(schema.projectEvents.id) }),
           db.query.stageArtifacts.findMany({ where: eq(schema.stageArtifacts.projectId, project.id), orderBy: asc(schema.stageArtifacts.id) }),
         ]);
