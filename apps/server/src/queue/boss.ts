@@ -96,6 +96,8 @@ export interface Queue {
   cancelLiveJobs(queue: QueueName, key: string, opts?: TxOpts): Promise<void>;
   /** Start pg-boss (runs its own migrations) and create the queues. */
   start(): Promise<void>;
+  /** Has `start()` completed and `stop()` not begun (the health check)? */
+  started(): boolean;
   stop(): Promise<void>;
 }
 
@@ -151,6 +153,7 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       }
       started = true;
     },
+    started: () => started,
     async stop() {
       if (!started) return;
       // graceful: stop fetching, let running jobs finish (deploys shouldn't kill a 5-minute render)

@@ -7,6 +7,8 @@ import type { ProjectEvent, ProjectEventType } from "@reelsaw/shared";
 import type { Logger } from "./log.js";
 
 export const EVENTS_CHANNEL = "reelsaw_events";
+const RECONNECT_MIN_MS = 2000;
+const RECONNECT_MAX_MS = 30_000;
 const CHANNEL = EVENTS_CHANNEL;
 
 /** NOTIFY payload of a persisted event: ids only, listeners read the row. */
@@ -78,8 +80,10 @@ export interface EventBus {
   notices(projectId: string, signal?: AbortSignal): AsyncIterable<Notice>;
   /** Live progress tick: NOTIFY only, no row. */
   progress(projectId: string, tick: Omit<ProgressNotice, "kind" | "projectId">): Promise<void>;
-  /** Open the LISTEN connection (API processes only). */
+  /** Open the LISTEN connection (API processes only). After it, a dropped connection is re-opened with backoff until `stop()`. */
   start(): Promise<void>;
+  /** Is the LISTEN connection up right now (the health check)? False before `start()` and while reconnecting. */
+  connected(): boolean;
   stop(): Promise<void>;
 }
 
@@ -105,16 +109,58 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
     c.on("end", () => {
       if (!stopped) reconnect();
     });
-    await c.connect();
-    await c.query(`LISTEN ${CHANNEL}`);
+    try {
+      await c.connect();
+      await c.query(`LISTEN ${CHANNEL}`);
+    } catch (err) {
+      // a half-open client must not linger (or crash the process with an unhandled 'error' event)
+      c.removeAllListeners();
+      c.on("error", () => {});
+      void c.end().catch(() => {});
+      throw err;
+    }
     client = c;
   }
+  let reconnecting = false;
+  /**
+   * Re-open the LISTEN connection after it dropped, retrying with exponential backoff (2 s doubling to a 30 s cap) until it
+   * is back or the bus is stopped. One loop at a time: the error and end events of the dying client, and of a failed
+   * attempt, all land here and are ignored while it runs. A failed attempt clears `starting`, so `start()` can also retry.
+   */
   function reconnect() {
-    if (stopped) return;
-    client?.removeAllListeners();
+    if (stopped || reconnecting) return;
+    reconnecting = true;
+    const dead = client;
     client = undefined;
     starting = undefined;
-    setTimeout(() => bus.start().catch((e) => log.error({ err: e }, "reconnect failed")), 2000);
+    if (dead) {
+      dead.removeAllListeners();
+      dead.on("error", () => {});
+      void dead.end().catch(() => {});
+    }
+    void (async () => {
+      let attempt = 0;
+      let delayMs = RECONNECT_MIN_MS;
+      try {
+        while (!stopped) {
+          await new Promise((r) => setTimeout(r, delayMs).unref());
+          if (stopped) return;
+          attempt++;
+          try {
+            starting = connect();
+            await starting;
+            log.info({ attempt }, "listener reconnected");
+            return;
+          } catch (err) {
+            starting = undefined;
+            log.warn({ err, attempt, retryInMs: Math.min(delayMs * 2, RECONNECT_MAX_MS) }, "listener reconnect failed");
+            delayMs = Math.min(delayMs * 2, RECONNECT_MAX_MS);
+          }
+        }
+      } finally {
+        reconnecting = false;
+      }
+    })();
   }
 
   const bus: EventBus = {
@@ -166,9 +212,13 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
       }
     },
     start() {
-      starting ??= connect();
+      starting ??= connect().catch((err) => {
+        starting = undefined; // a failed first connect can be tried again
+        throw err;
+      });
       return starting;
     },
+    connected: () => !stopped && client !== undefined,
     async stop() {
       stopped = true;
       await client?.end().catch(() => {});

@@ -27,7 +27,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Upload stuck on "Downloading…" then fails after ~15 min | worker log `Not enough disk` / older `Gave up waiting 900s for resources before ingest` | Worker volume smaller than `MIN_FREE_DISK_MB` plus the file (a ~4.6 GB disk cannot hold a 2 GB upload and still keep 2 GB free). Ingest used to wait the full 900 s, then retry, and the UI labelled every ingest "Downloading". With an S3 store the worker first evicts scratch copies the bucket has (`evicted scratch for a job short of disk`), then hands the job to a worker with room (`handing the job to a worker with disk`) before it fails. |
 | Worker volume fills up over weeks with an S3 store | `reelsaw storage` → "scratch copies of stored files"; `du -sh /data/projects` | Every source and render ever processed also sat on the worker as a cache the sweep never evicted. Now `SCRATCH_CACHE_HOURS` (24) evicts the copies of finished projects once idle; `reelsaw storage sweep` does it at once, `reelsaw storage reclaim <MB>` frees a given amount least-recently-used first. |
 | Two large ingests started together, one (or both) failed with `ENOSPC` / "No space left on device" mid-download | `reelsaw storage` → "leased to jobs in flight"; worker log `leased disk` (debug), `waiting for resources` with `leased to N jobs in flight` | Before disk leases both passed the free-space check on the same bytes. Now a job claims its scratch against the volume's live leases (`disk_leases`, one advisory lock per volume) before it writes: the second job waits for the first to finish (progress says "Waiting for resources: … leased to 1 job in flight") and gives up only after `RESOURCE_WAIT_MAX_SECONDS`, when pg-boss retries it. Seeing this on a current version means a process outside Reelsaw is filling the volume. |
-| A worker shows "disk full" under Settings → System → Workers and takes no media jobs | worker log `paused disk queues on this worker` | Free disk fell under `MIN_FREE_DISK_MB`, nothing was left to evict (the local store, every copy in use, or the sweep already ran) and another worker had room. That worker takes ingest, transcribe, analyze, prepare and render; this one keeps the refine queues and resumes on its own 1 GB above the floor (`resumed disk queues`). Free space (retention, `reelsaw storage sweep`, a bigger volume) or add a worker. A single box never pauses: its jobs fail fast with `Not enough disk`. |
+| A worker shows "disk full" under Settings → System → Workers and takes no media jobs | worker log `paused disk queues on this worker` | Free disk fell under `MIN_FREE_DISK_MB`, nothing was left to evict (the local store, every copy in use, or the sweep already ran) and another worker had room. That worker takes ingest, transcribe, scene refinement, analyze, prepare and render; this one keeps the transcript-only refine queues (entities, disfluency) and resumes on its own 1 GB above the floor (`resumed disk queues`), or sooner when no other worker has room any more (the peer crashed, stopped or filled up: a stuck queue is worse than a failing job). Free space (retention, `reelsaw storage sweep`, a bigger volume) or add a worker. A single box never pauses: its jobs fail fast with `Not enough disk`. |
 | Word removed in transcript but still heard | ✂ badge / `reelsaw clip` → SKIPPED reason; then `reelsaw cuts <clipId>` | Verifier refused every candidate (see §3). Safe default: audio kept, captions still drop it. |
 | Transcript filled with one looping word or the show's name list ("no no no…", "Chafing Dream Swag Bags…") | `reelsaw status` words around that time; many copies share one timestamp | Whisper decoder loop on a 10-minute chunk (often after a real short repeat, or the vocabulary `prompt` leaking at a chunk cut). Collapse keeps a short run; a repetitive chunk is retried without the prompt. Re-transcribe to recover the missing minutes. |
 | Fewer clips than expected | `reelsaw events` → `stage.completed` payload `dropped` | Small model returned few candidates, wrong timestamps (see §4), or scores under the run's gate (`candidates` artifact → `settings.gate`: rule, threshold, median, MAD). |
@@ -310,10 +310,11 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   the job fits, then re-measures. Still short, the stage job looks at the last heartbeats (`worker_instances`): if
   another live worker listening on that queue reported the room, the job is thrown back for pg-boss to retry there
   (`stage.failed` says "another worker will pick it up") and this worker pauses its media queues (ingest, transcribe,
-  analyze, prepare, render; `offWork`) so the retry cannot land on it; if nobody has the room the run fails with the
+  refine.scenes, analyze, prepare, render; `offWork` with `wait: false`, because it runs inside the job) so the retry cannot land on it; if nobody has the room the run fails with the
   reason, as before. Every 30 s the gate re-measures: below the floor plus 1 GB it evicts proactively, so room is made
   before a job arrives; under the floor with another worker that has room it pauses; back above the floor plus 1 GB it
-  registers the queues again. A worker never pauses when no other worker could take the jobs (a single box, or every
+  registers the queues again, and so does a paused worker whose peer is gone (no other live worker has room for the
+  smallest disk requirement: `resumed disk queues on this worker: no other worker can take the work`). A worker never pauses when no other worker could take the jobs (a single box, or every
   worker full): there a job fails fast with the disk message rather than sit on "queued". The heartbeat's `queues`
   (Workers page, MCP `list_workers`, `reelsaw workers`) shows what a paused worker still takes. With the local store
   nothing is evictable (scratch and store are one hardlinked file): `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS`
@@ -496,6 +497,24 @@ It looked frozen and the evidence was gone with the container's logs. What chang
 - **Recoverability:** `needsPrepare` routes an unprepared user clip back through `clip.prepare` from every path
   (render worker, re-render, retry, reconciler, `reelsaw recover`). Deploys drain: `SHUTDOWN_GRACE_SECONDS=300` +
   compose `stop_grace_period: 330s`, so a rebuild waits for running renders instead of burning a retry.
+- **Health:** `GET /api/health` returns 503 with a `checks` map (`db`, `events`, `queue`, `workers`; each answers
+  within 2 s or is reported as `timed out`) when the process is up but cannot work: Postgres unreachable, the LISTEN
+  connection for live updates down (it reconnects on its own with a 2 s to 30 s backoff and logs each failed attempt as
+  `listener reconnect failed`), pg-boss not started, or, in a process that runs workers, its worker heartbeat stale. The
+  Docker `HEALTHCHECK` treats any non-2xx as unhealthy. The `worker` compose service has no HTTP server and so no check.
+- **Lost jobs do not loop forever:** the reconciler re-enqueues a project or clip whose job vanished (worker crash, OOM
+  kill, heartbeat timeout), but counts each re-enqueue (`reconcile_requeues`). The fourth time it fails the project or
+  clip with "Processing was interrupted 4 times (the worker crashed, ran out of memory, or was stopped). Retry to try
+  again." and logs `gave up re-enqueueing`. Retry (or a new render) resets the count. Only one process runs the
+  reconciler tick at a time (an advisory lock); the others log `another process holds the reconciler lock` at debug.
+- **No worker:** a process with `RUN_WORKERS=false` logs `this process runs no workers` at boot. Projects then stay
+  `queued` until a `worker` container runs; after `STALL_MINUTES` the watchdog posts `job.stalled` with the reason
+  "No worker is running" when no worker heartbeat is fresh.
+- **Boot checks follow the role:** a process with `RUN_WORKERS=false` only warns when free disk is under
+  `MIN_FREE_DISK_MB` (a full disk must not lock out the admin UI that can free it) and skips the face, text and voice
+  detectors; with `RUN_HTTP=false` the mail server is not checked. The language model check stays fail-fast in every role.
+- **A pinned `WORKER_ID` shared by replicas** (`docker compose --scale worker=N`): the later processes append
+  `-<4 hex>` and log `WORKER_ID is already in use by a live process`, so they keep their own heartbeat row and leases.
 - **Triagability:** retried jobs log `previousAttempt` (our error or pg-boss "job heartbeat timeout" =
   interrupted) and post a `clip.retrying` event; the reconciler's watchdog posts `job.stalled` after
   `STALL_MINUTES` without events; the cut search reports progress per cut and attempt; logs also go to

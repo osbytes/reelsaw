@@ -1,4 +1,4 @@
-import { and, inArray, eq, desc, isNull } from "drizzle-orm";
+import { and, inArray, eq, desc, isNull, gt, sql } from "drizzle-orm";
 import { purgeDeleted } from "../projects/service.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare } from "../pipeline/lifecycle.js";
@@ -12,10 +12,14 @@ import type { Services } from "../services.js";
 import { flagAccounts, pruneRequestRate } from "../abuse.js";
 import { libraryProviders } from "../library/import.js";
 import { QUEUES, type QueueName } from "./boss.js";
-import { finalizeProjectIfDone } from "../pipeline/render.js";
+import { finalizeProjectIfDone, markClipFailed } from "../pipeline/render.js";
+import { failProject } from "../pipeline/common.js";
+import type { UnitOfWork } from "../uow.js";
+import { sessionLock, withSessionLock } from "../locks.js";
+import { WORKER_STALE_MS } from "../ops/workers.js";
 import { REFINE_QUEUE, finishIfComplete } from "../pipeline/refine.js";
 import { REFINE_STEPS } from "@reelsaw/shared";
-import type { ProjectStatus } from "@reelsaw/shared";
+import type { ClipStatus, PipelineStage, ProjectStatus } from "@reelsaw/shared";
 
 const statusQueue: Partial<Record<ProjectStatus, QueueName>> = {
   queued: QUEUES.ingest,
@@ -24,13 +28,43 @@ const statusQueue: Partial<Record<ProjectStatus, QueueName>> = {
   analyzing: QUEUES.analyze,
 };
 
+/** How many times the reconciler re-enqueues a lost job before it fails the project or clip instead. */
+export const MAX_RECONCILE_REQUEUES = 3;
+/** Pure: the counter value just written (after the increment) is past the budget. */
+export const shouldGiveUp = (requeues: number): boolean => requeues > MAX_RECONCILE_REQUEUES;
+export const INTERRUPTED_MESSAGE = `Processing was interrupted ${MAX_RECONCILE_REQUEUES + 1} times (the worker crashed, ran out of memory, or was stopped). Retry to try again.`;
+
+const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = { queued: "ingest", ingesting: "ingest", transcribing: "transcribe", refining: "refine", analyzing: "analyze" };
+
+/**
+ * pg-boss-level failures (heartbeat timeout, expiry, an OOM kill) never reach failProject / markClipFailed, so a job
+ * that kills its worker every time would be re-enqueued here forever with a fresh retry budget. Each re-enqueue
+ * counts on the row, in the same unit of work as the enqueue; past MAX_RECONCILE_REQUEUES the caller fails it.
+ * Resets to 0 on a user start, retry or render request (lifecycle.ts). Returns the new count, or null when the row
+ * moved on (status changed, deleted) or a live job appeared since the caller looked: nothing was counted or queued.
+ */
+async function countRequeue(u: UnitOfWork, target: { project: string; status: ProjectStatus } | { clip: string; status: ClipStatus }, live: QueueName[]): Promise<number | null> {
+  const p = schema.projects;
+  const c = schema.clips;
+  const [row] =
+    "project" in target
+      ? await u.db.update(p).set({ reconcileRequeues: sql`${p.reconcileRequeues} + 1` }).where(and(eq(p.id, target.project), eq(p.status, target.status), isNull(p.deletedAt))).returning({ n: p.reconcileRequeues })
+      : await u.db.update(c).set({ reconcileRequeues: sql`${c.reconcileRequeues} + 1` }).where(and(eq(c.id, target.clip), eq(c.status, target.status), isNull(c.deletedAt))).returning({ n: c.reconcileRequeues });
+  if (!row) return null;
+  const key = "project" in target ? target.project : target.clip;
+  for (const q of live) if (await u.hasLiveJob(q, key)) return null;
+  return row.n;
+}
+
 /**
  * Re-enqueue any project whose pipeline stage has no live job. Covers jobs lost to crashes
  * between "mark stage done" and "enqueue next stage", retries exhausted by a transient outage,
- * or manual DB edits. Every stage is idempotent, so double-runs are safe.
+ * or manual DB edits. Every stage is idempotent, so double-runs are safe. A project or clip that was
+ * re-enqueued more than MAX_RECONCILE_REQUEUES times since its last start fails instead (see `countRequeue`).
  */
 export async function reconcile(svc: Services): Promise<{ requeued: number }> {
   const db = svc.database.db;
+  const log = svc.log.child({ module: "reconcile" });
   let requeued = 0;
   const active = await db.query.projects.findMany({
     where: and(inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)),
@@ -44,20 +78,30 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
         if (needsPrepare(c)) {
           if (await svc.queue.hasLiveJob(QUEUES.prepare, c.id)) continue;
           // restart: false re-checks for a live prepare job inside the transaction and keeps one that appeared meanwhile
-          await svc.tx(async (u) => {
+          const n = await svc.tx(async (u) => {
+            const n = await countRequeue(u, { clip: c.id, status: c.status }, [QUEUES.prepare]);
+            if (n === null || shouldGiveUp(n)) return n;
             await u.cancelLiveJobs(QUEUES.render, c.id);
             await requestPrepare(svc, u, p.id, c.id, { restart: false });
+            return n;
           });
-          requeued++;
+          if (n !== null && shouldGiveUp(n)) await giveUpClip(svc, p.id, c.id, n);
+          else if (n !== null) requeued++;
           continue;
         }
         if (await svc.queue.hasLiveJob(QUEUES.render, c.id)) continue;
-        // re-queue the clip's current generation (no bump: nothing about the clip changed). Outside a unit of work on
-        // purpose: no row changes here, and a duplicate is harmless only because pg-boss enqueues with
-        // singletonKey = clip id on an exclusive queue (one live job per clip), so a race with another enqueue is a
-        // no-op, and a render of a stale generation exits. Drop that singletonKey and this needs svc.tx + hasLiveJob.
-        await svc.queue.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id, gen: c.renderGen });
-        requeued++;
+        // re-queue the clip's current generation (no bump: nothing about the clip changed). The counter and the
+        // enqueue share a unit of work, so a crash between them cannot lose a count or leave a count without its job.
+        // A duplicate is still harmless, because pg-boss enqueues with singletonKey = clip id on an exclusive queue
+        // (one live job per clip), and a render of a stale generation exits.
+        const n = await svc.tx(async (u) => {
+          const n = await countRequeue(u, { clip: c.id, status: c.status }, [QUEUES.render]);
+          if (n === null || shouldGiveUp(n)) return n;
+          await u.enqueue(QUEUES.render, { projectId: p.id, clipId: c.id, gen: c.renderGen });
+          return n;
+        });
+        if (n !== null && shouldGiveUp(n)) await giveUpClip(svc, p.id, c.id, n);
+        else if (n !== null) requeued++;
       }
       await finalizeProjectIfDone(svc, p.id);
       continue;
@@ -65,30 +109,65 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
     if (p.status === "refining") {
       const t = await db.query.transcripts.findFirst({ where: (x, { eq }) => eq(x.projectId, p.id), columns: { refine: true } });
       if (!t) continue;
+      const lost: QueueName[] = [];
       for (const step of REFINE_STEPS) {
         const st = t.refine[step];
         if (st === "done" || st === "failed") continue;
         if (await svc.queue.hasLiveJob(REFINE_QUEUE[step], p.id)) continue;
-        // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
-        await svc.queue.enqueue(REFINE_QUEUE[step], { projectId: p.id });
-        requeued++;
+        lost.push(REFINE_QUEUE[step]);
+      }
+      if (lost.length) {
+        // one count per pass however many steps lost their job; singletonKey = project id (exclusive queue) dedupes a race
+        const n = await svc.tx(async (u) => {
+          const n = await countRequeue(u, { project: p.id, status: p.status }, []);
+          if (n === null || shouldGiveUp(n)) return n;
+          for (const q of lost) await u.enqueue(q, { projectId: p.id });
+          return n;
+        });
+        if (n !== null && shouldGiveUp(n)) await giveUpProject(svc, p.id, p.status, n);
+        else if (n !== null) requeued += lost.length;
       }
       await finishIfComplete(svc, p.id);
       continue;
     }
     const queue = statusQueue[p.status];
     if (!queue || (await svc.queue.hasLiveJob(queue, p.id))) continue;
-    // outside a unit of work: safe only because of singletonKey = project id (exclusive queue), see above
-    await svc.queue.enqueue(queue, { projectId: p.id });
-    requeued++;
+    const n = await svc.tx(async (u) => {
+      const n = await countRequeue(u, { project: p.id, status: p.status }, [queue]);
+      if (n === null || shouldGiveUp(n)) return n;
+      await u.enqueue(queue, { projectId: p.id });
+      return n;
+    });
+    if (n !== null && shouldGiveUp(n)) await giveUpProject(svc, p.id, p.status, n);
+    else if (n !== null) requeued++;
   }
-  if (requeued) svc.log.info({ module: "reconcile", requeued }, "re-enqueued orphaned jobs");
+  if (requeued) log.info({ requeued }, "re-enqueued orphaned jobs");
   return { requeued };
+}
+
+async function giveUpProject(svc: Services, projectId: string, status: ProjectStatus, requeues: number) {
+  svc.log.child({ module: "reconcile" }).error({ projectId, status, requeues }, "gave up re-enqueueing a project whose job keeps getting lost");
+  await failProject(svc, projectId, stageOfStatus[status] ?? "ingest", new Error(INTERRUPTED_MESSAGE));
+}
+
+async function giveUpClip(svc: Services, projectId: string, clipId: string, requeues: number) {
+  svc.log.child({ module: "reconcile" }).error({ projectId, clipId, requeues }, "gave up re-enqueueing a clip whose job keeps getting lost");
+  await markClipFailed(svc, projectId, clipId, new Error(INTERRUPTED_MESSAGE));
 }
 
 export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
   let lastSweep = 0;
+  const log = svc.log.child({ module: "reconcile" });
+  // every RUN_WORKERS process runs a tick, but one at a time across the fleet (a session advisory lock held for the
+  // tick): no duplicate job.stalled events, no two sweeps racing on the prune_state cursors. reconcile() itself takes
+  // no lock, so the CLI's `recover` can call it directly.
   const tick = () =>
+    withSessionLock(svc.database.pool, sessionLock.reconcile(), run)
+      .then((r) => {
+        if (!r.ran) log.debug("another process holds the reconciler lock; skipping this tick");
+      })
+      .catch((err) => log.error({ err }, "reconcile failed"));
+  const run = () =>
     reconcile(svc)
       .then(() => detectStalls(svc, svc.settings.get().STALL_MINUTES))
       .then(() => sweepRetention(svc))
@@ -117,6 +196,20 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
 }
 
 /**
+ * For a process that runs no workers (RUN_WORKERS=false), which never starts the reconciler: only the watchdog, so
+ * a deployment with no `worker` container still reports queued projects as "No worker is running". Same lock as the
+ * reconciler's tick, so it does not duplicate events.
+ */
+export function startStallWatch(svc: Services, intervalMs = 5 * 60_000) {
+  const log = svc.log.child({ module: "watchdog" });
+  const tick = () =>
+    withSessionLock(svc.database.pool, sessionLock.reconcile(), () => detectStalls(svc, svc.settings.get().STALL_MINUTES)).catch((err) => log.error({ err }, "stall check failed"));
+  const timer = setInterval(() => void tick(), intervalMs);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
+/**
  * Watchdog: a running project or clip that has emitted no event for STALL_MINUTES is reported once
  * (structured warn + a `job.stalled` event the UI shows), with what it was last doing and the live
  * job's age, so "stuck" is visible and explainable instead of a silent spinner.
@@ -125,7 +218,11 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const db = svc.database.db;
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
-  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, ["ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true } });
+  // a project waiting in `queued` is normal behind a backlog, but not when no process that takes jobs has checked in lately
+  const live = await db.select({ id: schema.workerInstances.id }).from(schema.workerInstances).where(and(inArray(schema.workerInstances.role, ["worker", "app"]), gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)))).limit(1);
+  const noWorker = live.length === 0;
+  const statuses: ProjectStatus[] = ["ingesting", "transcribing", "refining", "analyzing", "rendering", ...(noWorker ? (["queued"] as const) : [])];
+  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, statuses), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
@@ -145,8 +242,15 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       lastEvent: { type: last.type, payload: last.payload },
       liveJobs: jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key, runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null })),
     };
-    log.warn(info, jobs.rows.length ? "no progress from running job" : "active project has no live job");
-    await svc.events.emit(p.id, "job.stalled", { idleMinutes: info.idleMinutes, lastEvent: last.type, liveJobs: info.liveJobs.length, hint: jobs.rows.length ? "still running; check `reelsaw status`" : "no job; the reconciler will re-enqueue it" });
+    const noWorkerReason = p.status === "queued" && noWorker;
+    log.warn(info, noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job");
+    await svc.events.emit(p.id, "job.stalled", {
+      idleMinutes: info.idleMinutes,
+      lastEvent: last.type,
+      liveJobs: info.liveJobs.length,
+      ...(noWorkerReason ? { reason: "No worker is running" } : {}),
+      hint: noWorkerReason ? "start a `worker` container (or run the app with RUN_WORKERS=true); queued projects wait for one" : jobs.rows.length ? "still running; check `reelsaw status`" : "no job; the reconciler will re-enqueue it",
+    });
     stalled++;
   }
   return stalled;

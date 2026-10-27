@@ -436,6 +436,8 @@ export const projects = pgTable(
      * refine or delete supersedes it. Stage jobs carry it and commit only while it is current (see pipeline/common.ts).
      */
     stageSeq: integer("stage_seq").notNull().default(0),
+    /** times the reconciler re-enqueued this project's lost job since the last user start or retry; past the limit it fails the project (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     /** when the stage now running began; stage.completed / stage.failed durations come from it */
     stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
@@ -507,6 +509,8 @@ export const clips = pgTable(
     id: text("id").primaryKey(),
     /** bumped on every render request; a render only commits if its generation is still current */
     renderGen: integer("render_gen").notNull().default(0),
+    /** times the reconciler re-enqueued this clip's lost job since the last render or prepare request; past the limit it fails the clip (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
