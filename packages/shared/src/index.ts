@@ -306,6 +306,10 @@ export type AssetLayer = z.infer<typeof assetLayerSchema>;
 export type TextLayer = z.infer<typeof textLayerSchema>;
 export type AudioLayer = z.infer<typeof audioLayerSchema>;
 export const MAX_CLIP_LAYERS = 30;
+/** The shortest clip, seconds (a clip made from a selection, or an edit of its bounds). */
+export const MIN_CLIP_SECONDS = 3;
+/** The longest clip a user can carve out or stretch to, seconds (10 minutes). */
+export const MAX_CLIP_SECONDS = 600;
 export const isVisualLayer = (l: ClipLayer): l is AssetLayer | TextLayer => l.kind !== "audio";
 
 /**
@@ -731,6 +735,22 @@ export const projectSettingsSchema = styleSchema.extend({
 });
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});
+
+/**
+ * How a clip is framed, before any face detection: the mode its sections fall back to, the adjustment that goes with that
+ * mode, the clip's own sections, and where the mode comes from. The renderer and `get_clip` both read it, so what the
+ * agent is told is what the render does. A legacy per-clip override wins and takes no project adjustment with it.
+ */
+export function resolveFraming(
+  clip: { layoutOverride?: string | null; layoutSections?: LayoutSection[] | null },
+  settings: Pick<ProjectSettings, "reframe"> & { reframeAdjust?: SectionAdjustFields | null },
+): { mode: ReframeMode; adjust: SectionAdjustFields | undefined; sections: LayoutSection[]; from: "clip" | "project" | "default" } {
+  const override = reframeModeSchema.safeParse(clip.layoutOverride);
+  const mode: ReframeMode = override.success ? override.data : settings.reframe;
+  const sections = clip.layoutSections ?? [];
+  const projectSets = settings.reframe !== "auto" || !!settings.reframeAdjust;
+  return { mode, adjust: override.success ? undefined : (settings.reframeAdjust ?? undefined), sections, from: override.success || sections.length ? "clip" : projectSets ? "project" : "default" };
+}
 
 /**
  * What a user can set once and have applied to every new project (Settings → Project defaults).

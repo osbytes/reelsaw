@@ -49,7 +49,7 @@ export const publicProcedure = t.procedure;
 
 /** Any signed-in account, including ones waiting for approval or suspended (for `me`, sign-out helpers). */
 export const signedInProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.who) throw new TRPCError({ code: "UNAUTHORIZED" });
+  if (!ctx.who) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to continue (or send a valid API key)." });
   return next({ ctx: { ...ctx, who: ctx.who, user: ctx.who.user } });
 });
 

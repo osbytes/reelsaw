@@ -203,7 +203,7 @@ a 429 hides the provider for the reset window with a sentence in the panel.
 
 | action | tRPC | MCP | CLI |
 |---|---|---|---|
-| list own library | `library.list` | `search_assets { source: "library" }` (empty `q` = everything) | `reelsaw library list [--kind] [--q]` |
+| list own library | `library.list` (a page: `items`, `nextCursor`, `total`; 100 by default, at most 500) | `search_assets { source: "library" }` (empty `q` = everything) | `reelsaw library list [--kind] [--q]` |
 | resolve ids (own, shared, removed-in-use) | `library.get { ids }` | `get_clip` / `get_project` already resolve names | |
 | search library, catalog, providers | `library.search { q, source?: "library" \| "catalog" \| <providerId>, kind?, cursor?, limit?, license? }`, `library.providers` | `search_assets` | `reelsaw library search <q> [--source] [--kind] [--license]` |
 | add (upload, URL, catalog / provider hit) | `library.add { uploadId \| url \| provider + externalId, name?, tags?, imageSeconds?, setDefault?, color? }` (exactly one source) | `add_asset` | `reelsaw library add <file\|url\|provider:externalId>` |

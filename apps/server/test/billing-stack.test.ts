@@ -10,6 +10,7 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { BASE, db, signUp } from "./helpers.js";
 
 const MOCK = process.env.STRIPE_MOCK_URL;
@@ -57,10 +58,16 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
   });
 
   it("the first video is free up to 60 minutes; the next ones count against the 20-minute month", async () => {
-    const mk = (title: string, sec: number) => pool.query(
-      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values (gen_random_uuid()::text, $1, $2, 'url', 'https://example.com/v.mp4', $3, 'done', '{}', now(), now())`,
-      [user.userId, title, sec],
-    );
+    // minutes come from source_usage (the ledger a purged project keeps), so each video is a project row and a usage row
+    let n = 0;
+    const mk = async (title: string, sec: number) => {
+      const id = randomUUID();
+      await pool.query(
+        `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', $4, 'done', '{}', now(), now())`,
+        [id, user.userId, title, sec],
+      );
+      await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() + ($4 || ' seconds')::interval)`, [user.userId, id, sec, String(n++)]);
+    };
     await mk("First, 45 min", 45 * 60);
     let s = await state();
     assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0, "the first video does not count");
@@ -72,6 +79,7 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(refused.error?.data.code, "TOO_MANY_REQUESTS");
     assert.match(refused.error!.message, /Monthly limit of 20 minutes of video reached \(25 used\); resets on .*Starter gives 100 minutes a month: http/);
     await pool.query(`delete from projects where user_id = $1`, [user.userId]);
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
   });
 
   // stack only: source_usage rows with no length (still downloading, or failed before the probe) never take the free first video

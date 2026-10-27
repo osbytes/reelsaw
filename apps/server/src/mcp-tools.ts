@@ -179,7 +179,7 @@ export const TOOLS = {
   },
   get_project_events: {
     title: "Project activity",
-    description: "The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. Returns [{ at, type, ...details }]. Use it to find out why something failed or is slow; get_project shows the current state.",
+    description: "The project's pipeline history, newest first (the same events the Activity panel shows; live progress ticks are not stored): stage starts and completions, clip renders, retries, failures with reasons. Returns [{ at, type, ...details }]. Use it to find out why something failed or is slow; get_project shows the current state.",
     inputSchema: {
       id: projectId(),
       limit: z.number().int().min(1).max(200).default(50).describe("Most events to return (1-200, default 50)"),
@@ -188,13 +188,13 @@ export const TOOLS = {
   },
   get_clip: {
     title: "Get clip",
-    description: "Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links. Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
+    description: "Everything about one clip: text, bounds, scores, emphasis, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links, and what the next render will use with where each comes from: style { own, effective, from: clip|project|default }, framing { own, effective: { mode, adjust, sections }, from }, bumpers { own, effective } (intro/outro). Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
     inputSchema: { id: clipId() },
     annotations: { readOnlyHint: true },
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. A section's offsetX/Y, subjectX, crop and contentCrop are described on layoutSections (a crop replaces the nudge and the subject). Returns the clip summary; poll get_clip until done.",
+    description: "Edit one clip (3 s-10 min): only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis, layers and intro/outro are burned in and re-render (~1 min) unless rerender is false. Returns the clip summary plus { changed, needsRerender, rerendered, hint }; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
@@ -208,12 +208,12 @@ export const TOOLS = {
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
       layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional().describe(`Everything laid over or played under the clip, one list (max ${MAX_CLIP_LAYERS}): kind asset = a library image/GIF/video (search_assets with source library; logos, stickers, b-roll), kind text = a line of text, kind audio = music or a sound effect (a library audio asset with a window in source seconds, volume, ducking, fade, loop). Replaces the whole list; null or [] = none. get_clip returns it`),
-      rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
+      rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true, same as the app); false = keep the old video until rerender_clip"),
     },
   },
   create_clip: {
     title: "Create clip",
-    description: "Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip { id, status: \"preparing\" }; it gets a title and renders in the background (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.",
+    description: "Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip summary { id, status: \"preparing\", queued: \"prepare\", hint }; preparation (title, hook, scores) is queued and the render follows by itself (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.",
     inputSchema: {
       projectId: projectId(),
       startSec: z.number().min(0).describe("Range start, seconds from the start of the source video"),
@@ -223,13 +223,13 @@ export const TOOLS = {
   },
   delete_clip: {
     title: "Delete clip",
-    description: "Delete one clip of a live project; a render in progress stops. It shows up on Deleted (list_deleted). Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_clip. For several clips of one project use delete_clips. Returns { changed, restorable, storedBytes }.",
+    description: "Delete one clip of a live project; a render in progress stops. It shows up on Deleted (list_deleted). Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_clip. For several clips of one project use delete_clips. Returns { changed, stoppedRender (a render in flight was stopped), renderQueued: false, restorable, storedBytes }.",
     inputSchema: { id: clipId() },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   delete_clips: {
     title: "Delete clips",
-    description: "Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. Each shows up on Deleted (list_deleted) and restore_clip brings it back for DELETED_RETENTION_DAYS. Already-deleted ids are skipped. Storage still counts until purge_clip. Returns { deleted, skipped, restorable, storedBytes }.",
+    description: "Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. Each shows up on Deleted (list_deleted) and restore_clip brings it back for DELETED_RETENTION_DAYS. Already-deleted ids are skipped. Storage still counts until purge_clip. Returns { deleted, skipped, stoppedRenders, renderQueued: false, restorable, storedBytes }.",
     inputSchema: {
       projectId: projectId(),
       clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
@@ -238,13 +238,13 @@ export const TOOLS = {
   },
   rerender_clip: {
     title: "Re-render clip",
-    description: "Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). Async: the new video replaces the old when done (usually under a minute); poll get_clip. Returns { step: render | prepare } (prepare = it never got its AI title, which runs first). For several clips of a project use rerender_clips.",
+    description: "Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). Async: the new video replaces the old when done (usually under a minute); poll get_clip. Returns { step: render | prepare, renderQueued, hint } (prepare = it never got its AI title, which runs first and renders afterwards). For several clips of a project use rerender_clips.",
     inputSchema: { id: clipId("Clip id, not a project id") },
     annotations: { idempotentHint: true },
   },
   rerender_clips: {
     title: "Re-render clips",
-    description: "Queue several clips of one project for rendering again in one step (after edits or failures). Finished and failed clips are queued, clips still rendering are skipped; each new video replaces the old when done. Returns { requested, rerendered, skipped }; poll get_project or wait_for_project. For a single clip rerender_clip is enough.",
+    description: "Queue several clips of one project for rendering again in one step (after edits or failures). Finished and failed clips are queued, clips still rendering are skipped; each new video replaces the old when done. Returns { requested, rerendered, skipped, renderQueued, hint }; poll get_project or wait_for_project. For a single clip rerender_clip is enough.",
     inputSchema: {
       projectId: projectId(),
       clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
@@ -253,7 +253,7 @@ export const TOOLS = {
   },
   export_project: {
     title: "Export clips",
-    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Returns { url, clips, notRendered }; the link needs the same Authorization header as this server.",
+    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Same conditions as the app's Export: the project must be live and at least one picked clip rendered, else the answer says why (not found, or nothing rendered yet). Returns { url, clips (rendered, in the zip), notRendered (picked but not finished, left out) }; the link needs the same Authorization header as this server.",
     inputSchema: {
       id: projectId(),
       clipIds: z.array(z.string()).max(200).optional().describe("Only these clips (max 200; must be rendered clips of the project); omitted = every rendered clip"),
@@ -366,8 +366,11 @@ export const TOOLS = {
   },
   list_layer_templates: {
     title: "List layer templates",
-    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = your deleted templates, restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
-    inputSchema: {},
+    description: "Your layer templates (sets of layers that fit any clip length), newest first, paged. Returns { items: [{ id, name, layerCount, layers, updatedAt }], nextCursor, total, deleted } (nextCursor goes in cursor; deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    inputSchema: {
+      cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
+      limit: z.number().int().min(1).max(500).default(100).describe("Templates per page (1-500, default 100)"),
+    },
     annotations: { readOnlyHint: true },
   },
   save_layer_template: {

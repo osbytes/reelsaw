@@ -411,9 +411,9 @@ export const assetMap = (list: AssetRef[]) => new Map(list.map((a) => [a.id, a])
 type Api = ReturnType<typeof appRouter.createCaller>;
 
 /** The library as an agent or operator wants to read it: `bumpers.list` plus which asset is the user's default intro and outro. */
-export async function libraryView(svc: Services, api: Api, userId: string, abs: (p: string) => string = (p) => p) {
-  const [lib, defaults] = await Promise.all([api.library.list(), userDefaults(svc.database.db, userId)]);
-  const row = (a: (typeof lib.assets)[number]) => ({
+export async function libraryView(svc: Services, api: Api, userId: string, abs: (p: string) => string = (p) => p, page: { limit?: number; cursor?: string } = {}) {
+  const [lib, defaults] = await Promise.all([api.library.list({ limit: page.limit ?? 500, cursor: page.cursor }), userDefaults(svc.database.db, userId)]);
+  const row = (a: (typeof lib.items)[number]) => ({
     id: a.id,
     name: a.name,
     kind: a.kind,
@@ -434,7 +434,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     /** the file itself (play the music, view the image or video); same auth as this server */
     url: abs(`/media/assets/${a.id}`),
   });
-  return { assets: lib.assets.map(row), deleted: lib.deleted.map(row) };
+  return { assets: lib.items.map(row), nextCursor: lib.nextCursor, total: lib.total, deleted: lib.deleted.map(row) };
 }
 
 // ---------- project coverage summaries (Projects list, projects.get, reelsaw status) ----------
