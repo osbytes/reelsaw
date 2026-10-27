@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MUST_CHANGE_PASSWORD_COPY, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, REPO_URL } from "@reelsaw/shared";
-import { Logo, ThemeToggle } from "../App";
+import { ThemeToggle } from "../App";
+import { AuthCardHeader } from "../components/AuthCardHeader";
 import { signOut } from "../lib/auth";
 import { useMe } from "../lib/account";
 import { useTRPC } from "../lib/trpc";
@@ -41,8 +42,7 @@ export function MustChangePasswordPage() {
             save.mutate({ password });
           }}
         >
-          <Logo />
-          <h1 className="text-[22px] font-bold tracking-tight">Choose a password</h1>
+          <AuthCardHeader title="Choose a password" titleClassName="text-[22px]" />
           <p className="text-sm leading-relaxed text-ink2">{MUST_CHANGE_PASSWORD_COPY}</p>
           <p className="min-h-5 text-xs text-ink3">{me.data ? `Signed in as ${me.data.email}` : ""}</p>
           <div>

@@ -13,7 +13,8 @@ import {
 } from "@reelsaw/shared";
 import { requestPasswordReset, resetPassword } from "../lib/auth";
 import { Captcha } from "../components/Captcha";
-import { Logo, ThemeToggle } from "../App";
+import { ThemeToggle } from "../App";
+import { AuthCardHeader } from "../components/AuthCardHeader";
 import { useSystemStatus } from "../lib/account";
 import { track } from "../lib/telemetry";
 import { ScrollArea } from "../components/scroll-area";
@@ -154,13 +155,7 @@ function AuthShell({ title, children }: { title: string; children: React.ReactNo
       <div className="relative flex min-h-dvh items-center justify-center p-6">
         <ThemeToggle className="absolute right-4 top-4" />
         <div className="flex w-full max-w-[380px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-          <Logo />
-          <div>
-            <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
-            <p className="mt-1 text-sm text-ink2">
-              Running on <span className="font-mono text-[13px]">{window.location.host}</span>
-            </p>
-          </div>
+          <AuthCardHeader title={title} />
           {children}
         </div>
         <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-ink3">

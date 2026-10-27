@@ -1,5 +1,6 @@
 import { PENDING_APPROVAL_MESSAGE, REPO_URL } from "@reelsaw/shared";
-import { Logo, ThemeToggle } from "../App";
+import { ThemeToggle } from "../App";
+import { AuthCardHeader } from "../components/AuthCardHeader";
 import { signOut } from "../lib/auth";
 import { useMe } from "../lib/account";
 import { ScrollArea } from "../components/scroll-area";
@@ -14,8 +15,7 @@ export function PendingPage() {
     <div className="relative flex min-h-dvh items-center justify-center p-6">
       <ThemeToggle className="absolute right-4 top-4" />
       <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-        <Logo />
-        <h1 className="text-[22px] font-bold tracking-tight">{suspended ? "Account suspended" : "Waiting for approval"}</h1>
+        <AuthCardHeader title={suspended ? "Account suspended" : "Waiting for approval"} titleClassName="text-[22px]" />
         <p className="text-sm leading-relaxed text-ink2">
           {blocked?.reason ?? PENDING_APPROVAL_MESSAGE}
           {!suspended && " This page refreshes on its own; you can also come back later."}

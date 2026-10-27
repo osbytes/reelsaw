@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Skeleton, SkeletonRegion } from "../components/ui";
 import { Navigate, useLocation } from "react-router";
-import { Logo, ThemeToggle } from "../App";
+import { ThemeToggle } from "../App";
+import { AuthCardHeader } from "../components/AuthCardHeader";
 import { authClient, useSession } from "../lib/auth";
 import { ScrollArea } from "../components/scroll-area";
 import { useDocumentTitle } from "../lib/title";
@@ -56,8 +57,7 @@ export function ConsentPage() {
     <div className="relative flex min-h-dvh items-center justify-center p-6">
       <ThemeToggle className="absolute right-4 top-4" />
       <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-        <Logo />
-        <h1 className="text-[22px] font-bold tracking-tight">Allow access?</h1>
+        <AuthCardHeader title="Allow access?" titleClassName="text-[22px]" />
         <p className="text-sm leading-relaxed text-ink2">
           <b>{client?.name ?? "An application"}</b>
           {client?.uri ? <span className="text-ink3"> ({client.uri})</span> : null} wants to use Reelsaw as <b>{data.user.email}</b>: create projects, read transcripts, edit and download clips.
