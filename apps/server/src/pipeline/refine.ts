@@ -310,7 +310,7 @@ export async function refineDisfluency(ctx: StageContext) {
 }
 
 /** Bump when the text scan's behaviour changes: the saved text-scan step stops applying. */
-const TEXT_SCAN_VERSION = "text-scan-1";
+const TEXT_SCAN_VERSION = "text-scan-2";
 const overlayBox = z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), kind: z.enum(["caption", "watermark"]), coverage: z.number(), windows: z.array(z.tuple([z.number(), z.number()])).optional(), share: z.number().optional() });
 const textScanSchema = z.object({
   overlays: z.array(overlayBox),
@@ -320,6 +320,7 @@ const textScanSchema = z.object({
   slides: z.number(),
   faceDropped: z.number(),
   moving: z.number(),
+  ui: z.number(),
 });
 
 export async function refineScenes(ctx: StageContext) {
@@ -345,13 +346,13 @@ export async function refineScenes(ctx: StageContext) {
         async (signal) => {
           const sourcePath = await ctx.ensureSource(project);
           const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
-          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length };
+          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length, ui: r.ui.length };
         },
         { schema: textScanSchema, timeoutMs: Math.max(30 * 60_000, Math.round(durationSec * 1000)), model: "text-detector" },
       );
       overlays = scan.overlays;
       textProfile = scan.textProfile;
-      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, textProfile: scan.textProfile, overlays }, "on-screen text scan");
+      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, ui: scan.ui, textProfile: scan.textProfile, overlays }, "on-screen text scan");
     } catch (err) {
       // a stop or a timeout ends the attempt (the cuts are already saved and the scan restarts alone); anything else only costs the text scan
       if (ctx.signal.aborted || err instanceof StageTimeoutError || err instanceof StaleJobError) throw err;

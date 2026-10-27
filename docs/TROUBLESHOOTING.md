@@ -507,6 +507,12 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 - **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across
   shots. With no detected shot changes only the top 15% / bottom 40% are trusted (a shirt print was flagged
   otherwise). `reelsaw overlays <projectId> [--store]` re-scans an existing project.
+- **Game and app interfaces stay put too.** A Roblox gameplay video had its menu bar, player list and side
+  buttons blurred as "captions" (report, 2026-10-27): a HUD passes every burned-in test (same place in every
+  shot, no drift, clear of faces). `splitInterface` drops narrow off-centre text halfway down a side, and when
+  there are two or more of those, the narrow boxes hugging a side edge in the corners as well. Subtitles are
+  centred or wide, and logos and lower thirds sit in the top or bottom band, so they stay (eval
+  `overlays/aggregate-roblox-2640-2840`).
 - **Blur regions must cover the longest line, not the typical one.** Centred subtitles vary in width, so a
   frequency grid only finds the band's core; ends of long lines and second lines leaked past the blur (39/133
   sampled frames). Regions now grow to the boxes seen in them (`growOverlays`, core-anchored so they don't

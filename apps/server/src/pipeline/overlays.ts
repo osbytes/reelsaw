@@ -114,6 +114,28 @@ export function drifts(o: Box, boxes: Box[]): boolean {
   return q(cys, 0.9) - q(cys, 0.1) > 1.8 * h && q(cxs, 0.9) - q(cxs, 0.1) > 0.05;
 }
 
+/** a region this close to the left or right edge of the frame is anchored to it */
+export const EDGE_MARGIN = 0.03;
+
+/**
+ * Game and app interface (scores, player lists, menu buttons) is pinned to the screen like burned-in
+ * text, so the multi-shot test keeps it. It is content, not something to mask. Subtitles are centred
+ * or span the frame; logos, handles and lower thirds sit in the top or bottom band. Narrow text off
+ * centre, halfway down a side, is interface. Two or more such regions mean the video shows an
+ * interface, and then narrow text hugging a side edge in the corners is part of it too (a player
+ * list, menu icons); without them a corner box stays a logo.
+ */
+export function splitInterface<O extends Box>(overlays: O[]): { kept: O[]; ui: O[] } {
+  const offCentre = (o: Box) => o.x2 - o.x1 < 0.25 && Math.abs((o.x1 + o.x2) / 2 - 0.5) > 0.2;
+  const midSide = (o: Box) => {
+    const cy = (o.y1 + o.y2) / 2;
+    return cy > 0.2 && cy < 0.75;
+  };
+  const side = overlays.filter((o) => offCentre(o) && midSide(o));
+  const ui = side.length >= 2 ? overlays.filter((o) => offCentre(o) && (midSide(o) || o.x1 <= EDGE_MARGIN || o.x2 >= 1 - EDGE_MARGIN)) : side;
+  return { kept: overlays.filter((o) => !ui.includes(o)), ui };
+}
+
 /** Nearest-neighbour resize of a text-detector frame to the face detector's input (both stretch the source). */
 function toFaceInput(rgb: Uint8Array): Uint8Array {
   const out = new Uint8Array(FACE_INPUT_W * FACE_INPUT_H * 3);
@@ -174,6 +196,8 @@ export interface OverlayScan {
   faceDropped: SourceOverlay[];
   /** regions discarded because their text wanders (printed on clothing or props, not burned in) */
   moving: SourceOverlay[];
+  /** regions discarded as game or app interface (scores, player lists, menus) */
+  ui: SourceOverlay[];
   textProfile: TextProfile;
 }
 
@@ -205,7 +229,7 @@ export async function detectOverlays(
   const slides = sampled.length - valid.length;
   const heavy = sampled.filter((g) => g.textHeavy).length;
   const textProfile: TextProfile = { frames: sampled.length, textHeavy: heavy, presentation: sampled.length > 0 && heavy / sampled.length >= PRESENTATION_SHARE };
-  if (!valid.length) return { overlays: [], frames: 0, scenes: 0, slides, faceDropped: [], moving: [], textProfile };
+  if (!valid.length) return { overlays: [], frames: 0, scenes: 0, slides, faceDropped: [], moving: [], ui: [], textProfile };
 
   const sceneIds = new Set(valid.map((g) => g.scene));
   const hits = new Float32Array(GX * GY);
@@ -269,8 +293,9 @@ export async function detectOverlays(
   const allBoxes = valid.flatMap((g) => g.boxes);
   const grown = mergeRegions(growOverlays(overlays, allBoxes, { quantile: 0.995 }));
   const steady = grown.filter((o) => !drifts(o, allBoxes));
-  const { kept, dropped } = dropFaceOverlaps(steady, valid);
-  return { overlays: kept, frames: valid.length, scenes: sceneIds.size, slides, faceDropped: dropped, moving: grown.filter((o) => !steady.includes(o)), textProfile };
+  const { kept: burned, ui } = splitInterface(steady);
+  const { kept, dropped } = dropFaceOverlaps(burned, valid);
+  return { overlays: kept, frames: valid.length, scenes: sceneIds.size, slides, faceDropped: dropped, moving: grown.filter((o) => !steady.includes(o)), ui, textProfile };
 }
 
 const quant = (xs: number[], q: number) => {

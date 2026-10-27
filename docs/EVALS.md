@@ -360,7 +360,8 @@ Sister Circle `uYFjIHelrH0` (talk show: lower thirds, round corner bug, a sweats
 screen as scene text), MrUniverse Oxford `jd5bCpWWBXA` (street interview, captions centred low at
 y 0.89-0.95, not bottom-right as first reported), Valsorda `YNzgRNsB9UA` (live-coding: title strip is
 the overlay, the code is content, presentation expected), Bradford City `F_FQy5Syc3A` (bug plus ad
-boards), R Podcast `GzCeABCU3Gk` (title band over a still), VOA `AK0A6L6-agU` (news package). Frame
+boards), R Podcast `GzCeABCU3Gk` (title band over a still), VOA `AK0A6L6-agU` (news package), Roblox
+gameplay `5S1OctmhFK8` (by URL and time only: game UI that must not be masked, no burned-in text). Frame
 labels may carry `video` (their source) and the `lower-third` kind; only frames without `video` feed
 the original Apollo metrics and the mask-residual check, while `overlayRecall` (required burned-in
 labels found) and `rawPrecision` (share of detected boxes on burned-in text; scene text lowers it by
