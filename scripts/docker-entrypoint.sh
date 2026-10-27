@@ -9,10 +9,10 @@ if [ "$(id -u)" = "0" ]; then
   # Mount roots are often root:root 0755; chown the directory itself so node can mkdir under it.
   # Avoid a recursive walk every boot (large stores). Only deepen if node still cannot write.
   chown node:node "$dir" 2>/dev/null || true
-  if ! gosu node test -w "$dir"; then
+  if ! setpriv --reuid=node --regid=node --init-groups test -w "$dir"; then
     chown -R node:node "$dir"
   fi
-  exec gosu node "$@"
+  exec setpriv --reuid=node --regid=node --init-groups "$@"
 fi
 
 exec "$@"

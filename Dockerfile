@@ -26,11 +26,10 @@ ENV DATA_DIR=/data \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=3000
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 gosu \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation2 fonts-roboto fonts-open-sans fonts-lato fonts-inter fonts-bebas-neue ca-certificates curl python3 \
  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
  && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
  && chmod +x /usr/local/bin/yt-dlp \
- && gosu nobody true \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=models /models /app/server/models
 
@@ -65,7 +64,13 @@ RUN set -eu; \
       find "$b" -mindepth 1 -maxdepth 1 -type d ! -name linux -exec rm -rf {} +; \
       find "$b/linux" -mindepth 1 -maxdepth 1 -type d ! -name "$arch" -exec rm -rf {} +; \
       ls "$b/linux/$arch"/*.node >/dev/null || { echo "no onnxruntime binary for linux/$arch in $b"; exit 1; }; \
-    done
+    done; \
+    # better-auth declares drizzle-kit as an optional peer and pnpm links the server's dev copy into the
+    # production tree; nothing imports it at runtime, and it drags in tsx and esbuild (Go binaries the
+    # image scanner flags). The dangling peer symlink left behind is never resolved.
+    cd /out/server/node_modules/.pnpm; \
+    rm -rf drizzle-kit@* tsx@* esbuild@* @esbuild+* @esbuild-kit+* node_modules/.bin/esbuild node_modules/.bin/tsx node_modules/.bin/drizzle-kit; \
+    ! ls -d *esbuild* 2>/dev/null || { echo "esbuild still in the production tree"; exit 1; }
 
 # ---------- dev: source mounted, live reload (docker-compose.dev.yml) ----------
 FROM system AS dev
@@ -112,15 +117,19 @@ COPY --from=build --chown=node:node /app/apps/server/assets /app/server/assets
 COPY --from=build --chown=node:node /app/apps/web/dist /app/web
 COPY --chown=node:node THIRD_PARTY.md /app/THIRD_PARTY.md
 # operator CLI: docker compose exec app reelsaw status <projectId> (drops to node when invoked as root)
-RUN printf '%s\n' '#!/bin/sh' 'if [ "$(id -u)" = "0" ]; then exec gosu node node /app/server/dist/cli.js "$@"; fi' 'exec node /app/server/dist/cli.js "$@"' > /usr/local/bin/reelsaw \
+# setpriv (util-linux, in the base image) drops privileges; the app never runs npm, npx, corepack or yarn,
+# so the copies bundled with the Node image go (their own dependencies carry scanner findings).
+RUN printf '%s\n' '#!/bin/sh' 'if [ "$(id -u)" = "0" ]; then exec setpriv --reuid=node --regid=node --init-groups node /app/server/dist/cli.js "$@"; fi' 'exec node /app/server/dist/cli.js "$@"' > /usr/local/bin/reelsaw \
  && chmod +x /usr/local/bin/reelsaw \
- && mkdir -p /data && chown node:node /data /app
-# Root entrypoint chowns volume-mounted DATA_DIR (Railway etc.), then gosu node. Process still runs as node.
+ && mkdir -p /data && chown node:node /data /app \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* \
+ && setpriv --reuid=node --regid=node --init-groups true
+# Root entrypoint chowns volume-mounted DATA_DIR (Railway etc.), then drops to node. Process still runs as node.
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 USER root
 VOLUME ["/data"]
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD gosu node node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD setpriv --reuid=node --regid=node --init-groups node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "/app/server/dist/main.js"]
