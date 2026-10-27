@@ -22,6 +22,7 @@ import type { Services } from "./services.js";
 import type { RuntimeSettings } from "./instance-settings.js";
 import { limitsFor, type Entitlements, type InstanceLimits } from "./quota.js";
 import type { Logger } from "./log.js";
+import type { Config } from "./config.js";
 
 const DISPOSABLE = new Set<string>(disposable);
 
@@ -30,15 +31,36 @@ const DISPOSABLE = new Set<string>(disposable);
  * Docker deployment) the proxy's headers name it; otherwise they are whatever the client sent, so they are
  * ignored and the guard keys on "unknown" (which never counts).
  */
-export function clientIp(headers: Headers, trustProxy: boolean): string | null {
-  if (!trustProxy) return null;
-  const cf = headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
-  const real = headers.get("x-real-ip")?.trim();
-  if (real) return real;
-  const xff = headers.get("x-forwarded-for");
-  const first = xff?.split(",")[0]?.trim();
-  return first || null;
+export function clientIp(headers: Headers, trust: Pick<Config, "TRUST_PROXY" | "TRUSTED_PROXY_HEADER" | "TRUSTED_PROXY_HOPS">): string | null {
+  if (!trust.TRUST_PROXY) return null;
+  const value = headers.get(trust.TRUSTED_PROXY_HEADER);
+  if (!value) return null;
+  if (trust.TRUSTED_PROXY_HEADER !== "x-forwarded-for") return value.trim() || null;
+  // each trusted proxy appends the address it saw, so the client is `hops` entries from the right; anything a client
+  // prepends sits to the left of that and is ignored. Fewer entries than hops means the request did not come through them.
+  const entries = value.split(",").map((e) => e.trim());
+  return entries[entries.length - trust.TRUSTED_PROXY_HOPS] || null;
+}
+
+/**
+ * Fixed-window counter per key (a client address), in memory: for cheap guards on unauthenticated endpoints where a
+ * database round trip per request is not worth it. Each process counts for itself, so with N replicas the real cap is up to N times `max`.
+ */
+export class WindowCounter {
+  private readonly buckets = new Map<string, { window: number; n: number }>();
+  constructor(private readonly max: number, private readonly windowMs = 86_400_000, private readonly now: () => number = Date.now) {}
+  /** Counts one request; false when `key` is over the cap for this window. */
+  hit(key: string): boolean {
+    const window = Math.floor(this.now() / this.windowMs);
+    if (this.buckets.size > 10_000) for (const [k, b] of this.buckets) if (b.window !== window) this.buckets.delete(k);
+    const b = this.buckets.get(key);
+    if (!b || b.window !== window) {
+      this.buckets.set(key, { window, n: 1 });
+      return true;
+    }
+    b.n += 1;
+    return b.n <= this.max;
+  }
 }
 
 /** One key per real mailbox: lower-case; gmail ignores dots and everything after `+`; other providers honour `+tags` too. */

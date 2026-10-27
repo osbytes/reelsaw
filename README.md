@@ -347,7 +347,15 @@ them), so a single-user box stays as it is:
   MCP connectors (claude.ai, Claude Desktop): dynamic client registration, sign-in and a consent
   page in the browser, discovery at `/.well-known/oauth-protected-resource/api/mcp` (which names
   the issuer, `<APP_URL>/api/auth`, whose metadata is at
-  `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs.
+  `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs. The
+  consent page shows the address the approval returns to, registrations are capped at 20 per
+  network address per day, and each person lists and revokes the apps they allowed under
+  Settings → Account → Connected apps.
+- **Client address behind a proxy** (`TRUST_PROXY`, `TRUSTED_PROXY_HEADER`, `TRUSTED_PROXY_HOPS`):
+  the sign-up cap and the registration limit key on the client address. With the default
+  `x-forwarded-for` it is the entry `TRUSTED_PROXY_HOPS` places from the right (1 behind Caddy,
+  2 behind Cloudflare and Caddy), so addresses a client prepends do not count; the other headers
+  are read only when selected.
 
 ## Billing (enterprise edition)
 
@@ -388,6 +396,16 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 ```json
 { "mcpServers": { "reelsaw": { "type": "http", "url": "https://your-host/api/mcp", "headers": { "Authorization": "Bearer rs_…" } } } }
 ```
+
+**Key permissions.** A key acts as you, with one exception: the instance-administration tools
+(`get_instance_settings`, `set_instance_settings`, `list_workers`, `get_queue`, `list_failures`,
+`get_failure`, `retry_failures`, `check_for_update`, and instance-wide `report_issue`) need a key
+created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
+Settings. Keys are created without it by default, and a key that lacks it is refused with "This
+key cannot change instance settings". Keys created before permissions existed carry no record and
+keep full access (the log warns once per such key); replace them with new keys to narrow them.
+Connectors that sign in through OAuth (`MCP_OAUTH=true`) never get the admin tools, whoever
+signs in.
 
 Clients that launch a command instead of calling a URL with a header (Claude Desktop without
 `MCP_OAUTH`, Cursor's stdio entries) use `reelsaw mcp`: the same tools over stdio, forwarded to a

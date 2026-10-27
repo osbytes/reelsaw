@@ -262,9 +262,15 @@ export function buildManifest(input: ExportInput): ExportManifest {
   };
 }
 
-function csvCell(v: unknown) {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+/**
+ * One CSV field. Text a spreadsheet would run as a formula (a title or caption that starts with = + - @, a tab or a
+ * carriage return; titles come from videos and models) gets a leading apostrophe, which Excel, Sheets and Numbers show as plain text.
+ * Numbers are written as they are: a negative one is not text.
+ */
+export function csvCell(v: unknown) {
+  let s = v == null ? "" : String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function buildCsv(m: ExportManifest) {

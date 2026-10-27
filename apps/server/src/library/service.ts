@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { assertPublicHttpUrl, isPrivateAddress, UnsafeUrlError } from "../lib/safe-url.js";
+import { bodyChunks, fetchPublic, isPrivateAddress, UnsafeUrlError } from "../lib/safe-url.js";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -281,36 +281,26 @@ export interface FetchDeps {
   lookup?: (host: string) => Promise<string[]>;
 }
 
-/** http(s) only, and never an address on a private network (the server must not become a proxy into its own). */
-async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["lookup"]>): Promise<URL> {
-  try {
-    return await assertPublicHttpUrl(raw, { lookup: async (h) => (await lookup(h)).map((address) => ({ address })) });
-  } catch (err) {
-    // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
-    if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message)) throw new Error("That address is not reachable from the server (private or unresolvable)");
-    throw err;
-  }
-}
 
 /**
  * Download `url` into the uploads table exactly as POST /api/upload would (same storage key, same row), so
  * `bumpers.create` takes it from there with its own type, size and ffprobe checks. Max 50 MB, 60 s, 3 redirects.
  */
 export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string; ext?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
-  const doFetch = deps.fetch ?? fetch;
   const lookup = deps.lookup ?? (async (h: string) => (await dnsLookup(h, { all: true })).map((a) => a.address));
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  let target = await assertPublicUrl(url, lookup);
-  let res: Response;
-  for (let hop = 0; ; hop++) {
-    res = await doFetch(target, { redirect: "manual", signal });
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-      if (hop >= MAX_REDIRECTS) throw new Error("Too many redirects");
-      target = await assertPublicUrl(new URL(res.headers.get("location")!, target).toString(), lookup);
-      continue;
-    }
-    break;
-  }
+  // resolved once, checked, and connected to at that address, hop by hop (lib/safe-url.ts): a name cannot rebind to a private address in between
+  const fetched = await fetchPublic(url, {
+    lookup: async (h) => (await lookup(h)).map((address) => ({ address })),
+    maxRedirects: MAX_REDIRECTS,
+    signal,
+    fetch: deps.fetch ? (u, init) => deps.fetch!(u, init) : undefined,
+  }).catch((err) => {
+    // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
+    if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message)) throw new Error("That address is not reachable from the server (private or unresolvable)");
+    throw err;
+  });
+  const { res, url: target } = fetched;
   if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status})`);
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (declared > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(declared / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
@@ -325,7 +315,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   try {
     await fs.mkdir(svc.paths.uploads, { recursive: true });
     let seen = 0;
-    const capped = Readable.fromWeb(res.body as never).map((chunk: Buffer) => {
+    const capped = Readable.from(bodyChunks(res)).map((chunk: Buffer) => {
       seen += chunk.length;
       if (seen > FETCH_MAX_BYTES) throw new Error(`The file is larger than ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
       return chunk;

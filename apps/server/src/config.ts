@@ -71,6 +71,10 @@ export const envSchema = z.object({
   REQUIRE_EMAIL_VERIFICATION: boolFalse,
   /** Behind a reverse proxy (Caddy, Cloudflare; the Docker deployment), the client address comes from its headers. false = ignore them (exposed directly). */
   TRUST_PROXY: boolTrue,
+  /** With TRUST_PROXY and X-Forwarded-For: how many proxies in front of the app append to it. The client is the entry that many from the right. */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(1).max(10).default(1),
+  /** Which header names the client address behind the proxy. */
+  TRUSTED_PROXY_HEADER: z.enum(["x-forwarded-for", "cf-connecting-ip", "x-real-ip"]).default("x-forwarded-for"),
   /** Sign-up guards (abuse.ts); 0 / false = off. Runtime settings. */
   MAX_SIGNUPS_PER_IP_PER_DAY: z.coerce.number().int().min(0).default(0),
   BLOCK_DISPOSABLE_EMAILS: boolFalse,

@@ -2,7 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { QuotaError } from "../quota.js";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { Services } from "../services.js";
-import { cannotUseApp, requester, type Requester } from "../auth.js";
+import { ADMIN_REFUSED_MESSAGE, cannotUseApp, requester, type Requester } from "../auth.js";
 import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
@@ -22,7 +22,7 @@ export type Context = {
 
 export function contextFactory(svc: Services) {
   return async ({ req }: FetchCreateContextFnOptions, c?: HonoContext<AppEnv>): Promise<Context> => {
-    const who = await requester(svc.auth, svc.database.db, req.headers);
+    const who = await requester(svc.auth, svc.database.db, req.headers, svc.log.child({ module: "auth" }));
     const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
     if (who) c?.set("userId", who.user.id);
     const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });
@@ -72,5 +72,7 @@ export const protectedProcedure = signedInProcedure.use(async ({ ctx, next, type
 
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admins only" });
+  // an API key or OAuth connector acts as its admin only when it was allowed to (auth.ts, README "MCP")
+  if (!ctx.who.canAdminister) throw new TRPCError({ code: "FORBIDDEN", message: ADMIN_REFUSED_MESSAGE });
   return next({ ctx });
 });

@@ -12,7 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { QuotaError } from "./quota.js";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Services } from "./services.js";
-import type { AuthUser } from "./auth.js";
+import type { AuthUser, Requester } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
@@ -31,9 +31,9 @@ function mmss(s: number) {
   return `${m}:${String(Math.floor(s - m * 60)).padStart(2, "0")}`;
 }
 
-export function createMcpServer(svc: Services, user: AuthUser, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
+export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
   const log = svc.log.child({ module: "mcp", userId: user.id, requestId });
-  const ctx: Context = { svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId, log };
+  const ctx: Context = { svc, who: { user, via: access.via, canAdminister: access.canAdminister, session: null, blocked: null }, req, requestId, log };
   const api = appRouter.createCaller(ctx);
   const db = svc.database.db;
   const abs = (p: string | null) => (p ? new URL(p, svc.config.APP_URL).toString() : null);
@@ -322,7 +322,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
       run(async () => {
         const caps = reportCapabilities(svc, user);
         if (!caps.zip) throw new TRPCError({ code: "FORBIDDEN", message: "Send feedback from the app instead of downloading a report on this instance." });
-        if (instance && !caps.instance) throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
+        if (instance && !(caps.instance && access.canAdminister)) throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
         if (projectId) await api.projects.get({ id: projectId });
         const q = new URLSearchParams({ description });
         if (instance) q.set("instance", "1");
@@ -510,8 +510,8 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
 }
 
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
-export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser): Promise<Response> {
-  const server = createMcpServer(svc, user, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
+export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
+  const server = createMcpServer(svc, user, access, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return (await transport.handleRequest(c)) ?? c.text("Not found", 404);
