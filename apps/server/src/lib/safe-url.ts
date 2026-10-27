@@ -190,9 +190,17 @@ export async function fetchPublic(raw: string, opts: FetchPublicOptions = {}): P
   for (let hop = 0; ; hop++) {
     const { url, address } = await resolvePublicHttpUrl(next, opts);
     const init = { redirect: "manual" as const, signal: opts.signal, headers: opts.headers };
-    const res = opts.fetch
-      ? await opts.fetch(url, init, address)
-      : await undiciFetch(url, { ...init, ...(address ? { dispatcher: pinnedAgent(address) } : {}) });
+    // one agent per hop: close() lets the in-flight request (and the body the caller reads) finish, then frees the sockets
+    const agent = !opts.fetch && address ? pinnedAgent(address) : undefined;
+    const closeAgent = () => void agent?.close().catch(() => undefined);
+    let res: PublicResponse;
+    try {
+      res = opts.fetch ? await opts.fetch(url, init, address) : await undiciFetch(url, { ...init, ...(agent ? { dispatcher: agent } : {}) });
+    } catch (err) {
+      closeAgent();
+      throw err;
+    }
+    closeAgent();
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location) {
       await res.body?.cancel().catch(() => undefined);

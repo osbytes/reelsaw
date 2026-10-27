@@ -435,7 +435,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const mode = z.enum(["hide", "keep", "always"]).safeParse(pos[1]);
     if (!pos[0] || !mode.success) throw new Error("usage: reelsaw source-text <projectId> <hide|keep|always>");
     const r = await setProjectSourceText(svc, null, pos[0], mode.data);
-    console.log(`source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render`);
+    console.log(`source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`);
   },
   /** Project-wide caption style: `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]`. Same function as projects.updateStyle and the update_project_style tool. */
   async "update-style"(svc) {
@@ -446,7 +446,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!style.success) throw new Error(`${style.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}\n${usage}`);
     if (!Object.keys(style.data).length) throw new Error(usage);
     const r = await updateProjectStyle(svc, null, pos[0], { style: style.data, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
-    console.log(`changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render`);
+    console.log(`changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`);
   },
   /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {

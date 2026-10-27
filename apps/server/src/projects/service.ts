@@ -614,12 +614,16 @@ export async function purgeDeleted(svc: Services, opts: { dryRun?: boolean; now?
 
 // ── create, retry, refine and the settings that re-render ──────────────────
 
-/** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. Returns how many were queued. */
+/** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. Returns how many were queued and how many live clips were left alone (still preparing or rendering: they finish with the old settings). */
 export async function rerenderProjectClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: typeof schema.clips.$inferSelect) => boolean = (c) => c.status === "done" || c.status === "failed") {
   let n = 0;
+  let skipped = 0;
   await lockProjectClips(u, projectId);
-  for (const c of await listClips(u.db, projectId)) if (which(c) && (await requestRender(svc, u, projectId, c.id)) !== null) n++;
-  return n;
+  for (const c of await listClips(u.db, projectId)) {
+    if (!which(c)) skipped++;
+    else if ((await requestRender(svc, u, projectId, c.id)) !== null) n++;
+  }
+  return { queued: n, skipped };
 }
 
 /**
@@ -720,7 +724,7 @@ export async function refineProject(svc: Services, actor: Actor, projectId: stri
 
 /** Hide or keep text burned into the source (captions, logos); re-renders the finished clips so the whole set agrees. */
 export async function setProjectSourceText(svc: Services, actor: Actor, projectId: string, sourceText: "hide" | "keep" | "always") {
-  const rerendered = await svc.tx(async (u) => {
+  const { queued: rerendered, skipped } = await svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     // clips first (locked in id order), the project row last; the jobs only start once this commits with the new setting
     const n = await rerenderProjectClips(svc, u, p.id);
@@ -728,7 +732,7 @@ export async function setProjectSourceText(svc: Services, actor: Actor, projectI
     await u.db.update(schema.projects).set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText })}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
     return n;
   });
-  return { ok: true as const, rerendered };
+  return { ok: true as const, rerendered, skipped };
 }
 
 const bumperChoice = z.string().min(1).max(100);
@@ -766,7 +770,7 @@ export async function setProjectBumpers(svc: Services, actor: Actor, projectId: 
       }
     }
     // clips first, the project row last (lock order clip → project)
-    const n = input.rerender ? await rerenderProjectClips(svc, u, p.id) : 0;
+    const n = input.rerender ? (await rerenderProjectClips(svc, u, p.id)).queued : 0;
     const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
     if (after) await syncProjectRefs(u.db, after);
     return n;
@@ -782,7 +786,7 @@ export type ProjectStyleInput = z.input<typeof projectStyleInput>;
  * finished clip (unless rerender is false) so the whole set stays consistent.
  */
 export async function updateProjectStyle(svc: Services, actor: Actor, projectId: string, input: ProjectStyleInput) {
-  const rerendered = await svc.tx(async (u) => {
+  const { queued: rerendered, skipped } = await svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     // validate against the whole settings object, but write only the changed keys (atomic merge)
     const check = projectSettingsSchema.safeParse({ ...p.settings, ...input.style });
@@ -792,9 +796,9 @@ export async function updateProjectStyle(svc: Services, actor: Actor, projectId:
     // clips first (locked in id order, then cleared and re-rendered), the project row last
     await lockProjectClips(u, p.id);
     if (!input.keepOverrides) await u.db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
-    const n = input.rerender !== false ? await rerenderProjectClips(svc, u, p.id) : 0;
+    const n = input.rerender !== false ? await rerenderProjectClips(svc, u, p.id) : { queued: 0, skipped: 0 };
     await u.db.update(schema.projects).set({ settings: settingsWrite(sql`${schema.projects.settings}`, patch), updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
     return n;
   });
-  return { ok: true as const, rerendered };
+  return { ok: true as const, rerendered, skipped };
 }

@@ -87,6 +87,9 @@ const LLM_STAGE_QUEUES: QueueName[] = [QUEUES.analyze, QUEUES.refineEntities, QU
 /** No job may be given longer than this: pg-boss caps a job's expiry at 24 h, and disk leases (disk-leases.ts) live as long. */
 export const MAX_JOB_EXPIRE_SECONDS = 24 * 3600;
 
+/** Whether `expireInSecondsFor` sizes this queue's expiry by the project's duration (so enqueue must read it). */
+export const hasDurationExpiry = (queue: QueueName): boolean => LLM_STAGE_QUEUES.includes(queue);
+
 /**
  * Backstop wall for one job, in seconds: the longest an attempt may run before pg-boss expires it. It is not the
  * time budget (that is the per-call and idle timeouts, and steps that survive an attempt: pipeline/steps.ts), only
@@ -95,7 +98,7 @@ export const MAX_JOB_EXPIRE_SECONDS = 24 * 3600;
  * Other queues, and projects without a duration yet, use the queue default (`undefined`: pg-boss applies the queue's value).
  */
 export function expireInSecondsFor(queue: QueueName, durationSec: number | null | undefined, selfHosted = false): number | undefined {
-  if (!LLM_STAGE_QUEUES.includes(queue) || !durationSec || !Number.isFinite(durationSec) || durationSec <= 0) return undefined;
+  if (!hasDurationExpiry(queue) || !durationSec || !Number.isFinite(durationSec) || durationSec <= 0) return undefined;
   const base = queueDefs.find((q) => q.name === queue)?.expireInSeconds ?? 1800;
   return Math.round(Math.min(Math.max(base, base + durationSec * (selfHosted ? 4 : 1)), MAX_JOB_EXPIRE_SECONDS));
 }
@@ -195,7 +198,7 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       // every stage job carries the version it belongs to, read in the caller's transaction (after any bump it made)
       // (the same read gives the media duration, which sizes the expiry of the long LLM stages)
       let expireInSeconds = opts?.expireInSeconds;
-      if (!("clipId" in data) && (data.seq === undefined || expireInSeconds === undefined)) {
+      if (!("clipId" in data) && (data.seq === undefined || (expireInSeconds === undefined && hasDurationExpiry(queue)))) {
         const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
         const r = (await exec.executeSql(`select stage_seq as seq, duration_sec as "durationSec" from projects where id = $1`, [data.projectId])).rows[0] as { seq?: number; durationSec?: number | null } | undefined;
         if (r?.seq !== undefined && data.seq === undefined) payload = { ...payload, seq: r.seq };

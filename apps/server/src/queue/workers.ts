@@ -149,8 +149,9 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
         );
         log.info({ ms: Date.now() - t0 }, "job done");
       } catch (thrown) {
-        // the stage idled out: that, not whatever the abort surfaced as inside a model call, is why it ended
-        const err = current?.timedOut ?? thrown;
+        // the stage idled out: that, not whatever the abort surfaced as inside a model call, is why it ended (unless the
+        // handler itself saw the project deleted or the job superseded: that is not a failure)
+        const err = thrown instanceof ProjectGoneError || thrown instanceof StaleJobError ? thrown : current?.timedOut ?? thrown;
         if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
         // cancelling a pg-boss job does not stop a running handler: the superseded one ends here, writing nothing
         if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");

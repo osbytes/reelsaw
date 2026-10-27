@@ -212,6 +212,8 @@ const RECENT = 20;
 export class StepRunner {
   private recent: number[] = [];
   private timer?: ReturnType<typeof setTimeout>;
+  /** Inside `steps()`: finished units feed the idle timer. A direct `step()` does not, so work after it is not timed as a step. */
+  private inBatch = false;
   private lastUnitMs = 0;
   private startedAt = Date.now();
   private model = "";
@@ -241,6 +243,12 @@ export class StepRunner {
     this.timer = undefined;
   }
 
+  /** After a finished unit: inside a batch the next one is expected soon (re-arm); on its own, whatever follows is not a step (disarm). */
+  private feedOrStop() {
+    if (this.inBatch) this.arm();
+    else this.disarm();
+  }
+
   /** Stop the idle timer (the stage ended, or is between batches of steps). */
   stop() {
     this.disarm();
@@ -258,7 +266,7 @@ export class StepRunner {
       const parsed = o.schema.safeParse(saved.output);
       if (parsed.success) {
         this.d.log.debug({ step: name }, "step reused");
-        this.arm();
+        this.feedOrStop();
         return parsed.data;
       }
       this.d.log.warn({ step: name }, "saved step no longer matches its schema; running it again");
@@ -288,7 +296,7 @@ export class StepRunner {
     this.recent = [...this.recent, ms].slice(-RECENT);
     this.completed++;
     histogram("reelsaw.pipeline.step.duration", ms / 1000, "s", { stage: this.d.stage, outcome: "ok" }, "Wall time of one pipeline step, by outcome");
-    this.arm();
+    this.feedOrStop();
     return out;
   }
 
@@ -303,6 +311,7 @@ export class StepRunner {
     if (!total) return [];
     const stop = new AbortController();
     const signal = AbortSignal.any([this.d.signal, stop.signal]);
+    this.inBatch = true;
     try {
       return await mapLimit(items, o.concurrency, async (item, i) => {
         signal.throwIfAborted();
@@ -319,6 +328,7 @@ export class StepRunner {
         }
       });
     } finally {
+      this.inBatch = false;
       this.disarm(); // between batches nothing is expected to finish
     }
   }

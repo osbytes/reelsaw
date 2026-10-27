@@ -192,13 +192,15 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  // A row in "creating" is past the upload and the projects.create mutation cannot be aborted: the project will
+  // appear, so its row (and Open link) stays. Aborting its controller is harmless (only the upload reads the signal).
   const cancel = useCallback((key: string) => {
     ctrls.current.get(key)?.abort();
-    setJobs((js) => js.filter((j) => j.key !== key));
+    setJobs((js) => js.filter((j) => j.key !== key || j.state === "creating"));
   }, []);
   const cancelAll = useCallback(() => {
     for (const c of ctrls.current.values()) c.abort();
-    setJobs((js) => js.filter((j) => j.state === "done" || j.state === "failed"));
+    setJobs((js) => js.filter((j) => j.state === "done" || j.state === "failed" || j.state === "creating"));
   }, []);
   const dismiss = useCallback((key: string) => setJobs((js) => js.filter((j) => j.key !== key)), []);
   const openWithFile = useCallback(

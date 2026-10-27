@@ -44,18 +44,18 @@ const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = { queued: "
  * counts on the row, in the same unit of work as the enqueue; past MAX_RECONCILE_REQUEUES the caller fails it.
  * Resets to 0 on a user start, retry or render request (lifecycle.ts). Returns the new count, or null when the row
  * moved on (status changed, deleted) or a live job appeared since the caller looked: nothing was counted or queued.
+ * The live-job check runs before the increment, so a race that finds a live job never burns a requeue.
  */
 async function countRequeue(u: UnitOfWork, target: { project: string; status: ProjectStatus } | { clip: string; status: ClipStatus }, live: QueueName[]): Promise<number | null> {
   const p = schema.projects;
   const c = schema.clips;
+  const key = "project" in target ? target.project : target.clip;
+  for (const q of live) if (await u.hasLiveJob(q, key)) return null;
   const [row] =
     "project" in target
       ? await u.db.update(p).set({ reconcileRequeues: sql`${p.reconcileRequeues} + 1` }).where(and(eq(p.id, target.project), eq(p.status, target.status), isNull(p.deletedAt))).returning({ n: p.reconcileRequeues })
       : await u.db.update(c).set({ reconcileRequeues: sql`${c.reconcileRequeues} + 1` }).where(and(eq(c.id, target.clip), eq(c.status, target.status), isNull(c.deletedAt))).returning({ n: c.reconcileRequeues });
-  if (!row) return null;
-  const key = "project" in target ? target.project : target.clip;
-  for (const q of live) if (await u.hasLiveJob(q, key)) return null;
-  return row.n;
+  return row ? row.n : null;
 }
 
 /**
