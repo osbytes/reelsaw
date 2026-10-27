@@ -290,9 +290,11 @@ export function createMediaTools(config: Config, log: Logger): MediaTools {
           },
         );
       } catch (err) {
+        // never `[]` for a failure: an empty list is stored as "the detector ran and found no cuts". The caller decides
+        // what a failed decode means (a pipeline step records it and retries; a render carries on without cuts).
         if (signal?.aborted) throw err;
-        log.warn({ err }, "scene detection failed, continuing without scene cuts");
-        return [];
+        log.warn({ err }, "scene detection failed");
+        throw new Error(`Shot-change detection failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`.slice(0, 300), { cause: err });
       }
       const { times, scores } = parseSceneScores(lines);
       return pickSceneCuts(times, scores, { floor });

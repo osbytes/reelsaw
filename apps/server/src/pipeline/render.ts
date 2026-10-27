@@ -298,7 +298,11 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const cutsFrom: "project" | "clip" | "none" = transcriptMeta?.sceneCuts ? "project" : needsFaces && svc.faces ? "clip" : "none";
   const sceneCuts =
     cutsFrom === "clip"
-      ? (await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration })).filter((c) => c > 0 && c < duration)
+      ? (await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration }).catch((err: unknown) => {
+          if (ctx.signal.aborted) throw err;
+          log.warn({ err }, "shot changes of the clip not detected, rendering without cuts");
+          return [] as number[];
+        })).filter((c) => c > 0 && c < duration)
       : (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {

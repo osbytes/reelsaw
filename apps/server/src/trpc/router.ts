@@ -1060,8 +1060,15 @@ const restRouter = router({
       const p = await ownedProject(db, ctx.user.id, input.id);
       const clips = await listClips(db, p.id);
       // facts only: the words, segments and flags come from transcripts.get, so a clip event never re-sends megabytes
-      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, flags: true } });
-      const transcript = t ? { language: t.language, flagCount: t.flags.length, pendingFlags: t.flags.filter((f) => f.status === "pending").length } : null;
+      const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { language: true, flags: true, refine: true } });
+      // a refine step that gave up (optional work, the project went on without it) with the plain reason from its final stage.failed event
+      const refineFailed: Array<{ step: string; error: string }> = [];
+      for (const [step, status] of Object.entries(t?.refine ?? {})) {
+        if (status !== "failed") continue;
+        const [ev] = await db.select({ error: sql<string | null>`${schema.projectEvents.payload}->>'error'` }).from(schema.projectEvents).where(and(eq(schema.projectEvents.projectId, p.id), eq(schema.projectEvents.type, "stage.failed"), sql`${schema.projectEvents.payload}->>'step' = ${step}`)).orderBy(desc(schema.projectEvents.id)).limit(1);
+        refineFailed.push({ step, error: ev?.error ?? "The step gave up after its retries." });
+      }
+      const transcript = t ? { language: t.language, flagCount: t.flags.length, pendingFlags: t.flags.filter((f) => f.status === "pending").length, refine: t.refine, refineFailed } : null;
       // expected seconds per stage once the source length is known (after ingest); learned from this instance's finished projects
       const models = currentModels(ctx.svc);
       const estimates = p.durationSec ? estimateStages(p.durationSec, models, await loadHistory(db), defaultFactors(models, localConfig(ctx.svc))) : null;
