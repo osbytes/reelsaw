@@ -622,7 +622,12 @@ export function ProjectPage() {
           ◷
         </span>
         <div className="min-w-0 flex-[1_1_280px] text-[13px]">
-          <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b> {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
+          {typeof (stalled.payload as { message?: unknown }).message === "string" ? (
+            <b>{String((stalled.payload as { message?: string }).message)}</b>
+          ) : (
+            <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b>
+          )}{" "}
+          {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
         </div>
         <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
           Keep waiting

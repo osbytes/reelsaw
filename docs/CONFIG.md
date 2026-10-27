@@ -132,7 +132,7 @@ either; `pnpm docs:check` fails when this file is stale.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot and by the hourly sweep. |
+| `ASR_CACHE_DAYS` | `14` | Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep. |
 | `FACE_MODEL_PATH` | `./models/ultraface-rfb-320.onnx` | UltraFace ONNX model. Ships in the image; `pnpm models:download` fetches it for runs outside Docker. |
 | `TEXT_DETECTION` | `true` | Burned-in caption and watermark detection (PP-OCRv4, CPU). false = never hide source text. |
 | `VAD` | `true` | Silero voice activity detection for tightening long pauses. false = never trim silence. |
