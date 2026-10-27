@@ -451,6 +451,8 @@ export const projects = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     /** soft delete: hidden everywhere, restorable until the purge (DELETED_RETENTION_DAYS) removes the row and its files */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
+    forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
   },
   (t) => [
     // the hourly purge looks for deleted projects across all users

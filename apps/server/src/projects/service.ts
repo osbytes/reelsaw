@@ -121,7 +121,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
  * running discards its output), emit `project.deleted`. Files stay until the purge. Returns false if it was
  * already deleted.
  */
-export async function deleteProject(svc: Services, u: UnitOfWork, projectId: string): Promise<boolean> {
+export async function deleteProject(svc: Services, u: UnitOfWork, projectId: string, opts: { forgetDecisions?: boolean } = {}): Promise<boolean> {
   await lockProjectClips(u, projectId); // clips before the project row, like a render completion
   const [before] = await u.db.select({ status: schema.projects.status, stage: schema.projects.stage }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!before) return false;
@@ -140,7 +140,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   // stage_seq too: a stage job still running stays stale after a restore, which resumes only through Retry
   await u.db
     .update(schema.projects)
-    .set({ deletedAt: new Date(), stageSeq: sql`${schema.projects.stageSeq} + 1`, updatedAt: new Date(), ...(working ? { status: "failed" as const, error: stopped } : {}) })
+    .set({ deletedAt: new Date(), forgetDecisionsOnPurge: !!opts.forgetDecisions, stageSeq: sql`${schema.projects.stageSeq} + 1`, updatedAt: new Date(), ...(working ? { status: "failed" as const, error: stopped } : {}) })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
   if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, ...facts });
@@ -148,20 +148,24 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   return true;
 }
 
-/** Owner-facing delete: ownership checked in the same unit of work as the write. */
-export async function deleteOwnedProject(svc: Services, actor: Actor, projectId: string) {
+/**
+ * Owner-facing delete: ownership checked in the same unit of work as the write. `forgetDecisions` marks the project so
+ * whichever purge removes it (Delete forever, or the retention sweep) forgets its decisions too; until then they stay
+ * out of learning and exports, and a restore keeps them after all.
+ */
+export async function deleteOwnedProject(svc: Services, actor: Actor, projectId: string, opts: { forgetDecisions?: boolean } = {}) {
   return svc.tx(async (u) => {
     await findProject(u.db, actor, projectId, { deleted: false });
     const stored = await projectStoredBytes(u.db, projectId);
-    const changed = await deleteProject(svc, u, projectId);
+    const changed = await deleteProject(svc, u, projectId, opts);
+    const base = stored ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.` : `Deleted. It can be restored ${restorableFor(svc)}.`;
     return {
       ok: true,
       changed,
       restorable: restorableFor(svc),
       storedBytes: stored,
-      message: stored
-        ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.`
-        : `Deleted. It can be restored ${restorableFor(svc)}.`,
+      forgetDecisions: !!opts.forgetDecisions,
+      message: opts.forgetDecisions ? `${base} What Reelsaw learned from it is forgotten when it is deleted forever.` : base,
     };
   });
 }
@@ -173,7 +177,7 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
     if (!p.deletedAt) return { ok: true, changed: false, status: p.status };
     if (actor) await checkRestoreQuota(u.db, svc.settings.get(), p.userId, { lock: true, ent: svc.entitlements });
     else await takeTxLock(u.db, txLock.quota(p.userId));
-    await u.db.update(schema.projects).set({ deletedAt: null, updatedAt: new Date() }).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
+    await u.db.update(schema.projects).set({ deletedAt: null, forgetDecisionsOnPurge: false, updatedAt: new Date() }).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
     await u.emit(projectId, "project.restored", {});
     return { ok: true, changed: true, status: p.status };
   });
@@ -190,11 +194,10 @@ export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: 
     const [still] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt))).for("update");
     if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was deleted." });
     const stored = await projectStoredBytes(u.db, projectId);
-    await purgeProject(svc, u, projectId);
-    // decisions outlive the project (docs/specs/decision-log.md) unless the owner asks to forget them too
-    const forgotten = opts.forgetDecisions ? await forgetDecisions(u.db, p.userId, { projectId }) : 0;
+    const forget = opts.forgetDecisions || p.forgetDecisionsOnPurge;
+    const { forgottenDecisions } = await purgeProject(svc, u, projectId, { forgetDecisions: forget });
     const freed = stored ? `Deleted forever. ${formatBytes(stored)} is free now.` : "Deleted forever.";
-    return { ok: true, storedBytes: stored, forgottenDecisions: forgotten, message: opts.forgetDecisions ? `${freed} What Reelsaw learned from it is forgotten too.` : freed };
+    return { ok: true, storedBytes: stored, forgottenDecisions, message: forget ? `${freed} What Reelsaw learned from it is forgotten too.` : freed };
   });
 }
 
@@ -537,19 +540,26 @@ export const gone = (svc: Services, what: string) => `No such ${what}. Deleted i
 
 // ── purge ──────────────────────────────────────────────────────────────────
 
-/** Remove a project for good in the caller's unit of work: jobs cancelled, the row (and its clips, transcript, events) deleted, files after commit. */
-export async function purgeProject(svc: Services, u: UnitOfWork, projectId: string) {
+/**
+ * Remove a project for good in the caller's unit of work: jobs cancelled, the row (and its clips, transcript, events)
+ * deleted, files after commit. Its decisions go too when `forgetDecisions` or the project was deleted with that
+ * choice; returns how many were forgotten.
+ */
+export async function purgeProject(svc: Services, u: UnitOfWork, projectId: string, opts: { forgetDecisions?: boolean } = {}): Promise<{ forgottenDecisions: number }> {
   for (const c of await u.db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, projectId))) {
     await u.cancelLiveJobs(QUEUES.render, c.id);
     await u.cancelLiveJobs(QUEUES.prepare, c.id);
   }
   for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, projectId);
-  const [gone] = await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId)).returning({ sourceMeta: schema.projects.sourceMeta });
+  const [gone] = await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId)).returning({ sourceMeta: schema.projects.sourceMeta, userId: schema.projects.userId, forget: schema.projects.forgetDecisionsOnPurge });
   await releaseUpload(svc, u, projectId, gone?.sourceMeta?.uploadId);
+  // decisions outlive the project (docs/specs/decision-log.md) unless the owner asked to forget them, now or when deleting it
+  const forgotten = gone && (gone.forget || opts.forgetDecisions) ? await forgetDecisions(u.db, gone.userId, { projectId }) : 0;
   u.afterCommit(async () => {
     await fs.rm(svc.paths.project(projectId), { recursive: true, force: true });
     await svc.storage.deletePrefix(keys.projectPrefix(projectId));
   });
+  return { forgottenDecisions: forgotten };
 }
 
 export const PURGE_BATCH = 200;

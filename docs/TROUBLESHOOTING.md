@@ -80,7 +80,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
 | `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
-| `reelsaw delete-project <projectId>` | delete a project, restorable like a clip (same as projects.delete and delete_project) |
+| `reelsaw delete-project <projectId> [--forget-decisions]` | delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged |
 | `reelsaw export <projectId> [clipId…] --out <file.zip>` | write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and export_project (every picked clip must belong to the project, at least one rendered) |
 | `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact\|ai]` | add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them (same as clips.create and create_clip) |
 | `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender\|--no-rerender]` | edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip) |

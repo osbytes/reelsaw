@@ -43,7 +43,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           by hand stay (same as projects.reanalyze and reanalyze_project)
  *   refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]
  *                                           re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project)
- *   delete-project <projectId>              delete a project, restorable like a clip (same as projects.delete and delete_project)
+ *   delete-project <projectId> [--forget-decisions]   delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged
  *   export <projectId> [clipId…] --out <file.zip>
  *                                           write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and
  *                                           export_project (every picked clip must belong to the project, at least one rendered)
@@ -492,8 +492,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
   /** Soft-delete a project: `reelsaw delete-project <projectId>`. Same function as projects.delete and the delete_project tool. */
   async "delete-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId>");
-    const r = await deleteOwnedProject(svc, null, pos[0]);
+    if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId> [--forget-decisions]");
+    const r = await deleteOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.changed ? r.message : `${pos[0]} was already deleted`);
   },
   /** The zip of rendered clips with platform metadata: `reelsaw export <projectId> [clipId…] --out file.zip`. Same preconditions as the Export button and the export_project tool. */

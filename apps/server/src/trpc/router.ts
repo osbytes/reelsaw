@@ -1164,7 +1164,9 @@ const restRouter = router({
       .mutation(({ ctx, input }) => applyProjectFraming(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. Storage still counts until purge. */
-    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    delete: protectedProcedure
+      .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
 
     /** Undo a delete (the owner, or an admin for anyone's project). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),

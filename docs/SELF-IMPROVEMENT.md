@@ -58,7 +58,7 @@ snapshot of the source. Spec: [specs/decision-log.md](specs/decision-log.md).
 
 Decisions deliberately **outlive their project**: `project_id` has no foreign key, so "Delete
 forever" and the retention purge remove the media and rows but keep what the user taught. The user
-can forget them: per project in the "Delete forever" dialog (`forgetDecisions`), all at once in
+can forget them: per project when deleting it (applied at whichever purge comes first, the retention sweep included) or in the "Delete forever" dialog (`forgetDecisions`), all at once in
 Settings → Learning, or by turning "Learn from my decisions" off (stops recording). Deleting the
 account cascades. `DECISION_RETENTION_DAYS` (default 0, keep) prunes old rows.
 

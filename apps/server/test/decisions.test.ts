@@ -131,6 +131,29 @@ describe("decision log", () => {
     assert.deepEqual(ex.cases.disfluency.map((c) => c.expect).sort(), ["cut", "cut", "keep", "keep"]);
   });
 
+  it("a delete that asked to forget hides the decisions from learning, a restore takes it back, the purge honours it", async () => {
+    const n = (await rows()).length;
+    const exported = async () => ((await trpc(owner.cookie, "decisions.export", {}, "GET")).data as { items: Array<{ projectId: string }> }).items.filter((d) => d.projectId === projectId).length;
+    assert.equal((await trpc(owner.cookie, "projects.delete", { id: projectId, forgetDecisions: true })).status, 200);
+    assert.equal(await exported(), 0);
+    assert.equal((await rows()).length, n); // kept until the purge, so a restore loses nothing
+    const listed = (await trpc(owner.cookie, "deleted.list", undefined, "GET")).data as { items: Array<{ id: string; forgetDecisions?: boolean }> };
+    assert.equal(listed.items.find((i) => i.id === projectId)?.forgetDecisions, true);
+    assert.equal((await trpc(owner.cookie, "projects.restore", { id: projectId })).status, 200);
+    assert.equal(await exported(), n);
+    assert.equal((await pool.query(`select forget_decisions_on_purge as f from projects where id = $1`, [projectId])).rows[0].f, false);
+  });
+
+  it("a purge without the option (the toast, the retention sweep) still forgets a project deleted with it", async () => {
+    const other = randomUUID();
+    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Other', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [other, owner.userId]);
+    await pool.query(`insert into user_decisions (user_id, project_id, kind, explicit, context, source, app_version) values ($1, $2, 'fix.reject', true, '{}', '{"type":"url"}', 'test')`, [owner.userId, other]);
+    assert.equal((await trpc(owner.cookie, "projects.delete", { id: other, forgetDecisions: true })).status, 200);
+    const purge = await trpc(owner.cookie, "projects.purge", { id: other });
+    assert.equal((purge.data as { forgottenDecisions: number }).forgottenDecisions, 1, JSON.stringify(purge.error));
+    assert.equal((await pool.query(`select 1 from user_decisions where project_id = $1`, [other])).rowCount, 0);
+  });
+
   it("keeps decisions after Delete forever, and forgets them when asked", async () => {
     const n = (await rows()).length;
     assert.equal((await trpc(owner.cookie, "projects.delete", { id: projectId })).status, 200);

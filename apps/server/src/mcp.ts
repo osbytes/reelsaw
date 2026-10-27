@@ -530,7 +530,7 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
   server.registerTool(
     "delete_project",
     TOOLS.delete_project,
-    ({ id }) => run(() => api.projects.delete({ id })),
+    ({ id, forgetDecisions }) => run(() => api.projects.delete({ id, forgetDecisions })),
   );
 
   server.registerTool(

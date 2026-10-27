@@ -233,6 +233,12 @@ export async function clipEditDecision(db: Db, projectId: string, before: ClipRo
 
 // ── reading, forgetting, settings ──────────────────────────────────────────
 
+/**
+ * Decisions still meant to teach: not about a project the owner deleted with "forget what Reelsaw learned" (they go at
+ * its purge; until then learning and exports skip them, and a restore brings them back). The list still shows them.
+ */
+const notBeingForgotten = sql`${schema.userDecisions.projectId} not in (select ${schema.projects.id} from ${schema.projects} where ${schema.projects.forgetDecisionsOnPurge})`;
+
 export interface ListDecisionsInput {
   kind?: DecisionKind;
   projectId?: string;
@@ -302,6 +308,7 @@ export async function rejectedCutRows(db: Db, userId: string, exceptProjectId: s
       and(
         eq(schema.userDecisions.userId, userId),
         eq(schema.userDecisions.kind, "fix.reject"),
+        notBeingForgotten,
         sql`${schema.userDecisions.projectId} <> ${exceptProjectId}`,
         sql`${schema.userDecisions.context}->>'flagKind' = 'disfluency'`,
         sql`coalesce(${schema.userDecisions.context}->>'subkind', '') <> 'manual'`,
@@ -330,6 +337,7 @@ export async function exportDecisions(db: Db, userId: string, input: { cursor?: 
         input.cursor ? gt(schema.userDecisions.id, input.cursor) : undefined,
         input.since ? gte(schema.userDecisions.createdAt, input.since) : undefined,
         input.kind ? eq(schema.userDecisions.kind, input.kind) : undefined,
+        notBeingForgotten,
       ),
     )
     .orderBy(asc(schema.userDecisions.id))

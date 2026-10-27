@@ -1,5 +1,5 @@
 {
-  "id": "69951c64-fdfc-4b5e-abb7-e1c4f5db3c83",
+  "id": "ee5a14a1-a6ab-43be-9e56-7c580af9b3b1",
   "prevId": "031c34d8-a94f-4c32-9259-a67fa9188cfc",
   "version": "7",
   "dialect": "postgresql",
@@ -2144,6 +2144,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "forget_decisions_on_purge": {
+          "name": "forget_decisions_on_purge",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

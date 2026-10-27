@@ -110,8 +110,17 @@ never exists for an edit that did not happen. When the user has turned learning 
 ### Purge and forgetting
 
 - Delete and "Delete forever" remove media and project rows; decisions stay by default (that is the point).
-- The "Delete forever" confirmation has **Also forget what Reelsaw learned from it**: deletes that project's
-  decisions in the same transaction as the purge. Same option on `purge_project` (MCP) and `reelsaw purge`.
+- **At delete time.** The "Delete this project?" confirmation (project page, ⌘K) has **Also forget what Reelsaw
+  learned from it**. Deleted projects are purged automatically after `DELETED_RETENTION_DAYS`, so the choice
+  can't wait for a later "Delete forever" the user may never click. It is stored on the project
+  (`projects.forget_decisions_on_purge`), and `purgeProject` honours it on every path: Delete forever from the
+  Deleted page or the toast, `purge_project`, and the retention sweep. Until then the decisions stay in the
+  table (a restore loses nothing; restore clears the flag), but learning (`rejectedCutRows`) and exports skip
+  them. The Deleted page marks such rows "forgets what Reelsaw learned from it". Same option on `delete_project`
+  (MCP) and `reelsaw delete-project --forget-decisions`.
+- **At purge time.** The Deleted page's "Delete forever" confirmation offers the same box for projects deleted
+  without it, and deletes those decisions in the purge's transaction. Same option on `purge_project` and
+  `reelsaw purge-project --forget-decisions`.
 - Settings → Learning: **Learn from my decisions** (user setting, default on; off stops recording, keeps what
   exists), the count of decisions kept, and **Forget everything** (deletes all of the user's rows).
 - Deleting the account cascades.
@@ -124,13 +133,14 @@ never exists for an edit that did not happen. When the user has turned learning 
 | list / summary | `decisions.list`, `decisions.summary` | `list_decisions` | `reelsaw decisions <email>` |
 | export as eval cases | `decisions.export` | `export_decisions` | `reelsaw decisions export <email> [--out f.jsonl]` |
 | forget | `decisions.forget` | `forget_decisions` | `reelsaw decisions forget <email> [--project id]` |
+| forget at delete (applied at the purge) | `projects.delete` `forgetDecisions` | `delete_project` `forgetDecisions` | `reelsaw delete-project <id> --forget-decisions` |
 | forget with the purge | `projects.purge` / `deleted.purge` `forgetDecisions` | `purge_project` `forgetDecisions` | `reelsaw purge-project <id> --forget-decisions` |
 | setting | `decisions.setLearning` | `set_learning` | |
 | backfill existing projects | | | `reelsaw decisions backfill [--dry-run]` |
 
 Only the project owner's own actions are recorded: an admin or the operator CLI acting on someone's project
-(`deleteClip(svc, null, …)`) writes no decision. The toast's one-click "Delete forever" keeps decisions (the
-default); the Deleted page's confirmation offers the forget option.
+(`deleteClip(svc, null, …)`) writes no decision. The toast's one-click "Delete forever" has no option of its
+own: it follows what was chosen when the project was deleted.
 
 `list` is keyset-paginated (`{ items, nextCursor, total }`), filterable by kind and project.
 

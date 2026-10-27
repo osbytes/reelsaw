@@ -11,6 +11,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
 const GRID = "grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-x-3 sm:grid-cols-[2rem_5.5rem_minmax(0,1fr)_minmax(14rem,1.4fr)_2rem]";
@@ -58,6 +59,7 @@ type Row = {
   usedByClips?: number;
   usedByTemplates?: number;
   layerCount?: number;
+  forgetDecisions?: boolean;
 };
 
 function whyHeld(r: Row) {
@@ -70,19 +72,8 @@ function detailOf(r: Row) {
   const size = r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files";
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
   const held = whyHeld(r);
-  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt)].filter(Boolean).join(" · ");
-}
-
-function ForgetDecisionsOption({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex cursor-pointer items-start gap-2.5">
-      <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--acc)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="min-w-0">
-        <span className="block text-sm">Also forget what Reelsaw learned from it</span>
-        <span className="block text-xs text-ink3">Your accepted and rejected fixes and clip edits are kept so Reelsaw keeps learning, unless you tick this.</span>
-      </span>
-    </label>
-  );
+  const forget = r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined;
+  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt), forget].filter(Boolean).join(" · ");
 }
 
 /**
@@ -329,7 +320,8 @@ export function DeletedPage() {
           );
         }}
       >
-        {pending?.some((r) => r.kind === "project") && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
+        {/* projects deleted with "forget" already go with their decisions; offer it only for the others */}
+        {pending?.some((r) => r.kind === "project" && !r.forgetDecisions) && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
       </ConfirmDialog>
     </ScrollArea>
   );

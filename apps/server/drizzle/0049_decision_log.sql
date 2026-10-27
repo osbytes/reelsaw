@@ -14,6 +14,7 @@ CREATE TABLE "user_decisions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "projects" ADD COLUMN "forget_decisions_on_purge" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "user_settings" ADD COLUMN "learn_from_decisions" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE "user_decisions" ADD CONSTRAINT "user_decisions_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "user_decisions_user_idx" ON "user_decisions" USING btree ("user_id","id");--> statement-breakpoint

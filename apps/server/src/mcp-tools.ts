@@ -415,8 +415,11 @@ export const TOOLS = {
   },
   delete_project: {
     title: "Delete project",
-    description: "Delete one of your projects and all its clips; work in progress stops. Reversible: restore_project brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_project (or the retention sweep) removes it for good; minutes already used stay counted. Returns { changed, restorable, storedBytes, message }.",
-    inputSchema: { id: projectId() },
+    description: "Delete one of your projects and all its clips; work in progress stops. Reversible: restore_project brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_project (or the retention sweep) removes it for good; minutes already used stay counted. Returns { changed, restorable, storedBytes, forgetDecisions, message }.",
+    inputSchema: {
+      id: projectId(),
+      forgetDecisions: z.boolean().default(false).describe("Forget what Reelsaw learned from it (its decision log entries) when it is deleted for good, by purge_project or the retention sweep; restoring it cancels that. Default false keeps them"),
+    },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   purge_project: {
