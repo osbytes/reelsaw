@@ -22,7 +22,7 @@ import { keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
-import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
+import { createExportZip, exportPlan, parseClipIds } from "./export.js";
 import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
@@ -377,18 +377,14 @@ export function createApp(svc: Services) {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
     const projectId = c.req.param("projectId");
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
-    if (!project) return c.text("not found", 404);
-    const [clips, transcript] = await Promise.all([
-      db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) }),
-      db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { language: true } }),
-    ]);
-    const ids = parseClipIds(c.req.query("clips"));
-    if (!ids) return c.text("bad clips list", 400);
-    const picked = pickExportClips(clips, ids);
-    if (picked.unknown.length) return c.text("some of those clips are not in this project", 404);
-    if (!picked.clips.some((cl) => cl.status === "done" && cl.outputKey)) return c.text("no rendered clips yet", 409);
-    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset });
+    let plan;
+    try {
+      plan = await exportPlan(svc, { id: session.user.id, admin: false }, projectId, parseClipIds(c.req.query("clips")));
+    } catch (err) {
+      if (!(err instanceof TRPCError)) throw err;
+      return c.text(err.message, err.code === "BAD_REQUEST" ? 400 : err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" ? 409 : 500);
+    }
+    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset });
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     c.header("Cache-Control", "no-store");

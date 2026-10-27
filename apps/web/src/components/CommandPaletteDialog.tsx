@@ -103,8 +103,8 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const [pickSec, setPickSec] = useState("");
 
   // the library, fetched only while the palette is open
-  const libQ = useQuery({ ...trpc.library.list.queryOptions(), enabled: open, staleTime: 30_000 });
-  const library = libQ.data?.assets;
+  const libQ = useQuery({ ...trpc.library.list.queryOptions({ limit: 500 }), enabled: open, staleTime: 30_000 });
+  const library = libQ.data?.items;
   const libFuse = useMemo(() => (library ? createFuzzy(library.map(searchable), SEARCH_KEYS) : null), [library]);
   const assetName = (id?: string | null) => (id ? (library?.find((a) => a.id === id)?.name ?? "deleted") : "none");
 

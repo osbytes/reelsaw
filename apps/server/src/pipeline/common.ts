@@ -183,7 +183,9 @@ export class StageContext {
       // first, so the results below land only while this job's version is current (and a re-analyze waits for them)
       if (!(await lockCurrentStage(u.db, this.projectId, this.seq))) throw new StaleJobError(this.projectId, this.seq);
       const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
-      await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
+      // reconcileRequeues counts lost jobs of the stage that just ended: the next stage starts from zero, so a project that
+      // loses its job once per stage never reaches the cap that fails it
+      await u.db.update(schema.projects).set({ stageProgress: 1, reconcileRequeues: 0, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
       await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra, ...(durationSec !== undefined ? { durationSec } : {}) });
       if (handoff) await handoff(u);
