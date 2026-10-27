@@ -7,7 +7,7 @@ import { transcribe } from "../pipeline/transcribe.js";
 import { analyze } from "../pipeline/analyze.js";
 import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from "../pipeline/refine.js";
 import { renderClip, markClipFailed } from "../pipeline/render.js";
-import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError } from "../pipeline/common.js";
+import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError, SourceExpiredError } from "../pipeline/common.js";
 import { ResourceExhaustedError } from "../resources.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
@@ -188,6 +188,12 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
         if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
+        if (err instanceof SourceExpiredError) {
+          // retrying cannot bring the source back: fail the step now (the project's Retry fetches it again)
+          log.warn({ step }, "refine step needs the expired source");
+          await refineStepFailed(svc, projectId, step, err, seq);
+          return;
+        }
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
         if (job.retryCount >= max) {
           svc.telemetry.captureException(err, { queue, step, projectId, jobId: job.id });
@@ -228,6 +234,11 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         );
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
+        if (err instanceof SourceExpiredError) {
+          log.warn("prepare needs the expired source");
+          await markClipFailed(svc, projectId, clipId, err);
+          return; // handled: retrying cannot bring the source back
+        }
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
         // short of disk even after eviction: with another worker that has room, pause this one so the retry lands there
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.prepare, err.requiredMB);
@@ -268,6 +279,11 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         }
       } catch (err) {
         if (err instanceof ProjectGoneError) return;
+        if (err instanceof SourceExpiredError) {
+          log.warn("render needs the expired source");
+          await markClipFailed(svc, projectId, clipId, err, gen);
+          return; // handled: retrying cannot bring the source back
+        }
         log.error({ err, attempt: job.retryCount + 1 }, "job failed");
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.render, err.requiredMB);
         if (job.retryCount >= max) {

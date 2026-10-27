@@ -1,5 +1,5 @@
 import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
-import { lockProjectClips, requestPrepare } from "./lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
@@ -269,6 +269,8 @@ export async function analyze(ctx: StageContext) {
         .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
         .returning({ id: schema.projects.id });
       if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
+      // every clip already done (a Retry that only fetched an expired source again): nothing is queued to finish the project
+      await finalizeProjectIfDone(svc, u, projectId);
     });
     return;
   }

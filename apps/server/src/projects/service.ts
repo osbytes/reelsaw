@@ -45,7 +45,7 @@ export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc
  */
 export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
   const [p] = await u.db
-    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey })
+    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, sourceExpiredAt: schema.projects.sourceExpiredAt })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) return null;
@@ -62,6 +62,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
   else if (transcript && refineDone) queue = QUEUES.analyze;
   else if (transcript) queue = QUEUES.refineEntities;
   else if (p.sourceKey) queue = QUEUES.transcribe;
+  if (p.sourceExpiredAt) queue = QUEUES.ingest; // retention removed the source: fetch it again first
 
   if (queue === QUEUES.render) {
     await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });

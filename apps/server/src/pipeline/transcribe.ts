@@ -33,19 +33,29 @@ export async function transcribe(ctx: StageContext) {
   await ctx.acquire("transcribe", 512);
   const sourcePath = await ctx.ensureSource(project); // leases the pull itself when the copy is missing
 
+  // Both outputs are built under a .part name and renamed, so a crash (OOM, SIGKILL, heartbeat
+  // timeout) mid-write can never leave a truncated file a retry would trust.
   const audioPath = path.join(dir, "audio.mp3");
+  const audioPart = `${audioPath}.part`;
+  await fs.rm(audioPart, { force: true });
   if (!(await exists(audioPath))) {
     await ctx.progress(0.02, "Extracting audio");
-    await svc.media.extractAudio(sourcePath, audioPath, ctx.signal);
+    await svc.media.extractAudio(sourcePath, audioPart, ctx.signal);
+    await fs.rename(audioPart, audioPath);
   }
 
   const chunkDir = path.join(dir, "chunks");
-  await fs.mkdir(chunkDir, { recursive: true });
-  let chunkFiles = (await fs.readdir(chunkDir)).filter((f) => f.endsWith(".mp3")).sort();
+  const chunkPart = `${chunkDir}.part`;
+  await fs.rm(chunkPart, { recursive: true, force: true });
+  const listChunks = async () => (await fs.readdir(chunkDir).catch(() => [])).filter((f) => f.endsWith(".mp3")).sort();
+  let chunkFiles = await listChunks();
   if (!chunkFiles.length) {
     await ctx.progress(0.05, "Splitting audio into chunks");
-    await svc.media.segmentAudio(audioPath, path.join(chunkDir, "chunk_%04d.mp3"), svc.config.TRANSCRIBE_CHUNK_SECONDS, ctx.signal);
-    chunkFiles = (await fs.readdir(chunkDir)).filter((f) => f.endsWith(".mp3")).sort();
+    await fs.rm(chunkDir, { recursive: true, force: true });
+    await fs.mkdir(chunkPart, { recursive: true });
+    await svc.media.segmentAudio(audioPath, path.join(chunkPart, "chunk_%04d.mp3"), svc.config.TRANSCRIBE_CHUNK_SECONDS, ctx.signal);
+    await fs.rename(chunkPart, chunkDir);
+    chunkFiles = await listChunks();
   }
   if (!chunkFiles.length) throw new Error("Audio chunking produced no files");
 

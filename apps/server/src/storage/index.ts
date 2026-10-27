@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Config, Paths } from "../config.js";
@@ -43,8 +44,27 @@ async function linkOrCopy(from: string, to: string) {
   try {
     await fsp.link(from, to);
   } catch {
-    await fsp.copyFile(from, to);
+    // copy under a temp name so an interrupted copy is never mistaken for the finished file
+    const tmp = `${to}.${process.pid}.${randomUUID()}.part`;
+    try {
+      await fsp.copyFile(from, tmp);
+      await fsp.rename(tmp, to);
+    } catch (err) {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
   }
+}
+
+/** True for the errors S3 gives a missing object (HeadObject has no body, so only the status or name tells). */
+export function isS3NotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const name = "name" in err ? err.name : undefined;
+  if (name === "NotFound" || name === "NoSuchKey") return true;
+  if ("$metadata" in err && typeof err.$metadata === "object" && err.$metadata !== null && "httpStatusCode" in err.$metadata) {
+    return err.$metadata.httpStatusCode === 404;
+  }
+  return false;
 }
 
 function safeKey(key: string) {
@@ -116,6 +136,14 @@ class S3Storage implements Storage {
     } catch (err) {
       throw new Error(`cannot access S3 bucket "${this.bucket}" at ${this.config.S3_ENDPOINT ?? "AWS"}: ${(err as Error).name}: ${(err as Error).message}`);
     }
+    // read-only credentials pass HeadBucket; fail at boot, not after a 2 GB download
+    const probe = this.k(`.reelsaw-check-${randomUUID()}`);
+    try {
+      await client.send(new sdk.PutObjectCommand({ Bucket: this.bucket, Key: probe, Body: "ok" }));
+      await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: probe }));
+    } catch (err) {
+      throw new Error(`S3 bucket "${this.bucket}" is readable but not writable (put/delete of a probe object failed): ${(err as Error).name}: ${(err as Error).message}`);
+    }
   }
 
   private async s3() {
@@ -151,15 +179,32 @@ class S3Storage implements Storage {
     await upload.done();
   }
 
-  async ensureLocal(key: string, localPath: string) {
+  /** Pulls in flight in this process, by destination: concurrent callers share one download. */
+  private pulls = new Map<string, Promise<string>>();
+
+  ensureLocal(key: string, localPath: string): Promise<string> {
+    const running = this.pulls.get(localPath);
+    if (running) return running;
+    const pull = this.pull(key, localPath).finally(() => this.pulls.delete(localPath));
+    this.pulls.set(localPath, pull);
+    return pull;
+  }
+
+  private async pull(key: string, localPath: string) {
     if (await fileExists(localPath)) return touched(localPath);
     const { client, sdk } = await this.s3();
     const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
     if (!res.Body) throw new Error(`storage object missing: ${key}`);
     await fsp.mkdir(path.dirname(localPath), { recursive: true });
-    const tmp = `${localPath}.part`;
-    await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
-    await fsp.rename(tmp, localPath);
+    const tmp = `${localPath}.${process.pid}.${randomUUID()}.part`;
+    try {
+      await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
+      if (await fileExists(localPath)) await fsp.rm(tmp, { force: true }); // another process got there first
+      else await fsp.rename(tmp, localPath);
+    } catch (err) {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
     return localPath;
   }
 
@@ -168,8 +213,9 @@ class S3Storage implements Storage {
     try {
       await client.send(new sdk.HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (isS3NotFound(err)) return false;
+      throw err;
     }
   }
 

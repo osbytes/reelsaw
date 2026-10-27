@@ -319,7 +319,8 @@ them), so a single-user box stays as it is:
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
-  projects; rows and history stay, the project page offers "fetch again" and clips re-render.
+  projects (the store object and the local copy); rows and history stay. A clip re-renders from its
+  source; once the source is removed, "fetch again" (Retry on the project) downloads it first.
   `reelsaw retention` runs a sweep by hand. With an S3 store, `SCRATCH_CACHE_HOURS` (24) is how long
   a worker keeps its local copies of stored files once a project is finished and idle; the bucket
   copy stays and comes back when a job needs it.

@@ -145,8 +145,8 @@ export const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: boolFalse,
   S3_PREFIX: z.string().optional(),
-  S3_PUBLIC_URL: z.string().optional(),
-  S3_PRESIGN_EXPIRES: z.coerce.number().int().default(3600),
+  S3_PUBLIC_URL: z.string().url("S3_PUBLIC_URL must be a full URL such as https://cdn.example.com").optional(),
+  S3_PRESIGN_EXPIRES: z.coerce.number().int().min(1).max(604800, "S3_PRESIGN_EXPIRES cannot exceed 604800 seconds (7 days, the SigV4 maximum)").default(3600),
   CLEANUP_WORKDIR: boolTrue,
   /** Events a project page replays when it connects (progress ticks never replay); older ones load on request */
   EVENT_REPLAY_LIMIT: z.coerce.number().int().min(20).max(2000).default(300),
