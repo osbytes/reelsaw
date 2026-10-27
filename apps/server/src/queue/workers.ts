@@ -150,7 +150,9 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
   const common = { pollingIntervalSeconds: 2 };
   // every queue's registration, so the disk gate can take a queue off this process and put it back
   const registrations = new Map<QueueName, () => Promise<void>>();
+  let concurrency = 0;
   const work = async <T extends ProjectJob>(queue: QueueName, options: { pollingIntervalSeconds: number; localConcurrency: number }, handler: (jobs: Job<T>[]) => Promise<void>) => {
+    concurrency += options.localConcurrency;
     const register = () => boss.work<T>(queue, options, handler).then(() => undefined);
     registrations.set(queue, register);
     await register();
@@ -310,6 +312,12 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
   }, "Jobs this worker process is running, by queue");
 
   svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
+  // a running job takes a pooled connection only for its writes and pg-boss needs some for fetching and heartbeats. The defaults
+  // already have more job slots than connections (they are rarely all busy), so warn only when the slots are over twice the pool: more
+  // than that, queries queue on the pool and a heartbeat can be missed. (Model-call slots use their own pool, ai/gate.ts.)
+  if (concurrency > svc.database.poolMax * 2) {
+    svc.log.warn({ module: "worker", jobSlots: concurrency, poolMax: svc.database.poolMax }, "job concurrency exceeds the Postgres pool; raise DB_POOL_MAX to at least the job slots plus a few");
+  }
   // room is made (or the gate closes) before the first job lands, not after it fails
   await diskGate.check().catch((err) => svc.log.warn({ module: "worker", err }, "disk gate check failed"));
   return { diskGate };

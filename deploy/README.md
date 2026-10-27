@@ -151,6 +151,16 @@ prints the same from the shell, and agents can ask with the `check_for_update` M
 asks GitHub's releases API every 6 hours (`UPDATE_CHECK_HOURS`) sending nothing but the request;
 `UPDATE_CHECK=false` turns it off.
 
+Back up first (see below): migrations only go forward, so pinning an older image after an upgrade
+is not a rollback unless that version's migrations match your database
+([irreversible migrations](../docs/RELEASING.md#irreversible-migrations)).
+
+**Waiting for renders on upgrade.** On `docker compose up -d` the app stops accepting requests, then
+waits up to `SHUTDOWN_GRACE_SECONDS` (default 300) for running jobs. Docker kills the container at
+`stop_grace_period`, which is `STOP_GRACE_PERIOD` in `.env` (default `330s`). If you raise
+`SHUTDOWN_GRACE_SECONDS`, set `STOP_GRACE_PERIOD` to at least that plus 30 seconds (for 900, use
+`930s`); the app logs a warning at boot when the two cannot both hold.
+
 ## Back up
 
 Everything lives in two volumes: `reelsaw_pgdata` (database) and `reelsaw_data` (videos, clips).

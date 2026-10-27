@@ -393,22 +393,34 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
 
 ### Stack tests in CI
 
-Not enabled; a commented `stack` job sits at the bottom of `ci.yml`. The 10 stack test files
-(accounts, hosted, import, mcp, project-settings, render-completion-deadlock, report,
-sampling-concurrency, settings, search) are only run by hand against a local deploy. What blocks
-turning it on, none of which could be verified without running Docker:
+The `stack` job in `ci.yml` runs the test files that import `test/helpers.ts` (accounts, hosted,
+import, mcp, project-settings, render-completion-deadlock, report, sampling-concurrency, settings,
+search and the rest) against the real compose stack, separate from the `check` job so unit CI stays
+fast. It:
 
-- **Never run in CI.** `docker compose up --build` of the root `docker-compose.yml` needs a throwaway
-  `.env` (`BETTER_AUTH_SECRET`, `APP_URL`, `PORT=3100`) and a ~10 minute image build; it has not been
-  confirmed that the app starts and passes `/api/health` with no AI provider configured (the local
-  setup refuses to start without an Ollama endpoint by design, so check the startup gate first).
-- **Helpers assume the author's host.** `test/helpers.ts` reads the Postgres password from `.env`, uses
-  `docker compose exec -T app reelsaw …` and `docker compose cp` from the repo root, and BASE defaults
-  to `localhost:3100`. In CI the compose project name, published ports and `.env` must match.
-- **Tests that call models** (anything that creates a project from a real URL) cannot run without
-  provider keys; they would need to be split out or given the mock in `scripts/mock-ai.mjs`.
+1. starts `scripts/mock-ai.mjs` on the runner (it answers `GET /v1/models`, chat completions and
+   transcription with word timestamps), because the app refuses to boot without a reachable language
+   and transcription model;
+2. writes a throwaway `.env` (random `BETTER_AUTH_SECRET`, `PORT=3100`, `OPENAI_BASE_URL` pointing at
+   the mock through `host.docker.internal`, `AI_MODEL=openai:mock`, `TRANSCRIPTION_MODEL=openai:whisper-1`);
+3. `docker compose up -d --build --wait app` with `COMPOSE_FILE=docker-compose.yml:.github/compose.ci.yml`
+   (the override only adds the `host.docker.internal` mapping; the variable is set for the whole job so
+   the helpers' `docker compose exec` / `cp` use the same files and project name), then curls
+   `/api/health`;
+4. runs `pnpm --filter @reelsaw/server test` with `REELSAW_URL=http://localhost:3100`. `helpers.ts`
+   reads the Postgres password from `.env` (absent, so the default `reelsaw`) and connects to the
+   published `127.0.0.1:5432`;
+5. on failure uploads `docker compose logs app` and the mock's log as the `stack-app-logs` artifact.
 
-When it works locally in a clean checkout with only that throwaway `.env`, uncomment the job.
+What it covers: sign-up and auth, settings, imports, reports, MCP, search, the render and sampling
+concurrency paths, with the deterministic mock as the model. What it does not: model quality (the mock
+returns fixed clips; that is the evals' job), anything needing a real URL download (`yt-dlp` against a
+live site), S3 storage and the GPU path.
+
+Not yet proven: the job was written without being run on a GitHub runner (the ~10 minute image build,
+`--wait` on the app's health check and the `host-gateway` mapping are the likely places to need a
+tweak on its first run). Treat a red first run as a setup bug before a product bug. Tests that need
+real provider keys or a second compose profile should be split out rather than skipped silently.
 
 ## Fixtures
 

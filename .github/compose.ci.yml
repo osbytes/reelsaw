@@ -1,0 +1,6 @@
+# Used only by the `stack` job in ci.yml (COMPOSE_FILE=docker-compose.yml:.github/compose.ci.yml):
+# lets the app container reach scripts/mock-ai.mjs running on the runner.
+services:
+  app:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

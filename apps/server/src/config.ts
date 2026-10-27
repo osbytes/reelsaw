@@ -39,6 +39,8 @@ export const envSchema = z.object({
   UPDATE_CHECK_URL: z.string().url().default("https://api.github.com/repos/osbytes/reelsaw/releases/latest"),
   UPDATE_CHECK_HOURS: z.coerce.number().min(1).max(168).default(6),
   DATABASE_URL: z.string().min(1),
+  /** Connections in this process's main Postgres pool (pg-boss, requests, jobs). Model-call slots (ai/gate.ts) use their own small pool. */
+  DB_POOL_MAX: z.coerce.number().int().min(4).default(10),
   BETTER_AUTH_SECRET: z.string().min(16),
   DATA_DIR: z.string().default(path.resolve(process.cwd(), "data")),
   WEB_DIST: z.string().optional(),
@@ -111,12 +113,12 @@ export const envSchema = z.object({
   ANALYZE_JUDGE_MODEL: z.string().optional(),
   /** Feed entities from the video metadata (channel, title, description, tags) to the transcriber as vocabulary hints. */
   TRANSCRIPT_BIAS: boolTrue,
-  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). Off by default; projects opt in via refineEntities when this ceiling is on. */
+  /** After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). On by default; projects opt in via refineEntities when this ceiling is on. */
   TRANSCRIPT_CORRECTION: boolTrue,
-  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). Off by default. */
+  /** Detect fillers / repetitions / false starts and remove them from captions (rules + optional LLM pass). Off by default (DISFLUENCY_REMOVAL below). */
   DISFLUENCY_REMOVAL: boolFalse,
   DISFLUENCY_LLM: boolFalse,
-  /** Scene-cut detection and on-screen text scan during refine. Off by default. */
+  /** Scene-cut detection and on-screen text scan during refine. On by default; set false to skip both. */
   REFINE_SCENES: boolTrue,
   /** Corrections at or above this LLM confidence are applied automatically; the rest wait for the user. */
   TRANSCRIPT_AUTO_FIX_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.85),
