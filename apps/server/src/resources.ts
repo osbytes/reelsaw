@@ -465,7 +465,9 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
     async check() {
       const s = await sample();
       if (s.diskFreeMB >= 0 && s.diskFreeMB < config.MIN_FREE_DISK_MB) {
-        throw new Error(`only ${s.diskFreeMB} MB free in ${dataDir}; MIN_FREE_DISK_MB=${config.MIN_FREE_DISK_MB}`);
+        // a process that runs no workers writes no scratch: refusing to boot would lock out the admin UI that can free the disk
+        if (!config.RUN_WORKERS) log.warn({ diskFreeMB: s.diskFreeMB, minFreeMB: config.MIN_FREE_DISK_MB, dataDir }, "free disk is below MIN_FREE_DISK_MB; starting anyway because this process runs no workers (an admin can still reach the UI to free space)");
+        else throw new Error(`only ${s.diskFreeMB} MB free in ${dataDir}; MIN_FREE_DISK_MB=${config.MIN_FREE_DISK_MB}`);
       }
       gpu = await detectGpu();
       log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, gpu: gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device without tools"}` : "none", renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}` }, "resources");

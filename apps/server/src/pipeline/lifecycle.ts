@@ -23,7 +23,7 @@ export async function requestRender(svc: Services, u: UnitOfWork, projectId: str
   if (!prev) return null; // gone, or soft-deleted (restore it first)
   const [row] = await u.db
     .update(schema.clips)
-    .set({ ...patch, status: "pending", error: null, outputKey: null, thumbnailKey: null, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
+    .set({ ...patch, status: "pending", error: null, outputKey: null, thumbnailKey: null, reconcileRequeues: 0, renderGen: sql`${schema.clips.renderGen} + 1`, updatedAt: new Date() })
     .where(eq(schema.clips.id, clipId))
     .returning({ gen: schema.clips.renderGen });
   await u.cancelLiveJobs(QUEUES.render, clipId);
@@ -69,7 +69,8 @@ export async function requestPrepare(_svc: Services, u: UnitOfWork, projectId: s
     await u.cancelLiveJobs(QUEUES.prepare, clipId);
   }
   const flipped = clip.status !== "preparing";
-  if (flipped || restart) await u.db.update(c).set({ status: "preparing", error: null, updatedAt: new Date() }).where(eq(c.id, clipId));
+  // a user or operator restart gives the clip a fresh reconciler budget; the reconciler's own re-queue (restart: false) keeps counting
+  if (flipped || restart) await u.db.update(c).set({ status: "preparing", error: null, ...(restart ? { reconcileRequeues: 0 } : {}), updatedAt: new Date() }).where(eq(c.id, clipId));
   const mode = o.mode ?? prepareModeOf(clip);
   if (restart || !(await u.hasLiveJob(QUEUES.prepare, clipId))) await u.enqueue(QUEUES.prepare, { projectId, clipId, mode });
   if (o.reason) await startRun(u, projectId, { reason: o.reason, status: "rendering", stage: "render" });
@@ -134,7 +135,7 @@ export interface StartRunOptions {
  */
 export async function startRun(u: UnitOfWork, projectId: string, o: StartRunOptions): Promise<number | null> {
   const t = schema.projects;
-  const values = { ...o.set, status: o.status, ...(o.stage !== undefined ? { stage: o.stage } : {}), error: null, updatedAt: new Date() };
+  const values = { ...o.set, status: o.status, ...(o.stage !== undefined ? { stage: o.stage } : {}), error: null, reconcileRequeues: 0, updatedAt: new Date() }; // a new run or a retry gets a fresh reconciler budget
   const idle = o.reason === "created" ? sql`${t.runSeq} = 0` : sql`${t.status} in ('done', 'failed')`;
   const [row] = await u.db
     .update(t)

@@ -579,7 +579,7 @@ apps/server   Hono + tRPC + Better Auth + Drizzle (Postgres) + pg-boss workers +
 packages/shared  zod schemas and types shared by both
 ```
 
-Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
+Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. Some steps depend on the process's role: a process with `RUN_WORKERS=false` only warns when free disk is under `MIN_FREE_DISK_MB` (so a full disk cannot lock out the admin UI that frees it) and skips the face, text and voice detectors; a process with `RUN_HTTP=false` skips the mail server check. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
 
 Pipeline (each box is a pg-boss queue; each stage emits events and enqueues the next):
 
@@ -676,6 +676,12 @@ work on one. Spec: [docs/specs/distribution-and-issue-reports.md](docs/specs/dis
 Every variable, with its default and meaning, is in [docs/CONFIG.md](docs/CONFIG.md) (generated from `apps/server/src/config.ts`; `pnpm docs:gen` refreshes it). [`.env.example`](.env.example) and [`deploy/.env.example`](deploy/.env.example) are generated from the same source.
 
 ## Observability
+
+**Health.** `GET /api/health` is a readiness check, not a ping. It answers `200 {"ok": true, "checks": {…}}` when
+Postgres answers, the event listener is connected, the job queue is started and (in a process that runs workers) its
+worker heartbeat is fresh; each check has a 2 s timeout. Otherwise it answers `503 {"ok": false, "checks": {…}}` with a
+short reason per failing check (`db`, `events`, `queue`, `workers`), and the log has the detail. The Docker
+`HEALTHCHECK` and any load balancer pointed at it restart or drain a process that is up but cannot work.
 
 **Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports boot
 failures, 5xx API errors and a job's final failed attempt; the web app reports render errors.

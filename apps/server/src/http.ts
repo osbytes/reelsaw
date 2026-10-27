@@ -35,6 +35,7 @@ import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
+import { runHealthChecks } from "./health.js";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
@@ -107,12 +108,15 @@ export function createApp(svc: Services) {
   // Public OTLP config for the browser. The production HTML embeds the same object so the SDK
   // starts before the first API call; Vite dev has no embed and fetches this instead.
   app.get("/api/otel", (c) => c.json(svc.otel.public));
-  // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
+  // readiness for anyone: 200 when the database, event listener, job queue and (with workers) this process's heartbeat all
+  // answer within 2 s each, else 503 with the same `checks` map saying which did not (health.ts). Machine numbers for
+  // admins (or HEALTH_DETAILS=true on a private network).
   app.get("/api/health", async (c) => {
     const open = svc.settings.get().HEALTH_DETAILS;
     const who = open ? null : await activeRequester(auth, db, c.req.raw.headers);
     const details = open || who?.user.role === "admin";
-    return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
+    const { ok, checks } = await runHealthChecks(svc);
+    return c.json({ ok, checks, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) }, ok ? 200 : 503);
   });
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
     if (c.req.method === "GET" && c.req.path === "/api/auth/verify-email") {

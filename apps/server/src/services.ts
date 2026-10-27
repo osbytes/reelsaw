@@ -5,7 +5,7 @@ import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { reclaimScratch } from "./storage/sweep.js";
 import { createDiskLeaser, LEASE_STALE_MS, releaseWorkerLeases, volumeId } from "./disk-leases.js";
-import { workerIdOf } from "./ops/workers.js";
+import { claimWorkerId } from "./ops/workers.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
@@ -178,8 +178,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
   const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
 
-  const faces = await step(config.FACE_DETECTION ? "face detector (UltraFace ONNX)" : "face detector (disabled)", async () => {
-    if (!config.FACE_DETECTION) return null;
+  // The on-device detectors serve pipeline stages, which only run in worker processes: a process with RUN_WORKERS=false
+  // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the
+  // exception: the API's cut preview (pipeline/cutpreview.ts) uses it to show the boundaries a render would cut at.
+  const detectors = config.RUN_WORKERS;
+  const faces = await step(!config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (UltraFace ONNX)" : "face detector (skipped, no workers in this process)", async () => {
+    if (!config.FACE_DETECTION || !detectors) return null;
     try {
       return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
     } catch (err) {
@@ -187,8 +191,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
-  const vad = await step(config.VAD ? "voice activity detector (Silero VAD)" : "voice activity detector (disabled)", async () => {
-    if (!config.VAD) return null;
+  const vad = await step(!config.VAD ? "voice activity detector (disabled)" : detectors ? "voice activity detector (Silero VAD)" : "voice activity detector (skipped, no workers in this process)", async () => {
+    if (!config.VAD || !detectors) return null;
     try {
       return await loadVad(config.VAD_MODEL_PATH);
     } catch (err) {
@@ -211,8 +215,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return a;
   });
 
-  const text = await step(config.TEXT_DETECTION ? "text detector (PP-OCRv4 ONNX)" : "text detector (disabled)", async () => {
-    if (!config.TEXT_DETECTION) return null;
+  const text = await step(!config.TEXT_DETECTION ? "text detector (disabled)" : detectors ? "text detector (PP-OCRv4 ONNX)" : "text detector (skipped, no workers in this process)", async () => {
+    if (!config.TEXT_DETECTION || !detectors) return null;
     try {
       return await loadTextDetector(config.TEXT_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "text" }) });
     } catch (err) {
@@ -331,7 +335,9 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const email = await step(config.EMAIL_DRIVER === "none" ? "email (disabled)" : `email (${config.EMAIL_DRIVER})`, async () => {
     const e = createEmail(config, log.child({ module: "email" }));
-    if (env.REELSAW_CLI !== "1") await e.check();
+    // only the HTTP process sends mail (sign-up, reset, approvals); a worker would only fail to boot over a mail server it never uses.
+    // The driver's settings are still validated by the config schema above.
+    if (env.REELSAW_CLI !== "1" && config.RUN_HTTP) await e.check();
     return e;
   });
 
@@ -344,7 +350,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // and claims its scratch against the volume's live leases first, so two jobs cannot both pass on the same free bytes (disk-leases.ts)
   await step("disk leases", async () => {
     const volume = await volumeId(paths.root);
-    const selfId = workerIdOf(config);
+    // a pinned WORKER_ID that a live replica already beats under gets a suffix first, or we would release that replica's leases
+    const selfId = await claimWorkerId(config, database.db, log.child({ module: "ops" }));
     // a previous incarnation under this id (a restarted container keeps hostname:pid; WORKER_ID is pinned) can no longer be writing
     await releaseWorkerLeases(svc, selfId);
     resources.setLeaser(createDiskLeaser(svc, { volume, selfId, staleMs: LEASE_STALE_MS }), volume);

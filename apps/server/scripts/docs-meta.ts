@@ -33,7 +33,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   WEB_DIST: ["core", "Directory of the built web app to serve. Unset: the bundled location."],
   RUN_HTTP: ["core", "Serve HTTP in this process. false for a worker-only container."],
   RUN_WORKERS: ["core", "Process pipeline jobs in this process. false for a web-only container. At least one of RUN_HTTP / RUN_WORKERS must be on."],
-  WORKER_ID: ["core", "Stable name for this process on Settings → System → Workers. Unset: `hostname:pid`. Set it to the pod or container name when scaling workers so each replica stays recognisable."],
+  WORKER_ID: ["core", "Stable name for this process on Settings → System → Workers. Unset: `hostname:pid`. Set it to the pod or container name when scaling workers so each replica stays recognisable. Two live processes must not share an id (they would overwrite each other's heartbeat and disk leases): if a process with the same id beat in the last 30 s, the new one appends `-` and four hex characters and logs a warning, so a pinned id on `docker compose --scale worker=N` still works."],
   REELSAW_VERSION: ["core", "Release version baked into the image at build time (`dev` from source)."],
   REELSAW_COMMIT: ["core", "Git commit baked into the image at build time."],
   REELSAW_BUILT_AT: ["core", "Build timestamp baked into the image."],

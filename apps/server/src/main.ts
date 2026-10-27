@@ -4,7 +4,7 @@ import { createServices, shutdownServices, StartupError } from "./services.js";
 import { createLogger } from "./log.js";
 import { createApp } from "./http.js";
 import { startWorkers } from "./queue/workers.js";
-import { startReconciler } from "./queue/reconcile.js";
+import { startReconciler, startStallWatch } from "./queue/reconcile.js";
 import { beat, startHeartbeat } from "./ops/workers.js";
 
 async function main() {
@@ -59,6 +59,9 @@ async function main() {
     stopDiskGate = () => diskGate.stop();
     if (svc.ee) await svc.ee.startWorkers();
     stopReconciler = startReconciler(svc);
+  } else {
+    log.warn({ module: "boot", runHttp: config.RUN_HTTP }, "this process runs no workers: projects stay queued until a `worker` container (or an app with RUN_WORKERS=true) is running");
+    stopReconciler = startStallWatch(svc); // so a queue nobody serves is reported, not silent
   }
   if (config.RUN_HTTP || config.RUN_WORKERS) {
     await beat(svc).catch((err) => log.warn({ err, module: "ops" }, "worker heartbeat failed"));
