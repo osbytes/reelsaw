@@ -269,7 +269,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
               try {
                 await prepareClip(ctx, clipId, mode);
               } finally {
-                await ctx.release();
+                await ctx.close(); // the disk it leased and the idle timer
               }
             }),
           ),

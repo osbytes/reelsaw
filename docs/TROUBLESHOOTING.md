@@ -256,8 +256,14 @@ windows and died in the same place, and the user saw "This operation was aborted
 - **Checkpoints are dropped** `STEP_RETENTION_DAYS` (14) after a finished project last changed (hourly sweep), or with the project
   when it is deleted forever. They are keyed on content, model, prompt version and settings, so changing the model, the clip lengths
   or the focus asks again only what changed (docs/SELECTION.md).
-- Still not checkpointed (a timeout redoes them): the refine steps (name fixes, disfluencies, on-screen text scan), prepare of a manual
-  clip and the pairwise re-rank. Each model call in them has the call limit now.
+- **Disfluency removal (language-model mode) and prepare resume too.** Each 120-word rewrite window and verifier batch of
+  `refine.disfluency`, and each map window, scoring and describe call of a manual clip's prepare (`job_steps.clip_id` is set), is
+  saved as it finishes. A window that times out fails the step (it is never written as `done` with only the windows that ran, so no
+  half-cleaned transcript); Retry or the automatic retry asks only the windows still missing. Only a window the model answers
+  badly is skipped, with a `disfluency model pass failed for a window` warning. A long "ai" selection is mapped in 3-minute windows
+  like a full analysis.
+- Still not checkpointed (a timeout redoes them): name fixes, the on-screen text scan and the pairwise re-rank. Each model call in
+  them has the call limit now.
 
 ### Whisper decoder loops (issue report 218, 2026-10-24)
 

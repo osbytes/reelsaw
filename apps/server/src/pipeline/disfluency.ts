@@ -16,7 +16,7 @@
  * a wrong jump cut is worse than a missed "um".
  */
 import { generateText, Output, type LanguageModel } from "ai";
-import { callSignal } from "./steps.js";
+import { callSignal, isAbortError } from "./steps.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
@@ -47,9 +47,27 @@ export const isFunctionWord = (w: string) => FUNCTION_WORDS.has(norm(w)) || FILL
 const endsSentence = (w: Word | undefined) => !!w && /[.!?]["')\]]?$/.test(w.text);
 const endsClause = (w: Word | undefined) => !!w && /[,;:]["')\]]?$/.test(w.text);
 
+/** Bump when the rewrite or verifier prompt changes: saved windows (job_steps) are keyed on it. */
+export const DISFLUENCY_PROMPT_VERSION = "disfluency-1";
+
+/**
+ * How a stage saves the model passes' units (a rewrite window, a verifier batch) as it goes, so a retry or a timeout
+ * resumes from the windows already done (refine.ts wires this to `ctx.step` / `ctx.steps`). Absent: every unit just runs.
+ */
+export interface DisfluencyCheckpoint {
+  /** run `fn` over `items` with the stage's concurrency, reporting progress for the phase */
+  all<I, R>(items: readonly I[], phase: "rewrite" | "verify", fn: (item: I, index: number, signal: AbortSignal) => Promise<R>): Promise<R[]>;
+  /** one saved unit: the stored output when `key` matches, else `fn` under its own time limit (`calls` model calls' worth) */
+  step<T>(name: string, key: { input: unknown; params?: unknown }, fn: (signal: AbortSignal) => Promise<T>, schema: z.ZodType<T>, o: { signal: AbortSignal; calls?: number }): Promise<T>;
+}
+
 export interface DisfluencyOptions {
   log?: Logger;
   signal?: AbortSignal;
+  /** save the model passes' units as steps (see DisfluencyCheckpoint) */
+  checkpoint?: DisfluencyCheckpoint;
+  /** errors that must end the run, never be skipped as one window's bad answer (a stage timeout, a superseded job) */
+  isFatal?: (err: unknown) => boolean;
   /** limit on each model call, ms */
   timeoutMs?: number;
   telemetry?: boolean;
@@ -244,25 +262,36 @@ export async function findModelCandidates(model: LanguageModel, words: Word[], o
   const reserved = opts.reserved ?? new Set<number>();
   const starts: number[] = [];
   for (let from = 0; from < words.length; from += WINDOW) starts.push(from);
-  const rewrites = await mapWindows(starts.length, opts.concurrency ?? 3, async (k) => {
-    if (opts.signal?.aborted) return undefined;
+  const rewriteWindow = async (k: number, signal: AbortSignal | undefined): Promise<string> => {
     const slice = words.slice(starts[k]!, starts[k]! + WINDOW);
+    const { output } = await generateText({
+      model,
+      temperature: 0,
+      maxRetries: 1,
+      abortSignal: signal,
+      output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
+      telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
+      prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
+    });
+    return output.cleaned;
+  };
+  const ck = opts.checkpoint;
+  // only a window the model answered badly is skipped; a timeout, a cancel or a superseded job ends the pass
+  const runWindow = async (k: number, signal: AbortSignal | undefined): Promise<string | undefined> => {
+    signal?.throwIfAborted();
     try {
-      const { output } = await generateText({
-        model,
-        temperature: 0,
-        maxRetries: 1,
-        abortSignal: callSignal(opts.signal, opts.timeoutMs),
-        output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
-        telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
-        prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
-      });
-      return output.cleaned;
+      if (!ck || !signal) return await rewriteWindow(k, callSignal(opts.signal, opts.timeoutMs));
+      const input = words.slice(starts[k]!, starts[k]! + WINDOW).map((w) => w.text);
+      return await ck.step(`window:${k}`, { input, params: { window: WINDOW } }, (sig) => rewriteWindow(k, sig), z.string(), { signal });
     } catch (err) {
-      opts.log?.warn({ err }, "disfluency model pass failed for a window, continuing");
+      if (isAbortError(err) || opts.signal?.aborted || opts.isFatal?.(err)) throw err;
+      opts.log?.warn({ err, window: k }, "disfluency model pass failed for a window, continuing");
       return undefined;
     }
-  });
+  };
+  const rewrites: Array<string | undefined> = ck
+    ? await ck.all(starts.map((_, k) => k), "rewrite", (k, _i, signal) => runWindow(k, signal))
+    : await mapWindows(starts.length, opts.concurrency ?? 3, (k) => runWindow(k, undefined));
   const out: Candidate[] = [];
   starts.forEach((from, k) => {
     const cleaned = rewrites[k];
@@ -325,38 +354,55 @@ export async function verifyCandidates(model: LanguageModel, words: Word[], cand
     const t = (ws: Word[]) => ws.map((w) => w.text).join(" ");
     return { spoken: t(words.slice(a, b)), edited: t([...words.slice(a, c.index), ...words.slice(c.index + c.span, b)]) };
   };
-  const ask = async (ids: number[]) => {
+  const rejected = (opts.rejectedExamples ?? []).slice(0, 8);
+  type Verdict = { id: number; cut: boolean; confidence: number };
+  const ask = async (ids: number[], signal: AbortSignal | undefined): Promise<Verdict[]> => {
     const { output } = await generateText({
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: callSignal(opts.signal, opts.timeoutMs),
+      abortSignal: signal,
       output: Output.object({ schema: verdictSchema, name: "verdicts" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies.verify", recordInputs: false, recordOutputs: false },
       prompt: verifyPrompt(
         ids.map((id, q) => ({ id: q + 1, ...pair(cands[id]!) })),
-        (opts.rejectedExamples ?? []).slice(0, 8),
+        rejected,
       ),
     });
+    const out: Verdict[] = [];
     for (const v of output.verdicts) {
       const id = ids[v.id - 1];
-      if (id !== undefined) result.set(id, { cut: v.verdict === "cut", confidence: v.confidence ?? 0.8 });
+      if (id !== undefined) out.push({ id, cut: v.verdict === "cut", confidence: v.confidence ?? 0.8 });
     }
+    return out;
   };
-  await mapWindows(batches.length, opts.concurrency ?? 3, async (k) => {
+  const fatal = (err: unknown) => isAbortError(err) || !!opts.signal?.aborted || !!opts.isFatal?.(err);
+  // one batch; a batch the model cannot answer is retried one candidate at a time, and a candidate it still cannot answer is dropped
+  const verifyBatch = async (ids: number[], signal: AbortSignal | undefined): Promise<Verdict[]> => {
     try {
-      await ask(batches[k]!);
-    } catch {
-      // small models sometimes break the schema on a batch: retry one at a time
-      for (const id of batches[k]!) {
+      return await ask(ids, signal);
+    } catch (err) {
+      if (fatal(err)) throw err; // a timeout or a cancel is not the model's bad answer
+      const out: Verdict[] = [];
+      for (const id of ids) {
         try {
-          await ask([id]);
-        } catch (err) {
-          opts.log?.warn({ err }, "disfluency verification failed for a candidate; dropped");
+          out.push(...(await ask([id], signal)));
+        } catch (err2) {
+          if (fatal(err2)) throw err2;
+          opts.log?.warn({ err: err2 }, "disfluency verification failed for a candidate; dropped");
         }
       }
+      return out;
     }
-  });
+  };
+  const ck = opts.checkpoint;
+  const verdictsOut = z.array(z.object({ id: z.number().int(), cut: z.boolean(), confidence: z.number() }));
+  const perBatch = ck
+    ? await ck.all(batches, "verify", (ids, k, signal) =>
+        ck.step(`verify:${k}`, { input: ids.map((id) => pair(cands[id]!)), params: { rejected } }, (sig) => verifyBatch(ids, sig), verdictsOut, { signal, calls: 3 }),
+      )
+    : await mapWindows(batches.length, opts.concurrency ?? 3, (k) => verifyBatch(batches[k]!, callSignal(opts.signal, opts.timeoutMs)));
+  for (const list of perBatch) for (const v of list ?? []) result.set(v.id, { cut: v.cut, confidence: v.confidence });
   return result;
 }
 
