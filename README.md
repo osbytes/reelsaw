@@ -247,7 +247,7 @@ Every stage scales with the length of the video. Expected seconds for a stage �
 | find moments | LLM latency × (video minutes ÷ 5 + 1) calls | 0.2 | 0.02–0.07 |
 | render | ffmpeg + face tracking per clip, ÷ render concurrency | 0.04 (3 clips) | 0.05 (3 clips) |
 
-Rule of thumb: **a vendor stack finishes a video in about a fifth of its length; a local CPU stack takes about as long as the video.** Refine runs alongside finding moments, so the stages don't add up exactly.
+Rule of thumb: **a vendor stack finishes a video in about a fifth of its length; a local CPU stack takes about as long as the video.** Refine runs alongside finding moments, so the stages don't add up exactly. Finding moments saves each part it finishes, so on a long video and a slow model a retry or a timeout continues from the last finished part instead of starting over, and the project shows "N of M parts, about X left".
 
 ¹ Apple-silicon laptop, `qwen2.5:14b` on Ollama + `faster-whisper-small` on Speaches (CPU), 20-minute podcast: download 15 s, transcribe 4.9 min, refine 10 min, find moments 4 min, render 47 s; 20 min in all. On a local 14B model the disfluency verifier (one call per candidate, ~40 s each) is the bottleneck, not transcription; a smaller model or `DISFLUENCY_LLM=false` cuts refine to a fraction. ² Same video through the Vercel AI Gateway, `whisper-1` + `claude-haiku-4.5`: download 13 s, transcribe 77 s, refine 31 s, find moments 24 s, render 56 s; 3.4 min in all. Gemini 2.5 Flash took 5 min (long "thinking" outputs), Sonnet 4.5 about 4. Mixing a vendor LLM with a *local* `TRANSCRIPT_ALIGN_MODEL` makes render the slowest stage (5–9 min: every cut is re-aligned on the CPU); keep alignment on the same vendor as transcription. Full numbers in `eval/bench/results/`.
 
@@ -503,6 +503,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `add_transcript_cut` | Remove the words spoken between startSec and endSec from the transcript, so captions and the rendered video skip them; the span must cover whole words. |
 | `get_project_defaults` | The settings every new project starts with (Settings, Project defaults): language, vocabulary, instructions, focus, clip lengths, pauses, caption look and refine steps. |
 | `set_project_defaults` | Replace the settings every new project starts with; existing projects keep theirs. |
+| `set_project_source_text` | Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. |
+| `update_project_style` | Change the caption/hook look for the whole project (font, colors, size, position, words per line). |
 | `billing_portal_url` | Hosted instances: a Stripe Billing Portal URL to see invoices, change the card or cancel at period end. |
 <!-- /generated -->
 
@@ -539,6 +541,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw transcript-file <projectId> [--format srt\|vtt] [--words]` | print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file) |
 | `reelsaw import-transcript <projectId> <file.srt\|file.vtt> [--language xx]` | use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
+| `reelsaw source-text <projectId> <hide\|keep\|always>` | hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text) |
+| `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]` | change the caption/hook style of the whole project, clearing per-clip overrides and re-rendering (same as projects.updateStyle and update_project_style); values are JSON or text |
 | `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |

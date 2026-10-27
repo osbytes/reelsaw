@@ -29,6 +29,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   update-project <projectId> [--title t] [--set key=value]… [--clear key]…
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
+ *   source-text <projectId> <hide|keep|always>
+ *                                           hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text)
+ *   update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]
+ *                                           change the caption/hook style of the whole project, clearing per-clip overrides and re-rendering
+ *                                           (same as projects.updateStyle and update_project_style); values are JSON or text
  *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
  *                                           start a project from a link for an account (the given user, else the only account);
  *                                           same as projects.create and create_project; takes the same settings as update-project
@@ -181,10 +186,10 @@ import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
 import { listDeleted } from "./deleted.js";
-import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, updateProject } from "./projects/service.js";
+import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectSourceText, updateProject, updateProjectStyle } from "./projects/service.js";
 import { createClip, readClip, rerenderClip, rerenderClips, updateClip } from "./clips/service.js";
 import { createExportZip, exportPlan } from "./export.js";
-import { CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -424,6 +429,24 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { settings, clear } = settingsFlags(usage);
     const r = await updateProject(svc, null, pos[0], { title: flag("title"), settings, clear });
     console.log(r.changed.length ? `changed ${r.changed.join(", ")}${r.hint ? `. ${r.hint}` : ""}` : "nothing changed");
+  },
+  /** Hide or keep source text: `reelsaw source-text <projectId> <hide|keep|always>`. Same function as projects.setSourceText and the set_project_source_text tool. */
+  async "source-text"(svc) {
+    const mode = z.enum(["hide", "keep", "always"]).safeParse(pos[1]);
+    if (!pos[0] || !mode.success) throw new Error("usage: reelsaw source-text <projectId> <hide|keep|always>");
+    const r = await setProjectSourceText(svc, null, pos[0], mode.data);
+    console.log(`source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render`);
+  },
+  /** Project-wide caption style: `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]`. Same function as projects.updateStyle and the update_project_style tool. */
+  async "update-style"(svc) {
+    const usage = "usage: reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]";
+    if (!pos[0]) throw new Error(usage);
+    const { settings } = settingsFlags(usage);
+    const style = styleOverrideSchema.safeParse(settings);
+    if (!style.success) throw new Error(`${style.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}\n${usage}`);
+    if (!Object.keys(style.data).length) throw new Error(usage);
+    const r = await updateProjectStyle(svc, null, pos[0], { style: style.data, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
+    console.log(`changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render`);
   },
   /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {
@@ -1656,7 +1679,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

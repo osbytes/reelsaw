@@ -96,7 +96,7 @@ const FEATURES = [
   {
     icon: Database,
     title: "Reliable, resumable, scalable",
-    body: "Every stage is a pg-boss job in Postgres that checkpoints its output. A crashed worker resumes where it left off, orphaned work is re-queued, and extra worker containers scale rendering. Local disk or any S3-compatible storage.",
+    body: "Every stage is a pg-boss job in Postgres that checkpoints its output. A crashed worker resumes where it left off, a long video on a slow local model keeps the parts it finished (the project shows \"13 of 43 parts, about 1 h left\"), orphaned work is re-queued, and extra worker containers scale rendering. Local disk or any S3-compatible storage.",
   },
 ];
 

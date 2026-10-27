@@ -15,7 +15,7 @@ Workflow: create_project(sourceUrl, or uploadId from POST /api/upload) → wait_
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
-- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
+- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look for every clip, re-renders), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
@@ -621,6 +621,26 @@ export const TOOLS = {
     description: "Replace the settings every new project starts with; existing projects keep theirs. Send the whole set you want: keys left out are cleared, {} clears all (read get_project_defaults first). Intro and outro change through set_default_bumper. Returns { ok, projectDefaults, hint }.",
     inputSchema: {
       defaults: projectDefaultsInput.describe("The complete set of defaults, e.g. { language: \"en\", maxClips: 5, pauses: \"tight\" }"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  set_project_source_text: {
+    title: "Set source text handling",
+    description: "Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. Re-renders every finished clip so the set agrees. Returns { changed, needsRerender, rerendered, hint }; rerendered is how many clips were queued, so follow with wait_for_project.",
+    inputSchema: {
+      id: projectId(),
+      sourceText: z.enum(["hide", "keep", "always"]).describe("hide = cover on-screen text in the source, keep = leave it, always = always show it"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  update_project_style: {
+    title: "Update project style",
+    description: "Change the caption/hook look for the whole project (font, colors, size, position, words per line). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, hint }; rerendered is how many clips were queued. For one clip use update_clip { style }.",
+    inputSchema: {
+      id: projectId(),
+      style: styleOverrideSchema.describe("The style fields to change; fields left out keep their value"),
+      keepOverrides: z.boolean().optional().describe("Keep clips' own style overrides instead of clearing them (default false)"),
+      rerender: z.boolean().default(true).describe("Re-render finished clips now (default true); false saves the style and the next render shows it"),
     },
     annotations: { idempotentHint: true },
   },
