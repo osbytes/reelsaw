@@ -37,11 +37,15 @@ COPY --from=models /models /app/server/models
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS build
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm fetch reads only the lockfile, so a version bump in a package.json (every Release PR) keeps
+# the download layer cached; the install after it links from the store without the network
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm fetch
+COPY package.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --offline
 COPY . .
 RUN pnpm -r build \
  && pnpm --filter @reelsaw/server bundle \

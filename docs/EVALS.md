@@ -405,7 +405,10 @@ fast. It:
    and transcription model;
 2. writes a throwaway `.env` (random `BETTER_AUTH_SECRET`, `PORT=3100`, `OPENAI_BASE_URL` pointing at
    the mock through `host.docker.internal`, `AI_MODEL=openai:mock`, `TRANSCRIPTION_MODEL=openai:whisper-1`);
-3. `docker compose up -d --build --wait app` with `COMPOSE_FILE=docker-compose.yml:.github/compose.ci.yml`
+3. builds `reelsaw:latest` with buildx from cached layers (the `stack` Actions cache scope, written
+   only by pushes to main so PRs read it without filling the quota, and the release's
+   `ghcr.io/osbytes/reelsaw:buildcache`), then
+   `docker compose up -d --no-build --wait app` with `COMPOSE_FILE=docker-compose.yml:.github/compose.ci.yml`
    (the override only adds the `host.docker.internal` mapping; the variable is set for the whole job so
    the helpers' `docker compose exec` / `cp` use the same files and project name), then curls
    `/api/health`;

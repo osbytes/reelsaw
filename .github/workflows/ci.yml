@@ -76,7 +76,7 @@ jobs:
       # changesets/action open an empty Release PR on every push to main until it is retargeted
       - if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
         run: |
-          bad=$(grep -l '"@reelsaw/' .changeset/*.md | xargs grep -L '"@reelsaw/server"' || true)
+          bad=$(grep -l '"@reelsaw/' .changeset/*.md | xargs -r grep -L '"@reelsaw/server"' || true)
           [ -z "$bad" ] || { echo "changesets must name @reelsaw/server (web and shared are ignored): $bad"; exit 1; }
 
   # reelsaw.com (website/): its own pnpm root with its own lockfile, so it is checked on its own
@@ -138,8 +138,24 @@ jobs:
             echo "AI_MODEL=openai:mock"
             echo "TRANSCRIPTION_MODEL=openai:whisper-1"
           } > .env
-      - name: build and start the stack
-        run: docker compose up -d --build --wait --wait-timeout 900 app # Postgres is published on 127.0.0.1:5432
+      # the image compose runs (reelsaw:latest), built with buildx so layers come from a cache: pushes
+      # to main write the `stack` scope (PRs can read main's caches, not each other's), and the
+      # release cache in GHCR covers the amd64 layers a release shares with this build. PRs only
+      # read, so they do not fill the 10 GB Actions cache quota.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          load: true
+          tags: reelsaw:latest
+          cache-from: |
+            type=gha,scope=stack
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/reelsaw:buildcache
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=stack,mode=max' || '' }}
+      - name: start the stack
+        run: docker compose up -d --no-build --wait --wait-timeout 900 app # Postgres is published on 127.0.0.1:5432
       - run: curl -fsS http://localhost:3100/api/health
       - run: pnpm --filter @reelsaw/server test
       - name: app logs
