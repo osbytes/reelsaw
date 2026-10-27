@@ -19,6 +19,7 @@ import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from "./library/service.js";
 import { assetVisibleTo } from "./library/visible.js";
+import type { TranscriptFlag } from "@reelsaw/shared";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 
 import { listReleasesResult } from "./releases.js";
@@ -92,6 +93,19 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
     thumbnailUrl: abs(c.thumbnailUrl),
   });
 
+  const flagView = (f: TranscriptFlag) => ({
+    id: f.id,
+    kind: f.kind,
+    subkind: f.subkind ?? null,
+    status: f.status,
+    start: f.start,
+    end: f.end,
+    heard: f.heard,
+    suggested: f.suggested,
+    replacement: f.replacement ?? null,
+    confidence: f.confidence,
+  });
+
   /** Names and lengths of the assets these ids name (own uploads, removed ones still in use, or instance-shared rows). */
   const assetsByIds = async (ids: Array<string | null | undefined>) => {
     const want = [...new Set(ids.filter((id): id is string => !!id))];
@@ -136,11 +150,11 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
   server.registerTool(
     "create_project",
     TOOLS.create_project,
-    ({ sourceUrl, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+    ({ sourceUrl, uploadId, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
       run(async () => {
         // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
         const merged = { ...settings, ...(introAssetId !== undefined ? { introAssetId } : {}), ...(outroAssetId !== undefined ? { outroAssetId } : {}), ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}) };
-        return { ...(await api.projects.create({ sourceUrl, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
+        return { ...(await api.projects.create({ sourceUrl, uploadId, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
       }),
   );
 
@@ -504,6 +518,83 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
     "purge_layer_template",
     TOOLS.purge_layer_template,
     ({ templateId }) => run(() => api.layerTemplates.purge({ id: templateId })),
+  );
+
+  server.registerTool(
+    "list_transcript_flags",
+    TOOLS.list_transcript_flags,
+    ({ id, status, limit }) =>
+      run(async () => {
+        const t = await api.transcripts.get({ projectId: id });
+        if (!t) return { total: 0, flags: [], hint: "No transcript yet." };
+        const rows = t.flags.filter((f) => !status || f.status === status);
+        return {
+          total: rows.length,
+          flags: rows.slice(0, limit).map(flagView),
+          ...(rows.length > limit ? { hint: `Showing the first ${limit} of ${rows.length}; pass status to narrow the list.` } : {}),
+        };
+      }),
+  );
+
+  server.registerTool(
+    "review_transcript_flags",
+    TOOLS.review_transcript_flags,
+    ({ id, decisions, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.review({ projectId: id, decisions: decisions.map((d) => ({ id: d.flagId, status: d.status, replacement: d.replacement })), rerender });
+        const t = await api.transcripts.get({ projectId: id });
+        const asked = new Set(decisions.map((d) => d.flagId));
+        // a rejected manual fix is deleted, so it is no longer among the live flags
+        const flags = (t?.flags ?? []).filter((f) => asked.has(f.id)).map(flagView);
+        const needsRerender = !rerender && done.changed > 0;
+        const hint = done.changed
+          ? `${done.changed} fix${done.changed === 1 ? "" : "es"} changed the transcript; ${rerender ? `${done.rerendered} clip${done.rerendered === 1 ? "" : "s"} re-rendering` : "re-render the clips with rerender_clips to show it in the captions"}.`
+          : "Nothing changed: those fixes already had that decision.";
+        return { changed: done.changed, rerendered: done.rerendered, needsRerender, flags, hint };
+      }),
+  );
+
+  server.registerTool(
+    "add_transcript_correction",
+    TOOLS.add_transcript_correction,
+    ({ id, startSec, endSec, text, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.addCorrection({ projectId: id, start: startSec, end: endSec, text, rerender });
+        return { ...done, hint: `Captions now say "${text}" for that span; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.` };
+      }),
+  );
+
+  server.registerTool(
+    "add_transcript_cut",
+    TOOLS.add_transcript_cut,
+    ({ id, startSec, endSec, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.addCut({ projectId: id, start: startSec, end: endSec, rerender });
+        return { ...done, hint: `Those words are cut from the transcript; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.` };
+      }),
+  );
+
+  server.registerTool(
+    "get_project_defaults",
+    TOOLS.get_project_defaults,
+    () =>
+      run(async () => {
+        const me = await api.me.get();
+        return { projectDefaults: me.projectDefaults };
+      }),
+  );
+
+  server.registerTool(
+    "set_project_defaults",
+    TOOLS.set_project_defaults,
+    ({ defaults }) =>
+      run(async () => ({ ...(await api.me.updateProjectDefaults(defaults)), hint: "New projects start with these settings; existing projects are unchanged." })),
+  );
+
+  server.registerTool(
+    "billing_portal_url",
+    TOOLS.billing_portal_url,
+    () => run(() => api.billing.portal()),
   );
 
   return server;

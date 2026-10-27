@@ -295,7 +295,7 @@ export default function HomePage() {
                 MCP is the UI for agents
               </h2>
               <p className="text-[16px] leading-relaxed text-ink2 text-pretty">
-                Everything a person can do in the app exists as a tool on the built-in MCP server (Model Context Protocol, Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit layers and framing, create and re-render clips, manage the library and layer templates, and export the results. The same tools are on every hosted plan, including Free. The operator CLI mirrors the same service code for people running the box.
+                Every editing action in the app (projects, clips, transcript fixes, library, layer templates, settings and project defaults, billing links) exists as a tool on the built-in MCP server; only the admin pages for users, providers and models are app-only (Model Context Protocol, Streamable HTTP). Claude Code, Claude Desktop, Cursor or a script can create projects, wait for them, read timed transcripts, edit layers and framing, create and re-render clips, manage the library and layer templates, and export the results. The same tools are on every hosted plan, including Free. The operator CLI mirrors the same service code for people running the box.
               </p>
               <ul className="flex flex-wrap gap-2" aria-label="Some MCP tools">
                 {MCP_TOOLS.map((t) => (
