@@ -185,6 +185,22 @@ The story of a run is: `project event` lines (`run.started` ... `stage.completed
 the stage's own lines between them, and `job retry` / `job failed` lines with the previous attempt's
 reason.
 
+**Stalls (`job.stalled`).** After `STALL_MINUTES` without a project event the watchdog posts `job.stalled` once, and the
+project page shows it. Its `message` names the stage and what is done, for example "Finding moments has made no progress
+for 15 min: 13 of 43 parts done, last part finished 16 min ago." The payload also carries `stage`, `done`, `total`,
+`unitMs` (typical time of one part), `lastStepAt` and `lastStepName` (the newest saved step, from `job_steps`), so
+`get_project_events` shows the same. Progress ticks alone keep a project from being flagged, except for stages built on
+steps (transcribe, analyze): there a model that keeps ticking but finishes no part for `STALL_MINUTES` is flagged too
+("is still reporting activity but no part has finished for N min", `ticking: true`), which is the sign of a model too
+slow for its parts. A retry continues after the last finished part. Transcription saves each audio chunk as a step
+(`chunk:<n>`), so its progress and time left read like finding moments.
+
+**Speech-to-text cache.** Results are cached by the sha256 of the model, its options and the audio, under
+`DATA_DIR/cache/asr`. With `STORAGE_DRIVER=s3` each entry is also written to the bucket under `cache/asr/<sha>.json` and
+read back on a local miss, so a worker on another host reuses a transcription instead of paying for it again. Entries
+older than `ASR_CACHE_DAYS` are removed from both places at boot and by the hourly sweep (up to 5000 bucket entries per
+pass).
+
 **Follow a request.** Every response carries `x-request-id` (a proxy's id is kept if it sent one).
 Search that id: the `http` access line, the `trpc error` line if it failed (procedure, code, user),
 or the `mcp tool` line; the lines of the same handler share it. A 5xx body quotes it too. The job a

@@ -134,7 +134,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ALIGNER: ["local", "wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search."],
   ALIGN_MODEL_DIR: ["local", "wav2vec2 model directory."],
   ONNX_EXECUTION_PROVIDER: ["local", "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`."],
-  ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr; entries older than this are pruned at boot and by the hourly sweep."],
+  ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep."],
 
   STORAGE_DRIVER: ["storage", "`local` (inside DATA_DIR) or `s3`."],
   STORAGE_LOCAL_DIR: ["storage", "Directory for the local driver. Unset: DATA_DIR/storage."],

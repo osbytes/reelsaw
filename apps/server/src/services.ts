@@ -210,12 +210,6 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
-  const asr = await step("asr cache", async () => {
-    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate);
-    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
-    return a;
-  });
-
   const text = await step(!config.TEXT_DETECTION ? "text detector (disabled)" : detectors ? "text detector (PP-OCRv4 ONNX)" : "text detector (skipped, no workers in this process)", async () => {
     if (!config.TEXT_DETECTION || !detectors) return null;
     try {
@@ -229,6 +223,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     const s = createStorage(config, paths, log.child({ module: "storage" }));
     await s.check();
     return s;
+  });
+
+  const asr = await step("asr cache", async () => {
+    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate, storage);
+    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
+    return a;
   });
 
   const database = await step("database", async () => {

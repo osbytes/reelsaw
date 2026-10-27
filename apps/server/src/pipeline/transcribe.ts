@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { eq, asc } from "drizzle-orm";
+import { and, eq, asc } from "drizzle-orm";
 import type { JSONObject } from "@ai-sdk/provider";
 import type { TranscriptFlag, Word } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
@@ -8,13 +8,13 @@ import { QUEUES } from "../queue/boss.js";
 import { StageContext, StaleJobError, exists, lockCurrentStage, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
 import { extractEntities, biasProviderOptions, applyFlags } from "./entities.js";
-import { collapseDecoderLoopsWithStats, compressionRatio, flagsFromCollapse, preferLessRepetitive, shouldRetryWithoutPrompt, withoutPrompt, type LoopRun } from "./asr-loops.js";
+import { chunkStepKey, chunkStepName, chunkStepOutput, chunkStepSchema, collapseDecoderLoopsWithStats, compressionRatio, flagsFromCollapse, preferLessRepetitive, shouldRetryWithoutPrompt, withoutPrompt, type LoopRun } from "./asr-loops.js";
 import { underlyingProvider } from "../ai/registry.js";
 import { enqueueRefine } from "./refine.js";
 
 /**
- * Transcribe stage: audio → chunks → words. Chunks are checkpointed per row so a crash resumes
- * where it stopped, and run with bounded concurrency. Cleanup (names, disfluencies, scene cuts)
+ * Transcribe stage: audio → chunks → words. Each chunk is a durable step (ctx.step; rows in
+ * transcript_chunks hold the words) so a crash or timeout resumes where it stopped, with bounded concurrency. Cleanup (names, disfluencies, scene cuts)
  * is fanned out to the refine jobs so each can fail, retry and re-run on its own.
  */
 export async function transcribe(ctx: StageContext) {
@@ -88,55 +88,58 @@ export async function transcribe(ctx: StageContext) {
 
   const selfHosted = provider === "openai" && !!svc.providers.get("openai").baseUrl;
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
-  const pending = chunkFiles.map((_, i) => i).filter((i) => !doneIdx.has(i));
-  let completed = chunkFiles.length - pending.length;
-  ctx.log.info({ model: transcriptionModel, provider, selfHosted, chunks: chunkFiles.length, alreadyDone: completed, concurrency, chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS, audioSec: Math.round(acc), biasHints: entities.length }, "transcribe start");
-  const worker = async () => {
-    for (;;) {
-      const i = pending.shift();
-      if (i === undefined) return;
-      ctx.throwIfAborted();
-      const audio = await fs.readFile(path.join(chunkDir, chunkFiles[i]!));
-      let result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
-      // whisper-1 has no temperature-fallback; a vocabulary `prompt` that leaked, or a 30 s
-      // internal window that started looping, poisons the rest of this 10-minute file. Retry once
-      // without the prompt (openai/whisper compression_ratio_threshold = 2.4).
-      const prompted = typeof (providerOptions[provider] as { prompt?: unknown } | undefined)?.prompt === "string";
-      if (shouldRetryWithoutPrompt(result.text, prompted)) {
-        ctx.log.warn({ chunk: i, compressionRatio: Number(compressionRatio(result.text).toFixed(2)), chars: result.text.length }, "chunk looks like a decoder loop; retrying without vocabulary prompt");
-        const retried = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions: withoutPrompt(providerOptions, provider), signal: ctx.signal, maxRetries: 3, functionId: "transcribe.chunk-retry", telemetry: svc.otel.enabled });
-        const picked = preferLessRepetitive(result, retried);
-        ctx.log.info(
-          {
-            chunk: i,
-            kept: picked === retried ? "retry" : "original",
-            originalRatio: Number(compressionRatio(result.text).toFixed(2)),
-            retryRatio: Number(compressionRatio(retried.text).toFixed(2)),
-            retryChars: retried.text.length,
-          },
-          "chose less repetitive chunk transcript",
-        );
-        result = picked;
-      }
-      await ctx.db
-        .insert(schema.transcriptChunks)
-        .values({
-          id: `${projectId}:${i}`,
-          projectId,
-          index: i,
-          offsetSec: offsets[i]!,
-          language: result.language ?? null,
-          text: result.text,
-          segments: result.segments.map((sg) => ({ text: sg.text, start: sg.startSecond, end: sg.endSecond })),
-        })
-        .onConflictDoNothing();
-      completed++;
-      ctx.log.debug({ chunk: i, offsetSec: offsets[i], language: result.language, empty: result.text.trim().length === 0 }, "chunk transcribed");
-      await ctx.progress(0.1 + (0.85 * completed) / chunkFiles.length, `Transcribed chunk ${completed}/${chunkFiles.length}`);
+  ctx.log.info({ model: transcriptionModel, provider, selfHosted, chunks: chunkFiles.length, alreadyDone: doneIdx.size, concurrency, chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS, audioSec: Math.round(acc), biasHints: entities.length }, "transcribe start");
+
+  // One durable step per chunk (progress, time left, idle timeout and retry accounting come from the step layer, as in
+  // analyze). The words stay in transcript_chunks: a step's saved output is only counts, and a chunk that already has a
+  // row (a run from before steps, or a step lost with its row kept) is not transcribed again.
+  const transcribeChunk = async (i: number, audio: Buffer, signal: AbortSignal) => {
+    const t0 = Date.now();
+    const row = await ctx.db.query.transcriptChunks.findFirst({ where: and(eq(schema.transcriptChunks.projectId, projectId), eq(schema.transcriptChunks.index, i)) });
+    if (row) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
+    let result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
+    // whisper-1 has no temperature-fallback; a vocabulary `prompt` that leaked, or a 30 s
+    // internal window that started looping, poisons the rest of this 10-minute file. Retry once
+    // without the prompt (openai/whisper compression_ratio_threshold = 2.4).
+    const prompted = typeof (providerOptions[provider] as { prompt?: unknown } | undefined)?.prompt === "string";
+    if (shouldRetryWithoutPrompt(result.text, prompted)) {
+      ctx.log.warn({ chunk: i, compressionRatio: Number(compressionRatio(result.text).toFixed(2)), chars: result.text.length }, "chunk looks like a decoder loop; retrying without vocabulary prompt");
+      const retried = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions: withoutPrompt(providerOptions, provider), signal, maxRetries: 3, functionId: "transcribe.chunk-retry", telemetry: svc.otel.enabled });
+      const picked = preferLessRepetitive(result, retried);
+      ctx.log.info(
+        {
+          chunk: i,
+          kept: picked === retried ? "retry" : "original",
+          originalRatio: Number(compressionRatio(result.text).toFixed(2)),
+          retryRatio: Number(compressionRatio(retried.text).toFixed(2)),
+          retryChars: retried.text.length,
+        },
+        "chose less repetitive chunk transcript",
+      );
+      result = picked;
     }
+    await ctx.db
+      .insert(schema.transcriptChunks)
+      .values({
+        id: `${projectId}:${i}`,
+        projectId,
+        index: i,
+        offsetSec: offsets[i]!,
+        language: result.language ?? null,
+        text: result.text,
+        segments: result.segments.map((sg) => ({ text: sg.text, start: sg.startSecond, end: sg.endSecond })),
+      })
+      .onConflictDoNothing();
+    ctx.log.debug({ chunk: i, offsetSec: offsets[i], language: result.language, empty: result.text.trim().length === 0 }, "chunk transcribed");
+    return chunkStepOutput(i, result.text, result.segments.length, Date.now() - t0);
   };
   await ctx.progress(0.1, `Transcribing ${chunkFiles.length} chunk(s), ${concurrency} at a time`);
-  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, pending.length)) }, worker));
+  const unitMs = ctx.unitTimeoutMs(transcriptionModel);
+  await ctx.steps(chunkFiles, { concurrency, range: [0.1, 0.95], message: (d, t) => `Transcribed chunk ${d}/${t}` }, async (file, i, signal) => {
+    const audio = await fs.readFile(path.join(chunkDir, file));
+    const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });
+    return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), { schema: chunkStepSchema, timeoutMs: unitMs, model: transcriptionModel, signal });
+  });
 
   const chunks = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), orderBy: asc(schema.transcriptChunks.index) });
   if (chunks.length !== chunkFiles.length) throw new Error(`Expected ${chunkFiles.length} transcript chunks, have ${chunks.length}`);

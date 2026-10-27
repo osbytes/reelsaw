@@ -25,6 +25,8 @@ export interface Storage {
   resolve(key: string, opts?: { downloadName?: string }): Promise<{ file: string } | { url: string }>;
   delete(key: string): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
+  /** Up to `limit` objects under `prefix` (keys as passed to the other methods) with their last-modified time. A bounded listing, not a walk of the bucket. */
+  list(prefix: string, limit: number): Promise<Array<{ key: string; modifiedAt: Date }>>;
 }
 
 /** Content types for the files this server streams (uploads, library assets, renders); anything else is an octet stream. */
@@ -114,6 +116,22 @@ class LocalStorage implements Storage {
   }
   async deletePrefix(prefix: string) {
     await fsp.rm(this.abs(prefix), { recursive: true, force: true });
+  }
+  async list(prefix: string, limit: number) {
+    const out: Array<{ key: string; modifiedAt: Date }> = [];
+    const walk = async (rel: string) => {
+      for (const e of await fsp.readdir(this.abs(rel), { withFileTypes: true }).catch(() => [])) {
+        if (out.length >= limit) return;
+        const child = `${rel.replace(/\/+$/, "")}/${e.name}`;
+        if (e.isDirectory()) await walk(child);
+        else {
+          const st = await fsp.stat(this.abs(child)).catch(() => null);
+          if (st) out.push({ key: child, modifiedAt: st.mtime });
+        }
+      }
+    };
+    await walk(prefix);
+    return out;
   }
 }
 
@@ -251,6 +269,19 @@ class S3Storage implements Storage {
       token = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (token);
   }
+
+  async list(prefix: string, limit: number) {
+    const { client, sdk } = await this.s3();
+    const root = this.prefix ? `${this.prefix.replace(/\/+$/, "")}/` : "";
+    const out: Array<{ key: string; modifiedAt: Date }> = [];
+    let token: string | undefined;
+    do {
+      const page = await client.send(new sdk.ListObjectsV2Command({ Bucket: this.bucket, Prefix: this.k(prefix).replace(/\/?$/, "/"), MaxKeys: Math.min(1000, limit - out.length), ContinuationToken: token }));
+      for (const o of page.Contents ?? []) if (o.Key && o.LastModified) out.push({ key: o.Key.slice(root.length), modifiedAt: o.LastModified });
+      token = page.IsTruncated && out.length < limit ? page.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
 }
 
 async function fileExists(file: string) {
@@ -280,6 +311,7 @@ export function withStorageLogging(inner: Storage, log: Logger): Storage {
     resolve: (key, opts) => inner.resolve(key, opts),
     delete: (key) => timed("delete", key, () => inner.delete(key)),
     deletePrefix: (prefix) => timed("deletePrefix", prefix, () => inner.deletePrefix(prefix)),
+    list: (prefix, limit) => timed("list", prefix, () => inner.list(prefix, limit)),
   };
 }
 
@@ -296,6 +328,7 @@ export function createStorage(config: Config, paths: Paths, log?: Logger): Stora
 }
 
 // ---------- key helpers ----------
+export const ASR_CACHE_PREFIX = "cache/asr/";
 export const keys = {
   upload: (id: string, ext: string) => `uploads/${id}${ext}`,
   source: (projectId: string, ext: string) => `projects/${projectId}/source${ext}`,
@@ -311,5 +344,7 @@ export const keys = {
   assetNorm: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/norm.${variant}.mp4`,
   /** derived cache: an SVG rasterised once at the render width */
   assetRaster: (sourceKey: string, variant: string) => `${keys.assetDir(sourceKey)}/raster.${variant}.png`,
+  /** a speech-to-text result (ai/asr.ts) shared across hosts when the store is S3; `sha` is the cache key */
+  asrCache: (sha: string) => `${ASR_CACHE_PREFIX}${sha}.json`,
   projectPrefix: (projectId: string) => `projects/${projectId}`,
 };

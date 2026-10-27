@@ -86,7 +86,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     case "transcript.imported":
       return { text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`, tone: "ok" };
     case "job.stalled":
-      return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
+      return { text: typeof p.message === "string" ? `${p.message} ${p.hint ?? ""}`.trim() : `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:
       return null;
   }

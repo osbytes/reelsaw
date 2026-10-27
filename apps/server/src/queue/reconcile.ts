@@ -15,6 +15,7 @@ import { libraryProviders } from "../library/import.js";
 import { QUEUES, type QueueName } from "./boss.js";
 import { finalizeProjectIfDone, markClipFailed } from "../pipeline/render.js";
 import { failProject } from "../pipeline/common.js";
+import { STAGE_LABEL } from "../pipeline/steps.js";
 import type { UnitOfWork } from "../uow.js";
 import { sessionLock, withSessionLock } from "../locks.js";
 import { WORKER_STALE_MS } from "../ops/workers.js";
@@ -212,6 +213,29 @@ export function startStallWatch(svc: Services, intervalMs = 5 * 60_000) {
   return () => clearInterval(timer);
 }
 
+export interface StallFacts {
+  /** the project's stage (a key of STAGE_LABEL) or null when it has none */
+  stage: string | null;
+  idleMinutes: number;
+  /** parts finished and in all, from projects.stage_detail */
+  done: number | null;
+  total: number | null;
+  /** minutes since the newest saved step of the stage finished, null when it has none */
+  lastStepMinutes: number | null;
+  /** progress ticks kept arriving although no part finished */
+  ticking: boolean;
+}
+
+/** "Finding moments has made no progress for 15 min: 13 of 43 parts done, last part finished 16 min ago." */
+export function stallSentence(f: StallFacts): string {
+  const label = f.stage ? (STAGE_LABEL[f.stage] ?? f.stage) : "This project";
+  const head = f.ticking && f.lastStepMinutes !== null ? `${label} is still reporting activity but no part has finished for ${f.lastStepMinutes} min` : `${label} has made no progress for ${f.idleMinutes} min`;
+  const parts: string[] = [];
+  if (f.done !== null && f.total !== null && f.total > 0) parts.push(`${f.done} of ${f.total} parts done`);
+  if (f.lastStepMinutes !== null && !(f.ticking)) parts.push(`last part finished ${f.lastStepMinutes} min ago`);
+  return parts.length ? `${head}: ${parts.join(", ")}.` : `${head}.`;
+}
+
 /**
  * Watchdog: a running project or clip that has emitted no event for STALL_MINUTES is reported once
  * (structured warn + a `job.stalled` event the UI shows), with what it was last doing and the live
@@ -225,12 +249,19 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const live = await db.select({ id: schema.workerInstances.id }).from(schema.workerInstances).where(and(inArray(schema.workerInstances.role, ["worker", "app"]), gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)))).limit(1);
   const noWorker = live.length === 0;
   const statuses: ProjectStatus[] = ["ingesting", "transcribing", "refining", "analyzing", "rendering", ...(noWorker ? (["queued"] as const) : [])];
-  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, statuses), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true } });
+  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, statuses), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true, stage: true, stageSeq: true, stageDetail: true } });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
-    // progress ticks only touch projects.updated_at (they are not stored as events), so that counts as activity too
-    if (!last || last.createdAt > cutoff || p.updatedAt > cutoff || last.type === "job.stalled") continue;
+    if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
+    // the newest saved step of this run of the stage (stages built on ctx.step); its updated_at moves only when a part finishes
+    const [step] = p.stage
+      ? await db.select({ name: schema.jobSteps.name, updatedAt: schema.jobSteps.updatedAt }).from(schema.jobSteps).where(and(eq(schema.jobSteps.projectId, p.id), eq(schema.jobSteps.stage, p.stage), eq(schema.jobSteps.stageSeq, p.stageSeq))).orderBy(desc(schema.jobSteps.updatedAt)).limit(1)
+      : [];
+    // progress ticks only touch projects.updated_at (they are not stored as events), so that counts as activity too;
+    // except for a stage of steps, where ticks without a finished part for STALL_MINUTES is a slow model, not progress
+    const ticking = p.updatedAt > cutoff;
+    if (ticking && !(step && step.updatedAt <= cutoff)) continue;
     // live jobs by (name, singleton_key): enqueue sets the key to the project id (stage jobs) or the clip id (render/prepare),
     // and exclusive-policy queues index exactly that, unlike data->>'projectId' which scans the whole job table
     const clipIds = (await db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, p.id))).map((c) => c.id);
@@ -245,12 +276,20 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       lastEvent: { type: last.type, payload: last.payload },
       liveJobs: jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key, runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null })),
     };
+    const lastStepMinutes = step ? Math.round((Date.now() - step.updatedAt.getTime()) / 60_000) : null;
+    const detail = p.stageDetail;
+    const explain = stallSentence({ stage: p.stage, idleMinutes: info.idleMinutes, done: detail?.done ?? null, total: detail?.total ?? null, lastStepMinutes, ticking });
     const noWorkerReason = p.status === "queued" && noWorker;
     log.warn(info, noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job");
     await svc.events.emit(p.id, "job.stalled", {
       idleMinutes: info.idleMinutes,
       lastEvent: last.type,
       liveJobs: info.liveJobs.length,
+      ...(p.stage ? { stage: p.stage } : {}),
+      ...(detail ? { done: detail.done, total: detail.total, unitMs: detail.unitMs } : {}),
+      ...(step ? { lastStepAt: step.updatedAt.toISOString(), lastStepName: step.name } : {}),
+      ...(ticking ? { ticking: true } : {}),
+      message: noWorkerReason ? "No worker is running, so this queued project is waiting." : explain,
       ...(noWorkerReason ? { reason: "No worker is running" } : {}),
       hint: noWorkerReason ? "start a `worker` container (or run the app with RUN_WORKERS=true); queued projects wait for one" : jobs.rows.length ? "still running; check `reelsaw status`" : "no job; the reconciler will re-enqueue it",
     });
