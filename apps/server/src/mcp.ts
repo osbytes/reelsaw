@@ -35,6 +35,12 @@ function mmss(s: number) {
   return `${m}:${String(Math.floor(s - m * 60)).padStart(2, "0")}`;
 }
 
+/** The follow-up for a settings change that re-renders: `skipped` clips were still preparing or rendering and finish with the old settings. */
+function rerenderHint(rerendered: number, skipped: number): string {
+  const base = rerendered ? `Re-rendering ${rerendered} clip(s); follow with wait_for_project.` : "No finished clips to re-render; the next render uses it.";
+  return skipped ? `${base} ${skipped} clip(s) were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.`.trim() : base;
+}
+
 export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
   const log = svc.log.child({ module: "mcp", userId: user.id, requestId });
   const ctx: Context = { svc, who: { user, via: access.via, canAdminister: access.canAdminister, session: null, blocked: null }, req, requestId, log };
@@ -640,7 +646,7 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
     ({ id, sourceText }) =>
       run(async () => {
         const r = await api.projects.setSourceText({ id, sourceText });
-        return { changed: ["sourceText"], needsRerender: false, rerendered: r.rerendered, hint: r.rerendered ? `Re-rendering ${r.rerendered} clip(s); follow with wait_for_project.` : "No finished clips to re-render; the next render uses it." };
+        return { changed: ["sourceText"], needsRerender: r.skipped > 0, rerendered: r.rerendered, skipped: r.skipped, hint: rerenderHint(r.rerendered, r.skipped) };
       }),
   );
 
@@ -652,9 +658,10 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
         const r = await api.projects.updateStyle({ id, style, keepOverrides, rerender });
         return {
           changed: Object.keys(style),
-          needsRerender: !rerender,
+          needsRerender: !rerender || r.skipped > 0,
           rerendered: r.rerendered,
-          hint: r.rerendered ? `Re-rendering ${r.rerendered} clip(s); follow with wait_for_project.` : rerender ? "No finished clips to re-render; the next render uses it." : "Saved; call rerender_clips to apply it to finished clips.",
+          skipped: r.skipped,
+          hint: rerender ? rerenderHint(r.rerendered, r.skipped) : "Saved; call rerender_clips to apply it to finished clips.",
         };
       }),
   );

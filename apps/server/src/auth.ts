@@ -311,7 +311,7 @@ export async function requester(auth: Auth, db: Db, headers: Headers, log?: Logg
     if (!res.valid || !res.key) return null;
     userId = res.key.referenceId;
     via = "apikey";
-    keyAdmin = apiKeyCanAdminister(res.key.id, res.key.permissions, log);
+    keyAdmin = apiKeyCanAdminister(res.key.permissions);
   } else {
     session = await auth.api.getSession({ headers });
     if (!session) return null;
@@ -324,22 +324,14 @@ export async function requester(auth: Auth, db: Db, headers: Headers, log?: Logg
 
 export const ADMIN_REFUSED_MESSAGE = "This key cannot change instance settings. Create a key with instance administration enabled in Settings → API keys.";
 
-const warnedLegacyKeys = new Set<string>();
-
 /**
  * Keys carry `permissions` (Better Auth's apiKey plugin): `{ admin: ["write"] }` allows the admin tools, anything
- * else (including `{ admin: [] }`, what Settings stores by default) does not. A key with no permission record at
- * all predates this and keeps full access, with one warning per key per process so an operator can replace it.
+ * else (including `{ admin: [] }`, what Settings stores by default, and no record at all) does not. Keys that predate
+ * permissions were given `{ admin: ["write"] }` by migration 0048, so they work as before and the grant shows in
+ * Settings, where it can be revoked.
  */
-export function apiKeyCanAdminister(keyId: string, permissions: Record<string, string[]> | null | undefined, log?: Logger): boolean {
-  if (!permissions) {
-    if (!warnedLegacyKeys.has(keyId)) {
-      warnedLegacyKeys.add(keyId);
-      log?.warn({ keyId }, "API key has no permission record; treated as full access");
-    }
-    return true;
-  }
-  return permissions.admin?.includes("write") ?? false;
+export function apiKeyCanAdminister(permissions: Record<string, string[]> | null | undefined): boolean {
+  return permissions?.admin?.includes("write") ?? false;
 }
 
 /** `requester`, but only for accounts allowed to use the app. Pending, suspended, and must-change sessions get null. */

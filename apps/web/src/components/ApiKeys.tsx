@@ -9,10 +9,9 @@ import { ScrollArea } from "./scroll-area";
 
 type Key = { id: string; name: string | null; start: string | null; createdAt: Date | string; lastRequest: Date | string | null; permissions?: Record<string, string[]> | null };
 
-/** What a key may do beyond a normal account: keys made before permissions existed have no record and keep full access. */
+/** What a key may do beyond a normal account. A key with no record (never an administrator) shows nothing; older keys were granted admin by migration. */
 function adminLabel(k: Key): string | null {
-  if (!k.permissions) return "full access";
-  return k.permissions.admin?.includes("write") ? "can administer" : null;
+  return k.permissions?.admin?.includes("write") ? "can administer" : null;
 }
 
 function when(d: Date | string | null | undefined) {

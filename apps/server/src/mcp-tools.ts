@@ -626,7 +626,7 @@ export const TOOLS = {
   },
   set_project_source_text: {
     title: "Set source text handling",
-    description: "Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. Re-renders every finished clip so the set agrees. Returns { changed, needsRerender, rerendered, hint }; rerendered is how many clips were queued, so follow with wait_for_project.",
+    description: "Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. Re-renders every finished clip so the set agrees. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, so follow with wait_for_project; skipped clips were still preparing or rendering and need rerender_clips once done (needsRerender is true).",
     inputSchema: {
       id: projectId(),
       sourceText: z.enum(["hide", "keep", "always"]).describe("hide = cover on-screen text in the source, keep = leave it, always = always show it"),
@@ -635,7 +635,7 @@ export const TOOLS = {
   },
   update_project_style: {
     title: "Update project style",
-    description: "Change the caption/hook look for the whole project (font, colors, size, position, words per line). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, hint }; rerendered is how many clips were queued. For one clip use update_clip { style }.",
+    description: "Change the caption/hook look for the whole project (font, colors, size, position, words per line). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
     inputSchema: {
       id: projectId(),
       style: styleOverrideSchema.describe("The style fields to change; fields left out keep their value"),

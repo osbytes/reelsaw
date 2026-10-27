@@ -184,6 +184,17 @@ describe("ctx.step", () => {
   });
 });
 
+describe("idle timer outside a batch", () => {
+  it("does not time work that follows a direct step", async () => {
+    const store = new MemoryStore();
+    const { r } = runner(store, { idleMs: 30 });
+    await r.step("a", key(), async () => [1], { schema: numbers, timeoutMs: 1000 });
+    await new Promise((res) => setTimeout(res, 100)); // non-step work (a scene-cut detect, a text scan) longer than the idle limit
+    assert.equal(r.idled, undefined);
+    r.stop();
+  });
+});
+
 describe("ctx.steps", () => {
   it("reports done/total with a time left, bounds concurrency, and keeps input order", async () => {
     const store = new MemoryStore();

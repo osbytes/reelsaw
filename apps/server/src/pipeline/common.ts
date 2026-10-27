@@ -212,9 +212,10 @@ export class StageContext {
   /**
    * Finish the stage. `handoff` runs in the same transaction: the results it writes, the
    * stage.completed event and the next stage's job commit together (or not at all, and the job
-   * retries), so a crash can't leave "completed" with nothing queued after it.
+   * retries), so a crash can't leave "completed" with nothing queued after it. `extra` may be a function: it runs in
+   * the same transaction once the stage is locked (before the event), for a payload that depends on what the handoff will do.
    */
-  async complete(extra: Record<string, unknown> = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
+  async complete(extra: Record<string, unknown> | ((u: UnitOfWork) => Promise<Record<string, unknown>>) = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
     await this.svc.tx(async (u) => {
       // first, so the results below land only while this job's version is current (and a re-analyze waits for them)
       if (!(await lockCurrentStage(u.db, this.projectId, this.seq))) throw new StaleJobError(this.projectId, this.seq);
@@ -223,7 +224,8 @@ export class StageContext {
       // loses its job once per stage never reaches the cap that fails it
       await u.db.update(schema.projects).set({ stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
-      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra, ...(durationSec !== undefined ? { durationSec } : {}) });
+      const payload = typeof extra === "function" ? await extra(u) : extra;
+      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...payload, ...(durationSec !== undefined ? { durationSec } : {}) });
       if (handoff) await handoff(u);
     });
   }

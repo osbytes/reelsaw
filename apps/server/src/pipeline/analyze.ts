@@ -1,6 +1,8 @@
 import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
 import { finalizeProjectIfDone, lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
+import type { Services } from "../services.js";
+import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
 import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
@@ -278,24 +280,9 @@ export async function analyze(ctx: StageContext) {
   if (existingClips.length) {
     log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
     await svc.tx(async (u) => {
-      // unprepared clips go through the one prepare path (which keeps a live prepare job); the rest re-queue their
-      // current generation. Clips are locked (id order) before the project row is touched.
       await lockProjectClips(u, projectId);
       if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq); // a newer re-analyze owns these clips now
-      for (const c of await listClips(u.db, projectId)) {
-        if (c.status === "done") continue;
-        if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });
-        else await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
-      }
-      // a conditional flip: only a project still in an earlier stage moves to rendering, and only that caller emits
-      const [moved] = await u.db
-        .update(schema.projects)
-        .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
-        .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
-        .returning({ id: schema.projects.id });
-      if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
-      // every clip already done (a Retry that only fetched an expired source again): nothing is queued to finish the project
-      await finalizeProjectIfDone(svc, u, projectId);
+      await convergeOnExistingClips(svc, u, projectId);
     });
     return;
   }
@@ -482,16 +469,20 @@ export async function analyze(ctx: StageContext) {
   log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit
-  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } }, async (u) => {
+  let converged = false;
+  let liveNow: schema.Clip[] = [];
+  const stageExtra = { chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } };
+  await ctx.complete(async (u) => {
     // the project row is locked by now (lockCurrentStage), so what we read here is what the insert sees
-    const liveNow = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
-    if (liveNow.some((c) => c.origin === "ai" && !keepReason(c))) {
+    liveNow = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+    converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+    // when we converge, another run's picks stand and this run inserted none
+    return { clips: converged ? 0 : rows.length, ...stageExtra };
+  }, async (u) => {
+    if (converged) {
       // another run of this analysis committed its picks while we scored: converge on them instead of adding a second set
       log.info({ clips: liveNow.length }, "clips already exist, converging");
-      await u.db
-        .update(schema.projects)
-        .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
-        .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])));
+      await convergeOnExistingClips(svc, u, projectId); // the clips are locked by lockCurrentStage in ctx.complete
       return;
     }
     const firstIndex = liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0);
@@ -505,6 +496,28 @@ export async function analyze(ctx: StageContext) {
     for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
   });
   void db;
+}
+
+/**
+ * Pick up where an analysis that already committed its clips left off: unprepared clips go through the one prepare
+ * path (which keeps a live prepare job), the rest re-queue their current generation, the project moves to rendering
+ * (only a project still in an earlier stage, and only that caller emits), and a project whose clips are all done
+ * finishes. The caller holds the clip locks (id order) and the project's stage lock.
+ */
+async function convergeOnExistingClips(svc: Services, u: UnitOfWork, projectId: string): Promise<void> {
+  for (const c of await listClips(u.db, projectId)) {
+    if (c.status === "done") continue;
+    if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });
+    else await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
+  }
+  const [moved] = await u.db
+    .update(schema.projects)
+    .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
+    .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
+    .returning({ id: schema.projects.id });
+  if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
+  // every clip already done (a Retry that only fetched an expired source again): nothing is queued to finish the project
+  await finalizeProjectIfDone(svc, u, projectId);
 }
 
 /**

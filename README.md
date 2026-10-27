@@ -411,8 +411,9 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 `get_failure`, `retry_failures`, `check_for_update`, and instance-wide `report_issue`) need a key
 created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
 Settings. Keys are created without it by default, and a key that lacks it is refused with "This
-key cannot change instance settings". Keys created before permissions existed carry no record and
-keep full access (the log warns once per such key); replace them with new keys to narrow them.
+key cannot change instance settings". Keys created before permissions existed were given the administration grant when the
+database upgraded, so they keep working; it shows on the key in Settings, where you can revoke it
+or replace the key. A key with no permission record is never an administrator.
 Connectors that sign in through OAuth (`MCP_OAUTH=true`) never get the admin tools, whoever
 signs in.
 
