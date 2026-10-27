@@ -199,6 +199,7 @@ export function TemplatesPage() {
               {templates.map((t) => row(t))}
             </ul>
           )}
+          {templates.length > 0 && <p className="pt-1 text-xs tabular-nums text-ink3">Showing {templates.length.toLocaleString()} of {templates.length.toLocaleString()} templates</p>}
         </section>
 
         {deleted.length > 0 && (

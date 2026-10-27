@@ -364,6 +364,11 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
             </button>
           </div>
         )}
+        {mode === "library" && !list.isPending && all.length > 0 && (
+          <p className="text-xs tabular-nums text-ink3">
+            Showing {rows.length.toLocaleString()} of {all.length.toLocaleString()} of your files (the list is not paged; catalog and provider results load more on request)
+          </p>
+        )}
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
         {mode === "library" && (list.data?.deleted.length ?? 0) > 0 && (
           <p className="text-xs text-ink3">
