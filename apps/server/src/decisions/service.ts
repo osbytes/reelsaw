@@ -61,10 +61,13 @@ export async function learningOn(db: Db, userId: string): Promise<boolean> {
 
 /**
  * Append decisions about one project, in the caller's unit of work (pass `u.db`), so a rolled-back action records
- * nothing. Writes nothing when the owner turned learning off. Returns how many rows were written.
+ * nothing. Writes nothing when the owner turned learning off; `build` (the transcript and model reads behind the rows)
+ * only runs when it is on. Returns how many rows were written.
  */
-export async function recordDecisions(svc: Pick<Services, "config">, db: Db, project: ProjectRef, rows: DecisionInput[]): Promise<number> {
-  if (!rows.length || !(await learningOn(db, project.userId))) return 0;
+export async function recordDecisions(svc: Pick<Services, "config">, db: Db, project: ProjectRef, build: () => Promise<DecisionInput[]> | DecisionInput[]): Promise<number> {
+  if (!(await learningOn(db, project.userId))) return 0;
+  const rows = await build();
+  if (!rows.length) return 0;
   const source = sourceRefOf(project);
   await db.insert(schema.userDecisions).values(
     rows.map((r) => ({
@@ -94,7 +97,10 @@ export function fixContext(raw: ReadonlyArray<Word>, f: Pick<TranscriptFlag, "wo
   return { words: raw.slice(from, to).map((w) => ({ text: w.text, start: w.start, end: w.end })), target: { index: f.wordIndex - from, span: f.span }, offset: from };
 }
 
-/** A fix as the decision stores it: everything but the flags a manual cut absorbed (those have their own rows). */
+/**
+ * A fix as the decision stores it: everything but the flags a manual fix absorbed. Detector cuts a manual cut confirms
+ * get their own fix.accept rows (`addManualFix`); the rest were decided before (their own rows) or are superseded.
+ */
 export function flagSnapshot(f: TranscriptFlag): Record<string, unknown> {
   const { absorbed: _absorbed, ...rest } = f;
   void _absorbed;
@@ -299,7 +305,10 @@ export async function setLearning(db: Db, userId: string, enabled: boolean) {
   return { ok: true as const, enabled };
 }
 
-/** Rejected detector cuts from the user's other projects, newest first: the "keep" examples the disfluency verifier sees. */
+/**
+ * Rejected detector cuts from the user's other projects, newest first: the "keep" examples the disfluency verifier sees.
+ * Only rejections that still stand: a later decision on the same fix (accepted after all, deleted, restored) retracts one.
+ */
 export async function rejectedCutRows(db: Db, userId: string, exceptProjectId: string, max: number) {
   return db
     .select({ context: schema.userDecisions.context })
@@ -312,6 +321,7 @@ export async function rejectedCutRows(db: Db, userId: string, exceptProjectId: s
         sql`${schema.userDecisions.projectId} <> ${exceptProjectId}`,
         sql`${schema.userDecisions.context}->>'flagKind' = 'disfluency'`,
         sql`coalesce(${schema.userDecisions.context}->>'subkind', '') <> 'manual'`,
+        sql`not exists (select 1 from user_decisions later where later.project_id = ${schema.userDecisions.projectId} and later.id > ${schema.userDecisions.id} and later.context->>'flagId' = ${schema.userDecisions.context}->>'flagId')`,
       ),
     )
     .orderBy(desc(schema.userDecisions.id))
@@ -356,7 +366,8 @@ export const BACKFILL_BATCH = 50;
 /**
  * Decisions that existed before the log, from the transcripts that still hold them (`reelsaw decisions backfill`):
  * accepted / rejected detector fixes, manual fixes and deleted fixes of every project, live or in Deleted, whose
- * owner has learning on and that has no decisions yet (so a rerun adds nothing). Clip edits cannot be recovered: their
+ * owner has learning on, skipping fixes the log already has (decided since it started, or an earlier run), so a rerun
+ * adds nothing. Clip edits cannot be recovered: their
  * before-values are gone. Rows carry `context.backfilled` and the project's last change as their time.
  */
 export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; budgetMs?: number } = {}) {
@@ -374,8 +385,10 @@ export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; bu
         const n = await svc.tx(async (u) => {
           const [p] = await u.db.select().from(schema.projects).where(eq(schema.projects.id, id));
           if (!p) return 0;
-          const [has] = await u.db.select({ id: schema.userDecisions.id }).from(schema.userDecisions).where(eq(schema.userDecisions.projectId, id)).limit(1);
-          if (has) return 0;
+          // fixes decided since the log started already have rows; a rerun finds every fix logged and adds nothing
+          const logged = new Set(
+            (await u.db.selectDistinct({ flagId: sql<string | null>`${schema.userDecisions.context}->>'flagId'` }).from(schema.userDecisions).where(eq(schema.userDecisions.projectId, id))).map((r) => r.flagId),
+          );
           const [t] = await u.db.select({ flags: schema.transcripts.flags, deletedFlags: schema.transcripts.deletedFlags, rawWords: schema.transcripts.rawWords, words: schema.transcripts.words }).from(schema.transcripts).where(eq(schema.transcripts.projectId, id));
           if (!t) return 0;
           const at = p.updatedAt;
@@ -389,10 +402,11 @@ export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; bu
             const { deletedAt, ...f } = d;
             items.push({ kind: "fix.delete", flag: f, before: f, after: null, createdAt: new Date(deletedAt), backfilled: true });
           }
-          if (!items.length) return 0;
-          const rows = await fixDecisions(u.db, id, t.rawWords ?? t.words, items);
+          const fresh = items.filter((it) => !logged.has(it.flag.id));
+          if (!fresh.length) return 0;
+          const rows = await fixDecisions(u.db, id, t.rawWords ?? t.words, fresh);
           if (o.dryRun) return (await learningOn(u.db, p.userId)) ? rows.length : 0;
-          return recordDecisions(svc, u.db, p, rows);
+          return recordDecisions(svc, u.db, p, () => rows);
         });
         if (n) {
           projects++;

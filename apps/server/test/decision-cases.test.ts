@@ -42,7 +42,7 @@ describe("fix context", () => {
     assert.deepEqual(c.target, { index: 3, span: 1 });
     assert.equal(fixContext(words, flag({ wordIndex: 98, span: 2 })).words.length, 32);
   });
-  it("drops the flags a manual cut absorbed (they have rows of their own)", () => {
+  it("drops the flags a manual cut absorbed", () => {
     assert.equal("absorbed" in flagSnapshot(flag({ subkind: "manual", absorbed: [{ id: "x" }] })), false);
   });
 });
@@ -97,6 +97,14 @@ describe("disfluency cases from decisions", () => {
     assert.equal(cases.length, 1);
     assert.equal(cases[0]!.expect, "keep");
     assert.equal(disfluencyCases([first], [caseKey(disfluencyCaseOf(first)!)]).length, 0);
+  });
+  it("an undo takes the older label back: deleting your manual cut, restoring a deleted cut", () => {
+    const manual = flag({ id: "m1", subkind: "manual", status: "accepted" });
+    assert.equal(disfluencyCases([decision({ id: 1, kind: "fix.manual", flag: manual }), decision({ id: 2, kind: "fix.delete", flag: manual })]).length, 0);
+    const auto = flag({ status: "auto" });
+    assert.equal(disfluencyCases([decision({ id: 1, kind: "fix.delete", flag: auto }), decision({ id: 2, kind: "fix.restore", flag: auto })]).length, 0);
+    // a decision after the undo labels again
+    assert.equal(disfluencyCases([decision({ id: 1, kind: "fix.delete", flag: auto }), decision({ id: 2, kind: "fix.restore", flag: auto }), decision({ id: 3, kind: "fix.reject", flag: auto })])[0]?.expect, "keep");
   });
   it("parses an export, counting lines that are not decisions", () => {
     const text = [JSON.stringify(decision()), "not json", JSON.stringify({ id: 2 }), ""].join("\n");

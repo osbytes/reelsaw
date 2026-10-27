@@ -75,6 +75,7 @@ export const PRIVACY: LegalSection[] = [
       "Account: name, email address, a hashed password, when you signed in and from which address and browser.",
       "Content: the videos you upload or link, their transcripts, the clips and files the Service makes, your settings and project history.",
       "Billing: your Stripe customer id, plan and subscription status. Card numbers never reach us; Stripe holds them.",
+      "Your decisions: the fixes you accept, reject or make and the clips you edit, create or delete, each with the transcript words or clip text it was about, which models proposed it, and the source's title, link and fingerprint. Reelsaw uses them to learn your preferences and to test itself against them. You can turn this off in Settings → Learning.",
       "Usage: minutes processed, storage used, model calls and their cost, which the app shows you and we use for the plan limits.",
       "Technical logs: request ids, errors and timings for 7 days, to keep the Service working.",
       "Website: reelsaw.com uses PostHog analytics with cookieless, aggregated page views; no advertising trackers.",
@@ -86,11 +87,11 @@ export const PRIVACY: LegalSection[] = [
   },
   {
     heading: "How long we keep it",
-    paragraphs: ["Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you delete them forever or they are purged. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."],
+    paragraphs: ["Stored source videos are deleted 30 days after upload and rendered clips 90 days after rendering; the project and its transcript stay so a clip can be rendered again from a fresh upload. Deleted projects, clips, library items and templates are restorable from Deleted for a while (7 days for projects and clips, 30 days for library items and templates) and still count toward storage until you delete them forever or they are purged. Your decisions (above) are kept when a project is deleted forever, so Reelsaw keeps learning from them, until you forget them: when deleting a project ("Also forget what Reelsaw learned from it"), or all at once in Settings → Learning. An account you delete is purged with everything it owns within 30 days; billing records are kept as long as tax law requires."],
   },
   {
     heading: "Your rights",
-    paragraphs: ["You can see and export your content in the app (every project has an export). You can correct your name and email in Settings, delete projects and clips, and delete the account. For anything else, or to object to processing, write to " + LEGAL_CONTACT + ". If you are in the EU/EEA or the UK you also have the right to complain to your data protection authority."],
+    paragraphs: ["You can see and export your content in the app (every project has an export). You can correct your name and email in Settings, delete projects and clips, stop or forget your recorded decisions in Settings → Learning, and delete the account. For anything else, or to object to processing, write to " + LEGAL_CONTACT + ". If you are in the EU/EEA or the UK you also have the right to complain to your data protection authority."],
   },
   {
     heading: "Security",

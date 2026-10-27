@@ -17,7 +17,7 @@ import { detectDisfluencies } from "../../pipeline/disfluency.js";
 import { isUnavailable, type CaseResult, type EvalContext, type FixtureSource, type Suite, type SummaryMetric } from "../framework.js";
 import { evalAi } from "../asr.js";
 
-type Split = "dev" | "heldout";
+export type Split = "dev" | "heldout";
 
 export interface Case {
   id: string;

@@ -4,7 +4,8 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { DECISION_KINDS, type Word } from "@reelsaw/shared";
+import { DECISION_KINDS } from "@reelsaw/shared";
+import type { Case, Split } from "../eval/suites/disfluency.js";
 
 /** A decision as exported (`reelsaw decisions export`, MCP `export_decisions`): one JSON object per line. */
 export const exportedDecisionSchema = z.object({
@@ -32,19 +33,8 @@ const fixContextSchema = z.object({
   target: z.object({ index: z.number().int().min(0), span: z.number().int().min(1) }),
 });
 
-export type Split = "dev" | "heldout";
-
-/** The case shape of eval/fixtures/disfluency/cases.json. */
-export interface DisfluencyCase {
-  id: string;
-  expect: "cut" | "keep";
-  kind: string;
-  split: Split;
-  source?: { url?: string; projectId?: string; decidedAt?: string; videoId?: string; sha256?: string };
-  target: { index: number; span: number };
-  label: string;
-  words: Word[];
-}
+/** The case shape of eval/fixtures/disfluency/cases.json, defined once by the suite that runs it. */
+export type DisfluencyCase = Case;
 
 /** Dev or heldout by project, never by row: windows of one video must not land on both sides (leakage). */
 export function splitOf(projectId: string): Split {
@@ -57,6 +47,15 @@ function linkAt(url: string | undefined, sec: number): string | undefined {
   return /youtube\.com\/watch|youtu\.be\//.test(url) ? `${url}${url.includes("?") ? "&" : "?"}t=${Math.floor(sec)}` : url;
 }
 
+/** The word window an explicit decision about a disfluency cut was made on, whether or not it is a label. */
+function disfluencyWindow(d: ExportedDecision) {
+  if (!d.explicit) return null;
+  const ctx = fixContextSchema.safeParse(d.context);
+  if (!ctx.success || ctx.data.flagKind !== "disfluency") return null;
+  const { target, words } = ctx.data;
+  return target.index + target.span > words.length ? null : ctx.data;
+}
+
 /**
  * The disfluency case a decision stands for, or null when it is not one: an explicit decision about a cut.
  *   fix.accept of a detector cut    → cut  (it was right)
@@ -66,22 +65,20 @@ function linkAt(url: string | undefined, sec: number): string | undefined {
  * Deleting or rejecting your own manual cut is an undo, not a label.
  */
 export function disfluencyCaseOf(d: ExportedDecision): DisfluencyCase | null {
-  if (!d.explicit) return null;
-  const ctx = fixContextSchema.safeParse(d.context);
-  if (!ctx.success || ctx.data.flagKind !== "disfluency") return null;
-  const manual = ctx.data.subkind === "manual";
+  const ctx = disfluencyWindow(d);
+  if (!ctx) return null;
+  const manual = ctx.subkind === "manual";
   const expect: "cut" | "keep" | null =
     d.kind === "fix.accept" && !manual ? "cut" : d.kind === "fix.reject" && !manual ? "keep" : d.kind === "fix.delete" && !manual ? "keep" : d.kind === "fix.manual" ? "cut" : null;
   if (!expect) return null;
-  const { words, target } = ctx.data;
-  if (target.index + target.span > words.length) return null;
+  const { words, target } = ctx;
   const said = words.slice(target.index, target.index + target.span).map((w) => w.text);
   const slug = said.join("-").toLowerCase().replace(/[^a-z0-9-]+/g, "").slice(0, 40) || "span";
   const at = words[target.index]!.start;
   return {
     id: `d${d.id}-${slug}`,
     expect,
-    kind: ctx.data.subkind ?? "manual",
+    kind: ctx.subkind ?? "manual",
     split: splitOf(d.projectId),
     source: {
       url: linkAt(d.source.url, at),
@@ -105,18 +102,20 @@ export function caseKey(c: Pick<DisfluencyCase, "words" | "target">): string {
 
 /**
  * Cases from an export, deduped by `caseKey`; when one window was decided more than once, the latest decision wins
- * (rows come newest first from the export, so the first seen is kept). `exclude` drops cases already committed.
+ * (rows come newest first from the export, so the first seen is kept), even when it is no label: undoing a manual
+ * cut or restoring a deleted cut takes the older label back. `exclude` drops cases already committed.
  */
 export function disfluencyCases(rows: ExportedDecision[], exclude: Iterable<string> = []): DisfluencyCase[] {
   const seen = new Set(exclude);
   const out: DisfluencyCase[] = [];
   for (const r of [...rows].sort((a, b) => b.id - a.id)) {
-    const c = disfluencyCaseOf(r);
-    if (!c) continue;
-    const k = caseKey(c);
+    const w = disfluencyWindow(r);
+    if (!w) continue;
+    const k = caseKey(w);
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push(c);
+    const c = disfluencyCaseOf(r);
+    if (c) out.push(c);
   }
   return out;
 }

@@ -57,6 +57,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   decisions <email> [--kind k] [--project id]      the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions)
  *   decisions export <email> [--out f.jsonl] [--since iso]   the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite)
  *   decisions forget <email> [--project id]          delete the account's decisions, or one project's (forget_decisions)
+ *   decisions learning <email> on|off                record the account's decisions or stop (Settings → Learning / set_learning)
  *   decisions backfill [--dry-run]                   write decisions still held in transcripts from before the log existed
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
@@ -164,7 +165,7 @@ import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureSt
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
-import { backfillDecisions, decisionSummary, EXPORT_MAX, exportDecisions, forgetDecisions, listDecisions } from "./decisions/service.js";
+import { backfillDecisions, decisionSummary, EXPORT_MAX, exportDecisions, forgetDecisions, listDecisions, setLearning } from "./decisions/service.js";
 import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
@@ -554,24 +555,32 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
    *   reelsaw decisions <email> [--kind fix.reject] [--project <id>] [--limit 50]
    *   reelsaw decisions export <email> [--out f.decisions.jsonl] [--since <iso>] [--kind <k>]   (JSON lines, for evals)
    *   reelsaw decisions forget <email> [--project <id>]
+   *   reelsaw decisions learning <email> on|off   (Settings → Learning's switch, set_learning)
    *   reelsaw decisions backfill [--dry-run]    (decisions still held in transcripts, from before the log existed)
    */
   async decisions(svc) {
     const db = svc.database.db;
-    const sub = ["export", "forget", "backfill"].includes(pos[0] ?? "") ? pos[0] : undefined;
-    const usage = "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | backfill [--dry-run]";
+    const sub = ["export", "forget", "learning", "backfill"].includes(pos[0] ?? "") ? pos[0] : undefined;
+    const usage = "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | learning <email> on|off | backfill [--dry-run]";
     const kindArg = flag("kind");
     const kind = kindArg ? DECISION_KINDS.find((k) => k === kindArg) : undefined;
     if (kindArg && !kind) throw new Error(`--kind must be one of ${DECISION_KINDS.join(", ")}`);
     if (sub === "backfill") {
       const dry = args.includes("--dry-run");
       const r = await backfillDecisions(svc, { dryRun: dry });
-      console.log(`${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; projects that already had decisions were skipped`);
+      console.log(`${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`);
       return;
     }
     const email = sub ? pos[1] : pos[0];
     if (!email) throw new Error(usage);
     const u = await userByEmail(svc, email);
+    if (sub === "learning") {
+      const on = pos[2] === "on" ? true : pos[2] === "off" ? false : undefined;
+      if (on === undefined) throw new Error("usage: reelsaw decisions learning <email> on|off");
+      await svc.tx((tx) => setLearning(tx.db, u.id, on));
+      console.log(`learning ${on ? "on" : "off"} for ${u.email}${on ? "" : " (decisions already kept stay; reelsaw decisions forget removes them)"}`);
+      return;
+    }
     if (sub === "forget") {
       const n = await svc.tx((tx) => forgetDecisions(tx.db, u.id, { projectId: flag("project") }));
       console.log(`forgot ${n} decision(s) of ${u.email}${flag("project") ? ` about ${flag("project")}` : ""}`);

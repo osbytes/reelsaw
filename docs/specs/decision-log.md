@@ -135,7 +135,7 @@ never exists for an edit that did not happen. When the user has turned learning 
 | forget | `decisions.forget` | `forget_decisions` | `reelsaw decisions forget <email> [--project id]` |
 | forget at delete (applied at the purge) | `projects.delete` `forgetDecisions` | `delete_project` `forgetDecisions` | `reelsaw delete-project <id> --forget-decisions` |
 | forget with the purge | `projects.purge` / `deleted.purge` `forgetDecisions` | `purge_project` `forgetDecisions` | `reelsaw purge-project <id> --forget-decisions` |
-| setting | `decisions.setLearning` | `set_learning` | |
+| setting | `decisions.setLearning` | `set_learning` | `reelsaw decisions learning <email> on\|off` |
 | backfill existing projects | | | `reelsaw decisions backfill [--dry-run]` |
 
 Only the project owner's own actions are recorded: an admin or the operator CLI acting on someone's project

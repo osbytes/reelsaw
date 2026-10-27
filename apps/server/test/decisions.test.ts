@@ -87,6 +87,19 @@ describe("decision log", () => {
     assert.equal(d?.before?.status, "auto");
   });
 
+  it("a manual cut over the detector's unreviewed cut confirms it", async () => {
+    const other = randomUUID();
+    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Absorb', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [other, owner.userId]);
+    await pool.query(`insert into transcripts (project_id, text, words, raw_words, segments, flags) values ($1, 'x', $2, $2, '[]', $3)`, [other, JSON.stringify(words), JSON.stringify([flag("absorb-me", 70)])]);
+    const cut = await trpc(owner.cookie, "transcripts.addCut", { projectId: other, start: 69, end: 71.8, rerender: false });
+    assert.equal(cut.status, 200, JSON.stringify(cut.error));
+    const kinds = (await pool.query<{ kind: string; flag: string }>(`select kind, context->>'flagId' as flag from user_decisions where project_id = $1 order by id`, [other])).rows;
+    assert.deepEqual(kinds.map((r) => r.kind), ["fix.accept", "fix.manual"]);
+    assert.equal(kinds[0]!.flag, "absorb-me");
+    await pool.query(`delete from user_decisions where project_id = $1`, [other]);
+    await pool.query(`delete from projects where id = $1`, [other]);
+  });
+
   it("records a clip edit as the changed fields before and after", async () => {
     const r = await trpc(owner.cookie, "clips.update", { id: clipId, title: "My title", startSec: 2, rerender: false });
     assert.equal(r.status, 200, JSON.stringify(r.error));

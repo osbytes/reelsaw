@@ -7,6 +7,8 @@
  * row newer than the cutoff and the cursor never moves past rows that are merely too young.
  * Protected event types (the run skeleton the Activity tab and `runsOf` read) are skipped, so the
  * cursor does move past them and they are never rescanned. They go with the project (cascade).
+ * user_decisions is the exception (`byTime`): backfilled rows get new ids but old times, so id order does not track
+ * time there, and it is pruned by created_at instead.
  */
 import type { Services } from "./services.js";
 import type { RuntimeSettings } from "./instance-settings.js";
@@ -56,7 +58,7 @@ const TABLES = {
   llm: { table: "llm_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
   stt: { table: "stt_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
   admin: { table: "admin_events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
-  decisions: { table: "user_decisions", typed: false, days: (c: RuntimeSettings) => c.DECISION_RETENTION_DAYS },
+  decisions: { table: "user_decisions", typed: false, byTime: true, days: (c: RuntimeSettings) => c.DECISION_RETENTION_DAYS },
 } as const;
 type Which = keyof typeof TABLES;
 interface PruneState {
@@ -69,6 +71,14 @@ async function pruneTable(svc: Services, which: Which, cutoff: Date, startCursor
   const pool = svc.database.pool;
   let cursor = startCursor;
   let deleted = 0;
+  if ("byTime" in TABLES[which]) {
+    for (;;) {
+      if (expired(deadline)) return { deleted, cursor, done: false };
+      const r = await pool.query(`delete from ${table} where id in (select id from ${table} where created_at < $1 limit ${PRUNE_BATCH})`, [cutoff]);
+      deleted += r.rowCount ?? 0;
+      if ((r.rowCount ?? 0) < PRUNE_BATCH) return { deleted, cursor, done: true };
+    }
+  }
   for (;;) {
     if (expired(deadline)) return { deleted, cursor, done: false };
     const page = await pool.query<{ id: string; type?: string; created_at: Date }>(

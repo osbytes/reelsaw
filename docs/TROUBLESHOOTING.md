@@ -89,6 +89,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw decisions <email> [--kind k] [--project id]` | the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions) |
 | `reelsaw decisions export <email> [--out f.jsonl] [--since iso]` | the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite) |
 | `reelsaw decisions forget <email> [--project id]` | delete the account's decisions, or one project's (forget_decisions) |
+| `reelsaw decisions learning <email> on\|off` | record the account's decisions or stop (Settings → Learning / set_learning) |
 | `reelsaw decisions backfill [--dry-run]` | write decisions still held in transcripts from before the log existed |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |

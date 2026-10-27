@@ -165,7 +165,14 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
   };
   const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
   const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
-  await recordDecisions(svc, u.db, p, await fixDecisions(u.db, p.id, raw, [{ kind: "fix.manual", flag, before: null, after: flag }]));
+  // a cut drawn over the detector's unreviewed cuts confirms them: each gets its fix.accept next to the fix.manual
+  const confirmed = what.kind === "disfluency" ? merged.filter((f) => f.kind === "disfluency" && f.subkind !== "manual" && (f.status === "pending" || f.status === "auto")) : [];
+  await recordDecisions(svc, u.db, p, () =>
+    fixDecisions(u.db, p.id, raw, [
+      ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const } })),
+      { kind: "fix.manual", flag, before: null, after: flag },
+    ]),
+  );
   return { ok: true, flagId: flag.id, rerendered };
   });
 }
@@ -1275,7 +1282,7 @@ const restRouter = router({
           svc,
           db,
           p,
-          await fixDecisions(
+          () => fixDecisions(
             db,
             p.id,
             raw,
@@ -1304,7 +1311,7 @@ const restRouter = router({
           if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
           const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
           const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
-          await recordDecisions(ctx.svc, u.db, p, await fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.delete", flag: f, before: f, after: null }]));
+          await recordDecisions(ctx.svc, u.db, p, () => fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.delete", flag: f, before: f, after: null }]));
           return { ok: true, rerendered };
         }),
       ),
@@ -1332,7 +1339,7 @@ const restRouter = router({
         }
         live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
         const rerendered = await saveFlags(svc, u, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
-        await recordDecisions(svc, u.db, p, await fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]));
+        await recordDecisions(svc, u.db, p, () => fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]));
         return { ok: true, rerendered };
         }),
       ),

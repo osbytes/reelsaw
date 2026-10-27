@@ -266,7 +266,7 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
     const p = await findProject(u.db, actor, c.projectId, { deleted: false });
     const changed = await markClipDeleted(svc, u, c);
     if (changed) await finalizeProjectIfDone(svc, u, c.projectId);
-    if (changed && byOwner(actor, p)) await recordDecisions(svc, u.db, p, await clipDecisions(u.db, p.id, "clip.delete", [c]));
+    if (changed && byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.delete", [c]));
     const stored = clipStored(c);
     return {
       ok: true,
@@ -307,7 +307,7 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
       } else skipped++;
     }
     if (deleted) await finalizeProjectIfDone(svc, u, projectId);
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, await clipDecisions(u.db, p.id, "clip.delete", gone));
+    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.delete", gone));
     return { ok: true as const, deleted, skipped, stoppedRenders, restorable: restorableFor(svc), storedBytes };
   });
 }
@@ -323,7 +323,7 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
     const [{ next }] = await u.db.select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` }).from(schema.clips).where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(c.projectId, "clip.restored", { clipId, index: next, title: c.title });
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, await clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
+    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
     return { ok: true, changed: true, clipId, status: c.status, needsRerender: c.status !== "done" };
   });
 }
@@ -388,7 +388,7 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
     await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true, kept: kept.length, replaced: replaced.length });
     // the user asked for different picks: the replaced ones are weak negatives, not deletes they chose one by one
-    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, await clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
+    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
     await u.artifact(p.id, "analyze", "kept", { kept: kept.map(({ c, why }) => ({ clipId: c.id, index: c.index, title: c.title, why })), replaced: replaced.map((c) => c.id), restorable: restorableFor(svc) });
     await u.enqueue(QUEUES.analyze, { projectId: p.id });
     u.afterCommit(() => svc.log.child({ module: "analyze", projectId: p.id }).info({ kept: kept.length, replaced: replaced.length }, "re-analyze keeps the clips the user made or edited"));

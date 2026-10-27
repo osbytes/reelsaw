@@ -264,7 +264,8 @@ async function rejectedCutExamples(svc: Services, projectId: string, max = 8): P
   }
   if (out.length >= max) return out;
   const seen = new Set(out);
-  const others = await db.query.projects.findMany({ where: eq(schema.projects.userId, p.userId), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
+  // projects deleted with "forget what Reelsaw learned" teach nothing while they wait for the purge
+  const others = await db.query.projects.findMany({ where: and(eq(schema.projects.userId, p.userId), eq(schema.projects.forgetDecisionsOnPurge, false)), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
   for (const o of others) {
     if (o.id === projectId || out.length >= max) continue;
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, o.id), columns: { flags: true, rawWords: true, words: true } });
