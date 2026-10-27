@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.27.0
+
+### Minor Changes
+
+- [#191](https://github.com/osbytes/reelsaw/pull/191) [`5016e2a`](https://github.com/osbytes/reelsaw/commit/5016e2a069272dab6ba58c41d7a7a909f0879dbf) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Decision log: what you accept, reject, cut, correct and edit is recorded (with the words or clip text it was about, the models that proposed it and a fingerprint of the source) and outlives deleted projects, so Reelsaw keeps learning after "Delete forever" (rejected cuts from deleted projects still teach the filler detector). Settings → Learning turns it off or forgets everything; the delete and "Delete forever" dialogs can forget one project's decisions (a choice made at delete time holds for the automatic purge too). New MCP tools `list_decisions`, `export_decisions`, `forget_decisions`, `set_learning` (and `forgetDecisions` on `delete_project` and `purge_project`), CLI `reelsaw decisions` (list, export, forget, backfill of decisions made before this release), `DECISION_RETENTION_DAYS` (default keep). Ingest records the source's sha256, video id and format. Evals: `harvest-decisions.ts` turns an export into disfluency candidates split by project, and the `decisions` suite replays today's detector against users' decisions.
+
+### Patch Changes
+
+- [#189](https://github.com/osbytes/reelsaw/pull/189) [`3afa8dd`](https://github.com/osbytes/reelsaw/commit/3afa8ddcb274457ec910b0df0f5f673d3f7b8cf0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Game and app interfaces are no longer blurred as burned-in captions. The on-screen text scan now tells interface text (scores, player lists and menu buttons pinned to the side of a gameplay or screen recording) from subtitles, logos and lower thirds, and leaves the interface visible. New projects get this automatically. For an existing project, an operator can re-scan with `reelsaw overlays <projectId> --store` and then re-render the clips.
+
 ## 0.26.4
 
 ### Patch Changes
