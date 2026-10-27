@@ -55,6 +55,13 @@ async function main() {
     // requestTimeout 0: Node's default (300 s) cuts off a multi-GB upload on an ordinary connection;
     // headersTimeout and keep-alive still close idle sockets
     server = serve({ fetch: app.fetch, port: config.PORT, serverOptions: { requestTimeout: 0 } }, (info) => log.info({ port: info.port, appUrl: config.APP_URL }, "http listening"));
+    // Node closes an idle keep-alive socket after 5 s, which is shorter than what clients (undici, browsers, proxies)
+    // keep theirs for: a request reusing a socket the server just closed fails with "other side closed". Outlive
+    // them (65 s, the usual load-balancer figure); headersTimeout must stay above it, and shutdown closes idle sockets.
+    if ("keepAliveTimeout" in server) {
+      server.keepAliveTimeout = 65_000;
+      server.headersTimeout = 66_000;
+    }
     httpCloser = trackHttpServer(server);
     server.on("error", (err) => {
       log.fatal({ err, port: config.PORT }, "cannot listen");
