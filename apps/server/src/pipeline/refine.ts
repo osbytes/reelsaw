@@ -7,9 +7,9 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
-import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
+import { DISFLUENCY_PROMPT_VERSION, detectDisfluencies, type DisfluencyCheckpoint, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
 import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
@@ -279,9 +279,22 @@ export async function refineDisfluency(ctx: StageContext) {
   const reserved = new Set<number>();
   for (const f of t.flags) if (f.kind === "entity" || f.kind === "loop" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const trace: DisfluencyTraceEntry[] = [];
+  const modelId = svc.models.get().language;
+  const unitMs = ctx.unitTimeoutMs(modelId);
+  const concurrency = 3;
+  const phases = { rewrite: { range: [0.1, 0.7] as [number, number], what: "Checking" }, verify: { range: [0.7, 0.95] as [number, number], what: "Verifying" } };
+  // every model window is a saved step: a timeout or a restart resumes from the windows already done, and a window
+  // lost to a timeout fails the stage (it is never written as "done" with whatever flags were found so far)
+  const checkpoint: DisfluencyCheckpoint = {
+    all: (items, phase, fn) => ctx.steps(items, { concurrency, range: phases[phase].range, message: (d, t) => `${phases[phase].what} for fillers and repeats (${d}/${t})` }, fn),
+    step: (name, key, fn, stepSchema, o) => ctx.step(name, { ...key, model: modelId, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, { schema: stepSchema, timeoutMs: unitMs * (o.calls ?? 1), model: modelId, signal: o.signal }),
+  };
   const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
-    timeoutMs: ctx.unitTimeoutMs(svc.models.get().language),
+    timeoutMs: unitMs,
+    concurrency,
+    checkpoint: useLlm ? checkpoint : undefined,
+    isFatal: (err) => err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError,
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
     reserved,
