@@ -51,6 +51,31 @@ should follow the update check (Settings → System) or watch releases.
   keys stored in Settings.
 - Leave `ALLOW_PRIVATE_SOURCE_URLS` off unless the instance must read from a NAS.
 - Put the instance behind an HTTPS reverse proxy and keep `TRUST_PROXY` matched to the
-  deployment (`false` when the app is exposed directly).
+  deployment (`false` when the app is exposed directly). Set `TRUSTED_PROXY_HOPS` to the number
+  of proxies in front of the app (2 for Cloudflare in front of Caddy) so the client address is
+  the entry from the right that your proxies wrote, not one the client sent; use
+  `TRUSTED_PROXY_HEADER=cf-connecting-ip` only when the origin accepts traffic from Cloudflare alone.
+- Create API keys without "Allow instance administration" unless the agent must change
+  instance settings. OAuth connectors never get admin tools. Connected apps can be revoked under
+  Settings → Account.
+
+### URL sources and your network
+
+Reelsaw checks the address of every link it fetches itself (library imports, subtitle files):
+the name is resolved once, refused if it is inside the network, and the connection goes to that
+address, so DNS rebinding and redirects to internal hosts are caught. **yt-dlp**, which
+downloads the video behind a project's source link, resolves names and follows redirects and
+embedded URLs on its own; Reelsaw only checks the first address. A hosted or shared instance,
+where people you do not trust can add links, should not rely on that check alone:
+
+- Send yt-dlp's traffic through an egress proxy that refuses private destinations (`YTDLP_PROXY`,
+  for example an HTTP proxy or gateway on a separate network), or
+- run the app container under a network policy or firewall rule that blocks RFC1918 ranges
+  (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local (`169.254.0.0/16`, which includes
+  cloud metadata at `169.254.169.254`) and `fc00::/7`, `fe80::/10`, except for the services it needs
+  (database, object storage, Ollama).
+
+A single-user instance on a home network that reads from its own NAS has less to defend; that is
+what `ALLOW_PRIVATE_SOURCE_URLS=true` is for.
 
 Dependencies are watched by Dependabot and CodeQL on every pull request.

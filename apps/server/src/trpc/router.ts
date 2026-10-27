@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -416,6 +417,48 @@ const headRouter = router({
         return { ok: true, projectDefaults: next };
       });
     }),
+    /**
+     * A new API key for this account (Settings → API keys). Permissions can only be set on the server, so the
+     * Settings page asks here instead of calling the auth client. A key can administer the instance only when an
+     * admin ticked it; a key cannot mint keys.
+     */
+    createApiKey: protectedProcedure
+      .input(z.object({ name: z.string().trim().min(1).max(32), admin: z.boolean().default(false) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.who.via !== "session") throw new TRPCError({ code: "FORBIDDEN", message: "Create keys from the Settings page after signing in." });
+        if (input.admin && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can create a key that administers the instance." });
+        const created = await ctx.svc.auth.api.createApiKey({ body: { name: input.name, userId: ctx.user.id, permissions: { admin: input.admin ? ["write"] : [] } } });
+        ctx.log.info({ keyId: created.id, admin: input.admin }, "api key created");
+        return { id: created.id, key: created.key, name: input.name };
+      }),
+    /** Apps (MCP connectors) this account has allowed through the OAuth consent screen. Empty unless MCP_OAUTH is on. */
+    oauthGrants: protectedProcedure.query(async ({ ctx }) => {
+      const rows = await ctx.svc.database.db
+        .select({
+          clientId: schema.oauthConsent.clientId,
+          grantedAt: schema.oauthConsent.createdAt,
+          scopes: schema.oauthConsent.scopes,
+          name: schema.oauthClient.name,
+          uri: schema.oauthClient.uri,
+          redirectUris: schema.oauthClient.redirectUris,
+        })
+        .from(schema.oauthConsent)
+        .innerJoin(schema.oauthClient, eq(schema.oauthClient.clientId, schema.oauthConsent.clientId))
+        .where(eq(schema.oauthConsent.userId, ctx.user.id))
+        .orderBy(desc(schema.oauthConsent.createdAt));
+      return rows.map(({ redirectUris, ...r }) => ({ ...r, redirectHosts: redirectHosts(redirectUris) }));
+    }),
+    /** Take an app's access away: its consent and every token it holds for this account. Its next request fails. */
+    revokeOauthGrant: protectedProcedure.input(z.object({ clientId: z.string().min(1).max(200) })).mutation(({ ctx, input }) =>
+      ctx.svc.tx(async (u) => {
+        const mine = (table: { userId: AnyPgColumn; clientId: AnyPgColumn }) => and(eq(table.userId, ctx.user.id), eq(table.clientId, input.clientId));
+        await u.db.delete(schema.oauthAccessToken).where(mine(schema.oauthAccessToken));
+        await u.db.delete(schema.oauthRefreshToken).where(mine(schema.oauthRefreshToken));
+        const gone = await u.db.delete(schema.oauthConsent).where(mine(schema.oauthConsent)).returning({ id: schema.oauthConsent.id });
+        ctx.log.info({ clientId: input.clientId, consents: gone.length }, "oauth grant revoked");
+        return { ok: true };
+      }),
+    ),
   }),
 
   /**
@@ -436,6 +479,12 @@ const headRouter = router({
 type UsageCounts = Awaited<ReturnType<typeof bumperUsageCounts>>;
 
 /** One library row as the screens read it. `owner` is "shared" for catalog / provider imports (`user_id` null). */
+/** The hosts an OAuth app sends people back to: what the consent screen and the connected-apps list show. */
+function redirectHosts(uris: string[]): string[] {
+  const hosts = uris.flatMap((u) => (URL.canParse(u) ? [new URL(u).host] : []));
+  return [...new Set(hosts)];
+}
+
 function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts, me: string) {
   return {
     id: r.id,

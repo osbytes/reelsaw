@@ -5,6 +5,7 @@ import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
 import { ApiKeysSection } from "../components/ApiKeys";
 import { AccountSection } from "../components/AccountSection";
+import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
 import { useMe, useSystemStatus } from "../lib/account";
 import { ProcessingTimes } from "../components/ProcessingTimes";
@@ -115,6 +116,7 @@ export function SettingsPage() {
             <AccountSection />
             <ProjectDefaultsSection />
             <ApiKeysSection mcpUrl={`${window.location.origin}/api/mcp`} />
+            <ConnectedAppsSection />
           </>
         )}
       </main>

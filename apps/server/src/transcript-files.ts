@@ -16,7 +16,7 @@ import { slugify } from "./export.js";
 import { stageSeqOf, startRun } from "./pipeline/lifecycle.js";
 import { enqueueRefine } from "./pipeline/refine.js";
 import { releaseUpload } from "./storage/uploads.js";
-import { assertPublicHttpUrl, UnsafeUrlError } from "./lib/safe-url.js";
+import { bodyChunks, fetchPublic, TooManyRedirectsError, UnsafeUrlError } from "./lib/safe-url.js";
 import type { Actor } from "./projects/service.js";
 
 export type CaptionFormat = "srt" | "vtt";
@@ -88,30 +88,21 @@ async function uploadText(svc: Services, actor: Actor, uploadId: string): Promis
 
 /** A subtitle file from a public link (MCP `import_transcript { url }`): http(s) only, never an address inside this network, 3 redirects, 10 MB, 30 s. */
 export async function fetchSubtitleText(url: string, deps: { fetch?: typeof fetch; lookup?: (host: string) => Promise<Array<{ address: string }>> } = {}): Promise<string> {
-  const doFetch = deps.fetch ?? fetch;
   const signal = AbortSignal.timeout(30_000);
   try {
-    let target = await assertPublicHttpUrl(url, { lookup: deps.lookup });
-    for (let hop = 0; ; hop++) {
-      const res = await doFetch(target, { redirect: "manual", signal });
-      const next = res.headers.get("location");
-      if (res.status >= 300 && res.status < 400 && next) {
-        if (hop >= 3) throw new TRPCError({ code: "BAD_REQUEST", message: "Too many redirects" });
-        target = await assertPublicHttpUrl(new URL(next, target).toString(), { lookup: deps.lookup });
-        continue;
-      }
-      if (!res.ok || !res.body) throw new TRPCError({ code: "BAD_REQUEST", message: `Download failed (HTTP ${res.status})` });
-      const chunks: Buffer[] = [];
-      let seen = 0;
-      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-        seen += chunk.length;
-        if (seen > MAX_SUBTITLE_BYTES) throw new TRPCError({ code: "BAD_REQUEST", message: `The file is larger than ${MAX_SUBTITLE_BYTES / 1024 / 1024} MB` });
-        chunks.push(Buffer.from(chunk));
-      }
-      return Buffer.concat(chunks).toString("utf8");
+    // resolved once, checked, and connected to at that address, hop by hop (lib/safe-url.ts)
+    const { res } = await fetchPublic(url, { lookup: deps.lookup, maxRedirects: 3, signal, fetch: deps.fetch ? (u, init) => deps.fetch!(u, init) : undefined });
+    if (!res.ok || !res.body) throw new TRPCError({ code: "BAD_REQUEST", message: `Download failed (HTTP ${res.status})` });
+    const chunks: Buffer[] = [];
+    let seen = 0;
+    for await (const chunk of bodyChunks(res)) {
+      seen += chunk.length;
+      if (seen > MAX_SUBTITLE_BYTES) throw new TRPCError({ code: "BAD_REQUEST", message: `The file is larger than ${MAX_SUBTITLE_BYTES / 1024 / 1024} MB` });
+      chunks.push(Buffer.from(chunk));
     }
+    return Buffer.concat(chunks).toString("utf8");
   } catch (err) {
-    if (err instanceof UnsafeUrlError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+    if (err instanceof UnsafeUrlError || err instanceof TooManyRedirectsError) throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
     throw err;
   }
 }

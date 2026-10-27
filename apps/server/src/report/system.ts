@@ -44,8 +44,10 @@ function hashJobData(data: Record<string, unknown> | null) {
   return { ...rest, ownerHash: hashOwner(userId) };
 }
 
-export async function systemInfo(svc: Services, instance: boolean) {
+/** `full` (admin-generated reports only) adds the configuration dump: machine, models, storage driver, roles. Others get versions only. */
+export async function systemInfo(svc: Services, instance: boolean, full: boolean) {
   const c = svc.config;
+  if (!full) return { app: { version: c.REELSAW_VERSION, commit: c.REELSAW_COMMIT, builtAt: c.REELSAW_BUILT_AT }, runtime: { node: process.version, platform: process.platform, arch: process.arch } };
   const accounts = instance
     ? await svc.database.db.execute(sql`
         select

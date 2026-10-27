@@ -118,8 +118,8 @@ export function verifyEmailErrorFromSearch(search: string): { expired: boolean; 
  */
 export const REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD = "The password from your first sign-up is the one on the account. Sign in with that, or reset it.";
 
-/** Same sentence as the mailbox-key guard (`abuse.ts`). */
-export const ACCOUNT_EXISTS_MESSAGE = "An account already exists for this email address. Sign in, or reset your password.";
+/** The one sentence every refused repeat sign-up hears, whatever state the account is in (it must not reveal which). Also the mailbox-key guard (`abuse.ts`). */
+export const ACCOUNT_EXISTS_MESSAGE = "This email address cannot be used to sign up. If it is yours, sign in or reset your password.";
 
 export type AccountBlock = { kind: "pending" | "banned"; reason: string } | null;
 

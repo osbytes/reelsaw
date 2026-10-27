@@ -1450,7 +1450,7 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
   if (!user) throw new Error("user not found");
   console.error(`acting as ${user.email}`);
   const req = new Request(svc.config.APP_URL);
-  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
+  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", canAdminister: true, session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
 }
 
 async function userByEmail(svc: Services, email: string | undefined) {

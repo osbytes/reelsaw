@@ -281,7 +281,7 @@ export async function createReportZip(
       if (include.system) {
         const own = (await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.userId, user.id))).map((p) => p.id);
         const ownClips = own.length ? (await db.select({ id: schema.clips.id }).from(schema.clips).where(inArray(schema.clips.projectId, own))).map((c) => c.id) : [];
-        addJson("system.json", { ...(await systemInfo(svc, include.instance)), logLevel: svc.logLevel.state() });
+        addJson("system.json", { ...(await systemInfo(svc, include.instance, caps.instance)), logLevel: svc.logLevel.state() });
         addJson("queue.json", JSON.parse(redact(JSON.stringify(await queueInfo(svc, include.instance ? { instance: true } : { projectIds: project ? [project.id] : own })))));
         addJson("usage.json", await usageInfo(svc, include.instance ? { instance: true } : { userId: user.id }));
         addJsonl("errors.jsonl", await recentErrors(svc, { projectIds: own, clipIds: ownClips, instance: include.instance }, redact));

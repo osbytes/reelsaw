@@ -27,6 +27,7 @@ import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
+import { clientIp, WindowCounter } from "./abuse.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
 import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
 import { execFile } from "node:child_process";
@@ -118,7 +119,16 @@ export function createApp(svc: Services) {
     const { ok, checks } = await runHealthChecks(svc);
     return c.json({ ok, checks, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) }, ok ? 200 : 503);
   });
+  // OAuth dynamic client registration is open to anyone (claude.ai registers itself); cap it per address so the client table cannot be flooded
+  const registrations = new WindowCounter(20);
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+    if (config.MCP_OAUTH && c.req.method === "POST" && c.req.path === "/api/auth/oauth2/register") {
+      const ip = clientIp(c.req.raw.headers, config);
+      if (ip && !registrations.hit(ip)) {
+        c.get("log").warn({ ip }, "oauth client registration refused: too many from this address today");
+        return c.json({ error: "too_many_requests", error_description: "Too many apps were registered from this network today. Try again tomorrow." }, 429);
+      }
+    }
     if (c.req.method === "GET" && c.req.path === "/api/auth/verify-email") {
       const gate = await gateEmailVerification(db, c.req.query("token") ?? "");
       if (!gate.ok) {
@@ -174,18 +184,18 @@ export function createApp(svc: Services) {
         if (!user) return c.json({ error: "unauthorized" }, 401);
         const why = cannotUseApp(user, "oauth");
         if (why) return c.json({ error: "forbidden", message: why }, 403);
-          return handleMcp(c, svc, user);
+          return handleMcp(c, svc, user, { via: "oauth", canAdminister: false });
         },
         // the JWKS is served by this very process: fetch it over loopback, not through APP_URL (which may not resolve from inside a container)
         { resource: mcpResource(config), jwksUrl: `http://127.0.0.1:${config.PORT}/api/auth/jwks` },
       );
       return guarded(c.req.raw);
     }
-    const who = await requester(auth, db, c.req.raw.headers);
+    const who = await requester(auth, db, c.req.raw.headers, svc.log.child({ module: "auth" }));
     if (!who) return mcpUnauthorized(c);
     const why = cannotUseApp(who.user, who.via);
     if (why) return c.json({ error: "forbidden", message: why }, 403);
-    return handleMcp(c, svc, who.user);
+    return handleMcp(c, svc, who.user, who);
   });
 
   // Raw upload: body is the file, original name in x-filename. Streams to disk, then into storage.
@@ -302,11 +312,24 @@ export function createApp(svc: Services) {
     if (!session) return c.text("unauthorized", 401);
     const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
-    const loc = await storage.resolve(asset.sourceKey);
-    if ("url" in loc) return c.redirect(loc.url, 302);
-    const res = await sendFile(c.req.raw, loc.file);
     // an uploaded SVG is a document: never let one run script or load anything in the app's origin
-    if (asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg")) res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    const svgCsp = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    const isSvg = asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg");
+    const loc = await storage.resolve(asset.sourceKey);
+    if ("url" in loc) {
+      // a redirect to the bucket would skip the sandbox header, so an SVG is read through this server (they are small)
+      if (!isSvg) return c.redirect(loc.url, 302);
+      const tmp = path.join(paths.tmp, `svg-${asset.id}-${randomUUID()}.svg`);
+      try {
+        await storage.ensureLocal(asset.sourceKey, tmp);
+        const body = await fsp.readFile(tmp);
+        return new Response(body, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": svgCsp, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=300" } });
+      } finally {
+        await fsp.rm(tmp, { force: true });
+      }
+    }
+    const res = await sendFile(c.req.raw, loc.file);
+    if (isSvg) res.headers.set("Content-Security-Policy", svgCsp);
     return res;
   });
 

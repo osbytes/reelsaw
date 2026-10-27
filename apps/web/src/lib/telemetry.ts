@@ -37,7 +37,7 @@ export function identify(user: { id: string; email: string; name: string; role: 
     sb?.setUser(null);
     return;
   }
-  ph?.identify(user.id, { email: user.email, name: user.name, role: user.role, ...(user.plan ? { plan: user.plan } : {}) });
+  ph?.identify(user.id, { role: user.role, ...(user.plan ? { plan: user.plan } : {}) });
   sb?.setUser({ id: user.id });
 }
 
