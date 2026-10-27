@@ -183,6 +183,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `DECISION_RETENTION_DAYS` | `0` | Prune the decision log (users' accepts, rejects and edits, kept after their project is deleted so Reelsaw can learn from them) after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `STEP_RETENTION_DAYS` | `14` | Drop the saved checkpoints of a finished project (the finding-moments windows a Retry reuses) after N days without change. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Enterprise edition and billing (hosted)

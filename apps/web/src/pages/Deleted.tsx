@@ -11,6 +11,7 @@ import { ScrollArea } from "../components/scroll-area";
 import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog, MoreButton, Skeleton, SkeletonRegion } from "../components/ui";
 import { QuotaNotice, quotaFromError } from "../components/QuotaNotice";
+import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 
 const KIND_LABEL: Record<DeletedKind, string> = { project: "Project", clip: "Clip", asset: "Library item", template: "Template" };
 const GRID = "grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-x-3 sm:grid-cols-[2rem_5.5rem_minmax(0,1fr)_minmax(14rem,1.4fr)_2rem]";
@@ -58,6 +59,7 @@ type Row = {
   usedByClips?: number;
   usedByTemplates?: number;
   layerCount?: number;
+  forgetDecisions?: boolean;
 };
 
 function whyHeld(r: Row) {
@@ -70,7 +72,8 @@ function detailOf(r: Row) {
   const size = r.storedBytes ? formatBytes(r.storedBytes) : r.kind === "template" ? plural(r.layerCount ?? 0, "layer") : "no files";
   const extra = r.kind === "clip" ? r.projectTitle : r.kind === "asset" ? r.assetKind : undefined;
   const held = whyHeld(r);
-  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt)].filter(Boolean).join(" · ");
+  const forget = r.forgetDecisions ? "forgets what Reelsaw learned from it" : undefined;
+  return [extra, size, `deleted ${ago(r.deletedAt)}`, held, foreverLabel(r.purgeAt), forget].filter(Boolean).join(" · ");
 }
 
 /**
@@ -89,6 +92,7 @@ export function DeletedPage() {
   const purge = useMutation(trpc.deleted.purge.mutationOptions());
   const [sel, setSel] = useState<string[]>([]);
   const [pending, setPending] = useState<Row[] | null>(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
 
   const highlightedKind = (["project", "clip", "asset", "template"] as const).find((k) => hash.get(k));
   const highlightedId = highlightedKind ? hash.get(highlightedKind) : "";
@@ -267,7 +271,10 @@ export function DeletedPage() {
       </main>
       <ConfirmDialog
         open={!!pending}
-        onOpenChange={(o) => !o && setPending(null)}
+        onOpenChange={(o) => {
+          if (!o) setPending(null);
+          setForgetDecisions(false);
+        }}
         title={pending && pending.length > 1 ? `Delete ${pending.length} items forever?` : "Delete forever?"}
         body={
           pending && pending.length > 1 ? (
@@ -300,7 +307,7 @@ export function DeletedPage() {
           const rows = pending;
           if (!rows?.length) return;
           purge.mutate(
-            { items: rows.map((r) => ({ kind: r.kind, id: r.id })) },
+            { items: rows.map((r) => ({ kind: r.kind, id: r.id })), forgetDecisions: forgetDecisions && rows.some((r) => r.kind === "project") },
             {
               onSuccess: (r) => {
                 setPending(null);
@@ -312,7 +319,10 @@ export function DeletedPage() {
             },
           );
         }}
-      />
+      >
+        {/* projects deleted with "forget" already go with their decisions; offer it only for the others */}
+        {pending?.some((r) => r.kind === "project" && !r.forgetDecisions) && <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} />}
+      </ConfirmDialog>
     </ScrollArea>
   );
 }

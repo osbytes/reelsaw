@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, TemplateLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile } from "@reelsaw/shared";
+import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, TemplateLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile, DecisionKind, SourceRef } from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -295,6 +295,8 @@ export const userSettings = pgTable("user_settings", {
   limits: jsonb("limits").$type<Record<string, number>>().notNull().default({}),
   /** admin's per-user watermark decision: true / false; null = follow the plan and the instance setting (quota.ts `watermarkFor`) */
   watermark: boolean("watermark"),
+  /** record this user's accepts, rejects and edits in user_decisions (decisions/service.ts); off stops recording, keeps what exists */
+  learnFromDecisions: boolean("learn_from_decisions").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type UserSettingsRow = typeof userSettings.$inferSelect;
@@ -449,6 +451,8 @@ export const projects = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     /** soft delete: hidden everywhere, restorable until the purge (DELETED_RETENTION_DAYS) removes the row and its files */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
+    forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
   },
   (t) => [
     // the hourly purge looks for deleted projects across all users
@@ -653,6 +657,41 @@ export const stageArtifacts = pgTable(
   },
   (t) => [index("stage_artifacts_project_id_idx").on(t.projectId, t.id)],
 );
+
+/**
+ * Append-only log of what users decided about the pipeline's output (docs/specs/decision-log.md): accepted, rejected,
+ * deleted and manual fixes, clip edits, deletes and re-picks, each with the before/after values and enough context
+ * to judge it without the project. `project_id` / `clip_id` are deliberately not foreign keys: decisions outlive
+ * the project ("Delete forever" keeps them unless the user asks to forget). Written in the action's unit of work
+ * (`recordDecisions`); pruned after DECISION_RETENTION_DAYS (events-retention.ts).
+ */
+export const userDecisions = pgTable(
+  "user_decisions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    clipId: text("clip_id"),
+    kind: text("kind").$type<DecisionKind>().notNull(),
+    /** a person chose it (false: inferred, e.g. a clip a re-analyze replaced) */
+    explicit: boolean("explicit").notNull(),
+    before: jsonb("before").$type<Record<string, unknown> | null>(),
+    after: jsonb("after").$type<Record<string, unknown> | null>(),
+    context: jsonb("context").$type<Record<string, unknown>>().notNull(),
+    models: jsonb("models").$type<Record<string, string>>().notNull().default({}),
+    source: jsonb("source").$type<SourceRef>().notNull(),
+    appVersion: text("app_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("user_decisions_user_idx").on(t.userId, t.id),
+    index("user_decisions_user_kind_idx").on(t.userId, t.kind, t.id),
+    index("user_decisions_project_idx").on(t.projectId, t.id),
+  ],
+);
+export type UserDecision = typeof userDecisions.$inferSelect;
 
 export * from "./oauth-schema.js";
 

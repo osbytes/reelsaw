@@ -202,6 +202,7 @@ Generated from the registry in `apps/server/src/eval/suites/index.ts` (`pnpm doc
 | `cuts` | models | disfluency jump cuts on real audio: removed cleanly, refused safely, or broken |
 | `transcription` | models, media | WER + entity recall through the configured STT, bias and correction: synthetic `say` audio, and real speech graded against human captions |
 | `disfluency` | nothing (runs offline) | disfluency detection precision/recall on reviewed real-transcript cases (rules + model) |
+| `decisions` | nothing (runs offline) | today's disfluency detector against users' recorded accept / reject / manual-cut decisions (EVAL_DECISIONS=export.jsonl) |
 | `selection-model` | models | one real map call per sampled chunk: candidates inside the chunk, parseable, snappable |
 <!-- /generated -->
 
@@ -504,6 +505,35 @@ as the older cases do. Keep `cut` and `keep` roughly balanced and assign `split`
 each. Commit only the window words, never the whole track. Sources so far: Dwarkesh Patel × Si
 Sheppard `LwQQ7nBCGSs` (host and guest) and Missing Semester lecture 1 `MSgoeuMqUmU` (lecturers and a
 student).
+
+## Cases from user decisions
+
+Every accept, reject, manual cut and delete is a label a user gave for free, and the decision log
+(`user_decisions`, [specs/decision-log.md](specs/decision-log.md)) keeps it with its ±30-word window
+after the project is deleted. Two ways to use it:
+
+```bash
+docker compose exec -T app reelsaw decisions export you@example.com > me.decisions.jsonl   # or MCP export_decisions
+cd apps/server
+npx tsx src/eval/tools/harvest-decisions.ts ../../me.decisions.jsonl --out ../../eval/fixtures/disfluency/candidates.json
+EVAL_DECISIONS=../../me.decisions.jsonl npx tsx src/eval/run.ts decisions            # live replay, no baseline
+```
+
+- **Harvest** writes candidate disfluency cases in the `cases.json` shape: accepted detector cuts and
+  manual cuts are `cut`, rejected or deleted detector cuts are `keep`; undoing your own cut, inferred
+  decisions and name fixes are skipped. Split is by project (a hash of the project id), so windows of
+  one video never land on both sides; windows already in `cases.json` or decided twice are dropped
+  (the latest decision wins). `candidates.json` and `*.decisions.jsonl` are gitignored: read each
+  candidate as for caption diffs above, and move only the ones you were given to share into
+  `cases.json` (the `d<id>-…` case id points back at the decision).
+- **Replay** (`decisions` suite) runs today's detector over every explicit cut decision in an export and
+  reports precision / recall against what users chose, overall and per split. It never compares with
+  or writes a baseline (user data is not in git); without `EVAL_DECISIONS` / `--decisions` it is
+  skipped. The cases are drawn from the detector's own proposals (plus manual cuts), so recall here
+  is over what users noticed, the same caveat as cases 01-50.
+- Each case's `source` carries the link at the moment, `videoId` and the source's `sha256` from
+  ingest. A re-download is usually not byte-identical; the case does not need the media (it stores
+  its words).
 
 ## Real-speech transcription cases
 

@@ -16,6 +16,7 @@ import { ago } from "../lib/time";
 import { formatTag, searchable, SEARCH_KEYS } from "../lib/library";
 import { ScrollArea } from "./scroll-area";
 import { ConfirmDialog, Skeleton, SkeletonRegion, StatusText } from "./ui";
+import { ForgetDecisionsOption } from "./ForgetDecisionsOption";
 import { CHANGELOG_URL, DELETED_PATH, formatTime } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
@@ -160,6 +161,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
   const [cursor, setCursor] = useState(0);
   const [target, setTarget] = useState<Target | null>(null);
   const [confirm, setConfirm] = useState<null | { kind: "refine" | "delete" | "clip" | "asset"; id: string; title: string }>(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
   // projects and clips share one window (DELETED_RETENTION_DAYS)
   const keepWindow = useRestoreWindow("project", confirm?.kind === "delete" || confirm?.kind === "clip");
   const savedQ = useRef("");
@@ -703,14 +705,17 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
       />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
-        onOpenChange={(o) => !o && setConfirm(null)}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+          setForgetDecisions(false);
+        }}
         title="Delete this project?"
         body={`“${confirm?.title ?? ""}”: the project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() => {
           const c = confirm!;
-          del.mutateAsync({ id: c.id }).then(
+          del.mutateAsync({ id: c.id, forgetDecisions }).then(
             (r) => {
               refresh();
               notifyDeleted({
@@ -722,7 +727,9 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
             (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
           );
         }}
-      />
+      >
+        <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirm?.kind === "clip"}
         onOpenChange={(o) => !o && setConfirm(null)}

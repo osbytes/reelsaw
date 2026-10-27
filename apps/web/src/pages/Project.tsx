@@ -14,6 +14,7 @@ import { summarizeError } from "../lib/errors";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ProjectPageSkeleton } from "../components/PageSkeletons";
 import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
+import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ShortcutSheet } from "../components/ShortcutSheet";
@@ -93,6 +94,7 @@ export function ProjectPage() {
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
   const keepWindow = useRestoreWindow("project", confirm === "delete");
   const [actOpen, setActOpen] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
@@ -996,13 +998,16 @@ export function ProjectPage() {
       />
       <ConfirmDialog
         open={confirm === "delete"}
-        onOpenChange={(o) => !o && setConfirm(null)}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+          setForgetDecisions(false);
+        }}
         title="Delete this project?"
         body={`The project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() =>
-          del.mutateAsync({ id }).then((r) => {
+          del.mutateAsync({ id, forgetDecisions }).then((r) => {
             nav("/"); // leave first, so this page never refetches the project it just deleted
             void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
             const title = q.data?.title ?? "Project";
@@ -1014,7 +1019,9 @@ export function ProjectPage() {
             });
           })
         }
-      />
+      >
+        <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
+      </ConfirmDialog>
       <TranscriptFileModal
         open={filesOpen}
         onOpenChange={setFilesOpen}

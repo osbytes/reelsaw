@@ -32,25 +32,44 @@ unpredictable. This is the plan; items move to "done" with their eval numbers.
 | Names & terms typed | `settings.vocabulary` | spelling the transcriber should know |
 | What each stage decided and why | `stage_artifacts` | the candidate set the decision was made from |
 
-Missing: a cheap, queryable decision log. Today some signals are only inferable (a clip that was
-edited isn't marked as such, and its original range is gone once edited). First step below.
+Since the decision log (item 0), the fix and clip signals above are also written as rows of
+`user_decisions`, with their before/after values and context, and outlive the project. Framing and
+style edits are in `clip.edit` rows; project-level style and vocabulary are not decisions yet.
 
 ## Where we are
 
 - Done: rejected disfluency cuts from the user's other projects are shown to the verifier as "keep"
-  examples (`refine.ts` `rejectedCutExamples`). Decisions survive re-runs; deleted fixes stay
-  deleted; manual fixes are never overwritten.
+  examples (`refine.ts` `rejectedCutExamples`, read from the decision log, so rejections from
+  purged projects still count). Decisions survive re-runs; deleted fixes stay deleted; manual fixes
+  are never overwritten.
+- Done: the decision log (item 0, [specs/decision-log.md](specs/decision-log.md)), the source
+  fingerprint at ingest, harvest of disfluency candidates and the `decisions` replay suite.
 - Not yet: accepted cuts, name-fix verdicts, clip edits/deletes, framing overrides and acceptance
   rates feed nothing. Evals use real decisions but are rebuilt by hand.
 
 ## Roadmap
 
-### 0. Decision log (foundation)
+### 0. Decision log (foundation) — done
 Append-only `user_decisions` rows written in the same unit of work as the action: user, project,
-kind (fix.accept, fix.reject, fix.delete, fix.manual, clip.delete, clip.edit, clip.repick,
-layout.override, style.edit), the before/after values, and the stage artifact the item came from.
-Gives every later item one query instead of a reconstruction, and an export for evals.
-*Measure:* none (plumbing); a test that each action writes exactly one row.
+kind (`fix.accept|reject|manual|delete|restore`, `clip.edit|create|delete|restore|replaced`), whether a
+person clicked (`explicit`), the before/after values, the context needed to judge it without the
+project (word window, clip text and the model's reasoning), the models and app version, and a
+snapshot of the source. Spec: [specs/decision-log.md](specs/decision-log.md).
+
+Decisions deliberately **outlive their project**: `project_id` has no foreign key, so "Delete
+forever" and the retention purge remove the media and rows but keep what the user taught. The user
+can forget them: per project when deleting it (applied at whichever purge comes first, the retention sweep included) or in the "Delete forever" dialog (`forgetDecisions`), all at once in
+Settings → Learning, or by turning "Learn from my decisions" off (stops recording). Deleting the
+account cascades. `DECISION_RETENTION_DAYS` (default 0, keep) prunes old rows.
+
+Sources are fingerprinted at ingest (`sourceMeta.extractor`, `videoId`, `formatId`, `sha256`), since a
+re-download from YouTube is not byte-identical: `videoId` gets the video back, `sha256` proves the
+same bytes (timestamps line up), and a mismatch means re-anchoring by the words each decision stores.
+An upload's hash only links a later re-upload; text-level decisions work without the media.
+
+Surfaces: `decisions.*` (tRPC), `list_decisions` / `export_decisions` / `forget_decisions` (MCP),
+`reelsaw decisions …` (list, export, forget, backfill of existing transcripts).
+*Measure:* none (plumbing); tests that each action writes one row in its transaction.
 
 ### 1. Name fixes remember verdicts (small, high value)
 - A rejected heard → suggested pair is not proposed again for that user (or channel).
@@ -88,10 +107,15 @@ edits become that channel's defaults, proposed once ("Use split for this channel
 rather than applied silently.
 *Measure:* overrides per clip on later videos of the channel.
 
-### 6. Self-maintaining evals (ongoing)
-Periodically turn new decisions into eval fixtures automatically (deduped, held out from what the
-models were shown), so every change to prompts or heuristics is measured against what users
-actually wanted, and drift shows up in numbers.
+### 6. Self-maintaining evals (started)
+Turn new decisions into eval fixtures (deduped, held out from what the models were shown), so every
+change to prompts or heuristics is measured against what users actually wanted, and drift shows up
+in numbers.
+- Done: `reelsaw decisions export` → `src/eval/tools/harvest-decisions.ts` writes disfluency
+  candidates (split by project, deduped against committed cases) for a person to promote; the
+  `decisions` suite replays today's rules over an export (`EVAL_DECISIONS=…`) and reports agreement.
+- Next: harvest for names and selection pairs; a scheduled export + replay with the numbers on the
+  admin page; promotion without hand-editing JSON.
 
 ## Guardrails
 
@@ -100,17 +124,17 @@ actually wanted, and drift shows up in numbers.
   visible reset.
 - Prompt hygiene: user-derived examples are data inside delimited sections, capped in count and
   length, never instructions.
-- Privacy: learning data stays in the instance; issue reports include it like other project data,
-  under the same redaction.
+- Privacy: learning data stays in the instance. Issue reports do not include the decision log yet;
+  when they do, under the same redaction. The user can turn recording off and forget at any time.
 
 ## Order and effort
 
 | # | Item | Effort | Depends on |
 |---|---|---|---|
-| 0 | Decision log | S | - |
+| 0 | Decision log | S | - (done) |
 | 1 | Name-fix memory + channel vocabulary | S | 0 (can start without) |
 | 2 | Balanced verifier examples | S | - |
 | 3 | Per-user auto-apply calibration | M | 0 |
 | 5 | Layout/style channel defaults | M | 0 |
 | 4 | Clip selection feedback | L | 0, stage_artifacts |
-| 6 | Self-maintaining evals | M | 0 |
+| 6 | Self-maintaining evals | M | 0 (started) |

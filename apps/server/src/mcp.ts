@@ -530,13 +530,42 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
   server.registerTool(
     "delete_project",
     TOOLS.delete_project,
-    ({ id }) => run(() => api.projects.delete({ id })),
+    ({ id, forgetDecisions }) => run(() => api.projects.delete({ id, forgetDecisions })),
   );
 
   server.registerTool(
     "purge_project",
     TOOLS.purge_project,
-    ({ id }) => run(() => api.projects.purge({ id })),
+    ({ id, forgetDecisions }) => run(() => api.projects.purge({ id, forgetDecisions })),
+  );
+
+  server.registerTool(
+    "list_decisions",
+    TOOLS.list_decisions,
+    (input) =>
+      run(async () => {
+        const [summary, page] = await Promise.all([api.decisions.summary(), api.decisions.list(input)]);
+        return { summary, ...page };
+      }),
+  );
+
+  server.registerTool(
+    "export_decisions",
+    TOOLS.export_decisions,
+    (input) => run(() => api.decisions.export(input)),
+  );
+
+  server.registerTool(
+    "forget_decisions",
+    TOOLS.forget_decisions,
+    ({ projectId }) => run(() => api.decisions.forget({ projectId })),
+  );
+
+  server.registerTool(
+    "set_learning",
+    TOOLS.set_learning,
+    ({ enabled }) =>
+      run(async () => ({ ...(await api.decisions.setLearning({ enabled })), hint: enabled ? "Your decisions are recorded from now on." : "New decisions are no longer recorded; what is kept stays until forget_decisions." })),
   );
 
   server.registerTool(

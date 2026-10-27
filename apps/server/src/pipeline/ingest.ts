@@ -10,6 +10,7 @@ import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { StageContext, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
+import { sha256File } from "./bumpers.js";
 
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
@@ -99,6 +100,10 @@ export async function ingest(ctx: StageContext) {
           uploader: info.uploader ?? info.channel ?? meta.uploader,
           duration: info.duration,
           webpage_url: info.webpage_url,
+          // the source fingerprint decisions point at (docs/specs/decision-log.md): videoId gets the video back, formatId says which encode
+          extractor: info.extractor_key,
+          videoId: info.id,
+          formatId: info.format_id,
           thumbnail: meta.thumbnail ?? info.thumbnail,
           ext: info.ext,
           description: typeof info.description === "string" ? info.description.slice(0, 4000) : undefined,
@@ -128,8 +133,10 @@ export async function ingest(ctx: StageContext) {
   const probe = await svc.media.ffprobe(sourcePath);
   if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
+  // the exact bytes the transcript's timestamps refer to; a stored source already hashed keeps its hash
+  if (!(stored && typeof meta.sha256 === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
   await ctx.release(); // the source is on disk, where free-space checks count it: the lease has done its job
-  ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType }, "source facts");
+  ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType, sha256: meta.sha256, videoId: meta.videoId }, "source facts");
   if (download) recordDownload(download.proxy, download.sec, probe.durationSec, sourceBytes);
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname

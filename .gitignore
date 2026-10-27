@@ -15,6 +15,9 @@ eval/reports/
 apps/server/dist-bundle/
 
 eval/bench/models.local*.json
+# user data: decision-log exports and the candidates harvested from them (read before promoting into cases.json)
+*.decisions.jsonl
+eval/fixtures/*/candidates.json
 # tool-specific agent files are local pointers to AGENTS.md, never tracked (docs/PRINCIPLES.md, Process)
 CLAUDE.md
 .cursor/
