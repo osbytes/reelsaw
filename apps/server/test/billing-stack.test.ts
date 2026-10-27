@@ -74,6 +74,22 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     await pool.query(`delete from projects where user_id = $1`, [user.userId]);
   });
 
+  // stack only: source_usage rows with no length (still downloading, or failed before the probe) never take the free first video
+  it("the first-video allowance goes to the earliest video whose length is known", async () => {
+    const mk = (title: string, sec: number | null, ageMin: number) => {
+      const id = `fv-${title}-${Date.now()}`;
+      return pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() - ($4 || ' minutes')::interval)`, [user.userId, id, sec, String(ageMin)]);
+    };
+    await mk("pending", null, 30);
+    let s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0);
+    await mk("first", 45 * 60, 20);
+    await mk("second", 15 * 60, 10);
+    s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 15, "the 45-minute video is the free one, not the earlier row without a length");
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
+  });
+
   it("checkout returns the mock's page; completing it delivers events in reverse and twice, and the plan lands", async () => {
     const r = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month" });
     assert.equal(r.error, undefined, r.error?.message);
@@ -111,6 +127,16 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.match((r.data as { url: string }).url, /flow=subscription_update_confirm/);
     const same = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month" });
     assert.match(same.error?.message ?? "", /already on Creator/);
+  });
+
+  // stack + Stripe mock only: a lagging cache row must not lead to a second subscription
+  it("a stale cache row does not start a second Checkout: the existing subscription is resynced and the Portal offered", async () => {
+    await pool.query(`delete from billing_subscriptions where user_id = $1`, [user.userId]);
+    const r = await trpc(user.cookie, "billing.checkout", { plan: "pro", interval: "month" });
+    assert.equal(r.error, undefined, r.error?.message);
+    assert.equal((r.data as { kind: string }).kind, "portal");
+    const s = await until(state, (x) => x.subscription !== null);
+    assert.ok(s.subscription, "the row is back, rewritten from Stripe");
   });
 
   it("a plan change at Stripe reaches the row and writes billing.changed", async () => {

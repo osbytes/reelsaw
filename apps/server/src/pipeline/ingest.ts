@@ -1,8 +1,9 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
+import { QuotaExceededError, recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
@@ -38,6 +39,18 @@ export async function ingest(ctx: StageContext) {
     if (project.sourceType === "url") {
       // web and MCP both land here, so one check covers every way of adding a link
       await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
+      // refuse an over-limit video before fetching it, when the site tells us its length up front
+      const announced = await announcedDuration(ctx, project.sourceUrl ?? "");
+      if (announced) {
+        const over = await svc.tx(async (u) => {
+          await takeTxLock(u.db, txLock.quota(project.userId));
+          return sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, announced, svc.entitlements);
+        });
+        if (over) {
+          ctx.log.warn({ userId: project.userId, durationSec: announced, reason: over }, "source-minutes limit reached before download");
+          throw new QuotaExceededError(over);
+        }
+      }
       let stderrTail = "";
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
       const t0 = performance.now();
@@ -128,7 +141,7 @@ export async function ingest(ctx: StageContext) {
     const over = await sourceMinutesExceeded(u.db, svc.settings.get(), project.userId, projectId, probe.durationSec, svc.entitlements);
     if (over) {
       ctx.log.warn({ userId: project.userId, durationSec: probe.durationSec, reason: over }, "source-minutes limit reached");
-      throw new Error(over);
+      throw new QuotaExceededError(over);
     }
     await u.db
       .update(schema.projects)
@@ -138,6 +151,25 @@ export async function ingest(ctx: StageContext) {
     await u.enqueue(QUEUES.transcribe, { projectId });
   });
   void svc;
+}
+
+/**
+ * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (live streams, some
+ * sites) or the lookup fails. The binding check still runs on the probed file, so this only saves a doomed download.
+ */
+async function announcedDuration(ctx: StageContext, url: string): Promise<number | null> {
+  try {
+    const { stdout } = await ctx.svc.media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], { signal: ctx.signal });
+    const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
+    if (!jsonLine) return null;
+    const info: unknown = JSON.parse(jsonLine);
+    const duration = z.object({ duration: z.number().positive() }).safeParse(info);
+    return duration.success ? duration.data.duration : null;
+  } catch (err) {
+    ctx.signal.throwIfAborted();
+    ctx.log.debug({ err }, "could not look up the video's length before downloading");
+    return null;
+  }
 }
 
 /**

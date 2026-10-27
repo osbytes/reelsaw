@@ -172,7 +172,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * confirm-update flow instead (Stripe prorates and the webhook updates us); a new Checkout would make a
    * second subscription.
    */
-  async function checkout(user: { id: string; email: string; name: string }, plan: string, interval: Interval): Promise<{ url: string; kind: "checkout" | "change" }> {
+  async function checkout(user: { id: string; email: string; name: string }, plan: string, interval: Interval): Promise<{ url: string; kind: "checkout" | "change" | "portal" }> {
     const price = await priceFor(plan, interval);
     const row = await entitlements.rowFor(db(), user.id);
     const customer = await ensureCustomer(user);
@@ -190,6 +190,15 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       return { url: session.url, kind: "change" };
     }
     if (row?.status === "complimentary") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `This account has ${planOf(row.plan).label} as a courtesy; ask an admin before paying for a plan.` });
+    // our row can lag Stripe (a lost webhook, a sync still queued): never start a second subscription for a customer
+    // who has one that is not over. Bring the row up to date and let them manage that one in the Billing Portal.
+    const existing = await openSubscriptionOf(customer);
+    if (existing) {
+      await sync(existing.id, "checkout");
+      const portalSession = await stripe.billingPortal.sessions.create({ customer, return_url: url(billingPath()) });
+      log.warn({ userId: user.id, plan, interval, subscriptionId: existing.id, status: existing.status }, "checkout skipped: the customer already has a subscription at Stripe");
+      return { url: portalSession.url, kind: "portal" };
+    }
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer,
@@ -205,6 +214,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     if (!session.url) throw new Error("Stripe returned a Checkout Session without a URL");
     log.info({ userId: user.id, plan, interval, sessionId: session.id, managedPayments: config.STRIPE_MANAGED_PAYMENTS }, "checkout started");
     return { url: session.url, kind: "checkout" };
+  }
+
+  /** A subscription of this Stripe customer that is not over (Stripe's list filters by one status at a time, so list them all and look). */
+  async function openSubscriptionOf(customer: string): Promise<Stripe.Subscription | null> {
+    const notOver: readonly string[] = ["active", "trialing", "past_due", "incomplete", "unpaid"];
+    for await (const s of stripe.subscriptions.list({ customer, status: "all", limit: 20 })) if (notOver.includes(s.status)) return s;
+    return null;
   }
 
   async function portal(user: { id: string; email: string; name: string }): Promise<{ url: string }> {
@@ -340,6 +356,12 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       else if (cur && isLive(cur.status) && isLive(next.status) && (cur.plan !== next.plan || cur.interval !== next.interval)) await audit("billing.changed", { ...ids, from: { plan: cur.plan, interval: cur.interval } });
       if (cur?.status !== "past_due" && next.status === "past_due") await audit("billing.payment_failed", { ...ids, graceEndsAt: new Date(now.getTime() + graceDays * 86_400_000).toISOString() });
       if ((cur && isLive(cur.status) && !isLive(next.status)) || (!cur?.cancelAtPeriodEnd && next.cancelAtPeriodEnd)) await audit("billing.canceled", { ...ids, endsAt: (next.cancelAtPeriodEnd ? next.periodEnd : (next.endedAt ?? now))?.toISOString() ?? null });
+      // a price no plan matches puts the account on Free without anyone being told: say so once per price
+      if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
+        const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
+        await u.db.insert(schema.adminEvents).values({ ...base, type: "billing.unknown_price", payload: { ...ids, priceId: next.priceId, message } });
+        u.afterCommit(() => svc.telemetry.captureException(new Error(message), { userId, subscriptionId, priceId: next!.priceId }));
+      }
       await markProcessed(u, subscriptionId, readAt);
       u.afterCommit(() => slog[changed ? "info" : "debug"]({ userId, plan: next!.plan, status: next!.status, effective: after.plan.name, was: before.plan.name, cancelAtPeriodEnd: next!.cancelAtPeriodEnd }, changed ? "subscription synced" : "subscription unchanged"));
       return { userId, changed, plan: next.plan, status: next.status };

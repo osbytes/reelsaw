@@ -9,6 +9,7 @@ import { refineEntities, refineDisfluency, refineScenes, refineStepFailed } from
 import { renderClip, markClipFailed } from "../pipeline/render.js";
 import { StageContext, failProject, stageFailedAttempt, ProjectGoneError, StaleJobError, SourceExpiredError } from "../pipeline/common.js";
 import { ResourceExhaustedError } from "../resources.js";
+import { QuotaExceededError } from "../quota.js";
 import { withSpan } from "../otel.js";
 import type { PipelineStage, RefineStep } from "@reelsaw/shared";
 import { inflightJobs, setListeningQueues, trackJob } from "./inflight.js";
@@ -129,13 +130,15 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
         log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
         // disk will not free itself on the next attempt here: fail the run, unless another worker has the room
         const handOff = err instanceof ResourceExhaustedError && job.retryCount < max ? await diskHandOff(gate, queue, err, log) : null;
-        const last = job.retryCount >= max || (err instanceof ResourceExhaustedError && !handOff);
+        // a video refused for its length is refused again on every attempt: fail the run now, without downloading it again
+        const refused = err instanceof QuotaExceededError;
+        const last = job.retryCount >= max || refused || (err instanceof ResourceExhaustedError && !handOff);
         if (last) {
-          svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
+          if (!refused) svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
           await failProject(svc, projectId, stage, err, seq);
         } else await stageFailedAttempt(svc, projectId, stage, handOff ?? err, attempt, max + 1, seq);
         // returning marks the job done so a shortfall does not loop on this worker
-        if (err instanceof ResourceExhaustedError && !handOff) return;
+        if (refused || (err instanceof ResourceExhaustedError && !handOff)) return;
         throw handOff ?? err; // let pg-boss apply the retry policy
       }
     });

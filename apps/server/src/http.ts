@@ -17,7 +17,7 @@ import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
-import { checkStorageQuota, QuotaError } from "./quota.js";
+import { assertStorageRoom, checkStorageQuota, QuotaError } from "./quota.js";
 import { keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
@@ -200,7 +200,8 @@ export function createApp(svc: Services) {
       return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
     }
     try {
-      await checkStorageQuota(db, svc.settings.get(), session.user.id, length, svc.entitlements);
+      // a chunked body carries no length: reserve the largest upload allowed (the actual size is re-checked under the lock below)
+      await checkStorageQuota(db, svc.settings.get(), session.user.id, length > 0 ? length : maxUploadMb * 1024 * 1024, svc.entitlements);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       const quota = err instanceof QuotaError ? err.quota : undefined;
@@ -233,9 +234,13 @@ export function createApp(svc: Services) {
       const storageKey = keys.upload(id, ext);
       await storage.putFile(storageKey, dest);
       try {
-        await db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        // the real size, under the account's quota lock, in the transaction that inserts the row: parallel uploads cannot all pass
+        await svc.tx(async (u) => {
+          await assertStorageRoom(svc, u, session.user.id, st.size);
+          await u.db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        });
       } catch (err) {
-        // put first (the row must never point at a missing object), so a failed insert leaves an orphan: remove it
+        // put first (the row must never point at a missing object), so a failed insert or a refusal leaves an orphan: remove it
         await storage.delete(storageKey).catch((e) => c.get("log").warn({ err: e, storageKey }, "could not remove the orphaned upload object"));
         throw err;
       }
@@ -245,6 +250,10 @@ export function createApp(svc: Services) {
       if (err instanceof UploadTooLarge) {
         c.get("log").warn({ bytes: received, maxMb: maxUploadMb }, "upload rejected: too large");
         return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
+      }
+      if (err instanceof QuotaError) {
+        c.get("log").warn({ uploadId: id, bytes: received, reason: err.message }, "upload rejected: storage limit");
+        return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);

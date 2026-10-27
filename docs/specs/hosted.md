@@ -120,7 +120,9 @@ Decisions, in order of how hard they are to reverse:
   `MAX_RERENDERS_PER_HOUR` and `MAX_STORAGE_MB` join the per-user limits (0 = unlimited); `PROVIDER_CONCURRENCY`
   caps model calls per provider across processes (Postgres advisory-lock slots; self-hosted default 2); usage adds
   reported LLM cost (`llm_usage.cost_usd`), minutes transcribed (`stt_usage`) and rendered-clip bytes. Hosted sets
-  e.g. `MAX_LIVE_JOBS_PER_USER=12`, `MAX_RERENDERS_PER_HOUR=60`, `MAX_STORAGE_MB=20000`.
+  e.g. `MAX_LIVE_JOBS_PER_USER=12`, `MAX_RERENDERS_PER_HOUR=60`. On accounts with a plan, the plan's values win
+  over the environment's `MAX_STORAGE_MB` and the other plan-granted limits (precedence in the README, "Settings
+  and precedence"); the environment value caps accounts without a plan and limits the plan does not set.
 
 ## Part D: running it
 

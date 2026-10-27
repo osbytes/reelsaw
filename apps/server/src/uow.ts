@@ -16,7 +16,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
 import type { ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
-import { USER_RENDER_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
+import { USER_RERUN_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
@@ -130,7 +130,7 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               await client.query(TX_LOCK_SQL, [txLock.jobs(a.userId)]);
               a = await queue.admission(data, exec);
               try {
-                checkJobLimits(limits, a, USER_RENDER_QUEUES.includes(q));
+                checkJobLimits(limits, a, USER_RERUN_QUEUES.includes(q));
               } catch (err) {
                 log.warn({ userId: a.userId, queue: q, live: a.live, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
                 throw err;

@@ -2,7 +2,7 @@
  * The plans, as config: a name, the Stripe price lookup keys (monthly, yearly), the limits the plan grants and
  * the marketing line. Lookup keys are stable; the Stripe prices behind them can be rotated without a deploy.
  * Free is in the same list with no price: it is what an account with no subscription (or a lapsed one) gets.
- * `website/content/pricing.ts` mirrors this list for reelsaw.com; `test/billing-plans.test.ts` keeps them equal.
+ * `website/content/pricing.ts` mirrors this list for reelsaw.com; the "pricing content" case in `test/billing.test.ts` keeps them equal.
  */
 import type { Limits } from "../../quota.js";
 

@@ -97,6 +97,10 @@ describe("downloadAsUpload", () => {
       storage: { putFile: async (k: string) => void put.push(k) },
       log: createLogger({ LOG_LEVEL: "silent", LOG_FORMAT: "json" }),
       database: { db: { insert: () => ({ values: async (v: Record<string, unknown>) => void rows.push(v) }) } },
+      settings: { get: () => ({}) },
+      // the unit of work: the same fake table, no storage limit, the lock and settings reads answered empty
+      tx: async (fn: (u: unknown) => Promise<unknown>) =>
+        fn({ db: { insert: () => ({ values: async (v: Record<string, unknown>) => void rows.push(v) }), execute: async () => ({ rows: [] }), query: { userSettings: { findFirst: async () => undefined } } } }),
     } as unknown as Services;
     return { svc, rows, put, dir };
   }
@@ -109,6 +113,20 @@ describe("downloadAsUpload", () => {
     assert.equal(h.rows[0]!.userId, "u1");
     assert.match(h.put[0]!, /^uploads\/.+\.png$/);
     assert.deepEqual(await fs.readdir(h.dir), []);
+  });
+  it("refuses a file the account has no storage room for, and removes the stored object again", async () => {
+    const h = await harness();
+    const removed: string[] = [];
+    const full = {
+      ...h.svc,
+      settings: { get: () => ({ MAX_STORAGE_MB: 1 }) },
+      storage: { putFile: async () => {}, delete: async (k: string) => void removed.push(k) },
+      // the account already stores 5 MB (the sum query's answer)
+      tx: async (fn: (u: unknown) => Promise<unknown>) => fn({ db: { insert: () => ({ values: async () => { throw new Error("row must not be inserted"); } }), execute: async () => ({ rows: [{ bytes: 5_000_000 }] }), query: { userSettings: { findFirst: async () => undefined } } } }),
+    } as unknown as Services;
+    await assert.rejects(downloadAsUpload(full, "u1", "https://cdn.test/x", { fetch: async () => png(), lookup: pub }), /stores 5 MB, the most allowed is 1 MB/);
+    assert.equal(removed.length, 1);
+    assert.match(removed[0]!, /^uploads\/.+\.png$/);
   });
   it("refuses private hosts, odd schemes, redirects into private space and unknown types", async () => {
     const h = await harness();

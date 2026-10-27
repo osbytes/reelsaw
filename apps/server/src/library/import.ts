@@ -17,7 +17,7 @@ import type { Services } from "../services.js";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { sha256File } from "../pipeline/bumpers.js";
-import { createAsset, downloadAsUpload, sharedSourceWhere, type FetchDeps } from "./service.js";
+import { createAsset, downloadAsUpload, insertUploadWithinQuota, sharedSourceWhere, type FetchDeps } from "./service.js";
 import { createCatalog, type Catalog } from "./catalog.js";
 import { createProviderHttp, createProviderRegistry, ProviderError, ProviderUnavailable, type CatalogSearchResult, type ProviderRegistry } from "./providers/index.js";
 
@@ -90,8 +90,9 @@ async function localAsUpload(svc: Services, userId: string, file: string, name: 
   const id = randomUUID();
   const size = (await fs.stat(file)).size;
   const filename = `${name.replace(/[\\/]/g, "_")}.${ext}`.slice(0, 200);
-  await svc.storage.putFile(keys.upload(id, `.${ext}`), file);
-  await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey: keys.upload(id, `.${ext}`), sizeBytes: size });
+  const storageKey = keys.upload(id, `.${ext}`);
+  await svc.storage.putFile(storageKey, file);
+  await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: size });
   return { uploadId: id, filename, sizeBytes: size };
 }
 

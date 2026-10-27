@@ -307,15 +307,20 @@ Everything below is off by default and switched on by environment (`deploy/.env.
 them), so a single-user box stays as it is:
 
 - **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_SOURCE_MINUTES_PER_MONTH`,
-  `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB` (0 = unlimited), with per-user overrides on the Users
-  page. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
+  `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB`, `MAX_LIVE_JOBS_PER_USER` (jobs queued or running from
+  one account's own requests), `MAX_RERENDERS_PER_HOUR` (re-renders, hand-made clips and re-runs such as
+  re-analyze and refine, per hour), `MAX_REQUESTS_PER_MINUTE` and `MAX_REQUESTS_PER_HOUR` (0 = unlimited),
+  with per-user overrides on the Users page. Storage counts sources, uploads (an upload already copied into
+  a project counts once), rendered clips and intros/outros, and is checked on every way a file arrives. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
-  plan, else the UTC calendar month. Length is checked once the video is probed, so an over-long
-  download fails the project with that reason.
+  plan, else the UTC calendar month. A link's length is checked before it is downloaded when the
+  site reports it, and again once the file is probed, so an over-long video fails the project with that
+  reason, once, without being fetched again. The first video of a plan with a free allowance is the first
+  one whose length is known.
 - **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
   `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan
   removes it, and an admin can switch it per user on the Users page (Limits). Decided at render time,
-  so a re-render after the change applies it.
+  so a re-render after the change applies it. Clips already rendered keep what they were rendered with.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
@@ -369,6 +374,9 @@ ships in the same image, and runs only with `REELSAW_EE=true` plus `STRIPE_SECRE
   `reelsaw billing <email>` shows the row, Stripe's view and the last webhook events.
 - A failed payment keeps the plan for `BILLING_GRACE_DAYS` (7), then the account is on Free.
   Admins can grant a plan without Stripe (Users → Limits → Plan, or `reelsaw billing set-plan`).
+  A lapse or downgrade does not re-watermark clips already rendered; only new renders get the watermark.
+  An account that already has a live Stripe subscription is sent to the Billing Portal to change it,
+  never to a second Checkout.
 - Setting up a Stripe account: `pnpm --filter @reelsaw/server stripe:setup --webhook --portal` (rebuilds `@reelsaw/shared` first)
   creates the products, prices (by lookup key), webhook endpoint and portal configuration from the
   plan list, idempotently. Developing without a Stripe account: `pnpm --filter @reelsaw/server
