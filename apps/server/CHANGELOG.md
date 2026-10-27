@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.27.1
+
+### Patch Changes
+
+- [#193](https://github.com/osbytes/reelsaw/pull/193) [`074b44b`](https://github.com/osbytes/reelsaw/commit/074b44b70dc3a217ab74cc6b6e56d901e2fa8b6d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The sign-in, sign-up and password cards now show the title on the left with the logo at the top right, and no longer print the host the app runs on.
+
 ## 0.27.0
 
 ### Minor Changes
