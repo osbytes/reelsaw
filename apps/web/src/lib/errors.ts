@@ -34,6 +34,9 @@ export function summarizeError(raw: string, opts: { admin?: boolean } = {}): { s
   } else if (match(/ENOMEM|out of memory|Cannot allocate memory|ran out of memory/i)) {
     user = "This project couldn't finish because the server ran out of memory.";
     hint = "Lower concurrency or give the worker more RAM.";
+  } else if (match(/^[A-Z][\w ]* timed out: .*Retry continues where it stopped/)) {
+    // the stage timeout message is already a plain sentence with the progress and the way out (pipeline/steps.ts)
+    user = text;
   } else if (match(/^Could not download:/i) || match(/^Couldn’t /) || match(/^Couldn't /)) {
     // Already plain; strip any env-key / ops advice that may have been stored for older failures.
     user = scrubPlatform(text);

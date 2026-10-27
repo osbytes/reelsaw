@@ -14,6 +14,7 @@ import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
 import type { UserRole } from "./db/schema.js";
 import { takeTxLock, txLock } from "./locks.js";
+import { NonRetryableError } from "./pipeline/common.js";
 
 export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_SOURCE_MINUTES_PER_MONTH", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB", "MAX_REQUESTS_PER_MINUTE", "MAX_REQUESTS_PER_HOUR"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
@@ -94,7 +95,7 @@ export class QuotaError extends TRPCError {
  * A video was refused for its length (daily or monthly minutes). Not a fault and not worth a retry: the stage
  * worker fails the project at once instead of downloading the same video again.
  */
-export class QuotaExceededError extends Error {
+export class QuotaExceededError extends NonRetryableError {
   constructor(message: string) {
     super(message);
     this.name = "QuotaExceededError";

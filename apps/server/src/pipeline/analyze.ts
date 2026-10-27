@@ -3,8 +3,12 @@ import { finalizeProjectIfDone, lockProjectClips, requestPrepare } from "./lifec
 import { needsPrepare } from "./manual.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
-import { StageContext, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
-import { chunkTranscript, excludeRanges, mapChunk, mapLimit, needsSecondLook, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
+import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, excludeRanges, mapChunk, needsSecondLook, pairwiseRank, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import { isAbortError } from "./steps.js";
+import { isSelfHostedModel } from "../ai/self-hosted.js";
+import { clipCandidateSchema } from "@reelsaw/shared";
+import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { finishThought } from "./thought.js";
@@ -185,12 +189,6 @@ export function snapCandidate(
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }
 
-/** Local models are slow and sequential; cloud models take parallel calls and extra samples. */
-function isSelfHostedModel(cfg: { AI_MODEL: string; OPENAI_BASE_URL?: string }) {
-  const provider = cfg.AI_MODEL.split(":")[0];
-  return provider === "compat" || provider === "ollama" || (provider === "openai" && !!cfg.OPENAI_BASE_URL);
-}
-
 /** Where one model-proposed moment ended up (indices refer to the candidates array). */
 interface CandidateFate {
   i: number;
@@ -221,23 +219,43 @@ function textFor(c: ClipCandidate, segments: TranscriptSegment[]) {
     .slice(0, 2500);
 }
 
+/** Bump when the shot-cut detector's behaviour changes: the saved scene-cuts step stops applying. */
+const SCENE_CUTS_VERSION = "scenes-1";
+
 /**
  * The source's shot cuts, detected once per project and kept on the transcript: clip boundaries snap to
- * them, the layout changes at them and the on-screen text scan reads shots from them. Cheap (ffmpeg scene
- * scores on a 320 px decode, a few seconds for an hour of video), so every project gets them; the scenes
- * refine step (opt-in) only adds the text scan on top. Null means never detected (an older project, an
- * imported report): detect now. A failed detection is logged and comes back empty.
+ * them, the layout changes at them and the on-screen text scan reads shots from them. Every project gets them
+ * (the scenes refine step, opt-in, only adds the text scan on top). It is a full low-resolution decode of the
+ * video: seconds on a fast machine, several minutes for an hour of video on a small CPU, so it is a checkpointed
+ * step of its own (the cuts live in `transcripts.sceneCuts`; the step row records the outcome and time).
+ * Null means never detected (an older project, an imported report, a re-transcribed one): detect now. A detection
+ * that fails inside ffmpeg is logged and comes back empty, but one that was cancelled or timed out is not stored.
  */
 export async function ensureSceneCuts(ctx: StageContext, project: Project, stored: number[] | null): Promise<number[]> {
   if (stored) return stored;
   if (!project.width || !project.sourceKey) return [];
   await ctx.progress(0.01, "Detecting shot changes");
-  const sourcePath = await ctx.ensureSource(project);
-  const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, ctx.signal);
-  await ctx.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
-  ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
-  return cuts;
+  const detect = async (signal: AbortSignal): Promise<number> => {
+    const sourcePath = await ctx.ensureSource(project);
+    const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, signal);
+    signal.throwIfAborted(); // detectScenes answers [] when it was stopped: that is not "no cuts"
+    await ctx.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
+    ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
+    return cuts.length;
+  };
+  // a decode is bounded by the video's own length on any machine that can play it in real time; never less than 30 min
+  const timeoutMs = Math.max(30 * 60_000, Math.round((project.durationSec ?? 0) * 1000));
+  await ctx.step("scene-cuts", { input: project.sourceKey, model: "ffmpeg-scene", promptVersion: SCENE_CUTS_VERSION, params: { floor: 0.1, width: 320 } }, detect, { schema: z.number(), timeoutMs, model: "ffmpeg-scene" });
+  // the step may have been reused while the transcript was replaced (cuts reset to null): then detect again
+  const [row] = await ctx.db.select({ cuts: schema.transcripts.sceneCuts }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId));
+  if (row?.cuts) return row.cuts;
+  await detect(ctx.signal);
+  const [again] = await ctx.db.select({ cuts: schema.transcripts.sceneCuts }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId));
+  return again?.cuts ?? [];
 }
+
+/** One scoring batch's raw answers: a list of items per sample. */
+const samplesSchema = z.array(z.array(scoreItem));
 
 export async function analyze(ctx: StageContext) {
   const { svc, projectId, db } = ctx;
@@ -281,7 +299,8 @@ export async function analyze(ctx: StageContext) {
   const sceneCuts = await ensureSceneCuts(ctx, project, transcript.sceneCuts);
 
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
-  const selfHosted = isSelfHostedModel({ AI_MODEL: svc.models.get().language, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
+  const languageId = svc.models.get().language;
+  const selfHosted = isSelfHostedModel({ AI_MODEL: languageId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
   // the judge (scoring + pairwise) may be a different model; its hosting decides the sampling cost
   const judgeId = svc.config.ANALYZE_JUDGE_MODEL;
@@ -295,28 +314,36 @@ export async function analyze(ctx: StageContext) {
   const sc: SelectContext = { title: project.title, durationSec, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds, maxClips: settings.maxClips, focus: settings.focus, instructions: settings.instructions };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
+  const judgeModelId = judgeId ?? languageId;
+  const mapUnitMs = ctx.unitTimeoutMs(languageId);
+  const scoreUnitMs = ctx.unitTimeoutMs(judgeModelId);
+  // the pairwise pass is not checkpointed; each of its calls still has a limit
+  judge.timeoutMs = scoreUnitMs;
   const segments = transcript.segments;
-  log.info({ durationSec, segments: segments.length, model: svc.models.get().language, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
+  log.info({ durationSec, segments: segments.length, model: languageId, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
 
-  // 1-2. chunk + map
+  // 1-2. chunk + map. Every window is a checkpointed step keyed on its lines, the model, the prompt version and the
+  // selection settings (sc): a retry, or a re-analyze with nothing changed, reuses the windows already mapped.
   const chunks = chunkTranscript(segments);
-  let mapped = 0;
+  const candidatesSchema = z.array(clipCandidateSchema);
   await ctx.progress(0.03, `Finding moments in ${chunks.length} part(s) of the transcript`);
-  const perChunk = await mapLimit(chunks, concurrency, async (ch) => {
-    const found = await mapChunk(o, ch, sc);
-    await ctx.progress(0.05 + 0.35 * (++mapped / chunks.length), `Found candidates in part ${mapped}/${chunks.length}`);
-    return found;
-  });
-  // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1)
-  let gleaned = 0;
+  const perChunk = await ctx.steps(chunks, { concurrency, range: [0.05, 0.4], message: (d, t) => `Found candidates in part ${d}/${t}` }, (ch, i, signal) =>
+    ctx.step(`map:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal }),
+  );
+  // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1). A window whose
+  // extra pass fails (the model answered nonsense) just keeps its first picks; a timeout or a cancel is never skipped.
   const gleanIdx = chunks.map((ch, i) => (needsSecondLook(ch, perChunk[i]!, settings.minClipSeconds) ? i : -1)).filter((i) => i >= 0);
-  await mapLimit(gleanIdx, concurrency, async (i) => {
-    if (ctx.signal.aborted) return;
+  await ctx.steps(gleanIdx, { concurrency, range: [0.4, 0.45], message: (d, t) => `Looking again in ${d}/${t} part(s)` }, async (i, _k, signal) => {
     const ch = chunks[i]!;
-    const more = await mapChunk(o, ch, sc, excludeRanges(perChunk[i]!)).catch(() => []);
+    const exclude = excludeRanges(perChunk[i]!);
+    const more = await ctx
+      .step(`glean:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end, exclude }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc, exclude), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal })
+      .catch((err: unknown) => {
+        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted) throw err;
+        log.warn({ err, chunk: i }, "second map pass failed; keeping the first picks of this window");
+        return [];
+      });
     perChunk[i]!.push(...more);
-    gleaned++;
-    await ctx.progress(0.4 + 0.05 * (gleaned / Math.max(1, gleanIdx.length)), `Looking again in part ${i + 1}/${chunks.length}`);
   });
   if (gleanIdx.length) log.debug({ gleaned: gleanIdx.length, perChunk: perChunk.map((l) => l.length) }, "second map pass on uncovered windows");
   const candidates = perChunk.flat();
@@ -368,7 +395,20 @@ export async function analyze(ctx: StageContext) {
   // 4. rubric scoring
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c, segments) }));
   await ctx.progress(0.45, `Scoring ${pooled.length} candidate(s)${samples > 1 ? ` × ${samples} samples` : ""}`);
-  const scored = await scoreCandidates(judge, inputs, sc, samples, concurrency, (d, t) => void ctx.progress(0.45 + 0.35 * (d / t), `Scoring candidates (${d}/${t})`).catch(() => {}));
+  // one step per batch of candidates (all its samples): keyed on the candidates' texts, the judge, the prompt and the settings
+  const scoreResults = await ctx.steps(scoreBatches(inputs), { concurrency, range: [0.45, 0.8], message: (d, t) => `Scoring candidates (${d}/${t})` }, (batch, i, signal) =>
+    ctx.step(
+      `score:${i}`,
+      { input: batch, model: judgeModelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples } },
+      async (sig) => {
+        const out: z.infer<typeof samplesSchema> = [];
+        for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples));
+        return out;
+      },
+      { schema: samplesSchema, timeoutMs: scoreUnitMs * samples, model: judgeModelId, signal },
+    ),
+  );
+  const scored = aggregateScores(inputs, sc, scoreResults.flat());
   // unscored (scoring failed) keep their map-pass guess only to order them among themselves
   type Ranked = { c: ClipCandidate; id: number; r: ScoreResult | undefined; total: number };
   let ranked: Ranked[] = pooled.map((c, id) => ({ c, id, r: scored.get(id), total: scored.get(id)?.total ?? Math.round(c.score) }));
@@ -399,6 +439,7 @@ export async function analyze(ctx: StageContext) {
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
+  ctx.throwIfAborted(); // a stopped attempt must not go on to hand off half a ranking
   let ranks: Map<number, number> | undefined;
   if (pairwise && chosen.length > 2 && !ctx.signal.aborted) {
     // only scored clips are compared; an unscored fill-in keeps its place after them

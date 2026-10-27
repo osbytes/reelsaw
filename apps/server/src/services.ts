@@ -17,6 +17,7 @@ import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
+import { isSelfHostedModel } from "./ai/self-hosted.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
@@ -328,7 +329,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const queue = await step("job queue (pg-boss)", async () => {
-    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }));
+    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }));
     await q.start();
     return q;
   });

@@ -93,3 +93,28 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
   if (sources || clips) log.info({ sources, clips }, "retention sweep removed files");
   return { sources, clips };
 }
+
+/**
+ * Drop the checkpoints (job_steps) of projects that finished (done or failed) and have not changed for
+ * STEP_RETENTION_DAYS; 0 keeps them. A project that is working, or was touched recently (a Retry soon after a failure
+ * reuses its steps), keeps them. Runs from the hourly sweep, a few projects per statement within a time budget.
+ */
+export async function pruneJobSteps(svc: Services): Promise<number> {
+  const days = svc.settings.get().STEP_RETENTION_DAYS;
+  if (days <= 0) return 0;
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const deadline = deadlineIn(RETENTION_BUDGET_MS);
+  let deleted = 0;
+  for (;;) {
+    const res = await svc.database.pool.query(
+      `delete from job_steps where project_id in (
+         select p.id from projects p where p.status in ('done', 'failed') and p.updated_at < $1
+           and exists (select 1 from job_steps s where s.project_id = p.id) limit 200)`,
+      [cutoff],
+    );
+    deleted += res.rowCount ?? 0;
+    if (!res.rowCount || Date.now() >= deadline) break;
+  }
+  if (deleted) svc.log.child({ module: "retention" }).info({ rows: deleted, days }, "pruned old pipeline checkpoints");
+  return deleted;
+}

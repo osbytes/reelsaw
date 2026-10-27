@@ -8,6 +8,7 @@
  *     cannot rewrite the transcript, and timestamps are preserved.
  */
 import { generateText, Output, type LanguageModel } from "ai";
+import { callSignal } from "./steps.js";
 import { z } from "zod";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
 import { randomUUID } from "node:crypto";
@@ -143,14 +144,14 @@ const properNounSchema = z.object({ names: z.array(z.string()) });
  * spelling). Generic hashtags like "Budgeting" or "PersonalFinance" would otherwise trigger
  * corrections of ordinary words.
  */
-export async function filterProperNouns(model: LanguageModel, entities: string[], context: { title?: string; uploader?: string }, signal?: AbortSignal): Promise<string[]> {
+export async function filterProperNouns(model: LanguageModel, entities: string[], context: { title?: string; uploader?: string }, signal?: AbortSignal, timeoutMs?: number): Promise<string[]> {
   if (!entities.length) return [];
   try {
     const { output } = await generateText({
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: signal,
+      abortSignal: callSignal(signal, timeoutMs),
       output: Output.object({ schema: properNounSchema, name: "names" }),
       prompt: `From the list below, return only the items that are proper nouns or fixed-spelling terms a transcriber might misspell: people, companies, brands, products, places, software names, acronyms.
 Drop generic topics, hashtags made of ordinary words, and plain English words or phrases.
@@ -337,11 +338,11 @@ export async function correctTranscript(
   words: Word[],
   entities: string[],
   context: { title?: string; uploader?: string },
-  opts: { signal?: AbortSignal; telemetry?: boolean; autoConfidence?: number; minFlagConfidence?: number; log?: Logger } = {},
+  opts: { signal?: AbortSignal; /** limit on each model call, ms */ timeoutMs?: number; telemetry?: boolean; autoConfidence?: number; minFlagConfidence?: number; log?: Logger } = {},
 ): Promise<CorrectionResult> {
   const autoConfidence = opts.autoConfidence ?? 0.85;
   const minFlagConfidence = opts.minFlagConfidence ?? 0.4;
-  entities = await filterProperNouns(model, entities, context, opts.signal);
+  entities = await filterProperNouns(model, entities, context, opts.signal, opts.timeoutMs);
   const candidates = findCandidates(words, entities);
   const trace: NonNullable<CorrectionResult["trace"]> = { entities, candidates: candidates.map((c) => ({ wordIndex: c.wordIndex, heard: c.heard, proposed: c.entity, outcome: "model failed" })) };
   const none = { words, rawWords: words, flags: [], applied: [], candidates: candidates.length, trace };
@@ -366,7 +367,7 @@ Respond with JSON: {"decisions":[{"id":0,"replace":true,"confidence":0.9}, ...]}
       prompt,
       temperature: 0,
       maxRetries: 2,
-      abortSignal: opts.signal,
+      abortSignal: callSignal(opts.signal, opts.timeoutMs),
       output: Output.object({ schema: decisionSchema, name: "decisions" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.correct-entities", recordInputs: false, recordOutputs: false },
     });

@@ -109,6 +109,8 @@ function publicProject(p: schema.Project) {
     status: p.status,
     stage: p.stage,
     stageProgress: p.stageProgress,
+    /** checkpointed stages: { done, total, etaSec, unitMs } (13 of 43 parts, seconds left), else null */
+    stageDetail: p.stageDetail,
     error: p.error,
     settings: p.settings,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,

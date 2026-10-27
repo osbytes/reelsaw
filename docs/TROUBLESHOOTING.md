@@ -230,6 +230,35 @@ and list it in `SUPPORTED` in `language.ts`.
 - Log what the model returned vs. what survived (`modelPicks`, `usable`, `dropped`): "the AI found nothing" was
   twice "the AI found three things we threw away".
 
+### Long videos on a slow model: timeouts and "Retry continues" (issue report, 2026-10-26)
+
+A 57-minute video on `compat:qwen2.5:14b` with no GPU failed in **Finding moments** after four attempts of exactly 30 minutes:
+each of the 43 three-minute windows took 140-190 s, nothing was kept between attempts, so every retry redid the same first 13
+windows and died in the same place, and the user saw "This operation was aborted".
+
+- **Finding moments saves its parts.** Each map window, each second look at a window, each batch of scored candidates and the
+  shot-cut detection is a *step* (`job_steps`, `ctx.step` in `pipeline/common.ts`), saved the moment it finishes. A retry, a
+  restart or a timeout continues where it stopped: the debug lines `step reused` show what was skipped. The project page and
+  `reelsaw status` show "13 of 43 parts, about 1 h left" (`projects.stage_detail`; `get_project` has it as `stageDetail`).
+- **Two limits, both runtime settings.** `LLM_CALL_TIMEOUT_SECONDS` bounds one model call, every HTTP attempt of it together
+  (0 = auto: 120 s hosted, 600 s self-hosted). `STAGE_IDLE_TIMEOUT_MINUTES` stops a stage in which no part finished for that
+  long (0 = auto: 1.5 x the call limit). Neither is the total time: a stage may take hours as long as parts keep finishing.
+  A CPU-only 14B model needs about 2-3 min per part; raise the call limit if a single call really takes longer.
+- **Timeouts read as sentences:** "Finding moments timed out: 13 of 43 parts done in 30 min on qwen2.5:14b (~2.3 min per part).
+  Retry continues where it stopped; a smaller or GPU-backed model is faster." That text is the project's error and the
+  `stage.failed` / `project.failed` event.
+- **Retries count attempts that get nowhere.** An attempt that saved at least one new part does not use up a retry (the worker logs
+  `attempt made progress; re-queueing with a fresh budget` and raises the job's `retry_limit` by one); only attempts that saved
+  nothing count against the queue's limit, so a slow model finishes and a window that always fails stops after the limit.
+  Errors a retry cannot fix (`NonRetryableError`: the source was removed by retention, a quota refuses the video) fail the run at once.
+- **Backstop.** pg-boss still expires a job after `clamp(30 min, 30 min + duration x factor, 24 h)`, factor 4 when the language
+  model is self-hosted at enqueue time, else 1. It only stops a runaway; the limits above are the budget. Disk leases live 24 h.
+- **Checkpoints are dropped** `STEP_RETENTION_DAYS` (14) after a finished project last changed (hourly sweep), or with the project
+  when it is deleted forever. They are keyed on content, model, prompt version and settings, so changing the model, the clip lengths
+  or the focus asks again only what changed (docs/SELECTION.md).
+- Still not checkpointed (a timeout redoes them): the refine steps (name fixes, disfluencies, on-screen text scan), prepare of a manual
+  clip and the pairwise re-rank. Each model call in them has the call limit now.
+
 ### Whisper decoder loops (issue report 218, 2026-10-24)
 
 whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no, no, no", and the previous chunk transcribed the vocabulary prompt (`Chafing Dream Swag Bags Flying Pig Project`) for ten minutes. OpenAI's local Whisper retries a window when zlib compression ratio > 2.4; the API does not. We collapse consecutive unigram runs longer than four copies and n-gram runs of three-plus copies with piled timestamps (`pipeline/asr-loops.ts`), and retry a repetitive chunk once without the prompt. Each collapse is an auto-applied transcript flag (↻ looping speech) over the as-heard words, so it shows up in review like a name fix; rejecting it puts the repeated copies back. Captions stay empty across the hole unless you type replacement text on that flag. Short emphasis (`no no no no`, `I think I think`) is kept. Re-transcribe to recover the minutes the loop replaced. Eval: `pnpm eval asr-loops`.
@@ -534,8 +563,9 @@ It looked frozen and the evidence was gone with the container's logs. What chang
 - **Job expiry:** every job has a hard expiry after which pg-boss retries it from the start (a crashed worker is
   caught much sooner by the 15 s heartbeat). Defaults: ingest/transcribe 3 h, render 1 h, prepare 15 min, analyze and
   refine 30 min, but analyze and the refine stages are sized per job from the project's duration:
-  `clamp(30 min, 2 x duration, 3 h)` (`expireInSecondsFor` in `queue/boss.ts`). A job that "expired" on a long
-  source with a slow local model is the symptom of this limit being too small: raise the model speed or split the source.
+  `clamp(30 min, 30 min + duration x factor, 24 h)`, factor 4 for a self-hosted language model and 1 otherwise
+  (`expireInSecondsFor` in `queue/boss.ts`). It is a backstop; the real budget is the per-call and idle timeouts
+  (section 4, "Long videos on a slow model"). An expired attempt of Finding moments keeps its saved parts, so Retry continues.
 - **Dependencies down:** boot fail-fast (exit 78) when the model that will actually run is unreachable or
   unusable (step `ai model check`). "Effective" means the admin override from Settings → Models when one is
   in force, else `AI_MODEL` / `TRANSCRIPTION_MODEL`; the error label says which. A dead server behind an

@@ -223,7 +223,7 @@ export async function refineEntities(ctx: StageContext) {
     raw,
     t.entities,
     { title: project.title, uploader: project.sourceMeta?.uploader as string | undefined },
-    { signal: ctx.signal, telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
+    { signal: ctx.signal, timeoutMs: ctx.unitTimeoutMs(svc.models.get().language), telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
   );
   ctx.log.debug(
     {
@@ -279,6 +279,7 @@ export async function refineDisfluency(ctx: StageContext) {
   const trace: DisfluencyTraceEntry[] = [];
   const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
+    timeoutMs: ctx.unitTimeoutMs(svc.models.get().language),
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
     reserved,

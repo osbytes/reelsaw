@@ -31,6 +31,7 @@ import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
+import { describeStageDetail, type StageDetail } from "../lib/stage-detail";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
@@ -87,7 +88,7 @@ export function ProjectPage() {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
-  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string } | null>(null);
+  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string; detail?: StageDetail } | null>(null);
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
@@ -123,8 +124,8 @@ export function ProjectPage() {
       setTotal((n) => n + 1);
     },
     onProgress: (evt) => {
-      const p = evt.payload as { stage: string; progress: number; message?: string; clipId?: string };
-      setProgress({ stage: p.stage, value: p.progress, message: p.message });
+      const p = evt.payload as { stage: string; progress: number; message?: string; detail?: StageDetail; clipId?: string };
+      setProgress({ stage: p.stage, value: p.progress, message: p.message, detail: p.detail });
       if (p.clipId) setClipProgress((c) => ({ ...c, [p.clipId!]: p.progress }));
     },
     onReplayed: (events, m, reconnect) => {
@@ -341,6 +342,8 @@ export function ProjectPage() {
       return null;
     }
   })();
+  // parts done of total with the time left, for a stage that saves its parts (live tick first, else the stored value)
+  const stageDetail = (progress && progress.stage === p.stage ? progress.detail : undefined) ?? p.stageDetail ?? null;
   const activityLoading = !replayed && activity.length === 0;
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
@@ -508,6 +511,11 @@ export function ProjectPage() {
             <span>Uploaded file</span>
           )}
           {activityTrigger}
+          {active && stageDetail && (
+            <span className="font-mono text-xs tabular-nums leading-5 text-ink3" title="Saved as each part finishes: Retry continues where it stopped">
+              {describeStageDetail(stageDetail)}
+            </span>
+          )}
           {eta && (
             <span
               className="inline-block min-w-[104px] font-mono text-xs tabular-nums leading-5 text-ink3"

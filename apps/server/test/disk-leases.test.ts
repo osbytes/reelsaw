@@ -34,8 +34,8 @@ describe("volumeId", () => {
 });
 
 describe("DISK_LEASE_TTL_MS", () => {
-  it("is the longest a stage job may run before pg-boss expires it, so no lease outlives its job", () => {
-    assert.equal(DISK_LEASE_TTL_MS, Math.max(...queueDefs.map((q) => q.expireInSeconds)) * 1000);
-    assert.ok(DISK_LEASE_TTL_MS >= 3600_000);
+  it("is the longest any job may be given before pg-boss expires it (24 h), so no lease outlives its job", () => {
+    assert.equal(DISK_LEASE_TTL_MS, 24 * 3600_000);
+    assert.ok(DISK_LEASE_TTL_MS >= Math.max(...queueDefs.map((q) => q.expireInSeconds)) * 1000);
   });
 });
