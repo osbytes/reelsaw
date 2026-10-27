@@ -136,7 +136,7 @@ export function ClipCard({
         <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
-            {clip.status === "failed" ? "!" : clip.status === "preparing" ? <Loader2 className="h-4 w-4 animate-spin" /> : working ? `${pct}%` : clip.status === "pending" ? "◷" : <span className="grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-[#1c1c1e]">▶</span>}
+            {clip.status === "failed" ? "!" : clip.status === "preparing" ? <Loader2 className="h-4 w-4 animate-spin" /> : working ? `${pct}%` : clip.status === "pending" ? "◷" : <span className="grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-film-ink">▶</span>}
           </span>
           {clip.status === "rendering" && (
             <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">

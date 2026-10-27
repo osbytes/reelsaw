@@ -6,6 +6,7 @@ import { useTRPC } from "../lib/trpc";
 import { ClipEditor, type EditorClip } from "../components/ClipEditor";
 import { NotFound } from "../components/NotFound";
 import { ClipEditorSkeleton } from "../components/PageSkeletons";
+import { LiveStatusPill } from "../components/LiveStatusPill";
 import { masksSourceText } from "@reelsaw/shared";
 
 /** Full-screen editor route: /p/:id/clips/:clipId. Live render progress comes from the project's event stream. */
@@ -19,7 +20,7 @@ export function ClipEditorPage() {
   const [progress, setProgress] = useState<number | undefined>(undefined);
 
   // render progress of this clip; the stream also keeps the project and transcript queries current
-  useProjectEvents(id, {
+  const { status: stream } = useProjectEvents(id, {
     onProgress: (evt) => {
       const p = evt.payload as { clipId?: string; progress?: number };
       if (p.clipId === clipId && typeof p.progress === "number") setProgress(p.progress);
@@ -53,6 +54,8 @@ export function ClipEditorPage() {
     );
 
   return (
+    <>
+    <LiveStatusPill status={stream} />
     <ClipEditor
       key={clip.id}
       projectId={p.id}
@@ -73,5 +76,6 @@ export function ClipEditorPage() {
       renderProgress={progress}
       onExit={() => nav(`/p/${p.id}#card=${clip.id}`)}
     />
+    </>
   );
 }

@@ -8,6 +8,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useProjectEvents } from "../lib/projectEvents";
+import { LiveStatusPill } from "../components/LiveStatusPill";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { summarizeError } from "../lib/errors";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
@@ -38,6 +39,19 @@ const STAGE_REACHED: Record<string, number> = { ingest: 0, transcribe: 1, refine
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 const TONE_GLYPH: Record<Tone, string> = { ok: "●", run: "◔", warn: "◷", err: "▲" };
 const TONE_FG: Record<Tone, string> = { ok: "text-ok", run: "text-acc-text", warn: "text-warn", err: "text-err" };
+
+const LOG_CAP = 2000;
+const capLog = (l: ProjectEvent[]) => (l.length > LOG_CAP ? l.slice(l.length - LOG_CAP) : l);
+/** Adds events to an id-ordered log without duplicates; sorts once, and only when the new ones do not simply append. */
+function mergeEvents(log: ProjectEvent[], add: ProjectEvent[]): ProjectEvent[] {
+  const lastOld = log.at(-1)?.id ?? -Infinity;
+  let have: Set<number> | undefined;
+  const fresh = add.filter((e) => e.id > lastOld || !(have ??= new Set(log.map((x) => x.id))).has(e.id));
+  if (!fresh.length) return log;
+  const out = [...log, ...fresh];
+  const ordered = fresh.every((e, i) => e.id > (i ? fresh[i - 1]!.id : lastOld));
+  return ordered ? out : out.sort((a, b) => a.id - b.id);
+}
 
 function useWidth() {
   const [w, setW] = useState(window.innerWidth);
@@ -102,23 +116,36 @@ export function ProjectPage() {
   const [total, setTotal] = useState(0);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  useProjectEvents(id, {
+  const { status: stream } = useProjectEvents(id, {
     list: true,
-    onEvent: (evt, live) => {
-      setLog((l) => (l.some((e) => e.id === evt.id) ? l : [...l, evt].sort((a, b) => a.id - b.id)));
-      if (live) setTotal((n) => n + 1);
+    onEvent: (evt) => {
+      setLog((l) => capLog(mergeEvents(l, [evt])));
+      setTotal((n) => n + 1);
     },
     onProgress: (evt) => {
       const p = evt.payload as { stage: string; progress: number; message?: string; clipId?: string };
       setProgress({ stage: p.stage, value: p.progress, message: p.message });
       if (p.clipId) setClipProgress((c) => ({ ...c, [p.clipId!]: p.progress }));
     },
-    onReplayed: (m, reconnect) => {
+    onReplayed: (events, m, reconnect) => {
       setReplayed(true);
       setTotal(m.total);
+      if (reconnect && m.hasMore) {
+        // the replay is only the newest events, so some between the drop and now are missing: start the log over
+        // from what the replay carries, offer the rest as "Load older" and re-read the project
+        setLog(capLog(mergeEvents([], events)));
+        setHasOlder(true);
+        void invalidate();
+        return;
+      }
+      setLog((l) => capLog(mergeEvents(l, events)));
       if (!reconnect) setHasOlder(m.hasMore);
     },
   });
+  // the in-memory log is capped (newest kept); the rest stays reachable through "Load older"
+  useEffect(() => {
+    if (log.length >= LOG_CAP) setHasOlder(true);
+  }, [log.length]);
   async function loadOlder() {
     const oldest = log[0]?.id;
     if (!oldest) return;
@@ -843,6 +870,7 @@ export function ProjectPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <LiveStatusPill status={stream} />
       {header}
       {/* overlaid under the header: a banner arriving mid-session must not push the source and transcript down */}
       <div className="relative z-20 h-0 shrink-0">
