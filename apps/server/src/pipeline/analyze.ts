@@ -410,13 +410,12 @@ export async function analyze(ctx: StageContext) {
   }
 
   if (kept.length) log.debug({ kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length }, "new picks avoid the clips the user kept");
-  const firstIndex = kept.reduce((m, k) => Math.max(m, k.index + 1), 0);
   // the project's layer template (brand overlays, music bed, CTA), materialised on every new clip against its own length
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const rows = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
     projectId,
-    index: firstIndex + index,
+    index, // position among the new picks; the hand-off offsets it past the clips that exist when it commits
     title: c.title.slice(0, 120),
     hook: c.hook.slice(0, 80),
     startSec: c.startSec,
@@ -431,16 +430,29 @@ export async function analyze(ctx: StageContext) {
     status: "pending" as const,
   }));
   log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
-  rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit
   await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } }, async (u) => {
-    if (rows.length) await u.db.insert(schema.clips).values(rows);
-    if (template && rows.length) await syncClipsRefs(u.db, projectId, rows);
+    // the project row is locked by now (lockCurrentStage), so what we read here is what the insert sees
+    const liveNow = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+    if (liveNow.some((c) => c.origin === "ai" && !keepReason(c))) {
+      // another run of this analysis committed its picks while we scored: converge on them instead of adding a second set
+      log.info({ clips: liveNow.length }, "clips already exist, converging");
+      await u.db
+        .update(schema.projects)
+        .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
+        .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])));
+      return;
+    }
+    const firstIndex = liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0);
+    const placed = rows.map((r) => ({ ...r, index: firstIndex + r.index }));
+    placed.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
+    if (placed.length) await u.db.insert(schema.clips).values(placed);
+    if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
     await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
-    for (const r of rows) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
+    for (const r of placed) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
     await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    for (const r of rows) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
+    for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
   });
   void db;
 }
@@ -457,5 +469,5 @@ export function keepReason(c: Pick<schema.Clip, "origin" | "editedAt" | "layoutO
 
 /** A project's live clips (not soft-deleted), in order. */
 export async function listClips(db: Db, projectId: string) {
-  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: asc(schema.clips.index) });
+  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)] });
 }

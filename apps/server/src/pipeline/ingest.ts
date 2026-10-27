@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
@@ -132,7 +132,7 @@ export async function ingest(ctx: StageContext) {
     }
     await u.db
       .update(schema.projects)
-      .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title, updatedAt: new Date() })
+      .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title: sql`case when ${schema.projects.title} = ${project.title} then ${title} else ${schema.projects.title} end`, updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
     await recordSourceDuration(u.db, projectId, probe.durationSec);
     await u.enqueue(QUEUES.transcribe, { projectId });

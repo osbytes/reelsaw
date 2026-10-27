@@ -5,7 +5,7 @@ import type { JSONObject } from "@ai-sdk/provider";
 import type { TranscriptFlag, Word } from "@reelsaw/shared";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, exists, modelsUsed } from "./common.js";
+import { StageContext, StaleJobError, exists, lockCurrentStage, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
 import { extractEntities, biasProviderOptions, applyFlags } from "./entities.js";
 import { collapseDecoderLoopsWithStats, compressionRatio, flagsFromCollapse, preferLessRepetitive, shouldRetryWithoutPrompt, withoutPrompt, type LoopRun } from "./asr-loops.js";
@@ -25,7 +25,12 @@ export async function transcribe(ctx: StageContext) {
   const existing = await ctx.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { projectId: true } });
   if (existing) {
     ctx.log.info("transcript exists, moving on to refine");
-    await enqueueRefine(svc, projectId);
+    // the same fence as ctx.complete: transcript lock first, then the project row, and only while this job's version is current
+    await svc.tx(async (u) => {
+      await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
+      if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq);
+      await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
+    });
     return;
   }
 
@@ -169,7 +174,7 @@ export async function transcribe(ctx: StageContext) {
       sceneCuts: null,
     })
     .onConflictDoNothing();
-    await enqueueRefine(svc, projectId, undefined, u);
+    await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
   });
 }
 

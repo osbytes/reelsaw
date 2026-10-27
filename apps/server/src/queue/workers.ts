@@ -233,7 +233,7 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.prepare, err.requiredMB);
         if (job.retryCount >= max) {
           svc.telemetry.captureException(err, { queue: QUEUES.prepare, projectId, clipId, jobId: job.id });
-          await markClipFailed(svc, projectId, clipId, err);
+          await markClipFailed(svc, projectId, clipId, err, undefined, { ifStatus: "preparing" });
         }
         throw err;
       }

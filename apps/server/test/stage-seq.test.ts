@@ -11,6 +11,7 @@ import { lifecycleHarness } from "./lifecycle-harness.js";
 import { schema } from "../src/db/index.js";
 import { StageContext, StaleJobError, failProject } from "../src/pipeline/common.js";
 import { supersedeStages } from "../src/pipeline/lifecycle.js";
+import { enqueueRefine } from "../src/pipeline/refine.js";
 import { retryProject, deleteProject, reanalyzeProject } from "../src/projects/service.js";
 import { reconcile } from "../src/queue/reconcile.js";
 import { QUEUES } from "../src/queue/boss.js";
@@ -113,5 +114,32 @@ describe("stage versions", { skip: notReady ?? false }, () => {
     await h.tx((u) => supersedeStages(u, id));
     await reconcile(h.svc);
     assert.deepEqual((await jobData(id)).map((j) => [j.name, j.data.seq]), [[QUEUES.analyze, 2]]);
+  });
+  it("the transcribe early exit (transcript already there) is fenced: a superseded job leaves the project alone", async () => {
+    const id = await h.makeProject(userId, "transcribing");
+    await h.pool.query(`insert into transcripts (project_id, text, words, segments) values ($1, '', '[]', '[]')`, [id]);
+    await h.tx((u) => supersedeStages(u, id));
+    await assert.rejects(enqueueRefine(h.svc, id, 0), StaleJobError);
+    assert.equal((await project(id)).status, "transcribing");
+    assert.equal(await h.eventCount(id, "stage.started"), 0);
+    await enqueueRefine(h.svc, id, 1);
+    assert.equal((await project(id)).status, "refining");
+  });
+
+  it("a user-initiated refine does not flip a busy project", async () => {
+    const id = await h.makeProject(userId, "rendering");
+    await h.pool.query(`insert into transcripts (project_id, text, words, segments) values ($1, '', '[]', '[]')`, [id]);
+    assert.equal(await enqueueRefine(h.svc, id, 0, undefined, undefined, { onlyIfIdle: true }), false);
+    assert.equal((await project(id)).status, "rendering");
+  });
+
+  it("retrying a project that failed in analyze with only a kept clip queues analyze, not render", async () => {
+    const id = await h.makeProject(userId, "failed");
+    await h.pool.query(`insert into transcripts (project_id, text, words, segments, refine) values ($1, '', '[]', '[]', '{"entities":"done","disfluency":"done","scenes":"done"}')`, [id]);
+    await h.pool.query(`update projects set stage = 'analyze', source_key = 'k' where id = $1`, [id]);
+    const clipId = await h.makeClip(id, 0, "done");
+    await h.pool.query(`update clips set origin = 'manual' where id = $1`, [clipId]);
+    const r = await h.tx((u) => retryProject(h.svc, u, id));
+    assert.equal(r?.queue, QUEUES.analyze);
   });
 });

@@ -13,7 +13,7 @@ import { cuesToTranscript, linesFromTranscript, parseCaptions, toSrt, toVtt, typ
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
 import { slugify } from "./export.js";
-import { startRun } from "./pipeline/lifecycle.js";
+import { stageSeqOf, startRun } from "./pipeline/lifecycle.js";
 import { enqueueRefine } from "./pipeline/refine.js";
 import { releaseUpload } from "./storage/uploads.js";
 import { assertPublicHttpUrl, UnsafeUrlError } from "./lib/safe-url.js";
@@ -184,7 +184,7 @@ export async function importTranscript(svc: Services, actor: Actor, projectId: s
       .onConflictDoUpdate({ target: schema.transcripts.projectId, set: values });
     if (idle && (await startRun(u, projectId, { reason: "refine", status: "refining", stage: "refine" })) === null) throw new TRPCError({ code: "CONFLICT", message: "The project started working again. Try once more when it is done." });
     await u.emit(projectId, "transcript.imported", { format: parsed.format, cues: parsed.cues.length, words: words.length, ...(values.language ? { language: values.language } : {}), warnings: parsed.warnings.length });
-    if (idle) await enqueueRefine(svc, projectId, undefined, u);
+    if (idle) await enqueueRefine(svc, projectId, await stageSeqOf(u.db, projectId), undefined, u);
     await releaseUpload(svc, u, projectId, input.uploadId); // the subtitle file is not needed once its text is the transcript
     u.afterCommit(() => log.info({ format: parsed.format, cues: parsed.cues.length, words: words.length, warnings: parsed.warnings, restarted: idle, previousLanguage: prev?.language ?? null }, "transcript imported"));
     return idle;

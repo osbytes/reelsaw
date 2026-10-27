@@ -1044,12 +1044,16 @@ export function overlayChain(items: LoadedOverlay[], firstInput: number, outW: n
   return { chain: `${parts.join(";")};`, out: prev };
 }
 
-export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number) {
+/**
+ * Mark a clip failed. `gen`: only while that render generation is current. `ifStatus`: only while the clip is still in
+ * that status (a prepare that gives up must not fail a clip a newer prepare or render has taken over).
+ */
+export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number, o: { ifStatus?: schema.Clip["status"] } = {}) {
   const message = err instanceof Error ? err.message : String(err);
   await svc.tx(async (u) => {
     // a failing stale render must not mark the newer, pending version as failed
-    const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
-    if (!cur || (gen !== undefined && cur.gen !== gen)) return;
+    const [cur] = await u.db.select({ gen: schema.clips.renderGen, status: schema.clips.status }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!cur || (gen !== undefined && cur.gen !== gen) || (o.ifStatus !== undefined && cur.status !== o.ifStatus)) return;
     await u.db.update(schema.clips).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000) });
     await finalizeInTx(svc, u, projectId);
