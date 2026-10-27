@@ -415,7 +415,7 @@ name: reelsaw
 
 x-app: &app
   image: ${REELSAW_IMAGE:-ghcr.io/osbytes/reelsaw:latest}
-  stop_grace_period: 330s
+  stop_grace_period: ${STOP_GRACE_PERIOD:-330s}
   restart: unless-stopped
   depends_on:
     db:

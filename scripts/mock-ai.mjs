@@ -53,6 +53,8 @@ http.createServer(async (req, res) => {
     res.end(JSON.stringify({ id: "chatcmpl-mock", object: "chat.completion", created: Date.now() / 1000, model: parsed.model, choices: [{ index: 0, message: msg, finish_reason: usesTool ? "tool_calls" : "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }));
     return;
   }
+  // the app's boot check lists installed models (GET /v1/models) before it will start
+  if (req.url?.startsWith("/v1/models")) { res.end(JSON.stringify({ object: "list", data: ["mock", "whisper-1"].map((id) => ({ id, object: "model" })) })); return; }
   if (req.url === "/calls") { res.end(JSON.stringify(calls)); return; }
   res.statusCode = 404; res.end(JSON.stringify({ error: "not mocked: " + req.url }));
 }).listen(PORT, () => console.log("mock ai on", PORT));

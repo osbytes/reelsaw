@@ -109,7 +109,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // the logger comes first (from raw env, before validation) so config errors are logged too
   const fmt = env.LOG_FORMAT === "json" || env.LOG_FORMAT === "pretty" ? env.LOG_FORMAT : "auto";
   const role = env.REELSAW_CLI === "1" ? "cli" : env.RUN_HTTP === "false" ? "worker" : env.RUN_WORKERS === "false" ? "api" : "app";
-  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
+  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined, WORKER_ID: env.WORKER_ID }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
   const bootLog = log.child({ module: "boot" });
   const step = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
     try {

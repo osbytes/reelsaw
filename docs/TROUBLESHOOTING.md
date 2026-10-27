@@ -163,7 +163,11 @@ the clip) and read the lines.
     docker compose exec -T app reelsaw logs <clipId> --level debug --module render
     docker compose exec -T app reelsaw logs <projectId> --since 2h --raw | jq 'select(.level>=40)'
 
-`logs` reads `LOG_FILE` (daily files, seven kept, so it survives redeploys); without `LOG_FILE` use
+`logs` reads `LOG_FILE` (daily files, seven kept, so it survives redeploys). Each process (the app and every
+scaled worker) writes its own `reelsaw.<worker id>.<date>.<n>.log` in that directory, so rotation in one
+never prunes another's; `logs` and issue reports read every `reelsaw.*.log*` file and merge the lines by
+timestamp (with `cat`/`grep` on the directory, sort on `time` yourself). Files not written to for seven days
+are removed at boot. Without `LOG_FILE` use
 `docker compose logs app | grep <id>`. Fields to filter on: `projectId`, `clipId`, `jobId`, `runSeq`
 (which run), `module`, `level` (10 trace, 20 debug, 30 info, 40 warn, 50 error, 60 fatal), `event`
 (the project event name on `msg: "project event"` lines), `requestId`, `userId`, `err`.
@@ -495,11 +499,16 @@ It looked frozen and the evidence was gone with the container's logs. What chang
 
 - **Recoverability:** `needsPrepare` routes an unprepared user clip back through `clip.prepare` from every path
   (render worker, re-render, retry, reconciler, `reelsaw recover`). Deploys drain: `SHUTDOWN_GRACE_SECONDS=300` +
-  compose `stop_grace_period: 330s`, so a rebuild waits for running renders instead of burning a retry.
+  compose `stop_grace_period: ${STOP_GRACE_PERIOD:-330s}` (set `STOP_GRACE_PERIOD` to at least `SHUTDOWN_GRACE_SECONDS` + 30s if you raise it), so a rebuild waits for running renders instead of burning a retry. On SIGTERM the app also stops accepting, ends open SSE streams and waits up to 10 s for open requests before the drain.
 - **Triagability:** retried jobs log `previousAttempt` (our error or pg-boss "job heartbeat timeout" =
   interrupted) and post a `clip.retrying` event; the reconciler's watchdog posts `job.stalled` after
   `STALL_MINUTES` without events; the cut search reports progress per cut and attempt; logs also go to
-  `LOG_FILE` (`/data/logs/reelsaw.log`, daily rotation, 7 kept) so `reelsaw logs <id>` works after redeploys.
+  `LOG_FILE` (`/data/logs/reelsaw.<worker id>.log`, one file set per process, daily rotation, 7 kept) so `reelsaw logs <id>` works after redeploys.
+- **Job expiry:** every job has a hard expiry after which pg-boss retries it from the start (a crashed worker is
+  caught much sooner by the 15 s heartbeat). Defaults: ingest/transcribe 3 h, render 1 h, prepare 15 min, analyze and
+  refine 30 min, but analyze and the refine stages are sized per job from the project's duration:
+  `clamp(30 min, 2 x duration, 3 h)` (`expireInSecondsFor` in `queue/boss.ts`). A job that "expired" on a long
+  source with a slow local model is the symptom of this limit being too small: raise the model speed or split the source.
 - **Dependencies down:** boot fail-fast (exit 78) when the model that will actually run is unreachable or
   unusable (step `ai model check`). "Effective" means the admin override from Settings → Models when one is
   in force, else `AI_MODEL` / `TRANSCRIPTION_MODEL`; the error label says which. A dead server behind an

@@ -18,7 +18,9 @@
  * `module` binding). The spec can be changed while running (`reelsaw log-level`), see LogControl.
  */
 import { pino, type DestinationStream, type Logger, type LoggerOptions } from "pino";
+import os from "node:os";
 import { forwardPinoLine } from "./otel-log.js";
+import { logFileFor, pruneOldLogs } from "./log-read.js";
 
 export type { Logger };
 
@@ -31,6 +33,8 @@ export interface LogConfig {
   LOG_FORMAT?: "json" | "pretty" | "auto";
   /** also write JSON lines here, rotated daily (7 kept), so logs survive container re-creation */
   LOG_FILE?: string;
+  /** the process's worker id (config WORKER_ID); names its file under LOG_FILE, default `hostname:pid` */
+  WORKER_ID?: string;
 }
 
 export interface LogLevels {
@@ -124,15 +128,18 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
     },
   };
   const console = pretty ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } : { target: "pino/file", options: { destination: 1 } };
+  // same id ops/workers.ts registers under; each process writes its own files so rotation never prunes another's
+  const logFile = env.LOG_FILE && !dest ? logFileFor(env.LOG_FILE, env.WORKER_ID?.trim() || `${os.hostname()}:${process.pid}`) : undefined;
+  if (env.LOG_FILE && logFile) pruneOldLogs(env.LOG_FILE, 7);
   const root = dest
     ? pino(opts, dest)
-    : env.LOG_FILE
+    : logFile
     ? pino({
         ...opts,
         transport: {
           targets: [
             { ...console, level: "trace" },
-            { target: "pino-roll", level: "trace", options: { file: env.LOG_FILE, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" } },
+            { target: "pino-roll", level: "trace", options: { file: logFile, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" } },
           ],
         },
       })

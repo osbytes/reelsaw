@@ -57,6 +57,7 @@ pipeline already do.
 | Fact | Where |
 |---|---|
 | Eight stage queues, exclusive + singletonKey, fair priority | `queue/boss.ts` |
+| Hard expiry per job: analyze/refine = clamp(1800 s, 2 x project duration, 3 h); other queues use the queue default | `expireInSecondsFor`, `queue/boss.ts` |
 | Failed project: `projects.status=failed`, `projects.error`, event `project.failed` | `pipeline/common.ts` `failProject` |
 | Mid-retry: event `stage.failed` with attempt/max | `stageFailedAttempt` |
 | Failed clip: `clips.status=failed`, diagnostics, `clip.failed` | `pipeline/render.ts` |

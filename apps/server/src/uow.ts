@@ -39,7 +39,8 @@ export interface UnitOfWork {
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
   emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
-  enqueue(queue: QueueName, data: JobData): Promise<string | null>;
+  /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
+  enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
   send(queue: string, data: object, opts?: { singletonKey?: string }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
@@ -116,13 +117,13 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           return row!.id;
         },
-        async enqueue(q, data) {
+        async enqueue(q, data, opts) {
           let a = await queue.admission(data, exec);
           const who = requestedBy.getStore();
           // the owner's plan may lift the job (hosted Pro); one indexed read, nothing self-hosted
           const ent = entitlements();
           const priorityBoost = ent && a.userId ? ((await ent.grantsFor(db, a.userId))?.queuePriority ?? 0) : 0;
-          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost });
+          if (!who || !a.userId || a.userId !== who.userId) return queue.enqueue(q, data, { ...exec, admission: a, priorityBoost, ...opts });
           if (instanceLimits) {
             const limits = await limitsFor(db, instanceLimits(), a.userId, entitlements());
             if (limits.MAX_LIVE_JOBS_PER_USER > 0 || limits.MAX_RERENDERS_PER_HOUR > 0) {
@@ -137,7 +138,7 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               }
             }
           }
-          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost });
+          return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost, ...opts });
         },
         send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),

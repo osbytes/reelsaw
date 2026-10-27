@@ -6,8 +6,9 @@ name: reelsaw
 
 x-app: &app
   image: ${REELSAW_IMAGE:-ghcr.io/osbytes/reelsaw:latest}
-  # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them
-  stop_grace_period: 330s
+  # deploys wait for running renders (SHUTDOWN_GRACE_SECONDS=300) instead of killing them. If you raise
+  # SHUTDOWN_GRACE_SECONDS, set STOP_GRACE_PERIOD in .env to at least that + 30s (e.g. 930s for 900)
+  stop_grace_period: ${STOP_GRACE_PERIOD:-330s}
   restart: unless-stopped
   # tini reaps ffmpeg children orphaned when yt-dlp is aborted
   init: true
