@@ -17,7 +17,7 @@ export interface AiService {
    * keyed by the vendor the options belong to (see `underlyingProvider`).
    */
   transcriptionOptions(id?: string): Record<string, Record<string, unknown>>;
-  /** Static validation of configured models + required keys. No network calls. */
+  /** Static validation of configured models + required keys, and for a self-hosted server a `GET /models` reachability and installed-model check (see `verify`). */
   check(effective?: { language: string; transcription: string }): Promise<void>;
   /**
    * Can `id` run here? Resolves it against the configured providers, checks the vendor's key is set

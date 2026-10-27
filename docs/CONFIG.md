@@ -30,6 +30,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `UPDATE_CHECK_URL` | `https://api.github.com/repos/osbytes/reelsaw/releases/latest` | Releases endpoint the check asks (GitHub's `releases/latest` of this repository); change it for a fork or a mirror. |
 | `UPDATE_CHECK_HOURS` | `6` | Hours between update checks (1–168). "Check now" in Settings asks at most once a minute. |
 | `DATABASE_URL` | `x` | Postgres connection string. Compose sets it; set it yourself when running from source. |
+| `DB_POOL_MAX` | `10` | Connections in each process's Postgres pool (minimum 4). The app and every worker process hold their own, so keep (processes x this) under Postgres' `max_connections`. Raise it if the boot log warns that job concurrency exceeds the pool. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction. |
 | `BETTER_AUTH_SECRET` | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` | 32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable. |
 | `DATA_DIR` | `./data` | Working directory for uploads, per-project scratch files, the local storage driver and caches. |
 | `WEB_DIST` | unset | Directory of the built web app to serve. Unset: the bundled location. |
@@ -195,7 +196,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `STALL_MINUTES` | `15` | A running job with no progress event for this long is reported (log and UI) as stalled. Runtime setting: admins can change it under Settings → System without a restart. |
-| `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. |
+| `SHUTDOWN_GRACE_SECONDS` | `300` | On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. Compose kills the container at `STOP_GRACE_PERIOD` (default 330s): when you raise this above 300, set STOP_GRACE_PERIOD to at least SHUTDOWN_GRACE_SECONDS + 30s in .env. The app warns at boot when it is above 300. |
 | `MAX_CPU_PERCENT` | `90` | Heavy steps wait while total CPU time is busier than this (measured, any OS). |
 | `MIN_FREE_MEM_MB` | `512` | Heavy steps wait while free memory is below this. |
 | `MIN_FREE_DISK_MB` | `2048` | Floor that must stay free. A job that also needs scratch checks the floor plus that scratch against free space net of what jobs in flight have already leased on the volume, and leases its own in the same step, so two jobs cannot both pass on the same bytes; short of disk it first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`), then waits for other jobs' leases to come back, or, short of real bytes, moves to another worker that has the room or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows "disk full"); a single box fails the job instead. |
@@ -217,7 +218,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `LANGFUSE_PUBLIC_KEY` | unset | Langfuse public key (checked at boot when LLM_TRACE includes langfuse). |
 | `LANGFUSE_SECRET_KEY` | unset | Langfuse secret key. |
 | `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Langfuse host. |
-| `LOG_FILE` | unset | Also write JSON lines here (daily files, 7 kept). Survives container re-creation; `reelsaw logs` and issue reports read it. |
+| `LOG_FILE` | unset | Also write JSON lines here (daily files, 7 kept). Each process writes its own `<name>.<worker id>.<date>.log` next to this path, so scaled workers never prune each other. Survives container re-creation; `reelsaw logs` and issue reports read every such file. |
 
 ### Media tools and downloads
 

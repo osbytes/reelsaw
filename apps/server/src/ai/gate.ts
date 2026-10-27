@@ -45,7 +45,15 @@ export interface ProviderGate {
   middleware(provider: string): LanguageModelMiddleware;
   /** enforce the limits across processes (Postgres advisory locks); until then they are per process */
   attach(pool: pg.Pool): void;
+  /**
+   * Connections the gate's own pool needs: one per in-flight limited call (the sum of the caps, 2..16).
+   * Not the app's main pool, or a burst of model calls would hold every connection pg-boss needs for its heartbeats.
+   */
+  poolSize(): number;
 }
+
+const GATE_POOL_MIN = 2;
+const GATE_POOL_MAX = 16;
 
 class Semaphore {
   active = 0;
@@ -133,6 +141,14 @@ export function createProviderGate(spec: string, compatName: string, isSelfHoste
     }),
     attach(p) {
       pool = p;
+    },
+    poolSize() {
+      // a provider with no limit never takes a slot (`run` calls `fn` directly), so only limited ones count: every
+      // explicit cap, plus the self-hosted default for the two providers that can be pointed at a local server
+      let total = 0;
+      for (const n of explicit.values()) total += n;
+      for (const p of new Set([compatName, "openai"])) if (!explicit.has(p)) total += SELF_HOSTED_DEFAULT;
+      return Math.min(GATE_POOL_MAX, Math.max(GATE_POOL_MIN, total));
     },
   };
 }

@@ -227,7 +227,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const database = await step("database", async () => {
-    const d = createDatabase(config.DATABASE_URL, log.child({ module: "db" }));
+    const d = createDatabase(config.DATABASE_URL, log.child({ module: "db" }), { poolMax: config.DB_POOL_MAX });
     await d.check();
     await d.migrate();
     return d;
@@ -250,8 +250,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
 
-  // the provider limits now hold across every process (ai/gate.ts)
-  gate.attach(database.pool);
+  // the provider limits now hold across every process (ai/gate.ts); each in-flight call holds a connection, so on its own pool
+  gate.attach(database.extraPool(gate.poolSize()));
 
   await step(`ai model check (${models.get().language}, ${models.get().transcription})`, async () => {
     const eff = models.get();

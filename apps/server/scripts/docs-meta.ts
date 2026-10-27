@@ -28,6 +28,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   PORT: ["core", "Port the HTTP server listens on."],
   APP_URL: ["core", "Public URL people open in the browser; used for auth cookies, CORS, the OAuth issuer and links in emails."],
   DATABASE_URL: ["core", "Postgres connection string. Compose sets it; set it yourself when running from source."],
+  DB_POOL_MAX: ["core", "Connections in each process's Postgres pool (minimum 4). The app and every worker process hold their own, so keep (processes x this) under Postgres' `max_connections`. Raise it if the boot log warns that job concurrency exceeds the pool. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction."],
   BETTER_AUTH_SECRET: ["core", "32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable."],
   DATA_DIR: ["core", "Working directory for uploads, per-project scratch files, the local storage driver and caches."],
   WEB_DIST: ["core", "Directory of the built web app to serve. Unset: the bundled location."],

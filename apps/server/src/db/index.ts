@@ -17,15 +17,38 @@ export interface Database {
   /** Round-trip query; throws with a readable message when the server is unreachable. */
   check(): Promise<void>;
   migrate(): Promise<void>;
+  /** size of `pool` (DB_POOL_MAX) */
+  poolMax: number;
+  /** A second pool on the same database for work that holds a connection for a long time (model-call slots), so it cannot starve `pool`. Closed with `close()`. */
+  extraPool(max: number): pg.Pool;
   close(): Promise<void>;
 }
 
 /** pg_advisory_lock key for migrations (any constant no other lock uses). */
 const MIGRATE_LOCK = 727_011;
 
-export function createDatabase(connectionString: string, log: Logger): Database {
-  const pool = new pg.Pool({ connectionString, max: 10 });
+/** Give up connecting after this long instead of queueing forever behind a saturated or unreachable server. */
+const CONNECT_TIMEOUT_MS = 10_000;
+/**
+ * A session left inside a transaction this long is ended by Postgres (its locks and snapshot are freed).
+ * Set per connection, not as a global `statement_timeout`: migrations and bulk updates may run long.
+ */
+const IDLE_IN_TRANSACTION_MS = 5 * 60_000;
+
+function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
+  const pool = new pg.Pool({ connectionString, max, connectionTimeoutMillis: CONNECT_TIMEOUT_MS });
   pool.on("error", (err) => log.error({ err }, "pg pool error"));
+  // queued ahead of the first query the pool hands out on this connection
+  pool.on("connect", (client) => {
+    client.query(`set idle_in_transaction_session_timeout = ${IDLE_IN_TRANSACTION_MS}`).catch((err) => log.warn({ err }, "could not set idle_in_transaction_session_timeout"));
+  });
+  return pool;
+}
+
+export function createDatabase(connectionString: string, log: Logger, opts: { poolMax?: number } = {}): Database {
+  const poolMax = opts.poolMax ?? 10;
+  const pool = makePool(connectionString, poolMax, log);
+  const extraPools = new Set<pg.Pool>();
   const db = drizzle(pool, { schema });
   return {
     pool,
@@ -54,7 +77,16 @@ export function createDatabase(connectionString: string, log: Logger): Database 
         client.release();
       }
     },
-    close: () => pool.end(),
+    poolMax,
+    extraPool(max) {
+      const extra = makePool(connectionString, max, log);
+      extraPools.add(extra);
+      return extra;
+    },
+    close: async () => {
+      await Promise.all([...extraPools].map((p) => p.end().catch(() => {})));
+      await pool.end();
+    },
   };
 }
 
