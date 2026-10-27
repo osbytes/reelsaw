@@ -98,8 +98,8 @@ export function fixContext(raw: ReadonlyArray<Word>, f: Pick<TranscriptFlag, "wo
 }
 
 /**
- * A fix as the decision stores it: everything but the flags a manual fix absorbed. Detector cuts a manual cut confirms
- * get their own fix.accept rows (`addManualFix`); the rest were decided before (their own rows) or are superseded.
+ * A fix as the decision stores it: everything but the flags a manual fix absorbed. Detector cuts a manual cut covers
+ * get their own inferred fix.accept rows (`addManualFix`); the rest were decided before (their own rows) or are superseded.
  */
 export function flagSnapshot(f: TranscriptFlag): Record<string, unknown> {
   const { absorbed: _absorbed, ...rest } = f;
@@ -126,7 +126,7 @@ export async function stageModels(db: Db, projectId: string, stage: string, kind
 }
 
 /** Decision rows for fixes: context from the raw words, models from the stage that proposed each (none for manual ones). */
-export async function fixDecisions(db: Db, projectId: string, raw: ReadonlyArray<Word>, items: Array<{ kind: DecisionKind; flag: TranscriptFlag; before: TranscriptFlag | null; after: TranscriptFlag | null; createdAt?: Date; backfilled?: boolean }>): Promise<DecisionInput[]> {
+export async function fixDecisions(db: Db, projectId: string, raw: ReadonlyArray<Word>, items: Array<{ kind: DecisionKind; flag: TranscriptFlag; before: TranscriptFlag | null; after: TranscriptFlag | null; createdAt?: Date; backfilled?: boolean; explicit?: boolean }>): Promise<DecisionInput[]> {
   const models = new Map<string, Record<string, string>>();
   const out: DecisionInput[] = [];
   for (const it of items) {
@@ -139,6 +139,7 @@ export async function fixDecisions(db: Db, projectId: string, raw: ReadonlyArray
     }
     out.push({
       kind: it.kind,
+      ...(it.explicit === false ? { explicit: false } : {}),
       before: it.before ? flagSnapshot(it.before) : null,
       after: it.after ? flagSnapshot(it.after) : null,
       context: { flagId: it.flag.id, flagKind: it.flag.kind, subkind: it.flag.subkind ?? null, ...fixContext(raw, it.flag), ...(it.backfilled ? { backfilled: true } : {}) },

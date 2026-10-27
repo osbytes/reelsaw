@@ -165,11 +165,12 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
   };
   const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
   const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
-  // a cut drawn over the detector's unreviewed cuts confirms them: each gets its fix.accept next to the fix.manual
+  // a cut drawn over the detector's unreviewed cuts implies they were right, but only implies it: the user may have cut a
+  // whole passage without looking at them, so each gets an inferred fix.accept (kept, never an eval label) next to the fix.manual
   const confirmed = what.kind === "disfluency" ? merged.filter((f) => f.kind === "disfluency" && f.subkind !== "manual" && (f.status === "pending" || f.status === "auto")) : [];
   await recordDecisions(svc, u.db, p, () =>
     fixDecisions(u.db, p.id, raw, [
-      ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const } })),
+      ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const }, explicit: false })),
       { kind: "fix.manual", flag, before: null, after: flag },
     ]),
   );

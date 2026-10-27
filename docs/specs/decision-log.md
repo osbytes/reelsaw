@@ -70,6 +70,7 @@ default 0 = keep), pruned by the daily history pruner like `project_events`.
 |---|---|---|---|
 | `fix.accept` / `fix.reject` | `review` (UI, MCP `review_transcript_flags`) | yes | the flag as proposed (status, suggested, replacement) → status, replacement |
 | `fix.manual` | `addCut`, `addCorrection` | yes | null → the manual flag (`kind` says cut or correction) |
+| `fix.accept` (inferred) | `addCut` over the detector's pending or applied cuts | no | the detector's flag → accepted. Implied only: a cut over a whole passage says nothing about its fillers, so it is kept as a weak signal and never becomes an eval case |
 | `fix.delete` / `fix.restore` | `deleteFlag`, `restoreFlag` | yes | the flag → null / null → the flag |
 | `clip.edit` | `updateClip` | yes | the changed fields as they were → as they are (`fields` lists them) |
 | `clip.create` | `createClip` | yes | null → range + mode (a moment the model missed) |
