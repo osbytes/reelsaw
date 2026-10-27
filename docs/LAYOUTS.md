@@ -79,7 +79,7 @@ for UltraFace (`sampleFaces`, `layout.ts`); the same frames feed a per-frame ver
 (`sampleClipText`, `overlays.ts:335`); its boxes are attached to the nearest face sample
 (`attachText`) and are the only text input the layout reads. Scene cuts (`scenes.ts`, adaptive
 threshold) are detected once per project before clip selection (`ensureSceneCuts`, `analyze.ts`) and
-kept on the transcript; a project from before that, or an imported report, has none, and the render
+kept on the transcript (a saved `scene-cuts` step the scenes refine step shares; a failed decode throws and retries rather than storing "no cuts"); a project from before that, or an imported report, has none, and the render
 detects them on the clip itself (`media.detectScenes` with the clip's range, one 320 px decode), so the
 layout always has the edits. The `layout resolved` log line says how many and from
 where (`sceneCuts: { n, from: "project" | "clip" }`). Active-speaker detection (`speaker.ts`, 10 fps mouth motion

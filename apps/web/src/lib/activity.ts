@@ -49,6 +49,8 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       return { text: done, tone: "ok" };
     }
     case "stage.failed":
+      // a refine step that gave up: optional work, the project went on without it
+      if (p.final === true && typeof p.step === "string") return { text: `${STAGE[String(p.stage)] ?? p.stage} step "${p.step}" gave up, continuing without it: ${errText(p.error)}`, tone: "warn" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };
     case "project.failed":
       return { text: `Stopped: ${errText(p.error)}`, tone: "err" };

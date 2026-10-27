@@ -1,11 +1,13 @@
+import { z } from "zod";
 import { detectOverlays } from "./overlays.js";
+import { ensureSceneCuts } from "./analyze.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
@@ -294,26 +296,52 @@ export async function refineDisfluency(ctx: StageContext) {
   await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } }, ctx.seq);
 }
 
+/** Bump when the text scan's behaviour changes: the saved text-scan step stops applying. */
+const TEXT_SCAN_VERSION = "text-scan-1";
+const overlayBox = z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), kind: z.enum(["caption", "watermark"]), coverage: z.number(), windows: z.array(z.tuple([z.number(), z.number()])).optional(), share: z.number().optional() });
+const textScanSchema = z.object({
+  overlays: z.array(overlayBox),
+  textProfile: z.object({ frames: z.number(), textHeavy: z.number(), presentation: z.boolean() }),
+  frames: z.number(),
+  scenes: z.number(),
+  slides: z.number(),
+  faceDropped: z.number(),
+  moving: z.number(),
+});
+
 export async function refineScenes(ctx: StageContext) {
   const { svc } = ctx;
   const t = await loadTranscript(ctx);
   if (t.refine.scenes === "done") return;
   await markRunning(ctx, "scenes");
   const project = await ctx.project();
-  const sourcePath = await ctx.ensureSource(project);
-  // the cuts were detected before selection (analyze.ts ensureSceneCuts); a project from before that gets them here
-  const sceneCuts = t.sceneCuts ?? (project.width ? await svc.media.detectScenes(sourcePath, undefined, ctx.signal) : []);
-  // burned-in captions / watermarks: best effort, never fails the step
+  // the cuts were detected before selection (analyze.ts); a project from before that gets them here, through the same
+  // `scene-cuts` step, and they are saved the moment they are found: a timeout in the text scan below loses nothing
+  const sceneCuts = await ensureSceneCuts(ctx, project, t.sceneCuts);
+  // burned-in captions / watermarks: best effort, never fails the step. One pass over sampled frames whose result
+  // (overlays, text profile) is a step of its own, so a retry after the merge failed does not scan again.
   let overlays: SourceOverlay[] = [];
   let textProfile: TextProfile | undefined;
   if (svc.text && project.width && project.durationSec) {
+    const detector = svc.text;
+    const durationSec = project.durationSec;
     try {
-      const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal, faces: svc.faces }, sourcePath, project.durationSec, sceneCuts);
+      const scan = await ctx.step(
+        "text-scan",
+        { input: { source: project.sourceKey, cuts: sceneCuts }, model: "text-detector", promptVersion: TEXT_SCAN_VERSION, params: { durationSec } },
+        async (signal) => {
+          const sourcePath = await ctx.ensureSource(project);
+          const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
+          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length };
+        },
+        { schema: textScanSchema, timeoutMs: Math.max(30 * 60_000, Math.round(durationSec * 1000)), model: "text-detector" },
+      );
       overlays = scan.overlays;
       textProfile = scan.textProfile;
       ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, textProfile: scan.textProfile, overlays }, "on-screen text scan");
     } catch (err) {
-      if (ctx.signal.aborted) throw err;
+      // a stop or a timeout ends the attempt (the cuts are already saved and the scan restarts alone); anything else only costs the text scan
+      if (ctx.signal.aborted || err instanceof StageTimeoutError || err instanceof StaleJobError) throw err;
       ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
     }
   }

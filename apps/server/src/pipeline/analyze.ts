@@ -229,17 +229,24 @@ const SCENE_CUTS_VERSION = "scenes-1";
  * video: seconds on a fast machine, several minutes for an hour of video on a small CPU, so it is a checkpointed
  * step of its own (the cuts live in `transcripts.sceneCuts`; the step row records the outcome and time).
  * Null means never detected (an older project, an imported report, a re-transcribed one): detect now. A detection
- * that fails inside ffmpeg is logged and comes back empty, but one that was cancelled or timed out is not stored.
+ * that fails inside ffmpeg throws (the step records it failed and the stage retries); only a decode that ran and found
+ * nothing stores `[]`, and one that was cancelled or timed out stores nothing.
  */
 export async function ensureSceneCuts(ctx: StageContext, project: Project, stored: number[] | null): Promise<number[]> {
   if (stored) return stored;
   if (!project.width || !project.sourceKey) return [];
-  await ctx.progress(0.01, "Detecting shot changes");
+  if (ctx.stage === "analyze") await ctx.progress(0.01, "Detecting shot changes"); // the refine stage reports its own steps
   const detect = async (signal: AbortSignal): Promise<number> => {
     const sourcePath = await ctx.ensureSource(project);
     const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, signal);
     signal.throwIfAborted(); // detectScenes answers [] when it was stopped: that is not "no cuts"
-    await ctx.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
+    // saved the moment they are found, in a unit of their own: a later step of this stage timing out loses nothing
+    await ctx.svc.tx(async (u) => {
+      const [t] = await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId)).for("update"); // transcript, then project
+      if (!t) return;
+      if (!(await lockCurrentStage(u.db, ctx.projectId, ctx.seq))) throw new StaleJobError(ctx.projectId, ctx.seq);
+      await u.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
+    });
     ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
     return cuts.length;
   };
