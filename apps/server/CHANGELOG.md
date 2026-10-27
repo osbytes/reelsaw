@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.26.4
+
+### Patch Changes
+
+- [#187](https://github.com/osbytes/reelsaw/pull/187) [`0979432`](https://github.com/osbytes/reelsaw/commit/0979432cae87902696f594e8c8028383d53f0108) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Leaner, cleaner container image: the image no longer ships tools the app never runs (drizzle-kit, tsx and their esbuild binaries, npm, corepack, yarn, gosu), which cleared every fixable vulnerability the image scanner reported. The entrypoint, `reelsaw` CLI and health check drop to the `node` user with `setpriv` instead of `gosu`.
+
 ## 0.26.3
 
 ### Patch Changes
