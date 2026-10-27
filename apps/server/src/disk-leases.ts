@@ -23,14 +23,14 @@ import { and, eq, gt, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./db/index.js";
 import { schema } from "./db/index.js";
 import { takeTxLock, txLock } from "./locks.js";
-import { queueDefs } from "./queue/boss.js";
+import { MAX_JOB_EXPIRE_SECONDS } from "./queue/boss.js";
 import { leaseFits, type DiskLeaser } from "./resources.js";
 import type { Services } from "./services.js";
 
 export const VOLUME_MARKER = ".volume-id";
 
-/** A lease outlives no job: the longest any stage job may run before pg-boss expires it. */
-export const DISK_LEASE_TTL_MS = Math.max(...queueDefs.map((q) => q.expireInSeconds)) * 1000;
+/** A lease outlives no job: the longest any job may be given before pg-boss expires it (queue/boss.ts MAX_JOB_EXPIRE_SECONDS, 24 h). */
+export const DISK_LEASE_TTL_MS = MAX_JOB_EXPIRE_SECONDS * 1000;
 
 /**
  * How long a worker may go without a heartbeat before its leases stop counting. Much longer than the 45 s

@@ -68,8 +68,8 @@ export const USER_RERUN_QUEUES: QueueName[] = [QUEUES.render, QUEUES.prepare, QU
 const HEARTBEAT_SECONDS = 15;
 
 // expireInSeconds is the queue DEFAULT. analyze and the refine stages override it per job from the
-// project's duration (`expireInSecondsFor`: clamp(default, duration * 2, 3 h)), so a long source on a
-// slow model is not cut off at 1800 s; every other queue uses its value here as the hard cap.
+// project's duration (`expireInSecondsFor`), so a long source on a slow model is not cut off at 1800 s; every
+// other queue uses its value here as the hard cap.
 export const queueDefs:Array<{ name: QueueName; expireInSeconds: number; retryLimit: number }> = [
   { name: QUEUES.ingest, expireInSeconds: 3 * 3600, retryLimit: 3 },
   { name: QUEUES.transcribe, expireInSeconds: 3 * 3600, retryLimit: 3 },
@@ -84,17 +84,20 @@ export const queueDefs:Array<{ name: QueueName; expireInSeconds: number; retryLi
 /** Stages whose LLM time grows with the media: their hard expiry is set per job from the project's duration. */
 const LLM_STAGE_QUEUES: QueueName[] = [QUEUES.analyze, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes];
 
+/** No job may be given longer than this: pg-boss caps a job's expiry at 24 h, and disk leases (disk-leases.ts) live as long. */
+export const MAX_JOB_EXPIRE_SECONDS = 24 * 3600;
+
 /**
- * Hard expiry for one job, in seconds. The queue default (1800 s for analyze and refine) is far too
- * short for a multi-hour source on a slow local model, and a job that expires is retried from the
- * start, burning a retry each time. The rule: twice the media duration, never below the queue default
- * and never above three hours, i.e. clamp(default, durationSec * 2, 3 h). Other queues, and projects
- * without a duration yet, use the queue default (`undefined`: pg-boss applies the queue's value).
+ * Backstop wall for one job, in seconds: the longest an attempt may run before pg-boss expires it. It is not the
+ * time budget (that is the per-call and idle timeouts, and steps that survive an attempt: pipeline/steps.ts), only
+ * what stops a runaway. The rule is clamp(default, default + duration × factor, 24 h), with factor 4 when the
+ * language model is self-hosted (a CPU-only local model can take a few times the video's length) and 1 otherwise.
+ * Other queues, and projects without a duration yet, use the queue default (`undefined`: pg-boss applies the queue's value).
  */
-export function expireInSecondsFor(queue: QueueName, durationSec: number | null | undefined): number | undefined {
+export function expireInSecondsFor(queue: QueueName, durationSec: number | null | undefined, selfHosted = false): number | undefined {
   if (!LLM_STAGE_QUEUES.includes(queue) || !durationSec || !Number.isFinite(durationSec) || durationSec <= 0) return undefined;
   const base = queueDefs.find((q) => q.name === queue)?.expireInSeconds ?? 1800;
-  return Math.round(Math.min(Math.max(base, durationSec * 2), 3 * 3600));
+  return Math.round(Math.min(Math.max(base, base + durationSec * (selfHosted ? 4 : 1)), MAX_JOB_EXPIRE_SECONDS));
 }
 
 export interface Queue {
@@ -120,7 +123,11 @@ export interface Queue {
   stop(): Promise<void>;
 }
 
-export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean, log: Logger): Queue {
+/**
+ * `languageSelfHosted`: is the language model that is in force right now (the environment or an admin's override) a
+ * self-hosted one? Asked at enqueue time, to size the backstop wall of the long LLM stages.
+ */
+export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean, log: Logger, languageSelfHosted: () => boolean = () => false): Queue {
   const boss = new PgBoss({
     db: { executeSql: (text, values) => pool.query(text, values) },
     schema: "pgboss",
@@ -192,7 +199,7 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
         const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
         const r = (await exec.executeSql(`select stage_seq as seq, duration_sec as "durationSec" from projects where id = $1`, [data.projectId])).rows[0] as { seq?: number; durationSec?: number | null } | undefined;
         if (r?.seq !== undefined && data.seq === undefined) payload = { ...payload, seq: r.seq };
-        expireInSeconds ??= expireInSecondsFor(queue, r?.durationSec);
+        expireInSeconds ??= expireInSecondsFor(queue, r?.durationSec, languageSelfHosted());
       }
       // a plan's boost (ee) lifts the account above others with the same backlog, never above an idle account's first job by more than the boost
       return boss.send(queue, payload, { singletonKey, priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0), ...(expireInSeconds ? { expireInSeconds } : {}), ...(opts?.db ? { db: opts.db } : {}) });
