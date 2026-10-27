@@ -101,6 +101,10 @@ export const envSchema = z.object({
   TRANSCRIBE_CONCURRENCY: z.coerce.number().int().min(0).max(8).default(0),
   /** Parallel LLM calls while finding/scoring moments. 0 = auto (1 for a self-hosted model, 4 for cloud). */
   ANALYZE_CONCURRENCY: z.coerce.number().int().min(0).max(16).default(0),
+  // one model call (all its HTTP attempts) may take this long; 0 = auto: 120 s hosted, 600 s self-hosted
+  LLM_CALL_TIMEOUT_SECONDS: z.coerce.number().int().min(0).max(86_400).default(0),
+  // a checkpointed stage that finishes no unit of work for this long is stopped (it resumes on retry); 0 = auto: 1.5 x the call timeout
+  STAGE_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().min(0).max(1440).default(0),
   /** Model calls in flight per provider across every process ("ollama=2,openai=16"; 0 = unlimited). Unset: 2 for self-hosted (the compatible server, openai with a base URL), unlimited for cloud. See ai/gate.ts. */
   PROVIDER_CONCURRENCY: z.string().default(""),
   /** Rubric samples per candidate (median is kept). 0 = auto (1 self-hosted, 3 cloud). */
@@ -192,6 +196,8 @@ export const envSchema = z.object({
   EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   LLM_USAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
   ADMIN_EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
+  // checkpoints of finished projects (job_steps) are dropped this many days after the project last changed (0 = keep)
+  STEP_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
   // bot protection on sign-up / sign-in (Better Auth captcha plugin)
   CAPTCHA_PROVIDER: z.enum(["cloudflare-turnstile", "google-recaptcha", "hcaptcha"]).optional(),
   CAPTCHA_SITE_KEY: z.string().optional(),

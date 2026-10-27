@@ -108,6 +108,8 @@ either; `pnpm docs:check` fails when this file is stale.
 | `TRANSCRIBE_CHUNK_SECONDS` | `600` | Audio is split into chunks of this length for transcription APIs with upload limits. |
 | `TRANSCRIBE_CONCURRENCY` | `0` | Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors. |
 | `ANALYZE_CONCURRENCY` | `0` | Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud. |
+| `LLM_CALL_TIMEOUT_SECONDS` | `0` | Longest one model call may take (all its HTTP attempts together) before the step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one (Ollama, a compatible server). A slow CPU-only model may need more. Runtime setting: admins can change it under Settings → System without a restart. |
+| `STAGE_IDLE_TIMEOUT_MINUTES` | `0` | A stage made of checkpointed steps (finding moments) is stopped when no step has finished for this long; Retry continues where it stopped. 0 = auto: 1.5 times the model call timeout. Runtime setting: admins can change it under Settings → System without a restart. |
 | `PROVIDER_CONCURRENCY` | unset | Model calls in flight per provider across every app and worker process, e.g. `compat=2,openai=2` (`compat` = the compatible provider's name). Unset providers: 2 for a self-hosted server (the compatible provider, openai with OPENAI_BASE_URL), unlimited for cloud. |
 | `ANALYZE_SCORE_SAMPLES` | `0` | Rubric samples per candidate (the median is kept). 0 = auto: 1 self-hosted, 3 cloud. |
 | `ANALYZE_PAIRWISE` | `auto` | Pairwise re-ranking of the top clips with position swapping. `auto` = on for cloud models only. Values: `auto | on | off`. |
@@ -181,6 +183,7 @@ either; `pnpm docs:check` fails when this file is stale.
 | `EVENT_RETENTION_DAYS` | `90` | Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `LLM_USAGE_RETENTION_DAYS` | `180` | Prune model-call usage rows after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 | `ADMIN_EVENT_RETENTION_DAYS` | `365` | Prune the admin event log after N days. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `STEP_RETENTION_DAYS` | `14` | Drop the saved checkpoints of a finished project (the finding-moments windows a Retry reuses) after N days without change. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
 
 ### Enterprise edition and billing (hosted)
 

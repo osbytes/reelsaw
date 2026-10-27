@@ -29,6 +29,8 @@ export interface ProgressNotice {
   stage: string;
   progress: number;
   message?: string;
+  /** checkpointed stages: units done of total, seconds left (projects.stage_detail) */
+  detail?: { done: number; total: number; etaSec: number | null; unitMs: number | null };
 }
 export type Notice = EventNotice | ProgressNotice;
 export const isProgressNotice = (n: Notice): n is ProgressNotice => "kind" in n && n.kind === "progress";
@@ -36,7 +38,7 @@ export const PROGRESS_NOTICE_MAX = 500;
 
 /** JSON for pg_notify, at most PROGRESS_NOTICE_MAX bytes: the message is cut (then dropped) to fit. */
 export function encodeProgressNotice(n: Omit<ProgressNotice, "kind">): string {
-  const base: ProgressNotice = { kind: "progress", projectId: n.projectId, ...(n.clipId ? { clipId: n.clipId } : {}), stage: n.stage, progress: Math.round(n.progress * 10_000) / 10_000 };
+  const base: ProgressNotice = { kind: "progress", projectId: n.projectId, ...(n.clipId ? { clipId: n.clipId } : {}), stage: n.stage, progress: Math.round(n.progress * 10_000) / 10_000, ...(n.detail ? { detail: n.detail } : {}) };
   let message = n.message ?? "";
   for (;;) {
     const json = JSON.stringify(message ? { ...base, message } : base);
@@ -59,7 +61,7 @@ export function decodeNotice(payload: string): Notice | null {
 
 /** A progress notice as the event-shaped message the stream sends. id 0 = not stored; never used as a resume point. */
 export function progressEvent(n: ProgressNotice, now = new Date()): ProjectEvent {
-  return { id: 0, projectId: n.projectId, type: "stage.progress", payload: { stage: n.stage, progress: n.progress, ...(n.message ? { message: n.message } : {}), ...(n.clipId ? { clipId: n.clipId } : {}) }, createdAt: now.toISOString() };
+  return { id: 0, projectId: n.projectId, type: "stage.progress", payload: { stage: n.stage, progress: n.progress, ...(n.message ? { message: n.message } : {}), ...(n.detail ? { detail: n.detail } : {}), ...(n.clipId ? { clipId: n.clipId } : {}) }, createdAt: now.toISOString() };
 }
 
 /**

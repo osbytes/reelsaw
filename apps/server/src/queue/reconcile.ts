@@ -2,7 +2,7 @@ import { and, inArray, eq, desc, isNull, gt, sql } from "drizzle-orm";
 import { purgeDeleted } from "../projects/service.js";
 import { needsPrepare } from "../pipeline/manual.js";
 import { requestPrepare } from "../pipeline/lifecycle.js";
-import { sweepRetention } from "../retention.js";
+import { pruneJobSteps, sweepRetention } from "../retention.js";
 import { pruneHistory } from "../events-retention.js";
 import { backfillAssetRefs } from "../library/refs.js";
 import { sweepScratch, purgeBumperAssets } from "../storage/sweep.js";
@@ -183,6 +183,7 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
         const asrDays = svc.config.ASR_CACHE_DAYS;
         if (asrDays > 0) await svc.asr.prune(asrDays).then((n) => n && svc.log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
         await pruneDiskLeases(svc); // expired or orphaned claims (the live sum already ignores them)
+        await pruneJobSteps(svc); // checkpoints of projects that finished STEP_RETENTION_DAYS ago
         await purgeBumperAssets(svc);
         await sweepAbandonedUploads(svc); // uploads no project ever used, after 24 h
         await purgeDeleted(svc); // deleted projects and replaced clips past DELETED_RETENTION_DAYS
