@@ -14,7 +14,12 @@ import { ZipArchive, type ZipEntryData } from "archiver";
 import type { Readable } from "node:stream";
 import type { Storage } from "./storage/index.js";
 import type { Paths } from "./config.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { schema } from "./db/index.js";
 import type { Clip, Project } from "./db/schema.js";
+import type { Services } from "./services.js";
+import { findProject, type Actor } from "./projects/service.js";
 import { formatTime, toSrt, toVtt } from "@reelsaw/shared";
 
 export const YOUTUBE_TITLE_MAX = 100;
@@ -85,6 +90,28 @@ export function pickExportClips(clips: Clip[], ids: string[]): { clips: Clip[]; 
   const want = new Set(ids);
   const total = clips.filter((c) => c.status === "done" && c.outputKey).length;
   return { clips: clips.filter((c) => want.has(c.id)), unknown: ids.filter((x) => !have.has(x)), subset: { requested: ids.length, total } };
+}
+
+/**
+ * What an export would contain, or why it cannot be made: the one precondition check behind the zip route
+ * (`/api/projects/:id/export.zip`), the MCP export_project tool and `reelsaw export`. The project must be the actor's and
+ * live, every picked id a clip of it, and at least one picked clip rendered (done with its file). `clipIds` null = a
+ * malformed list (see `parseClipIds`); empty = every clip. NOT_FOUND / BAD_REQUEST / CONFLICT carry plain sentences.
+ */
+export async function exportPlan(svc: Services, actor: Actor, projectId: string, clipIds: string[] | null = []) {
+  const ids = clipIds === null ? null : [...new Set(clipIds)];
+  if (!ids || ids.length > EXPORT_CLIP_IDS_MAX || ids.some((x) => !/^[\w-]{1,64}$/.test(x))) throw new TRPCError({ code: "BAD_REQUEST", message: `The clip list is not valid: give up to ${EXPORT_CLIP_IDS_MAX} clip ids of this project.` });
+  const db = svc.database.db;
+  const project = await findProject(db, actor, projectId, { deleted: false });
+  const [clips, transcript] = await Promise.all([
+    db.query.clips.findMany({ where: and(eq(schema.clips.projectId, project.id), isNull(schema.clips.deletedAt)) }),
+    db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, project.id), columns: { language: true } }),
+  ]);
+  const picked = pickExportClips(clips, ids);
+  if (picked.unknown.length) throw new TRPCError({ code: "NOT_FOUND", message: `Not clips of this project: ${picked.unknown.join(", ")}. get_project lists its clips.` });
+  const rendered = picked.clips.filter((c) => c.status === "done" && c.outputKey).length;
+  if (!rendered) throw new TRPCError({ code: "CONFLICT", message: ids.length ? "None of those clips is rendered yet. Wait for them to finish (or re-render failed ones), then export." : "No clip is rendered yet. Wait for the project to finish (wait_for_project), then export." });
+  return { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset, rendered, notRendered: picked.clips.length - rendered };
 }
 
 /** Extract a YouTube video id from the common URL shapes; null for anything else. */
@@ -262,9 +289,15 @@ export function buildManifest(input: ExportInput): ExportManifest {
   };
 }
 
-function csvCell(v: unknown) {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+/**
+ * One CSV field. Text a spreadsheet would run as a formula (a title or caption that starts with = + - @, a tab or a
+ * carriage return; titles come from videos and models) gets a leading apostrophe, which Excel, Sheets and Numbers show as plain text.
+ * Numbers are written as they are: a negative one is not text.
+ */
+export function csvCell(v: unknown) {
+  let s = v == null ? "" : String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function buildCsv(m: ExportManifest) {

@@ -24,14 +24,56 @@ export interface LogQuery {
   limit?: number;
 }
 
-/** The rotated files that belong to LOG_FILE, oldest first. */
+/**
+ * LOG_FILE with the process's id before the extension: `/data/logs/reelsaw.log` becomes
+ * `/data/logs/reelsaw.<id>.log`. The app and every scaled worker share the directory, and each
+ * pino-roll rotates (and prunes) only its own files; without the id they pruned each other's.
+ * `id` is the worker id (`WORKER_ID`, or `hostname:pid`), reduced to `[A-Za-z0-9._-]`.
+ */
+export function logFileFor(file: string, id: string): string {
+  const safe = id.replace(/[^A-Za-z0-9._-]/g, "_") || "proc";
+  const ext = path.extname(file);
+  return ext ? `${file.slice(0, -ext.length)}.${safe}${ext}` : `${file}.${safe}`;
+}
+
+function isLogFileOf(stem: string, name: string): boolean {
+  return name.startsWith(`${stem}.`) && name.includes(".log");
+}
+
+/** The files written under LOG_FILE (`reelsaw.*.log*`: every process and rotation), in name order. */
 export async function logFiles(file: string): Promise<string[]> {
   const dir = path.dirname(file);
-  const base = path.basename(file).replace(/\.log$/, "");
+  const stem = path.basename(file, path.extname(file));
   return (await fsp.readdir(dir).catch(() => [] as string[]))
-    .filter((f) => f.startsWith(base))
+    .filter((f) => isLogFileOf(stem, f))
     .sort()
     .map((f) => path.join(dir, f));
+}
+
+/**
+ * Delete log files nobody has written to for `days`. A restarted container gets a new hostname:pid
+ * and so a new set of files that no running pino-roll would ever prune.
+ */
+export function pruneOldLogs(file: string, days: number): void {
+  try {
+    const dir = path.dirname(file);
+    const stem = path.basename(file, path.extname(file));
+    const cutoff = Date.now() - days * 86400_000;
+    for (const f of fs.readdirSync(dir)) {
+      if (!isLogFileOf(stem, f)) continue;
+      const p = path.join(dir, f);
+      if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
+    }
+  } catch {
+    /* no directory yet, or a file raced away: logging must not fail over housekeeping */
+  }
+}
+
+/** Milliseconds of a raw JSON line's `time` (0 when it has none, so a stack trace stays near its neighbours). */
+function timeOf(line: string): number {
+  const m = /"time":"([^"]+)"/.exec(line);
+  const t = m ? Date.parse(m[1]!) : NaN;
+  return Number.isFinite(t) ? t : 0;
 }
 
 /** True when a raw JSON line passes the query's time/level/module filters (ids are checked on the raw text first). */
@@ -51,15 +93,31 @@ export function lineMatches(line: string, q: LogQuery): boolean {
 
 export async function readLogLines(file: string, q: LogQuery): Promise<{ lines: string[]; files: string[] }> {
   const files = await logFiles(file);
-  const hits: string[] = [];
+  // every process writes its own files; merge them by timestamp (stable: file order, then line order)
+  const merged: Array<{ t: number; i: number; line: string }> = [];
   for (const f of files) {
+    let hits: string[] = [];
     const rl = readline.createInterface({ input: fs.createReadStream(f, { encoding: "utf8" }), crlfDelay: Infinity });
     try {
-      for await (const line of rl) if (line && lineMatches(line, q)) hits.push(line);
+      for await (const line of rl) {
+        if (!line || !lineMatches(line, q)) continue;
+        hits.push(line);
+        // lines inside one file are in time order, so only its newest `limit` can make the cut
+        if (q.limit && hits.length > q.limit * 2) hits = hits.slice(-q.limit);
+      }
     } catch {
       /* a file rotated away mid-read */
     }
-    if (q.limit && hits.length > q.limit * 2) hits.splice(0, hits.length - q.limit);
+    if (q.limit) hits = hits.slice(-q.limit);
+    // a line without a time (a stack, a crash) takes the time of the line before it
+    let last = 0;
+    for (const line of hits) {
+      const t = timeOf(line) || last;
+      last = t;
+      merged.push({ t, i: merged.length, line });
+    }
   }
-  return { lines: q.limit ? hits.slice(-q.limit) : hits, files };
+  merged.sort((a, b) => a.t - b.t || a.i - b.i);
+  const lines = merged.map((m) => m.line);
+  return { lines: q.limit ? lines.slice(-q.limit) : lines, files };
 }

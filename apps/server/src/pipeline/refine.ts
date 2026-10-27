@@ -1,13 +1,15 @@
+import { z } from "zod";
 import { detectOverlays } from "./overlays.js";
+import { ensureSceneCuts } from "./analyze.js";
 import type { SourceOverlay, TextProfile } from "@reelsaw/shared";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { StageContext, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
-import { detectDisfluencies, type DisfluencyTraceEntry } from "./disfluency.js";
+import { DISFLUENCY_PROMPT_VERSION, detectDisfluencies, type DisfluencyCheckpoint, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
 import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
@@ -38,9 +40,21 @@ async function optionsFor(svc: Services, db: Db, projectId: string): Promise<Ref
   return resolveRefineOptions(svc.settings.get(), p?.settings ?? {});
 }
 
-/** Mark the project as refining and queue every enabled step that is not already done. */
-export async function enqueueRefine(svc: Services, projectId: string, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork): Promise<void> {
-  if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, steps, tx));
+export interface EnqueueRefineOptions {
+  /**
+   * A user-initiated call: flip the project to refining only while it is idle (done / failed) or already refining, and
+   * return false (nothing written, nothing queued) when something else is running. Pipeline callers flip unconditionally.
+   */
+  onlyIfIdle?: boolean;
+}
+
+/**
+ * Mark the project as refining and queue every enabled step that is not already done. `seq` is the stage version the
+ * caller belongs to: the project flip commits only while it is current (StaleJobError otherwise); undefined takes any.
+ * Returns false only for `onlyIfIdle` when the project was busy.
+ */
+export async function enqueueRefine(svc: Services, projectId: string, seq: number | undefined, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork, o: EnqueueRefineOptions = {}): Promise<boolean> {
+  if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, seq, steps, tx, o));
   const db = u.db;
   const [t] = await db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
   if (!t) throw new Error("no transcript to refine");
@@ -49,11 +63,21 @@ export async function enqueueRefine(svc: Services, projectId: string, steps: rea
   const toRun = steps.filter((s) => refineStepOn(opts, s) && refine[s] !== "done");
   for (const s of REFINE_STEPS) if (!refineStepOn(opts, s)) refine[s] = "done"; // disabled steps count as done
   for (const s of toRun) refine[s] = "queued";
+  const idle = o.onlyIfIdle ? inArray(schema.projects.status, ["done", "failed", "refining"]) : undefined;
+  const [flipped] = await db
+    .update(schema.projects)
+    .set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
+    .where(and(currentStage(projectId, seq), idle))
+    .returning({ id: schema.projects.id });
+  if (!flipped) {
+    if (o.onlyIfIdle && (await db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq))).length) return false;
+    throw new StaleJobError(projectId, seq);
+  }
   await db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, projectId));
-  await db.update(schema.projects).set({ status: "refining", stage: "refine", stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
   await u.emit(projectId, "stage.started", { stage: "refine", status: "refining", steps: toRun });
   for (const s of toRun) await u.enqueue(REFINE_QUEUE[s], { projectId });
   if (!toRun.length) await finishIfComplete(svc, projectId, u);
+  return true;
 }
 
 function overlaps(a: TranscriptFlag, b: TranscriptFlag) {
@@ -201,7 +225,7 @@ export async function refineEntities(ctx: StageContext) {
     raw,
     t.entities,
     { title: project.title, uploader: project.sourceMeta?.uploader as string | undefined },
-    { signal: ctx.signal, telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
+    { signal: ctx.signal, timeoutMs: ctx.unitTimeoutMs(svc.models.get().language), telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
   );
   ctx.log.debug(
     {
@@ -255,8 +279,22 @@ export async function refineDisfluency(ctx: StageContext) {
   const reserved = new Set<number>();
   for (const f of t.flags) if (f.kind === "entity" || f.kind === "loop" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const trace: DisfluencyTraceEntry[] = [];
+  const modelId = svc.models.get().language;
+  const unitMs = ctx.unitTimeoutMs(modelId);
+  const concurrency = 3;
+  const phases = { rewrite: { range: [0.1, 0.7] as [number, number], what: "Checking" }, verify: { range: [0.7, 0.95] as [number, number], what: "Verifying" } };
+  // every model window is a saved step: a timeout or a restart resumes from the windows already done, and a window
+  // lost to a timeout fails the stage (it is never written as "done" with whatever flags were found so far)
+  const checkpoint: DisfluencyCheckpoint = {
+    all: (items, phase, fn) => ctx.steps(items, { concurrency, range: phases[phase].range, message: (d, t) => `${phases[phase].what} for fillers and repeats (${d}/${t})` }, fn),
+    step: (name, key, fn, stepSchema, o) => ctx.step(name, { ...key, model: modelId, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, { schema: stepSchema, timeoutMs: unitMs * (o.calls ?? 1), model: modelId, signal: o.signal }),
+  };
   const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
     signal: ctx.signal,
+    timeoutMs: unitMs,
+    concurrency,
+    checkpoint: useLlm ? checkpoint : undefined,
+    isFatal: (err) => err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError,
     telemetry: svc.otel.enabled,
     autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
     reserved,
@@ -271,26 +309,52 @@ export async function refineDisfluency(ctx: StageContext) {
   await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } }, ctx.seq);
 }
 
+/** Bump when the text scan's behaviour changes: the saved text-scan step stops applying. */
+const TEXT_SCAN_VERSION = "text-scan-1";
+const overlayBox = z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), kind: z.enum(["caption", "watermark"]), coverage: z.number(), windows: z.array(z.tuple([z.number(), z.number()])).optional(), share: z.number().optional() });
+const textScanSchema = z.object({
+  overlays: z.array(overlayBox),
+  textProfile: z.object({ frames: z.number(), textHeavy: z.number(), presentation: z.boolean() }),
+  frames: z.number(),
+  scenes: z.number(),
+  slides: z.number(),
+  faceDropped: z.number(),
+  moving: z.number(),
+});
+
 export async function refineScenes(ctx: StageContext) {
   const { svc } = ctx;
   const t = await loadTranscript(ctx);
   if (t.refine.scenes === "done") return;
   await markRunning(ctx, "scenes");
   const project = await ctx.project();
-  const sourcePath = await ctx.ensureSource(project);
-  // the cuts were detected before selection (analyze.ts ensureSceneCuts); a project from before that gets them here
-  const sceneCuts = t.sceneCuts ?? (project.width ? await svc.media.detectScenes(sourcePath, undefined, ctx.signal) : []);
-  // burned-in captions / watermarks: best effort, never fails the step
+  // the cuts were detected before selection (analyze.ts); a project from before that gets them here, through the same
+  // `scene-cuts` step, and they are saved the moment they are found: a timeout in the text scan below loses nothing
+  const sceneCuts = await ensureSceneCuts(ctx, project, t.sceneCuts);
+  // burned-in captions / watermarks: best effort, never fails the step. One pass over sampled frames whose result
+  // (overlays, text profile) is a step of its own, so a retry after the merge failed does not scan again.
   let overlays: SourceOverlay[] = [];
   let textProfile: TextProfile | undefined;
   if (svc.text && project.width && project.durationSec) {
+    const detector = svc.text;
+    const durationSec = project.durationSec;
     try {
-      const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, signal: ctx.signal, faces: svc.faces }, sourcePath, project.durationSec, sceneCuts);
+      const scan = await ctx.step(
+        "text-scan",
+        { input: { source: project.sourceKey, cuts: sceneCuts }, model: "text-detector", promptVersion: TEXT_SCAN_VERSION, params: { durationSec } },
+        async (signal) => {
+          const sourcePath = await ctx.ensureSource(project);
+          const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
+          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length };
+        },
+        { schema: textScanSchema, timeoutMs: Math.max(30 * 60_000, Math.round(durationSec * 1000)), model: "text-detector" },
+      );
       overlays = scan.overlays;
       textProfile = scan.textProfile;
       ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, textProfile: scan.textProfile, overlays }, "on-screen text scan");
     } catch (err) {
-      if (ctx.signal.aborted) throw err;
+      // a stop or a timeout ends the attempt (the cuts are already saved and the scan restarts alone); anything else only costs the text scan
+      if (ctx.signal.aborted || err instanceof StageTimeoutError || err instanceof StaleJobError) throw err;
       ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
     }
   }

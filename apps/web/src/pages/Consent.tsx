@@ -16,6 +16,9 @@ export function ConsentPage() {
   const clientId = q.get("client_id") ?? "";
   const scopes = (q.get("scope") ?? "").split(" ").filter(Boolean);
   useDocumentTitle("Authorize · Reelsaw");
+  // where the approval goes back to: the app's name is its own claim, this address is not
+  const redirectUri = q.get("redirect_uri") ?? "";
+  const redirectHost = URL.canParse(redirectUri) ? new URL(redirectUri).host : "";
 
   const clientQ = useQuery({
     queryKey: ["oauth-public-client", clientId],
@@ -59,6 +62,11 @@ export function ConsentPage() {
           <b>{client?.name ?? "An application"}</b>
           {client?.uri ? <span className="text-ink3"> ({client.uri})</span> : null} wants to use Reelsaw as <b>{data.user.email}</b>: create projects, read transcripts, edit and download clips.
         </p>
+        <div className="rounded-[10px] border border-line bg-bg p-3 text-sm">
+          <div className="text-xs text-ink3">After you allow, you go back to</div>
+          <div className="break-all font-mono text-[15px] font-bold">{redirectHost || "an address we could not read"}</div>
+          <div className="mt-1 text-xs text-ink2">{redirectHost ? `Only continue if you started this from ${redirectHost}.` : "Only continue if you started this yourself."}</div>
+        </div>
         {scopes.length > 0 && (
           <ul className="list-disc pl-5 text-sm text-ink2">
             {scopes.map((s) => (
@@ -75,7 +83,7 @@ export function ConsentPage() {
             Deny
           </button>
         </div>
-        <p className="text-xs text-ink3">You can revoke this later by signing out everywhere or removing the connector on the other side.</p>
+        <p className="text-xs text-ink3">You can remove this later under Settings → Connected apps.</p>
       </div>
     </div>
     </ScrollArea>

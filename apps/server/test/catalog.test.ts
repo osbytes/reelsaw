@@ -149,6 +149,9 @@ function fakeSvc(opts: { fetch?: typeof fetch; bundledDir: string }) {
       delete: async (k: string) => void objects.delete(k),
     },
     database: { db: { insert: () => ({ values: async (v: Record<string, unknown>) => void uploads.push(v) }) } },
+    // the unit of work: the same fake table, no quota (settings carry no MAX_STORAGE_MB), the lock and settings reads answered empty
+    tx: async (fn: (u: unknown) => Promise<unknown>) =>
+      fn({ db: { insert: () => ({ values: async (v: Record<string, unknown>) => void uploads.push(v) }), execute: async () => ({ rows: [] }), query: { userSettings: { findFirst: async () => undefined } } } }),
   } as unknown as Services;
   libraryProviders(svc, { fetch: opts.fetch, bundledDir: opts.bundledDir });
   return { svc, objects, uploads };

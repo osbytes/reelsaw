@@ -118,11 +118,11 @@ describe("disk gate", () => {
     assert.equal(gateDecision({ freeMB: -1, paused: false, minFreeMB: 2048 }), "keep");
     assert.equal(gateDecision({ freeMB: -1, paused: true, minFreeMB: 2048 }), "resume");
   });
-  it("keeps the refine queues while paused and drops the media ones", () => {
+  it("keeps the transcript-only refine queues while paused and drops the ones that read media (refine.scenes included)", () => {
     const all = Object.values(QUEUES);
     assert.deepEqual(listeningQueues(all, false), all);
     const paused = listeningQueues(all, true);
     assert.ok(DISK_QUEUES.every((q) => !paused.includes(q)));
-    assert.deepEqual(paused, [QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes]);
+    assert.deepEqual(paused, [QUEUES.refineEntities, QUEUES.refineDisfluency]);
   });
 });

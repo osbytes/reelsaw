@@ -21,6 +21,7 @@ import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from
 import { z } from "zod";
 import { clipCandidateSchema, rubricTotal, type ClipCandidate, type ClipScores, type TranscriptSegment } from "@reelsaw/shared";
 import { fmtTs } from "./transcript.js";
+import { callSignal } from "./steps.js";
 import { withLlmContext } from "../ai/trace.js";
 import type { Logger } from "../log.js";
 
@@ -115,7 +116,16 @@ export interface LlmOpts {
   model: LanguageModel;
   signal?: AbortSignal;
   telemetry: boolean;
+  /**
+   * Longest one logical call may take, all its HTTP attempts together (retries, the salvage and plain-text
+   * fallbacks included). Unset inside a checkpointed step, whose own signal already carries its limit.
+   */
+  timeoutMs?: number;
 }
+
+/** Bump a prompt's version whenever its text changes: saved steps (job_steps) are keyed on it, so they stop applying. */
+export const MAP_PROMPT_VERSION = "map-1";
+export const SCORE_PROMPT_VERSION = "score-1";
 
 /**
  * Structured output with two fallbacks for weak/local models: salvage the raw text of a schema
@@ -126,7 +136,8 @@ async function llmJson<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name
 }
 
 async function llmJsonInner<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
-  const common = { model: o.model, prompt, abortSignal: o.signal, maxRetries: 2, temperature } as const;
+  const abortSignal = callSignal(o.signal, o.timeoutMs);
+  const common = { model: o.model, prompt, abortSignal, maxRetries: 2, temperature } as const;
   try {
     const { output } = await generateText({ ...common, output: Output.object({ schema, name }), telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}`, recordInputs: false, recordOutputs: false } });
     return output as T;
@@ -306,7 +317,7 @@ export function repairTimestamps(c: ClipCandidate, chunk: Pick<Chunk, "start" | 
 
 // ---------- 4. score ----------
 
-const scoreItem = z.object({
+export const scoreItem = z.object({
   id: z.number().int(),
   hook: z.number(),
   flow: z.number(),
@@ -316,7 +327,7 @@ const scoreItem = z.object({
   emphasis: z.array(z.string()).max(12).default([]),
 });
 const scoreSchema = z.object({ scores: z.array(scoreItem) });
-type ScoreItem = z.infer<typeof scoreItem>;
+export type ScoreItem = z.infer<typeof scoreItem>;
 
 const to10 = (v: unknown) => {
   const n = Number(v);
@@ -366,28 +377,37 @@ Respond with JSON only:
 {"scores":[{"id":${items[0]?.id ?? 0},"hook":7,"flow":6,"value":8,"shareability":5,${c.focus ? `"relevance":9,` : ""}"emphasis":["word","word"]}]}`;
 }
 
-/** Score candidates in small batches, `samples` times each, median per criterion. */
-export async function scoreCandidates(o: LlmOpts, items: ScoreInput[], c: SelectContext, samples: number, concurrency: number, onProgress?: (done: number, total: number) => void): Promise<Map<number, ScoreResult>> {
-  const BATCH = 4;
+/** Candidates per scoring prompt. */
+export const SCORE_BATCH = 4;
+
+/** The candidates split into the batches that are scored together (one prompt each). */
+export function scoreBatches(items: ScoreInput[]): ScoreInput[][] {
   const batches: ScoreInput[][] = [];
-  for (let i = 0; i < items.length; i += BATCH) batches.push(items.slice(i, i + BATCH));
-  const jobs = batches.flatMap((b) => Array.from({ length: samples }, () => b));
-  let done = 0;
-  const results = await mapLimit(jobs, concurrency, async (batch) => {
-    // models number things from 1 and renumber per prompt: use local 1..k ids, map back afterwards
-    const local = batch.map((it, i) => ({ ...it, id: i + 1 }));
-    const r = await llmJson(o, buildScorePrompt(local, c), scoreSchema, "score", samples > 1 ? 0.7 : 0.2, salvageScores).catch((err) => {
-      if (o.signal?.aborted) throw err;
-      o.log?.warn({ err }, "scoring batch failed");
-      return null;
-    });
-    onProgress?.(++done, jobs.length);
-    const got = r?.scores ?? [];
-    const idsOk = got.every((s) => s.id >= 1 && s.id <= batch.length) && new Set(got.map((s) => s.id)).size === got.length;
-    if (!idsOk && got.length === batch.length) return got.map((s, i) => ({ ...s, id: batch[i]!.id })); // trust order instead
-    if (!idsOk) o.log?.warn({ ids: got.map((s) => s.id), batch: batch.length }, "scoring batch returned unusable ids");
-    return got.filter((s) => s.id >= 1 && s.id <= batch.length).map((s) => ({ ...s, id: batch[s.id - 1]!.id }));
+  for (let i = 0; i < items.length; i += SCORE_BATCH) batches.push(items.slice(i, i + SCORE_BATCH));
+  return batches;
+}
+
+/**
+ * One batch scored once (one sample): the raw items, ids mapped back to the candidates'. A sample the model could not
+ * answer comes back empty; a cancelled or timed-out call is never swallowed.
+ */
+export async function scoreSample(o: LlmOpts, batch: ScoreInput[], c: SelectContext, samples: number): Promise<ScoreItem[]> {
+  // models number things from 1 and renumber per prompt: use local 1..k ids, map back afterwards
+  const local = batch.map((it, i) => ({ ...it, id: i + 1 }));
+  const r = await llmJson(o, buildScorePrompt(local, c), scoreSchema, "score", samples > 1 ? 0.7 : 0.2, salvageScores).catch((err) => {
+    if (o.signal?.aborted) throw err;
+    o.log?.warn({ err }, "scoring batch failed");
+    return null;
   });
+  const got = r?.scores ?? [];
+  const idsOk = got.every((s) => s.id >= 1 && s.id <= batch.length) && new Set(got.map((s) => s.id)).size === got.length;
+  if (!idsOk && got.length === batch.length) return got.map((s, i) => ({ ...s, id: batch[i]!.id })); // trust order instead
+  if (!idsOk) o.log?.warn({ ids: got.map((s) => s.id), batch: batch.length }, "scoring batch returned unusable ids");
+  return got.filter((s) => s.id >= 1 && s.id <= batch.length).map((s) => ({ ...s, id: batch[s.id - 1]!.id }));
+}
+
+/** Median per criterion over every sample of every batch; the emphasis words most samples agree on. */
+export function aggregateScores(items: ScoreInput[], c: SelectContext, results: ScoreItem[][]): Map<number, ScoreResult> {
   const byId = new Map<number, ScoreItem[]>();
   for (const s of results.flat()) {
     if (!items.some((it) => it.id === s.id)) continue;
@@ -409,6 +429,19 @@ export async function scoreCandidates(o: LlmOpts, items: ScoreInput[], c: Select
     out.set(it.id, { scores, total: rubricTotal(scores), emphasis });
   }
   return out;
+}
+
+/** Score candidates in small batches, `samples` times each, median per criterion. */
+export async function scoreCandidates(o: LlmOpts, items: ScoreInput[], c: SelectContext, samples: number, concurrency: number, onProgress?: (done: number, total: number) => void): Promise<Map<number, ScoreResult>> {
+  const batches = scoreBatches(items);
+  const jobs = batches.flatMap((b) => Array.from({ length: samples }, () => b));
+  let done = 0;
+  const results = await mapLimit(jobs, concurrency, async (batch) => {
+    const r = await scoreSample(o, batch, c, samples);
+    onProgress?.(++done, jobs.length);
+    return r;
+  });
+  return aggregateScores(items, c, results);
 }
 
 // ---------- 5. rank ----------

@@ -5,7 +5,7 @@ import { createDatabase, type Database } from "./db/index.js";
 import { createStorage, type Storage } from "./storage/index.js";
 import { reclaimScratch } from "./storage/sweep.js";
 import { createDiskLeaser, LEASE_STALE_MS, releaseWorkerLeases, volumeId } from "./disk-leases.js";
-import { workerIdOf } from "./ops/workers.js";
+import { claimWorkerId } from "./ops/workers.js";
 import { createAi, type AiService } from "./ai/registry.js";
 import { createModelSettings, type ModelSettings } from "./ai/models.js";
 import { createProviderSettings, type ProviderSettings } from "./ai/providers.js";
@@ -17,6 +17,7 @@ import path from "node:path";
 import { createMediaTools, type MediaTools } from "./media.js";
 import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
+import { isSelfHostedModel } from "./ai/self-hosted.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
@@ -109,7 +110,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // the logger comes first (from raw env, before validation) so config errors are logged too
   const fmt = env.LOG_FORMAT === "json" || env.LOG_FORMAT === "pretty" ? env.LOG_FORMAT : "auto";
   const role = env.REELSAW_CLI === "1" ? "cli" : env.RUN_HTTP === "false" ? "worker" : env.RUN_WORKERS === "false" ? "api" : "app";
-  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
+  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined, WORKER_ID: env.WORKER_ID }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
   const bootLog = log.child({ module: "boot" });
   const step = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
     try {
@@ -178,8 +179,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
   const catalog = createModelCatalog(config, log.child({ module: "models" }), providers);
 
-  const faces = await step(config.FACE_DETECTION ? "face detector (UltraFace ONNX)" : "face detector (disabled)", async () => {
-    if (!config.FACE_DETECTION) return null;
+  // The on-device detectors serve pipeline stages, which only run in worker processes: a process with RUN_WORKERS=false
+  // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the
+  // exception: the API's cut preview (pipeline/cutpreview.ts) uses it to show the boundaries a render would cut at.
+  const detectors = config.RUN_WORKERS;
+  const faces = await step(!config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (UltraFace ONNX)" : "face detector (skipped, no workers in this process)", async () => {
+    if (!config.FACE_DETECTION || !detectors) return null;
     try {
       return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
     } catch (err) {
@@ -187,8 +192,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
-  const vad = await step(config.VAD ? "voice activity detector (Silero VAD)" : "voice activity detector (disabled)", async () => {
-    if (!config.VAD) return null;
+  const vad = await step(!config.VAD ? "voice activity detector (disabled)" : detectors ? "voice activity detector (Silero VAD)" : "voice activity detector (skipped, no workers in this process)", async () => {
+    if (!config.VAD || !detectors) return null;
     try {
       return await loadVad(config.VAD_MODEL_PATH);
     } catch (err) {
@@ -205,14 +210,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
-  const asr = await step("asr cache", async () => {
-    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate);
-    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
-    return a;
-  });
-
-  const text = await step(config.TEXT_DETECTION ? "text detector (PP-OCRv4 ONNX)" : "text detector (disabled)", async () => {
-    if (!config.TEXT_DETECTION) return null;
+  const text = await step(!config.TEXT_DETECTION ? "text detector (disabled)" : detectors ? "text detector (PP-OCRv4 ONNX)" : "text detector (skipped, no workers in this process)", async () => {
+    if (!config.TEXT_DETECTION || !detectors) return null;
     try {
       return await loadTextDetector(config.TEXT_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "text" }) });
     } catch (err) {
@@ -226,8 +225,14 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     return s;
   });
 
+  const asr = await step("asr cache", async () => {
+    const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate, storage);
+    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
+    return a;
+  });
+
   const database = await step("database", async () => {
-    const d = createDatabase(config.DATABASE_URL, log.child({ module: "db" }));
+    const d = createDatabase(config.DATABASE_URL, log.child({ module: "db" }), { poolMax: config.DB_POOL_MAX });
     await d.check();
     await d.migrate();
     return d;
@@ -250,8 +255,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
 
-  // the provider limits now hold across every process (ai/gate.ts)
-  gate.attach(database.pool);
+  // the provider limits now hold across every process (ai/gate.ts); each in-flight call holds a connection, so on its own pool
+  gate.attach(database.extraPool(gate.poolSize()));
 
   await step(`ai model check (${models.get().language}, ${models.get().transcription})`, async () => {
     const eff = models.get();
@@ -324,14 +329,16 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const queue = await step("job queue (pg-boss)", async () => {
-    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }));
+    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }));
     await q.start();
     return q;
   });
 
   const email = await step(config.EMAIL_DRIVER === "none" ? "email (disabled)" : `email (${config.EMAIL_DRIVER})`, async () => {
     const e = createEmail(config, log.child({ module: "email" }));
-    if (env.REELSAW_CLI !== "1") await e.check();
+    // only the HTTP process sends mail (sign-up, reset, approvals); a worker would only fail to boot over a mail server it never uses.
+    // The driver's settings are still validated by the config schema above.
+    if (env.REELSAW_CLI !== "1" && config.RUN_HTTP) await e.check();
     return e;
   });
 
@@ -344,7 +351,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // and claims its scratch against the volume's live leases first, so two jobs cannot both pass on the same free bytes (disk-leases.ts)
   await step("disk leases", async () => {
     const volume = await volumeId(paths.root);
-    const selfId = workerIdOf(config);
+    // a pinned WORKER_ID that a live replica already beats under gets a suffix first, or we would release that replica's leases
+    const selfId = await claimWorkerId(config, database.db, log.child({ module: "ops" }));
     // a previous incarnation under this id (a restarted container keeps hostname:pid; WORKER_ID is pinned) can no longer be writing
     await releaseWorkerLeases(svc, selfId);
     resources.setLeaser(createDiskLeaser(svc, { volume, selfId, staleMs: LEASE_STALE_MS }), volume);

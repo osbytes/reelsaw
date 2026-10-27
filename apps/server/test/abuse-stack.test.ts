@@ -7,6 +7,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { ACCOUNT_EXISTS_MESSAGE } from "@reelsaw/shared";
 import { BASE, db, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
@@ -68,7 +69,7 @@ describe("abuse guards", () => {
     assert.match(c.text, /Too many accounts were created from this network today/);
     const dup = await trySignup(`Guard.${tag}+promo@example.test`, "203.0.113.250");
     assert.equal(dup.status, 422, dup.text);
-    assert.match(dup.text, /An account already exists for this email address/);
+    assert.ok(dup.text.includes(ACCOUNT_EXISTS_MESSAGE), dup.text); // one sentence for taken and unknown addresses alike
     const stored = await pool.query(`select email_key, signup_ip from "user" where id = $1`, [a.userId]);
     assert.equal(stored.rows[0].email_key, `guard.${tag}@example.test`);
     assert.equal(stored.rows[0].signup_ip, ip);

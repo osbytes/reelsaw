@@ -33,10 +33,13 @@ describe("hosted", () => {
       [projectId, user.userId],
     );
     await pool.query(`insert into llm_usage (user_id, project_id, stage, call, model, input_tokens, output_tokens, ms) values ($1, $2, 'analyze', 'analyze.map', 'test:model', 1000, 200, 50)`, [user.userId, projectId]);
+    // projects and minutes in admin.usage come from the source_usage ledger (kept after a purge), not the project row
+    await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, 600, now() - interval '100 days')`, [user.userId, projectId]);
   });
   after(async () => {
     await pool.query(`delete from "user" where id = any($1)`, [[admin.userId, user.userId]]);
     await pool.query(`delete from llm_usage where user_id = any($1)`, [[admin.userId, user.userId]]);
+    await pool.query(`delete from source_usage where user_id = any($1)`, [[admin.userId, user.userId]]);
     await pool.end();
   });
 

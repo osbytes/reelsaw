@@ -171,6 +171,7 @@ export const ADMIN_EVENT_TYPES = [
   "billing.payment_failed",
   "billing.canceled",
   "billing.complimentary",
+  "billing.unknown_price",
 ] as const;
 export type AdminEventType = (typeof ADMIN_EVENT_TYPES)[number];
 export const adminEvents = pgTable(
@@ -427,6 +428,8 @@ export const projects = pgTable(
     sourceExpiredAt: timestamp("source_expired_at", { withTimezone: true }),
     stage: text("stage"),
     stageProgress: real("stage_progress"),
+    /** checkpointed stages: units done, total, seconds left (remaining x rolling median unit time) and that median in ms; null when the stage is not made of steps */
+    stageDetail: jsonb("stage_detail").$type<{ done: number; total: number; etaSec: number | null; unitMs: number | null }>(),
     /** explicit runs (see pipeline/lifecycle.ts startRun): how many have started, when and why the current/last one did */
     runSeq: integer("run_seq").notNull().default(0),
     runStartedAt: timestamp("run_started_at", { withTimezone: true }),
@@ -436,6 +439,8 @@ export const projects = pgTable(
      * refine or delete supersedes it. Stage jobs carry it and commit only while it is current (see pipeline/common.ts).
      */
     stageSeq: integer("stage_seq").notNull().default(0),
+    /** times the reconciler re-enqueued this project's lost job since the last user start or retry; past the limit it fails the project (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     /** when the stage now running began; stage.completed / stage.failed durations come from it */
     stageStartedAt: timestamp("stage_started_at", { withTimezone: true }),
     error: text("error"),
@@ -477,6 +482,37 @@ export const transcriptChunks = pgTable(
   (t) => [uniqueIndex("transcript_chunks_project_index_idx").on(t.projectId, t.index)],
 );
 
+/**
+ * Durable checkpoints of a pipeline stage (pipeline/steps.ts, `ctx.step`): one row per unit of work (a map window,
+ * a scoring batch). The key hashes the unit's content, model, prompt version and parameters, so a retry, or a
+ * re-run with the same inputs, reuses the row and a changed input misses. Cascades with the project; the hourly
+ * sweep drops the rows of finished projects after STEP_RETENTION_DAYS.
+ */
+export const jobSteps = pgTable(
+  "job_steps",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** set for clip-scoped steps (prepare); null for project stages */
+    clipId: text("clip_id"),
+    stage: text("stage").notNull(),
+    name: text("name").notNull(),
+    key: text("key").notNull(),
+    status: text("status").$type<"done" | "failed">().notNull(),
+    /** bounded JSON only; validated with the caller's schema on read */
+    output: jsonb("output"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    /** the projects.stage_seq that wrote it: diagnostics, not part of the key */
+    stageSeq: integer("stage_seq").notNull(),
+    ms: integer("ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.stage, t.name, t.key] }), index("job_steps_project_stage_idx").on(t.projectId, t.stage)],
+);
+
 export const transcripts = pgTable("transcripts", {
   projectId: text("project_id")
     .primaryKey()
@@ -507,6 +543,8 @@ export const clips = pgTable(
     id: text("id").primaryKey(),
     /** bumped on every render request; a render only commits if its generation is still current */
     renderGen: integer("render_gen").notNull().default(0),
+    /** times the reconciler re-enqueued this clip's lost job since the last render or prepare request; past the limit it fails the clip (queue/reconcile.ts) */
+    reconcileRequeues: integer("reconcile_requeues").notNull().default(0),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),

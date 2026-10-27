@@ -33,6 +33,19 @@ describe("parseClipFile", () => {
   });
 });
 
+describe("retention leftovers", () => {
+  const cleared = () => view({ clips: new Map([["c1", { projectId: "p1", renderGen: 2, referenced: new Set<string>() }]]) });
+  it("removes a current-generation file of a clip whose row names no file (retention cleared it)", () => {
+    const r = plan([{ id: "p1", files: [f("clips/c1.2.mp4"), f("clips/c1.2.jpg")] }], cleared());
+    assert.deepEqual(r.map((x) => x.path).sort(), ["projects/p1/clips/c1.2.jpg", "projects/p1/clips/c1.2.mp4"]);
+  });
+  it("keeps it while the file is fresh or a job is live", () => {
+    assert.deepEqual(plan([{ id: "p1", files: [f("clips/c1.2.mp4", FRESH)] }], cleared()), []);
+    const busy = view({ projects: new Map([["p1", { busy: true }]]), clips: cleared().clips });
+    assert.deepEqual(plan([{ id: "p1", files: [f("clips/c1.2.mp4")] }], busy), []);
+  });
+});
+
 describe("planSweep", () => {
   it("removes older generations and keeps the current one", () => {
     const r = plan([{ id: "p1", files: [f("clips/c1.mp4"), f("clips/c1.1.mp4"), f("clips/c1.1.jpg"), f("clips/c1.2.mp4"), f("clips/c1.2.jpg")] }]);

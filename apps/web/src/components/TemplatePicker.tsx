@@ -17,7 +17,8 @@ import { ScrollArea } from "./scroll-area";
 /** The user's layer templates (live ones in `data.templates`, deleted ones in `data.deleted`). */
 export function useLayerTemplates() {
   const trpc = useTRPC();
-  return useQuery(trpc.layerTemplates.list.queryOptions());
+  // the newest 500 templates (the server pages; `total` says how many there are in all)
+  return useQuery(trpc.layerTemplates.list.queryOptions({ limit: 500 }, { select: (d) => ({ templates: d.items, deleted: d.deleted, total: d.total, nextCursor: d.nextCursor }) }));
 }
 type Template = NonNullable<ReturnType<typeof useLayerTemplates>["data"]>["templates"][number];
 

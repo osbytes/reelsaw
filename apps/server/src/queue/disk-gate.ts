@@ -1,17 +1,22 @@
 /**
  * One worker short of disk must not take the whole fleet down with it. This process keeps a gate
- * on the queues whose jobs write scratch (ingest, transcribe, analyze, prepare, render):
+ * on the queues whose jobs write scratch (ingest, transcribe, refine.scenes, analyze, prepare, render):
  *
  *   - every DISK_GATE_INTERVAL_MS it looks at free disk; below the floor plus headroom it evicts
  *     scratch copies the store still has (resources.reclaimTo), so room is made before a job lands,
  *     not after it fails;
  *   - when eviction cannot reach the floor and another live worker has the room, it pauses those
- *     queues (pg-boss `offWork`): jobs stay queued for the other workers, and this one keeps serving
- *     the refine queues, which need no scratch. Alone (a single box, or every worker full) it does
- *     not pause: a job then fails fast with the disk message, which is more useful than a project
- *     sitting on "queued" with nobody to take it;
+ *     queues (pg-boss `offWork`, without waiting: it is also called from inside a job's handler, which
+ *     the wait would deadlock on): jobs stay queued for the other workers, and this one keeps serving
+ *     the transcript-only refine queues (entities, disfluency), which need no scratch. Alone (a single
+ *     box, or every worker full) it does not pause: a job then fails fast with the disk message, which
+ *     is more useful than a project sitting on "queued" with nobody to take it;
  *   - once free disk is back above the floor plus headroom (an operator freed space, retention or
- *     the sweep ran, the volume grew) it registers the queues again.
+ *     the sweep ran, the volume grew) it registers the queues again;
+ *   - while paused, each check also looks for the peer that justified pausing: when no other live
+ *     worker has room for the smallest disk requirement any more (it crashed, stopped, filled up or
+ *     paused itself) this one registers the queues again anyway, because a stuck queue is worse than
+ *     a failing job.
  *
  * A job that still hits a shortfall (`ResourceExhaustedError`) asks `handOff`: if another live
  * worker has the room, the job is thrown back for pg-boss to retry (with this worker paused,
@@ -21,8 +26,11 @@ import type { Services } from "../services.js";
 import { QUEUES, type QueueName } from "./boss.js";
 import { workerWithRoom } from "../ops/workers.js";
 
-/** Queues whose jobs copy or write media under DATA_DIR. The refine queues only read the transcript. */
-export const DISK_QUEUES: readonly QueueName[] = [QUEUES.ingest, QUEUES.transcribe, QUEUES.analyze, QUEUES.prepare, QUEUES.render];
+/**
+ * Queues whose jobs copy or write media under DATA_DIR. The transcript-only refine queues (entities, disfluency) are not
+ * here; refine.scenes is, because it reads the full source (pulled from the store, then ffmpeg and OCR).
+ */
+export const DISK_QUEUES: readonly QueueName[] = [QUEUES.ingest, QUEUES.transcribe, QUEUES.refineScenes, QUEUES.analyze, QUEUES.prepare, QUEUES.render];
 export const DISK_GATE_INTERVAL_MS = 30_000;
 /** Free MB wanted above MIN_FREE_DISK_MB before the gate reopens, so it does not flap on one small job. */
 export const DISK_GATE_HEADROOM_MB = 1024;
@@ -76,7 +84,11 @@ export function createDiskGate(svc: Services, register: (queue: QueueName) => Pr
     if (paused) return;
     paused = true;
     changedAt = new Date().toISOString();
-    for (const q of DISK_QUEUES) await svc.queue.boss.offWork(q).catch((err) => log.warn({ err, queue: q }, "could not pause a queue"));
+    // wait: false is required, not an optimisation. pause() runs from inside a job's catch block (handOff), and pg-boss 12's
+    // offWork defaults to { wait: true }: it awaits the worker's run loop, which is awaiting the very handler that called
+    // us. That is a self-deadlock (the job never returns, its heartbeat expires, the retry lands here and hangs again).
+    // With wait: false the worker stops fetching and the running handler, this one included, finishes on its own.
+    for (const q of DISK_QUEUES) await svc.queue.boss.offWork(q, { wait: false }).catch((err) => log.warn({ err, queue: q }, "could not pause a queue"));
     log.warn({ reason, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB, paused: DISK_QUEUES, workerWithRoom: workerId }, "paused disk queues on this worker: not enough disk, nothing left to evict, another worker has room");
   }
 
@@ -86,12 +98,13 @@ export function createDiskGate(svc: Services, register: (queue: QueueName) => Pr
       return null;
     });
 
-  async function resume() {
+  async function resume(why?: string) {
     if (!paused) return;
     paused = false;
     changedAt = new Date().toISOString();
     for (const q of DISK_QUEUES) await register(q);
-    log.warn({ freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB }, "resumed disk queues on this worker: disk is back above the floor");
+    if (why) log.warn({ reason: why, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB }, "resumed disk queues on this worker: no other worker can take the work, so jobs fail fast here instead of waiting");
+    else log.warn({ freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB }, "resumed disk queues on this worker: disk is back above the floor");
   }
 
   async function check(): Promise<DiskGateState> {
@@ -104,6 +117,19 @@ export function createDiskGate(svc: Services, register: (queue: QueueName) => Pr
       const other = await roomElsewhere(QUEUES.ingest, minFreeMB);
       if (other) await pause(`${freeMB} MB free, floor ${minFreeMB}`, other.workerId);
     } else if (d === "resume") await resume();
+    else if (paused) {
+      // still below the reopen line. A stuck queue is worse than a failing job, so when the peer that justified pausing is
+      // gone (crashed, stopped, full itself, or paused its own disk queues) take the work back and let a job fail fast with
+      // the disk message. A failed lookup keeps the gate as it is: not knowing is not a reason to reopen.
+      const other = await workerWithRoom(svc, QUEUES.ingest, minFreeMB).then(
+        (w) => ({ known: true as const, w }),
+        (err) => {
+          log.warn({ err }, "could not look for a worker with room");
+          return { known: false as const, w: null };
+        },
+      );
+      if (other.known && !other.w) await resume(`${freeMB} MB free, floor ${minFreeMB}, but no other live worker has room for the queues`);
+    }
     return gate.state();
   }
 

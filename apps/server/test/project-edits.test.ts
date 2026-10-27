@@ -68,7 +68,7 @@ describe("deleteClip", { skip: notReady ?? false }, () => {
     const projectId = await h.makeProject(userId, "done");
     const clip = await h.makeClip(projectId, 0, "done");
     const stranger = await h.makeUser();
-    await assert.rejects(deleteClip(h.svc, { id: stranger, admin: false }, clip), /NOT_FOUND|No such project/);
+    await assert.rejects(deleteClip(h.svc, { id: stranger, admin: false }, clip), /NOT_FOUND|No project with that id/);
     assert.equal((await clipRow(clip)).deleted_at, null);
   });
 });
@@ -111,7 +111,7 @@ describe("updateProject", { skip: notReady ?? false }, () => {
     await assert.rejects(updateProject(h.svc, me(), projectId, { settings: { minClipSeconds: 90, maxClipSeconds: 60 } }), /minClipSeconds/);
     await assert.rejects(updateProject(h.svc, me(), projectId, { settings: { captionSize: 9 } as never }), /captionSize/);
     const stranger = await h.makeUser();
-    await assert.rejects(updateProject(h.svc, { id: stranger, admin: false }, projectId, { title: "Mine" }), /No such project/);
+    await assert.rejects(updateProject(h.svc, { id: stranger, admin: false }, projectId, { title: "Mine" }), /No project with that id/);
     assert.equal((await projectRow(projectId)).title, "New title");
   });
 });
@@ -158,6 +158,6 @@ describe("applyProjectFraming", { skip: notReady ?? false }, () => {
 
   it("refuses other people's projects", async () => {
     const stranger = await h.makeUser();
-    await assert.rejects(applyProjectFraming(h.svc, { id: stranger, admin: false }, projectId, { reframe: "fit" }), /No such project/);
+    await assert.rejects(applyProjectFraming(h.svc, { id: stranger, admin: false }, projectId, { reframe: "fit" }), /No project with that id/);
   });
 });

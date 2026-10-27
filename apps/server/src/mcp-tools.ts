@@ -5,22 +5,44 @@
  * cannot drift (`test/mcp.test.ts` checks they advertise the same tools and schemas).
  */
 import { z } from "zod";
-import { CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS, REFINE_STEPS } from "@reelsaw/shared";
+import { CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, userProjectDefaultsSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS, REFINE_STEPS } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { settingsPatchSchema } from "./instance-settings.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
-Workflow: create_project(sourceUrl) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
+Workflow: create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
 Which tool when:
 - inspect: get_project (state + all clips), get_clip (one clip in full), get_transcript (the words, timed), get_project_events (what happened and why), list_deleted (restorable projects, clips, library, templates), list_releases (GitHub changelog), report_issue (zip of a project, or instance-wide diagnostics for admins); admins: get_failure for one failed project or clip's full reason
-- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), reanalyze_project (pick clips again)
+- fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
+- change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look for every clip, re-renders), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
+
+const projectDefaultsShape = userProjectDefaultsSchema.omit({ introAssetId: true, outroAssetId: true }).shape;
+const projectDefaultsInput = z.object({
+  language: projectDefaultsShape.language.describe("Spoken language code, e.g. en"),
+  vocabulary: projectDefaultsShape.vocabulary.describe("Names and terms the transcript should spell right"),
+  instructions: projectDefaultsShape.instructions.describe("Standing instructions for picking clips"),
+  focus: projectDefaultsShape.focus.describe("What to look for in a clip"),
+  pauses: projectDefaultsShape.pauses.describe("Pause trimming: off, natural or tight"),
+  sourceText: projectDefaultsShape.sourceText.describe("On-screen text in the source: hide, keep or always"),
+  minClipSeconds: projectDefaultsShape.minClipSeconds.describe("Shortest clip, seconds (5-180)"),
+  maxClipSeconds: projectDefaultsShape.maxClipSeconds.describe("Longest clip, seconds (10-300)"),
+  maxClips: projectDefaultsShape.maxClips.describe("Most clips to pick (1-50)"),
+  highlightColor: projectDefaultsShape.highlightColor.describe("Caption highlight color, #rrggbb"),
+  wordsPerLine: projectDefaultsShape.wordsPerLine.describe("Caption words per line (1-8)"),
+  uppercase: projectDefaultsShape.uppercase.describe("Upper-case captions"),
+  refineEntities: projectDefaultsShape.refineEntities.describe("Fix misheard names"),
+  refineDisfluency: projectDefaultsShape.refineDisfluency.describe("Remove fillers and repetitions"),
+  disfluencyLlm: projectDefaultsShape.disfluencyLlm.describe("Use the language model for filler removal"),
+  refineScenes: projectDefaultsShape.refineScenes.describe("Scan the video for on-screen text and scene cuts"),
+  layerTemplateId: projectDefaultsShape.layerTemplateId.describe("Layer template new clips start with (from list_layer_templates)"),
+}).partial();
 
 const settingsInput = projectSettingsPatchSchema.describe("Project settings; omit for the defaults (automatic clip count, 20–60 s clips, natural pauses, name fixes and the on-screen text scan on, filler removal off). Set refineDisfluency / disfluencyLlm true to opt into filler removal, refineEntities / refineScenes false to skip those steps (instance Pipeline gates must be on).");
 
@@ -71,9 +93,10 @@ export const TOOLS = {
   },
   create_project: {
     title: "Create project",
-    description: "Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). Returns { id, title, status: \"queued\", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.",
+    description: "Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. Returns { id, title, status: \"queued\", next } at once; the pipeline (download, transcribe, pick, render) runs in the background for minutes, so follow with wait_for_project(id). Intro/outro default to your library defaults unless introAssetId/outroAssetId say otherwise.",
     inputSchema: {
-      sourceUrl: z.url().describe("http(s) URL of the video"),
+      sourceUrl: z.url().optional().describe("http(s) URL of the video; give this or uploadId"),
+      uploadId: z.string().min(1).max(100).optional().describe("Id returned by POST /api/upload (the file body, x-filename header, API key as Bearer); give this or sourceUrl"),
       title: z.string().min(1).max(200).optional().describe("Project title (default: the video's own title)"),
       settings: settingsInput.optional(),
       introAssetId: z.string().min(1).max(100).nullable().optional().describe("Library asset id (search_assets with source library) for the intro of every clip; null = no intro; omitted = your default intro"),
@@ -95,7 +118,7 @@ export const TOOLS = {
   },
   wait_for_project: {
     title: "Wait for project",
-    description: "Block until the project is done or failed, or timeoutSeconds pass. Returns { id, status, stage, stageProgress, error, clips: [{ id, title, status }] }; on timeout the same with hint \"Still running\": call it again. Use get_project instead for a non-blocking look with full clip details.",
+    description: "Block until the project is done or failed, or timeoutSeconds pass. Returns { id, status, stage, stageProgress, stageDetail ({ done, total, etaSec } while a stage works in parts, else null), error, clips: [{ id, title, status }] }; on timeout the same with hint \"Still running\": call it again. Use get_project instead for a non-blocking look with full clip details.",
     inputSchema: {
       id: projectId("create_project or list_projects"),
       timeoutSeconds: z.number().int().min(1).max(120).default(60).describe("Longest to wait, seconds (1-120, default 60)"),
@@ -156,7 +179,7 @@ export const TOOLS = {
   },
   get_project_events: {
     title: "Project activity",
-    description: "The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. Returns [{ at, type, ...details }]. Use it to find out why something failed or is slow; get_project shows the current state.",
+    description: "The project's pipeline history, newest first (the same events the Activity panel shows; live progress ticks are not stored): stage starts and completions, clip renders, retries, failures with reasons. Returns [{ at, type, ...details }]. Use it to find out why something failed or is slow; get_project shows the current state.",
     inputSchema: {
       id: projectId(),
       limit: z.number().int().min(1).max(200).default(50).describe("Most events to return (1-200, default 50)"),
@@ -165,13 +188,13 @@ export const TOOLS = {
   },
   get_clip: {
     title: "Get clip",
-    description: "Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links. Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
+    description: "Everything about one clip: text, bounds, scores, emphasis, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links, and what the next render will use with where each comes from: style { own, effective, from: clip|project|default }, framing { own, effective: { mode, adjust, sections }, from }, bumpers { own, effective } (intro/outro). Returns the clip object. get_project lists all clips in brief; poll this after an edit to see the render finish (status done).",
     inputSchema: { id: clipId() },
     annotations: { readOnlyHint: true },
   },
   update_clip: {
     title: "Update clip",
-    description: "Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis and layers are burned in and re-render in the background (~1 min) unless rerender is false. A section's offsetX/Y, subjectX, crop and contentCrop are described on layoutSections (a crop replaces the nudge and the subject). Returns the clip summary; poll get_clip until done.",
+    description: "Edit one clip (3 s-10 min): only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). Title, caption and hashtags apply at once; bounds, hook, framing, style, emphasis, layers and intro/outro are burned in and re-render (~1 min) unless rerender is false. Returns the clip summary plus { changed, needsRerender, rerendered, hint }; poll get_clip until done.",
     inputSchema: {
       id: clipId(),
       title: z.string().min(1).max(120).optional().describe("Clip title (1-120 chars)"),
@@ -185,12 +208,12 @@ export const TOOLS = {
       style: styleOverrideSchema.nullable().optional().describe("Caption/hook style for this clip on top of the project's; replaces the clip's override; null = follow the project"),
       emphasis: z.array(z.string().min(1).max(40)).max(30).optional().describe("Words the captions colour (max 30); replaces the list"),
       layers: z.array(clipLayerSchema).max(MAX_CLIP_LAYERS).nullable().optional().describe(`Everything laid over or played under the clip, one list (max ${MAX_CLIP_LAYERS}): kind asset = a library image/GIF/video (search_assets with source library; logos, stickers, b-roll), kind text = a line of text, kind audio = music or a sound effect (a library audio asset with a window in source seconds, volume, ducking, fade, loop). Replaces the whole list; null or [] = none. get_clip returns it`),
-      rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true); false = keep the old video until rerender_clip"),
+      rerender: z.boolean().default(true).describe("Re-render when a burned-in field changed (default true, same as the app); false = keep the old video until rerender_clip"),
     },
   },
   create_clip: {
     title: "Create clip",
-    description: "Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip { id, status: \"preparing\" }; it gets a title and renders in the background (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.",
+    description: "Add a clip from a time range of the source (needs a transcript). mode exact keeps your bounds (3 s-10 min); mode ai lets the model pick the best moment inside them (≥8 s). Returns the new clip summary { id, status: \"preparing\", queued: \"prepare\", hint }; preparation (title, hook, scores) is queued and the render follows by itself (about a minute), so poll get_clip until done. To change an existing clip use update_clip instead.",
     inputSchema: {
       projectId: projectId(),
       startSec: z.number().min(0).describe("Range start, seconds from the start of the source video"),
@@ -200,13 +223,13 @@ export const TOOLS = {
   },
   delete_clip: {
     title: "Delete clip",
-    description: "Delete one clip of a live project; a render in progress stops. It shows up on Deleted (list_deleted). Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_clip. For several clips of one project use delete_clips. Returns { changed, restorable, storedBytes }.",
+    description: "Delete one clip of a live project; a render in progress stops. It shows up on Deleted (list_deleted). Reversible: restore_clip brings it back for DELETED_RETENTION_DAYS (7 days by default). Storage still counts until purge_clip. For several clips of one project use delete_clips. Returns { changed, stoppedRender (a render in flight was stopped), renderQueued: false, restorable, storedBytes }.",
     inputSchema: { id: clipId() },
     annotations: { destructiveHint: true, idempotentHint: true },
   },
   delete_clips: {
     title: "Delete clips",
-    description: "Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. Each shows up on Deleted (list_deleted) and restore_clip brings it back for DELETED_RETENTION_DAYS. Already-deleted ids are skipped. Storage still counts until purge_clip. Returns { deleted, skipped, restorable, storedBytes }.",
+    description: "Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. Each shows up on Deleted (list_deleted) and restore_clip brings it back for DELETED_RETENTION_DAYS. Already-deleted ids are skipped. Storage still counts until purge_clip. Returns { deleted, skipped, stoppedRenders, renderQueued: false, restorable, storedBytes }.",
     inputSchema: {
       projectId: projectId(),
       clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
@@ -215,13 +238,13 @@ export const TOOLS = {
   },
   rerender_clip: {
     title: "Re-render clip",
-    description: "Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). Async: the new video replaces the old when done (usually under a minute); poll get_clip. Returns { step: render | prepare } (prepare = it never got its AI title, which runs first). For several clips of a project use rerender_clips.",
+    description: "Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). Async: the new video replaces the old when done (usually under a minute); poll get_clip. Returns { step: render | prepare, renderQueued, hint } (prepare = it never got its AI title, which runs first and renders afterwards). For several clips of a project use rerender_clips.",
     inputSchema: { id: clipId("Clip id, not a project id") },
     annotations: { idempotentHint: true },
   },
   rerender_clips: {
     title: "Re-render clips",
-    description: "Queue several clips of one project for rendering again in one step (after edits or failures). Finished and failed clips are queued, clips still rendering are skipped; each new video replaces the old when done. Returns { requested, rerendered, skipped }; poll get_project or wait_for_project. For a single clip rerender_clip is enough.",
+    description: "Queue several clips of one project for rendering again in one step (after edits or failures). Finished and failed clips are queued, clips still rendering are skipped; each new video replaces the old when done. Returns { requested, rerendered, skipped, renderQueued, hint }; poll get_project or wait_for_project. For a single clip rerender_clip is enough.",
     inputSchema: {
       projectId: projectId(),
       clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
@@ -230,7 +253,7 @@ export const TOOLS = {
   },
   export_project: {
     title: "Export clips",
-    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Returns { url, clips, notRendered }; the link needs the same Authorization header as this server.",
+    description: "A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. Same conditions as the app's Export: the project must be live and at least one picked clip rendered, else the answer says why (not found, or nothing rendered yet). Returns { url, clips (rendered, in the zip), notRendered (picked but not finished, left out) }; the link needs the same Authorization header as this server.",
     inputSchema: {
       id: projectId(),
       clipIds: z.array(z.string()).max(200).optional().describe("Only these clips (max 200; must be rendered clips of the project); omitted = every rendered clip"),
@@ -343,8 +366,11 @@ export const TOOLS = {
   },
   list_layer_templates: {
     title: "List layer templates",
-    description: "Your layer templates (sets of layers that fit any clip length). Returns { templates: [{ id, name, layerCount, layers, updatedAt }], deleted } (deleted = your deleted templates, restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
-    inputSchema: {},
+    description: "Your layer templates (sets of layers that fit any clip length), newest first, paged. Returns { items: [{ id, name, layerCount, layers, updatedAt }], nextCursor, total, deleted } (nextCursor goes in cursor; deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    inputSchema: {
+      cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
+      limit: z.number().int().min(1).max(500).default(100).describe("Templates per page (1-500, default 100)"),
+    },
     annotations: { readOnlyHint: true },
   },
   save_layer_template: {
@@ -535,9 +561,97 @@ export const TOOLS = {
       interval: z.enum(["month", "year"]).default("month").describe("Billing interval: month (default) or year"),
     },
   },
+  list_transcript_flags: {
+    title: "List transcript fixes",
+    description: "The fixes Reelsaw made or suggests in a project's transcript: misheard names, fillers and repetitions to cut, and your own cuts and corrections. Returns { total, flags: [{ id, kind, subkind, status, start, end, heard, suggested, replacement, confidence }] }; status pending waits for your decision. Use the ids with review_transcript_flags.",
+    inputSchema: {
+      id: projectId(),
+      status: z.enum(["pending", "auto", "accepted", "rejected"]).optional().describe("Only fixes in this state; omitted = all (pending = waiting for review, auto = applied automatically)"),
+      limit: z.number().int().min(1).max(500).default(100).describe("Most fixes to return (1-500, default 100)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  review_transcript_flags: {
+    title: "Review transcript fixes",
+    description: "Accept or reject suggested transcript fixes (ids from list_transcript_flags), optionally with your own replacement text for an accepted name fix. The transcript is rebuilt; with rerender true (default) clips whose captions overlap a change are re-rendered. Returns { changed, rerendered, needsRerender, flags: [{ id, status, replacement }], hint }.",
+    inputSchema: {
+      id: projectId(),
+      decisions: z
+        .array(
+          z.object({
+            flagId: z.string().min(1).describe("Fix id from list_transcript_flags"),
+            status: z.enum(["accepted", "rejected"]).describe("accepted applies the fix, rejected keeps the words as heard"),
+            replacement: z.string().max(80).optional().describe("Text to use instead of the suggestion (accepted fixes only)"),
+          }),
+        )
+        .min(1)
+        .max(200)
+        .describe("One decision per fix"),
+      rerender: z.boolean().default(true).describe("Re-render the finished clips whose captions overlap a change (default true); false only saves, re-render later with rerender_clips"),
+    },
+  },
+  add_transcript_correction: {
+    title: "Correct transcript words",
+    description: "Make captions show \"text\" instead of the words spoken between startSec and endSec (a misheard name, say); the span must cover whole words. Returns { ok, flagId, rerendered, hint }. Undo it by passing the flagId to review_transcript_flags with status rejected.",
+    inputSchema: {
+      id: projectId(),
+      startSec: z.number().min(0).describe("Start of the words to correct, seconds from the start of the source video"),
+      endSec: z.number().min(0).describe("End of the words to correct, seconds"),
+      text: z.string().trim().min(1).max(200).describe("What the captions should say for that span"),
+      rerender: z.boolean().default(true).describe("Re-render finished clips whose captions overlap the span (default true)"),
+    },
+  },
+  add_transcript_cut: {
+    title: "Cut transcript words",
+    description: "Remove the words spoken between startSec and endSec from the transcript, so captions and the rendered video skip them; the span must cover whole words. Returns { ok, flagId, rerendered, hint }. Undo it by passing the flagId to review_transcript_flags with status rejected.",
+    inputSchema: {
+      id: projectId(),
+      startSec: z.number().min(0).describe("Start of the words to cut, seconds from the start of the source video"),
+      endSec: z.number().min(0).describe("End of the words to cut, seconds"),
+      rerender: z.boolean().default(true).describe("Re-render finished clips whose captions overlap the span (default true)"),
+    },
+  },
+  get_project_defaults: {
+    title: "Get project defaults",
+    description: "The settings every new project starts with (Settings, Project defaults): language, vocabulary, instructions, focus, clip lengths, pauses, caption look and refine steps. Returns { projectDefaults }; keys you never set are absent and use the built-in value. Change them with set_project_defaults.",
+    annotations: { readOnlyHint: true },
+  },
+  set_project_defaults: {
+    title: "Set project defaults",
+    description: "Replace the settings every new project starts with; existing projects keep theirs. Send the whole set you want: keys left out are cleared, {} clears all (read get_project_defaults first). Intro and outro change through set_default_bumper. Returns { ok, projectDefaults, hint }.",
+    inputSchema: {
+      defaults: projectDefaultsInput.describe("The complete set of defaults, e.g. { language: \"en\", maxClips: 5, pauses: \"tight\" }"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  set_project_source_text: {
+    title: "Set source text handling",
+    description: "Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. Re-renders every finished clip so the set agrees. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, so follow with wait_for_project; skipped clips were still preparing or rendering and need rerender_clips once done (needsRerender is true).",
+    inputSchema: {
+      id: projectId(),
+      sourceText: z.enum(["hide", "keep", "always"]).describe("hide = cover on-screen text in the source, keep = leave it, always = always show it"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  update_project_style: {
+    title: "Update project style",
+    description: "Change the caption/hook look for the whole project (font, colors, size, position, words per line). Clears per-clip style overrides unless keepOverrides, and re-renders every finished clip unless rerender is false. Returns { changed, needsRerender, rerendered, skipped, hint }; rerendered is how many clips were queued, skipped how many were still preparing or rendering (they need rerender_clips once done). For one clip use update_clip { style }.",
+    inputSchema: {
+      id: projectId(),
+      style: styleOverrideSchema.describe("The style fields to change; fields left out keep their value"),
+      keepOverrides: z.boolean().optional().describe("Keep clips' own style overrides instead of clearing them (default false)"),
+      rerender: z.boolean().default(true).describe("Re-render finished clips now (default true); false saves the style and the next render shows it"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  billing_portal_url: {
+    title: "Billing portal URL",
+    description:
+      "Hosted instances: a Stripe Billing Portal URL to see invoices, change the card or cancel at period end. Returns { url }; a person must open it in a browser. On a self-hosted Reelsaw this answers that billing is not enabled.",
+  },
 };
 
 export type ToolName = keyof typeof TOOLS;
 /** Tools that only do something on a hosted instance with billing (ee); elsewhere they answer with a sentence. */
-export const EE_TOOLS: ToolName[] = ["get_billing", "billing_checkout_url"];
+export const EE_TOOLS: ToolName[] = ["get_billing", "billing_checkout_url", "billing_portal_url"];
 export const TOOL_NAMES = Object.keys(TOOLS) as ToolName[];

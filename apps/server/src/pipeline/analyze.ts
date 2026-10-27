@@ -1,10 +1,16 @@
 import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
-import { lockProjectClips, requestPrepare } from "./lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare } from "./lifecycle.js";
 import { needsPrepare } from "./manual.js";
+import type { Services } from "../services.js";
+import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
-import { StageContext, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
-import { chunkTranscript, excludeRanges, mapChunk, mapLimit, needsSecondLook, pairwiseRank, scoreCandidates, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
+import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, excludeRanges, mapChunk, needsSecondLook, pairwiseRank, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import { isAbortError } from "./steps.js";
+import { isSelfHostedModel } from "../ai/self-hosted.js";
+import { clipCandidateSchema } from "@reelsaw/shared";
+import { z } from "zod";
 import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { finishThought } from "./thought.js";
@@ -185,12 +191,6 @@ export function snapCandidate(
   return { ...c, startSec: Number(start.toFixed(2)), endSec: Number(end.toFixed(2)) };
 }
 
-/** Local models are slow and sequential; cloud models take parallel calls and extra samples. */
-function isSelfHostedModel(cfg: { AI_MODEL: string; OPENAI_BASE_URL?: string }) {
-  const provider = cfg.AI_MODEL.split(":")[0];
-  return provider === "compat" || provider === "ollama" || (provider === "openai" && !!cfg.OPENAI_BASE_URL);
-}
-
 /** Where one model-proposed moment ended up (indices refer to the candidates array). */
 interface CandidateFate {
   i: number;
@@ -221,23 +221,50 @@ function textFor(c: ClipCandidate, segments: TranscriptSegment[]) {
     .slice(0, 2500);
 }
 
+/** Bump when the shot-cut detector's behaviour changes: the saved scene-cuts step stops applying. */
+const SCENE_CUTS_VERSION = "scenes-1";
+
 /**
  * The source's shot cuts, detected once per project and kept on the transcript: clip boundaries snap to
- * them, the layout changes at them and the on-screen text scan reads shots from them. Cheap (ffmpeg scene
- * scores on a 320 px decode, a few seconds for an hour of video), so every project gets them; the scenes
- * refine step (opt-in) only adds the text scan on top. Null means never detected (an older project, an
- * imported report): detect now. A failed detection is logged and comes back empty.
+ * them, the layout changes at them and the on-screen text scan reads shots from them. Every project gets them
+ * (the scenes refine step, opt-in, only adds the text scan on top). It is a full low-resolution decode of the
+ * video: seconds on a fast machine, several minutes for an hour of video on a small CPU, so it is a checkpointed
+ * step of its own (the cuts live in `transcripts.sceneCuts`; the step row records the outcome and time).
+ * Null means never detected (an older project, an imported report, a re-transcribed one): detect now. A detection
+ * that fails inside ffmpeg throws (the step records it failed and the stage retries); only a decode that ran and found
+ * nothing stores `[]`, and one that was cancelled or timed out stores nothing.
  */
 export async function ensureSceneCuts(ctx: StageContext, project: Project, stored: number[] | null): Promise<number[]> {
   if (stored) return stored;
   if (!project.width || !project.sourceKey) return [];
-  await ctx.progress(0.01, "Detecting shot changes");
-  const sourcePath = await ctx.ensureSource(project);
-  const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, ctx.signal);
-  await ctx.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
-  ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
-  return cuts;
+  if (ctx.stage === "analyze") await ctx.progress(0.01, "Detecting shot changes"); // the refine stage reports its own steps
+  const detect = async (signal: AbortSignal): Promise<number> => {
+    const sourcePath = await ctx.ensureSource(project);
+    const cuts = await ctx.svc.media.detectScenes(sourcePath, undefined, signal);
+    signal.throwIfAborted(); // detectScenes answers [] when it was stopped: that is not "no cuts"
+    // saved the moment they are found, in a unit of their own: a later step of this stage timing out loses nothing
+    await ctx.svc.tx(async (u) => {
+      const [t] = await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId)).for("update"); // transcript, then project
+      if (!t) return;
+      if (!(await lockCurrentStage(u.db, ctx.projectId, ctx.seq))) throw new StaleJobError(ctx.projectId, ctx.seq);
+      await u.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
+    });
+    ctx.log.info({ cuts: cuts.length, first: cuts.slice(0, 12).map((c) => Number(c.toFixed(1))) }, "shot cuts detected");
+    return cuts.length;
+  };
+  // a decode is bounded by the video's own length on any machine that can play it in real time; never less than 30 min
+  const timeoutMs = Math.max(30 * 60_000, Math.round((project.durationSec ?? 0) * 1000));
+  await ctx.step("scene-cuts", { input: project.sourceKey, model: "ffmpeg-scene", promptVersion: SCENE_CUTS_VERSION, params: { floor: 0.1, width: 320 } }, detect, { schema: z.number(), timeoutMs, model: "ffmpeg-scene" });
+  // the step may have been reused while the transcript was replaced (cuts reset to null): then detect again
+  const [row] = await ctx.db.select({ cuts: schema.transcripts.sceneCuts }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId));
+  if (row?.cuts) return row.cuts;
+  await detect(ctx.signal);
+  const [again] = await ctx.db.select({ cuts: schema.transcripts.sceneCuts }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId));
+  return again?.cuts ?? [];
 }
+
+/** One scoring batch's raw answers: a list of items per sample. */
+const samplesSchema = z.array(z.array(scoreItem));
 
 export async function analyze(ctx: StageContext) {
   const { svc, projectId, db } = ctx;
@@ -253,22 +280,9 @@ export async function analyze(ctx: StageContext) {
   if (existingClips.length) {
     log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
     await svc.tx(async (u) => {
-      // unprepared clips go through the one prepare path (which keeps a live prepare job); the rest re-queue their
-      // current generation. Clips are locked (id order) before the project row is touched.
       await lockProjectClips(u, projectId);
       if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq); // a newer re-analyze owns these clips now
-      for (const c of await listClips(u.db, projectId)) {
-        if (c.status === "done") continue;
-        if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });
-        else await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
-      }
-      // a conditional flip: only a project still in an earlier stage moves to rendering, and only that caller emits
-      const [moved] = await u.db
-        .update(schema.projects)
-        .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
-        .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
-        .returning({ id: schema.projects.id });
-      if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
+      await convergeOnExistingClips(svc, u, projectId);
     });
     return;
   }
@@ -279,7 +293,8 @@ export async function analyze(ctx: StageContext) {
   const sceneCuts = await ensureSceneCuts(ctx, project, transcript.sceneCuts);
 
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? 0;
-  const selfHosted = isSelfHostedModel({ AI_MODEL: svc.models.get().language, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
+  const languageId = svc.models.get().language;
+  const selfHosted = isSelfHostedModel({ AI_MODEL: languageId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
   // the judge (scoring + pairwise) may be a different model; its hosting decides the sampling cost
   const judgeId = svc.config.ANALYZE_JUDGE_MODEL;
@@ -293,28 +308,36 @@ export async function analyze(ctx: StageContext) {
   const sc: SelectContext = { title: project.title, durationSec, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds, maxClips: settings.maxClips, focus: settings.focus, instructions: settings.instructions };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
+  const judgeModelId = judgeId ?? languageId;
+  const mapUnitMs = ctx.unitTimeoutMs(languageId);
+  const scoreUnitMs = ctx.unitTimeoutMs(judgeModelId);
+  // the pairwise pass is not checkpointed; each of its calls still has a limit
+  judge.timeoutMs = scoreUnitMs;
   const segments = transcript.segments;
-  log.info({ durationSec, segments: segments.length, model: svc.models.get().language, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
+  log.info({ durationSec, segments: segments.length, model: languageId, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
 
-  // 1-2. chunk + map
+  // 1-2. chunk + map. Every window is a checkpointed step keyed on its lines, the model, the prompt version and the
+  // selection settings (sc): a retry, or a re-analyze with nothing changed, reuses the windows already mapped.
   const chunks = chunkTranscript(segments);
-  let mapped = 0;
+  const candidatesSchema = z.array(clipCandidateSchema);
   await ctx.progress(0.03, `Finding moments in ${chunks.length} part(s) of the transcript`);
-  const perChunk = await mapLimit(chunks, concurrency, async (ch) => {
-    const found = await mapChunk(o, ch, sc);
-    await ctx.progress(0.05 + 0.35 * (++mapped / chunks.length), `Found candidates in part ${mapped}/${chunks.length}`);
-    return found;
-  });
-  // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1)
-  let gleaned = 0;
+  const perChunk = await ctx.steps(chunks, { concurrency, range: [0.05, 0.4], message: (d, t) => `Found candidates in part ${d}/${t}` }, (ch, i, signal) =>
+    ctx.step(`map:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal }),
+  );
+  // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1). A window whose
+  // extra pass fails (the model answered nonsense) just keeps its first picks; a timeout or a cancel is never skipped.
   const gleanIdx = chunks.map((ch, i) => (needsSecondLook(ch, perChunk[i]!, settings.minClipSeconds) ? i : -1)).filter((i) => i >= 0);
-  await mapLimit(gleanIdx, concurrency, async (i) => {
-    if (ctx.signal.aborted) return;
+  await ctx.steps(gleanIdx, { concurrency, range: [0.4, 0.45], message: (d, t) => `Looking again in ${d}/${t} part(s)` }, async (i, _k, signal) => {
     const ch = chunks[i]!;
-    const more = await mapChunk(o, ch, sc, excludeRanges(perChunk[i]!)).catch(() => []);
+    const exclude = excludeRanges(perChunk[i]!);
+    const more = await ctx
+      .step(`glean:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end, exclude }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc, exclude), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal })
+      .catch((err: unknown) => {
+        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted) throw err;
+        log.warn({ err, chunk: i }, "second map pass failed; keeping the first picks of this window");
+        return [];
+      });
     perChunk[i]!.push(...more);
-    gleaned++;
-    await ctx.progress(0.4 + 0.05 * (gleaned / Math.max(1, gleanIdx.length)), `Looking again in part ${i + 1}/${chunks.length}`);
   });
   if (gleanIdx.length) log.debug({ gleaned: gleanIdx.length, perChunk: perChunk.map((l) => l.length) }, "second map pass on uncovered windows");
   const candidates = perChunk.flat();
@@ -366,7 +389,20 @@ export async function analyze(ctx: StageContext) {
   // 4. rubric scoring
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c, segments) }));
   await ctx.progress(0.45, `Scoring ${pooled.length} candidate(s)${samples > 1 ? ` × ${samples} samples` : ""}`);
-  const scored = await scoreCandidates(judge, inputs, sc, samples, concurrency, (d, t) => void ctx.progress(0.45 + 0.35 * (d / t), `Scoring candidates (${d}/${t})`).catch(() => {}));
+  // one step per batch of candidates (all its samples): keyed on the candidates' texts, the judge, the prompt and the settings
+  const scoreResults = await ctx.steps(scoreBatches(inputs), { concurrency, range: [0.45, 0.8], message: (d, t) => `Scoring candidates (${d}/${t})` }, (batch, i, signal) =>
+    ctx.step(
+      `score:${i}`,
+      { input: batch, model: judgeModelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples } },
+      async (sig) => {
+        const out: z.infer<typeof samplesSchema> = [];
+        for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples));
+        return out;
+      },
+      { schema: samplesSchema, timeoutMs: scoreUnitMs * samples, model: judgeModelId, signal },
+    ),
+  );
+  const scored = aggregateScores(inputs, sc, scoreResults.flat());
   // unscored (scoring failed) keep their map-pass guess only to order them among themselves
   type Ranked = { c: ClipCandidate; id: number; r: ScoreResult | undefined; total: number };
   let ranked: Ranked[] = pooled.map((c, id) => ({ c, id, r: scored.get(id), total: scored.get(id)?.total ?? Math.round(c.score) }));
@@ -397,6 +433,7 @@ export async function analyze(ctx: StageContext) {
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
+  ctx.throwIfAborted(); // a stopped attempt must not go on to hand off half a ranking
   let ranks: Map<number, number> | undefined;
   if (pairwise && chosen.length > 2 && !ctx.signal.aborted) {
     // only scored clips are compared; an unscored fill-in keeps its place after them
@@ -410,13 +447,12 @@ export async function analyze(ctx: StageContext) {
   }
 
   if (kept.length) log.debug({ kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length }, "new picks avoid the clips the user kept");
-  const firstIndex = kept.reduce((m, k) => Math.max(m, k.index + 1), 0);
   // the project's layer template (brand overlays, music bed, CTA), materialised on every new clip against its own length
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const rows = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
     projectId,
-    index: firstIndex + index,
+    index, // position among the new picks; the hand-off offsets it past the clips that exist when it commits
     title: c.title.slice(0, 120),
     hook: c.hook.slice(0, 80),
     startSec: c.startSec,
@@ -431,18 +467,57 @@ export async function analyze(ctx: StageContext) {
     status: "pending" as const,
   }));
   log.debug({ picks: rows.map((r) => ({ index: r.index, start: r.startSec, end: r.endSec, score: r.score, title: r.title.slice(0, 60) })) }, "clips chosen");
-  rows.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
   // clips, their events, the candidates artifact, "analyze done", the move to rendering and every
   // render job: one commit
-  await ctx.complete({ clips: rows.length, chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } }, async (u) => {
-    if (rows.length) await u.db.insert(schema.clips).values(rows);
-    if (template && rows.length) await syncClipsRefs(u.db, projectId, rows);
+  let converged = false;
+  let liveNow: schema.Clip[] = [];
+  const stageExtra = { chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } };
+  await ctx.complete(async (u) => {
+    // the project row is locked by now (lockCurrentStage), so what we read here is what the insert sees
+    liveNow = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+    converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+    // when we converge, another run's picks stand and this run inserted none
+    return { clips: converged ? 0 : rows.length, ...stageExtra };
+  }, async (u) => {
+    if (converged) {
+      // another run of this analysis committed its picks while we scored: converge on them instead of adding a second set
+      log.info({ clips: liveNow.length }, "clips already exist, converging");
+      await convergeOnExistingClips(svc, u, projectId); // the clips are locked by lockCurrentStage in ctx.complete
+      return;
+    }
+    const firstIndex = liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0);
+    const placed = rows.map((r) => ({ ...r, index: firstIndex + r.index }));
+    placed.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
+    if (placed.length) await u.db.insert(schema.clips).values(placed);
+    if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
     await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
-    for (const r of rows) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
+    for (const r of placed) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
     await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    for (const r of rows) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
+    for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
   });
   void db;
+}
+
+/**
+ * Pick up where an analysis that already committed its clips left off: unprepared clips go through the one prepare
+ * path (which keeps a live prepare job), the rest re-queue their current generation, the project moves to rendering
+ * (only a project still in an earlier stage, and only that caller emits), and a project whose clips are all done
+ * finishes. The caller holds the clip locks (id order) and the project's stage lock.
+ */
+async function convergeOnExistingClips(svc: Services, u: UnitOfWork, projectId: string): Promise<void> {
+  for (const c of await listClips(u.db, projectId)) {
+    if (c.status === "done") continue;
+    if (needsPrepare(c)) await requestPrepare(svc, u, projectId, c.id, { restart: false });
+    else await u.enqueue(QUEUES.render, { projectId, clipId: c.id, gen: c.renderGen });
+  }
+  const [moved] = await u.db
+    .update(schema.projects)
+    .set({ status: "rendering", stage: "render", stageStartedAt: sql`now()`, updatedAt: new Date() })
+    .where(and(eq(schema.projects.id, projectId), inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing"])))
+    .returning({ id: schema.projects.id });
+  if (moved) await u.emit(projectId, "stage.started", { stage: "render", status: "rendering", resumed: true });
+  // every clip already done (a Retry that only fetched an expired source again): nothing is queued to finish the project
+  await finalizeProjectIfDone(svc, u, projectId);
 }
 
 /**
@@ -457,5 +532,5 @@ export function keepReason(c: Pick<schema.Clip, "origin" | "editedAt" | "layoutO
 
 /** A project's live clips (not soft-deleted), in order. */
 export async function listClips(db: Db, projectId: string) {
-  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: asc(schema.clips.index) });
+  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)] });
 }

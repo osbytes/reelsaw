@@ -16,7 +16,7 @@ export function GET() {
     "",
     `> ${SITE.description}`,
     "",
-    "Reelsaw is open-source (AGPL-3.0) software you run yourself with Docker Compose, or the same code hosted at app.reelsaw.com (Free, then $12 / $29 / $59 a month, metered in source minutes). It takes a long video (a YouTube link or an upload), transcribes it, asks a language model for the most clippable moments, reframes the speaker into 9:16 with face tracking, cuts verified fillers and false starts, burns in word-highlight captions and renders the clips. Every model (language, transcription, judge) is configurable: fully local with Ollama and a local Whisper, or any provider through the AI SDK. Everything a person can do in the app is also an MCP tool and a CLI command, including on the hosted Free plan.",
+    "Reelsaw is open-source (AGPL-3.0) software you run yourself with Docker Compose, or the same code hosted at app.reelsaw.com (Free, then $12 / $29 / $59 a month, metered in source minutes). It takes a long video (a YouTube link or an upload), transcribes it, asks a language model for the most clippable moments, reframes the speaker into 9:16 with face tracking, cuts verified fillers and false starts, burns in word-highlight captions and renders the clips. Every model (language, transcription, judge) is configurable: fully local with Ollama and a local Whisper, or any provider through the AI SDK. Every editing action in the app is also an MCP tool, including on the hosted Free plan; the admin pages for users, providers and models are app-only.",
     "",
     "## Install and run",
     "",

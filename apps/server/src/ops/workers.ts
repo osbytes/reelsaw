@@ -4,8 +4,10 @@
  * actually run work, not only the process that served the page.
  */
 import os from "node:os";
+import { randomBytes } from "node:crypto";
 import { eq, gt, lt, and, ne, inArray } from "drizzle-orm";
-import { schema } from "../db/index.js";
+import { schema, type Db } from "../db/index.js";
+import type { Logger } from "../log.js";
 import type { WorkerGpu, WorkerJob, WorkerRenders, WorkerRole } from "../db/schema.js";
 import type { QueueName } from "../queue/boss.js";
 import { inflightJobs, listeningQueues } from "../queue/inflight.js";
@@ -30,6 +32,33 @@ export function processRole(c: Pick<Config, "RUN_HTTP" | "RUN_WORKERS">): Worker
 export function workerIdOf(c: Pick<Config, "WORKER_ID">, hostname = os.hostname(), pid = process.pid): string {
   const pinned = c.WORKER_ID?.trim();
   return pinned && pinned.length ? pinned : `${hostname}:${pid}`;
+}
+
+/** A heartbeat row for the same id this recent means another live process is using the pinned WORKER_ID. */
+export const WORKER_ID_IN_USE_MS = 30_000;
+
+/** Pure: the pinned id, or the pinned id plus `-<4 hex>` when a live process already beats under it. */
+export function disambiguateWorkerId(pinned: string, lastBeatAt: Date | null, now: Date, suffix: string): string {
+  const inUse = lastBeatAt !== null && now.getTime() - lastBeatAt.getTime() <= WORKER_ID_IN_USE_MS;
+  return inUse ? `${pinned}-${suffix}` : pinned;
+}
+
+/**
+ * Boot: two replicas started with the same pinned WORKER_ID (`docker compose --scale worker=N`) would overwrite each
+ * other's heartbeat row and release each other's disk leases. When a row under the pinned id was updated in the last
+ * 30 s, this process takes `<id>-<4 hex>` instead (config.WORKER_ID is rewritten, so every `workerIdOf` caller agrees).
+ * Unpinned ids (`hostname:pid`) are already unique. Two replicas that start within the same moment can still both pass.
+ */
+export async function claimWorkerId(config: Config, db: Db, log: Logger): Promise<string> {
+  const pinned = config.WORKER_ID?.trim();
+  if (!pinned) return workerIdOf(config);
+  const [row] = await db.select({ updatedAt: schema.workerInstances.updatedAt }).from(schema.workerInstances).where(eq(schema.workerInstances.id, pinned));
+  const id = disambiguateWorkerId(pinned, row?.updatedAt ?? null, new Date(), randomBytes(2).toString("hex"));
+  if (id !== pinned) {
+    config.WORKER_ID = id;
+    log.warn({ pinned, workerId: id }, "WORKER_ID is already in use by a live process; using the suffixed id");
+  }
+  return id;
 }
 
 export interface WorkerView {

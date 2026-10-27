@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo } from "../lib/uploads";
+import { peekPendingFile, takePendingFile, uploadFile as postUpload, isVideo, clearPendingFile, uploadSizeProblem, useLeaveWarning } from "../lib/uploads";
 import { Ban, ChevronRight, Star } from "lucide-react";
 import { SlotRow, useBumperLibrary } from "../components/BumperField";
 import type { FixedOption } from "../components/BumperCombobox";
@@ -44,9 +44,11 @@ export function NewProjectPage() {
   const qc = useQueryClient();
   const status = useSystemStatus();
   const me = useMe();
+  const uploadCtrl = useRef<AbortController | null>(null);
   const create = useMutation({
     mutationFn: async (input: { title?: string; sourceUrl?: string; file?: File; settings: ProjectSettings }) => {
-      const uploadId = input.file ? await postUpload(input.file, setUploadPct) : undefined;
+      uploadCtrl.current = new AbortController();
+      const uploadId = input.file ? await postUpload(input.file, setUploadPct, uploadCtrl.current.signal) : undefined;
       return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings });
     },
     onSettled: () => setUploadPct(null),
@@ -56,13 +58,22 @@ export function NewProjectPage() {
   // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
   const [search] = useSearchParams();
   const loc = useLocation();
-  const [file, setFile] = useState<File | null>(() => peekPendingFile());
+  const [file, setFileRaw] = useState<File | null>(() => peekPendingFile());
+  // a file over the server's limit is refused up front, not after minutes of uploading
+  const maxMb = status.data?.maxUploadMb;
+  const setFile = (f: File | null) => {
+    const problem = f && uploadSizeProblem(f, maxMb);
+    if (problem) return void toast.error(problem);
+    setFileRaw(f);
+  };
+  // a file handed over from the dropzone that this page never took must not stay behind
+  useEffect(() => clearPendingFile, []);
   const [mode, setMode] = useState<"url" | "upload">(() => (file ? "upload" : "url"));
   const [url, setUrl] = useState(() => search.get("url") ?? "");
   useEffect(() => {
     const f = takePendingFile();
     if (f) {
-      setFile(f);
+      setFileRaw(f);
       setMode("upload");
     }
     const u = search.get("url");
@@ -88,6 +99,7 @@ export function NewProjectPage() {
   const library = useBumperLibrary();
   const [bump, setBump] = useState<{ intro: string; outro: string; introSec?: number; outroSec?: number }>(() => ({ intro: search.get("intro") || "default", outro: search.get("outro") || "default" }));
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  useLeaveWarning(uploadPct !== null);
   const [previewAs, setPreviewAs] = useState<PreviewLayout>("face");
   const [safe, setSafe] = useState(true);
   const [more, setMore] = useState(false);
@@ -149,6 +161,8 @@ export function NewProjectPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (mode === "upload" && !file) return;
+    const tooBig = mode === "upload" && file ? uploadSizeProblem(file, maxMb) : null;
+    if (tooBig) return void toast.error(tooBig);
     create.mutate(
       { title: title || undefined, sourceUrl: mode === "url" ? url : undefined, ...(mode === "upload" && file ? { file } : {}), settings: { ...s, ...bumperSettings } },
       {
@@ -246,7 +260,14 @@ export function NewProjectPage() {
                     <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${status.data?.maxUploadMb ?? "—"} MB`}</span>
                     <input className="hidden" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   </label>
-                  {uploadPct !== null && <ProgressBar value={uploadPct} />}
+                  {uploadPct !== null && (
+                    <div className="flex items-center gap-3">
+                      <ProgressBar value={uploadPct} className="flex-1" />
+                      <button type="button" className="btn-quiet px-2 py-1 text-xs" onClick={() => uploadCtrl.current?.abort()}>
+                        Cancel upload
+                      </button>
+                    </div>
+                  )}
                   <video ref={hiddenVideo} src={objectUrl ?? undefined} muted playsInline preload="auto" className="hidden" />
                 </>
               )}

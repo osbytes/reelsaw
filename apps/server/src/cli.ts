@@ -1,4 +1,3 @@
-import { requestPrepare, requestRender, requestRenders } from "./pipeline/lifecycle.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -30,7 +29,30 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   update-project <projectId> [--title t] [--set key=value]… [--clear key]…
  *                                           rename a project or change its settings without re-running anything
  *                                           (same as projects.update and update_project); values are JSON or text
- *   purge   [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
+ *   source-text <projectId> <hide|keep|always>
+ *                                           hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text)
+ *   update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]
+ *                                           change the caption/hook style of the whole project, clearing per-clip overrides and re-rendering
+ *                                           (same as projects.updateStyle and update_project_style); values are JSON or text
+ *   create-project <url> [--user <email|id>] [--title t] [--set key=value]…
+ *                                           start a project from a link for an account (the given user, else the only account);
+ *                                           same as projects.create and create_project; takes the same settings as update-project
+ *   retry <projectId>                       resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project)
+ *   reanalyze <projectId> [--set key=value]…
+ *                                           pick clips again from the existing transcript, optionally with new selection settings; clips made or edited
+ *                                           by hand stay (same as projects.reanalyze and reanalyze_project)
+ *   refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]
+ *                                           re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project)
+ *   delete-project <projectId>              delete a project, restorable like a clip (same as projects.delete and delete_project)
+ *   export <projectId> [clipId…] --out <file.zip>
+ *                                           write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and
+ *                                           export_project (every picked clip must belong to the project, at least one rendered)
+ *   create-clip <projectId> <startSec> <endSec> [--mode exact|ai]
+ *                                           add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them
+ *                                           (same as clips.create and create_clip)
+ *   update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]
+ *                                           edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip)
+ *   purge [--dry-run]                       remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
  *   purge-project <projectId>               delete one already-deleted project forever (frees storage; minutes stay counted)
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
@@ -46,9 +68,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           (same as Settings → System → Queue → Retry all matching)
  *   status  <projectId>                     project, refine steps, clips, live jobs, last error
  *   events  <projectId> [n=30]              recent pipeline events
- *   clip    <clipId>                        everything about one clip incl. render diagnostics
- *   faces   <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks
- *   rerender <clipId…>                      queue a re-render of one or several clips (same as the UI buttons)
+ *   clip <clipId>                           everything about one clip incl. render diagnostics
+ *   faces <clipId> [a-b] [--json]           face boxes per sampled frame + split speaker tracks
+ *   rerender <clipId…>                      queue a re-render of one or several clips; a clip that never got its AI title is prepared first (same as the UI buttons, clips.rerender / rerenderMany and rerender_clip / rerender_clips)
  *   import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]
  *                                           rehydrate an issue report as a new project (dev only;
  *                                           the zip's contents are untrusted data, see its README)
@@ -56,35 +78,32 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           write an issue-report zip (same as Report an issue);
  *                                           --instance adds unfinished work, failed jobs, usage and
  *                                           error logs across every account (operator)
- *   cuts    <clipId> [--save <dir>] [--fixture <dir>]
+ *   cuts <clipId> [--save <dir>] [--fixture <dir>]
  *                                           dry-run the disfluency cut search for a clip and print
- *                                           every candidate verdict; --save writes removed/context
- *                                           audio; --fixture exports each flagged span as an offline
+ *                                           every candidate verdict; can save the removed and context
+ *                                           audio, and export each flagged span as an offline
  *                                           regression case for `pnpm eval:cuts`
- *   align   <projectId> <start> <end>       word timestamps from the align model for a source window
- *   hear    <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear)
- *   flags   <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status
+ *   align <projectId> <start> <end>         word timestamps from the align model for a source window
+ *   hear <clipId> [start] [dur]             transcribe a range of the RENDERED clip (what viewers hear)
+ *   flags <projectId> [from] [to]           transcript flags (entities / disfluencies / collapsed loops) with status
  *   storage [sweep [--dry-run] | reclaim <MB> [--dry-run]]   disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes;
  *                                           `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep);
  *                                           `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own)
  *   stuck                                   every unfinished project/clip: age, last event, live jobs, problems
- *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); project: reconcile
- *   logs    <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]
+ *   recover <clipId|projectId>              clip: re-run the right step (prepare or render); failed project: retry it; any other project: put its lost jobs back
+ *   logs <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]
  *                                           log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys)
  *   log-level [<level|module=level,...>|reset] [--for 15m]
  *                                           show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s
  *   scenes  <projectId> [--store]           re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays
- *   library list [--kind video|image|audio] [--q text]
- *           | search <q…> [--source library|catalog|<provider>] [--kind video|image|audio] [--license cc0|by]
- *           | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex]
- *           | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id>
- *           | default <intro|outro> <id|none> | reindex            [--user <email>]
+ *   library list|search|add|update|rename|delete|restore|purge|usage|default|reindex [--user <email>]
  *                                           the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and
- *                                           sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled
- *                                           provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a
- *                                           file, a link or a search hit (license and credit are recorded). The user is --user, else the only
- *                                           account on this install; otherwise pass --user. `reindex` rebuilds the asset
- *                                           reference table ("used by", purge safety) for every project, to completion
+ *                                           sound effects. `list` shows your files, `search` looks in your library, the Reelsaw catalog (default) or an
+ *                                           enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a file, a link
+ *                                           or a search hit (license and credit are recorded); `update` sets tags, `rename` the name, `default` the
+ *                                           intro or outro for new projects. Acts as the given user, else the only account on this install.
+ *                                           `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion
+
  *   catalog status|refresh                  the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now
  *   project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]
  *                                           a project's intro/outro: the library default, none or a specific item
@@ -106,12 +125,12 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
- *   usage   [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported
+ *   usage [--days 30]                       per account: projects, source minutes, clips, model calls / tokens / reported
  *                                           cost, minutes transcribed, stored bytes (same numbers as Users → Usage)
  *   limits  <email> [--watermark always|never|follow]
  *                                           an account's quotas: instance value, plan, override, in force, in use now;
  *                                           --watermark sets the per-user override (same as Users → Limits)
- *   abuse   [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts,
+ *   abuse [--run]                           accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
  *                                           hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its
@@ -127,7 +146,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  */
 import { projectBumperSummaries } from "./library/service.js";
 import { describeCoverage } from "./library/summary.js";
-import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, or, sql } from "drizzle-orm";
 import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
@@ -167,8 +186,10 @@ import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
 import { listDeleted } from "./deleted.js";
-import { deleteClip, deleteClips, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, restoreClip, restoreProject, updateProject } from "./projects/service.js";
-import { CLEARABLE_SETTINGS, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectSourceText, updateProject, updateProjectStyle } from "./projects/service.js";
+import { createClip, readClip, rerenderClip, rerenderClips, updateClip } from "./clips/service.js";
+import { createExportZip, exportPlan } from "./export.js";
+import { CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -187,6 +208,57 @@ function offsetsLabel(s: { offsetX?: number; offsetY?: number; offsetX2?: number
 /** "followed" / "fixed" for the top pane, with a "·" prefixed second pane when the segment has one. */
 function subjectLabel(s: { subject?: string; subject2?: string }) {
   return [s.subject, s.subject2 ? `·${s.subject2}` : ""].filter(Boolean).join(" ");
+}
+
+/** `--set key=value` (JSON, else text) and `--clear key` flags as a settings patch and the optional settings to reset. */
+function settingsFlags(usage: string): { settings: ProjectSettingsPatch; clear: ClearableSetting[] } {
+  const raw: Record<string, unknown> = {};
+  const clear: ClearableSetting[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--set") {
+      const kv = args[++i] ?? "";
+      const eq = kv.indexOf("=");
+      if (eq <= 0) throw new Error(`--set needs key=value\n${usage}`);
+      const text = kv.slice(eq + 1);
+      let v: unknown = text;
+      try {
+        v = JSON.parse(text);
+      } catch {
+        // plain text (focus, instructions, …)
+      }
+      raw[kv.slice(0, eq)] = v;
+    } else if (args[i] === "--clear") {
+      const name = args[++i];
+      const k = CLEARABLE_SETTINGS.find((c) => c === name);
+      if (!k) throw new Error(`--clear takes one of ${CLEARABLE_SETTINGS.join(", ")}`);
+      clear.push(k);
+    }
+  }
+  const parsed = projectSettingsPatchSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}\n${usage}`);
+  return { settings: parsed.data, clear };
+}
+
+/** A non-negative number of seconds from a command-line word. */
+function seconds(raw: string, what: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${what} must be a number of seconds, got "${raw}"`);
+  return n;
+}
+
+/** `--user <email|id>`, else the only account on this install (printed, so the operator knows whose project it is). */
+async function actingUser(svc: Services, who: string | undefined) {
+  const db = svc.database.db;
+  let user;
+  if (who) user = await db.query.user.findFirst({ where: or(eq(schema.user.id, who), eq(schema.user.email, who.toLowerCase())) });
+  else {
+    const all = await db.query.user.findMany({ limit: 2 });
+    if (all.length !== 1) throw new Error("this install has several accounts: pass --user <email|id>");
+    user = all[0];
+  }
+  if (!user) throw new Error(`no account with email or id ${who}`);
+  console.error(`acting as ${user.email}`);
+  return user;
 }
 
 /** `--format srt|vtt` (default srt). */
@@ -354,29 +426,111 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async "update-project"(svc) {
     const usage = "usage: reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…";
     if (!pos[0]) throw new Error(usage);
-    const settings: Record<string, unknown> = {};
-    const clear: ClearableSetting[] = [];
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === "--set") {
-        const kv = args[++i] ?? "";
-        const eq = kv.indexOf("=");
-        if (eq <= 0) throw new Error(`--set needs key=value\n${usage}`);
-        const raw = kv.slice(eq + 1);
-        let v: unknown = raw;
-        try {
-          v = JSON.parse(raw);
-        } catch {
-          // plain text (focus, instructions, …)
-        }
-        settings[kv.slice(0, eq)] = v;
-      } else if (args[i] === "--clear") {
-        const k = args[++i] as ClearableSetting;
-        if (!CLEARABLE_SETTINGS.includes(k)) throw new Error(`--clear takes one of ${CLEARABLE_SETTINGS.join(", ")}`);
-        clear.push(k);
-      }
-    }
-    const r = await updateProject(svc, null, pos[0], { title: flag("title"), settings: settings as ProjectSettingsPatch, clear });
+    const { settings, clear } = settingsFlags(usage);
+    const r = await updateProject(svc, null, pos[0], { title: flag("title"), settings, clear });
     console.log(r.changed.length ? `changed ${r.changed.join(", ")}${r.hint ? `. ${r.hint}` : ""}` : "nothing changed");
+  },
+  /** Hide or keep source text: `reelsaw source-text <projectId> <hide|keep|always>`. Same function as projects.setSourceText and the set_project_source_text tool. */
+  async "source-text"(svc) {
+    const mode = z.enum(["hide", "keep", "always"]).safeParse(pos[1]);
+    if (!pos[0] || !mode.success) throw new Error("usage: reelsaw source-text <projectId> <hide|keep|always>");
+    const r = await setProjectSourceText(svc, null, pos[0], mode.data);
+    console.log(`source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`);
+  },
+  /** Project-wide caption style: `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]`. Same function as projects.updateStyle and the update_project_style tool. */
+  async "update-style"(svc) {
+    const usage = "usage: reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]";
+    if (!pos[0]) throw new Error(usage);
+    const { settings } = settingsFlags(usage);
+    const style = styleOverrideSchema.safeParse(settings);
+    if (!style.success) throw new Error(`${style.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}\n${usage}`);
+    if (!Object.keys(style.data).length) throw new Error(usage);
+    const r = await updateProjectStyle(svc, null, pos[0], { style: style.data, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
+    console.log(`changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`);
+  },
+  /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
+  async "create-project"(svc) {
+    const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]…";
+    if (!pos[0]) throw new Error(usage);
+    const { settings } = settingsFlags(usage);
+    const input = createProjectInputSchema.safeParse({ sourceUrl: pos[0], title: flag("title"), settings: Object.keys(settings).length ? settings : undefined });
+    if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
+    const user = await actingUser(svc, flag("user"));
+    const p = await createProject(svc, user.id, input.data);
+    console.log(`created ${p.id} "${p.title}" for ${user.email}; reelsaw status ${p.id} follows it`);
+  },
+  /** Resume a project from where it stopped: `reelsaw retry <projectId>`. Same function as projects.retry and the retry_project tool. */
+  async retry(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw retry <projectId>");
+    const r = await retryOwnedProject(svc, null, pos[0]);
+    console.log(`resumed ${pos[0]} at ${r.queue}`);
+  },
+  /** Pick clips again: `reelsaw reanalyze <projectId> [--set key=value]…`. Same function as projects.reanalyze and the reanalyze_project tool. */
+  async reanalyze(svc) {
+    const usage = "usage: reelsaw reanalyze <projectId> [--set key=value]…";
+    if (!pos[0]) throw new Error(usage);
+    const { settings } = settingsFlags(usage);
+    const r = await reanalyzeProject(svc, null, pos[0], Object.keys(settings).length ? settings : undefined);
+    console.log(`picking clips again: kept ${r.kept} (made or edited by hand), replaced ${r.replaced}; the replaced ones can be restored ${r.restorable}`);
+  },
+  /** Re-run refine steps: `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]`. Same function as projects.refine and the refine_project tool. */
+  async refine(svc) {
+    const usage = "usage: reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]";
+    if (!pos[0]) throw new Error(usage);
+    const steps = (flag("steps") ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+      const step = REFINE_STEPS.find((x) => x === s);
+      if (!step) throw new Error(`--steps takes ${REFINE_STEPS.join(", ")}\n${usage}`);
+      return step;
+    });
+    const r = await refineProject(svc, null, pos[0], { steps: steps.length ? steps : undefined, vocabulary: flag("vocabulary") });
+    console.log(`refining ${pos[0]}: ${r.steps.join(", ")}; clips re-render afterwards`);
+  },
+  /** Soft-delete a project: `reelsaw delete-project <projectId>`. Same function as projects.delete and the delete_project tool. */
+  async "delete-project"(svc) {
+    if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId>");
+    const r = await deleteOwnedProject(svc, null, pos[0]);
+    console.log(r.changed ? r.message : `${pos[0]} was already deleted`);
+  },
+  /** The zip of rendered clips with platform metadata: `reelsaw export <projectId> [clipId…] --out file.zip`. Same preconditions as the Export button and the export_project tool. */
+  async export(svc) {
+    const usage = "usage: reelsaw export <projectId> [clipId…] --out <file.zip>";
+    const [projectId, ...clipIds] = pos;
+    const out = flag("out");
+    if (!projectId || !out) throw new Error(usage);
+    const plan = await exportPlan(svc, null, projectId, clipIds);
+    const { createWriteStream } = await import("node:fs");
+    const { pipeline } = await import("node:stream/promises");
+    const { stream } = await createExportZip({ storage: svc.storage, paths: svc.paths, log: svc.log }, { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset });
+    await pipeline(stream, createWriteStream(out));
+    console.log(`${out}: ${plan.rendered} clip(s)${plan.notRendered ? `; ${plan.notRendered} picked clip(s) are not rendered and were left out` : ""}`);
+  },
+  /** A new clip from a time range: `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact|ai]`. Same function as clips.create and the create_clip tool. */
+  async "create-clip"(svc) {
+    const usage = "usage: reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact|ai]";
+    const [projectId, start, end] = pos;
+    if (!projectId || start === undefined || end === undefined) throw new Error(usage);
+    const mode = flag("mode") ?? "exact";
+    if (mode !== "exact" && mode !== "ai") throw new Error(`--mode is exact or ai\n${usage}`);
+    const r = await createClip(svc, null, { projectId, startSec: seconds(start, "startSec"), endSec: seconds(end, "endSec"), mode });
+    console.log(`created clip ${r.clip.id} (${formatTime(r.clip.startSec)}-${formatTime(r.clip.endSec)}); it is ${r.queued === "prepare" ? "being prepared and renders afterwards" : "queued"}`);
+  },
+  /** Edit one clip: `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]`. Same function as clips.update and the update_clip tool. */
+  async "update-clip"(svc) {
+    const usage = "usage: reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]";
+    if (!pos[0]) throw new Error(usage);
+    const start = flag("start");
+    const end = flag("end");
+    const r = await updateClip(svc, null, {
+      id: pos[0],
+      title: flag("title"),
+      hook: flag("hook"),
+      caption: flag("caption"),
+      startSec: start === undefined ? undefined : seconds(start, "--start"),
+      endSec: end === undefined ? undefined : seconds(end, "--end"),
+      rerender: args.includes("--no-rerender") ? false : args.includes("--rerender") ? true : undefined,
+    });
+    if (!r.changed.length) return void console.log("nothing changed");
+    console.log(`changed ${r.changed.join(", ")}; ${!r.needsRerender ? "nothing burned into the video changed, no re-render needed" : r.rerendered ? "re-rendering" : "the video still shows the old version: reelsaw rerender " + pos[0]}`);
   },
   /** Remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now (the storage sweep does this hourly). */
   async purge(svc) {
@@ -665,13 +819,14 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!p) throw new Error("project not found");
     console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
+    if (p.stageDetail) console.log(`  parts: ${p.stageDetail.done} of ${p.stageDetail.total}${p.stageDetail.etaSec !== null ? `, about ${formatTime(p.stageDetail.etaSec)} left` : ""}`);
     if (p.error) console.log(`  error: ${p.error}`);
     if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
     const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
     console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.settings.get().EVENT_RETENTION_DAYS})`);
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
     if (t) console.log(`  transcript: lang=${t.language} flags=${t.flags.length} refine=${JSON.stringify(t.refine)}`);
-    const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: schema.clips.index });
+    const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: [schema.clips.index, schema.clips.createdAt, schema.clips.id] });
     console.log("\nclips");
     table(
       clips.map((c) => ({
@@ -826,15 +981,19 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(dest);
   },
 
+  /** The same two paths as the buttons: clips.rerenderMany for finished / failed clips, clips.rerender (prepare first) for one that was never prepared. */
   async rerender(svc) {
     const db = svc.database.db;
     if (!pos.length) throw new Error("usage: reelsaw rerender <clipId…>");
-    const rows = await db.query.clips.findMany({ where: inArray(schema.clips.id, pos), columns: { id: true, projectId: true, origin: true, status: true, reasoning: true, scores: true } });
-    if (rows.length !== new Set(pos).size) throw new Error("clip not found");
-    const bad = rows.find((c) => needsPrepare(c));
-    if (bad) throw new Error(`clip ${bad.id} was never prepared; use \`reelsaw recover\` instead`);
-    for (const projectId of new Set(rows.map((c) => c.projectId))) {
-      const r = await svc.tx((u) => requestRenders(svc, u, projectId, rows.filter((c) => c.projectId === projectId).map((c) => c.id)));
+    const rows = [];
+    for (const id of new Set(pos)) rows.push(await readClip(db, null, id));
+    const unprepared = rows.filter((c) => !c.deletedAt && needsPrepare(c));
+    for (const c of unprepared) {
+      const r = await rerenderClip(svc, null, c.id);
+      console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued ${r.step} (it renders afterwards)`);
+    }
+    for (const projectId of new Set(rows.filter((c) => !unprepared.includes(c)).map((c) => c.projectId))) {
+      const r = await rerenderClips(svc, null, { projectId, clipIds: rows.filter((c) => c.projectId === projectId && !unprepared.includes(c)).map((c) => c.id) });
       console.log(`${projectId}: queued ${r.rerendered} render(s)${r.skipped ? `, skipped ${r.skipped} (still rendering)` : ""}`);
     }
   },
@@ -974,20 +1133,22 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 
   async recover(svc) {
     const db = svc.database.db;
-    const id = pos[0]!;
-    const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id) });
+    const id = pos[0];
+    if (!id) throw new Error("usage: reelsaw recover <clipId|projectId>");
+    const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id), columns: { id: true } });
     if (c) {
-      if (needsPrepare(c)) {
-        await svc.tx((u) => requestPrepare(svc, u, c.projectId, c.id, { reason: "retry" }));
-        return console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`);
-      }
-      await svc.tx((u) => requestRender(svc, u, c.projectId, c.id));
-      return console.log(`queued render for clip ${c.id.slice(0, 8)}`);
+      const r = await rerenderClip(svc, null, c.id);
+      return console.log(r.step === "prepare" ? `clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)` : `queued render for clip ${c.id.slice(0, 8)}`);
     }
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!p) throw new Error("no clip or project with that id");
+    // a failed project is resumed the way the Retry button does it; anything else only needs its lost jobs put back
+    if (p.status === "failed" && !p.deletedAt) {
+      const r = await retryOwnedProject(svc, null, p.id);
+      return console.log(`project ${p.id.slice(0, 8)} failed: resumed at ${r.queue}`);
+    }
     const r = await reconcile(svc);
-    console.log(`reconciled: re-enqueued ${r.requeued} job(s). Failed projects need the UI "Retry" (or status ${p.status} is already terminal).`);
+    console.log(`reconciled: re-enqueued ${r.requeued} job(s) (project status ${p.status}${p.deletedAt ? ", deleted" : ""})`);
   },
 
   async logs(svc) {
@@ -1236,9 +1397,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
     const show = (t: { id: string; name: string; layerCount: number }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s))`);
     if (sub === "list") {
-      const r = await api.layerTemplates.list();
-      if (!r.templates.length) console.log("no layer templates");
-      else table(r.templates.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
+      const r = await api.layerTemplates.list({ limit: 500 });
+      if (!r.items.length) console.log("no layer templates");
+      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
+      if (r.nextCursor) console.log(`showing the newest ${r.items.length} of ${r.total}`);
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
         table(r.deleted.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, deleted: t.deletedAt })));
@@ -1450,7 +1612,7 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
   if (!user) throw new Error("user not found");
   console.error(`acting as ${user.email}`);
   const req = new Request(svc.config.APP_URL);
-  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
+  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", canAdminister: true, session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
 }
 
 async function userByEmail(svc: Services, email: string | undefined) {
@@ -1517,7 +1679,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

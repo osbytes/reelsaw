@@ -8,6 +8,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
 import { toast } from "sonner";
 import { useProjectEvents } from "../lib/projectEvents";
+import { LiveStatusPill } from "../components/LiveStatusPill";
 import { describeEvent, groupByRun, reasonLabel, type Tone } from "../lib/activity";
 import { summarizeError } from "../lib/errors";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
@@ -30,6 +31,7 @@ import { stageTimes, useNow } from "../lib/timing";
 import { formatTime, masksSourceText, type ProjectEvent } from "@reelsaw/shared";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
+import { describeStageDetail, type StageDetail } from "../lib/stage-detail";
 
 const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
@@ -38,6 +40,19 @@ const STAGE_REACHED: Record<string, number> = { ingest: 0, transcribe: 1, refine
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 const TONE_GLYPH: Record<Tone, string> = { ok: "●", run: "◔", warn: "◷", err: "▲" };
 const TONE_FG: Record<Tone, string> = { ok: "text-ok", run: "text-acc-text", warn: "text-warn", err: "text-err" };
+
+const LOG_CAP = 2000;
+const capLog = (l: ProjectEvent[]) => (l.length > LOG_CAP ? l.slice(l.length - LOG_CAP) : l);
+/** Adds events to an id-ordered log without duplicates; sorts once, and only when the new ones do not simply append. */
+function mergeEvents(log: ProjectEvent[], add: ProjectEvent[]): ProjectEvent[] {
+  const lastOld = log.at(-1)?.id ?? -Infinity;
+  let have: Set<number> | undefined;
+  const fresh = add.filter((e) => e.id > lastOld || !(have ??= new Set(log.map((x) => x.id))).has(e.id));
+  if (!fresh.length) return log;
+  const out = [...log, ...fresh];
+  const ordered = fresh.every((e, i) => e.id > (i ? fresh[i - 1]!.id : lastOld));
+  return ordered ? out : out.sort((a, b) => a.id - b.id);
+}
 
 function useWidth() {
   const [w, setW] = useState(window.innerWidth);
@@ -73,7 +88,7 @@ export function ProjectPage() {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
-  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string } | null>(null);
+  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string; detail?: StageDetail } | null>(null);
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
@@ -102,23 +117,36 @@ export function ProjectPage() {
   const [total, setTotal] = useState(0);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  useProjectEvents(id, {
+  const { status: stream } = useProjectEvents(id, {
     list: true,
-    onEvent: (evt, live) => {
-      setLog((l) => (l.some((e) => e.id === evt.id) ? l : [...l, evt].sort((a, b) => a.id - b.id)));
-      if (live) setTotal((n) => n + 1);
+    onEvent: (evt) => {
+      setLog((l) => capLog(mergeEvents(l, [evt])));
+      setTotal((n) => n + 1);
     },
     onProgress: (evt) => {
-      const p = evt.payload as { stage: string; progress: number; message?: string; clipId?: string };
-      setProgress({ stage: p.stage, value: p.progress, message: p.message });
+      const p = evt.payload as { stage: string; progress: number; message?: string; detail?: StageDetail; clipId?: string };
+      setProgress({ stage: p.stage, value: p.progress, message: p.message, detail: p.detail });
       if (p.clipId) setClipProgress((c) => ({ ...c, [p.clipId!]: p.progress }));
     },
-    onReplayed: (m, reconnect) => {
+    onReplayed: (events, m, reconnect) => {
       setReplayed(true);
       setTotal(m.total);
+      if (reconnect && m.hasMore) {
+        // the replay is only the newest events, so some between the drop and now are missing: start the log over
+        // from what the replay carries, offer the rest as "Load older" and re-read the project
+        setLog(capLog(mergeEvents([], events)));
+        setHasOlder(true);
+        void invalidate();
+        return;
+      }
+      setLog((l) => capLog(mergeEvents(l, events)));
       if (!reconnect) setHasOlder(m.hasMore);
     },
   });
+  // the in-memory log is capped (newest kept); the rest stays reachable through "Load older"
+  useEffect(() => {
+    if (log.length >= LOG_CAP) setHasOlder(true);
+  }, [log.length]);
   async function loadOlder() {
     const oldest = log[0]?.id;
     if (!oldest) return;
@@ -314,6 +342,8 @@ export function ProjectPage() {
       return null;
     }
   })();
+  // parts done of total with the time left, for a stage that saves its parts (live tick first, else the stored value)
+  const stageDetail = (progress && progress.stage === p.stage ? progress.detail : undefined) ?? p.stageDetail ?? null;
   const activityLoading = !replayed && activity.length === 0;
   const live = activity[0]?.d ?? (active ? { text: "Waiting for the worker…", tone: "run" as Tone } : { text: "No activity yet", tone: "ok" as Tone });
   const dur = p.durationSec ?? 0;
@@ -481,6 +511,11 @@ export function ProjectPage() {
             <span>Uploaded file</span>
           )}
           {activityTrigger}
+          {active && stageDetail && (
+            <span className="font-mono text-xs tabular-nums leading-5 text-ink3" title="Saved as each part finishes: Retry continues where it stopped">
+              {describeStageDetail(stageDetail)}
+            </span>
+          )}
           {eta && (
             <span
               className="inline-block min-w-[104px] font-mono text-xs tabular-nums leading-5 text-ink3"
@@ -587,7 +622,12 @@ export function ProjectPage() {
           ◷
         </span>
         <div className="min-w-0 flex-[1_1_280px] text-[13px]">
-          <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b> {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
+          {typeof (stalled.payload as { message?: unknown }).message === "string" ? (
+            <b>{String((stalled.payload as { message?: string }).message)}</b>
+          ) : (
+            <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b>
+          )}{" "}
+          {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
         </div>
         <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
           Keep waiting
@@ -648,7 +688,7 @@ export function ProjectPage() {
             {active ? (
               progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
             ) : p.sourceExpiredAt ? (
-              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space`}>
+              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space. Fetch it again, then re-render the clips you need.`}>
                 Source removed · fetch again
               </button>
             ) : p.status === "failed" ? (
@@ -843,6 +883,7 @@ export function ProjectPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <LiveStatusPill status={stream} />
       {header}
       {/* overlaid under the header: a banner arriving mid-session must not push the source and transcript down */}
       <div className="relative z-20 h-0 shrink-0">

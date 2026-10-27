@@ -1,12 +1,13 @@
 /**
  * Retention: delete stored sources / rendered clips older than SOURCE_RETENTION_DAYS /
  * CLIP_RETENTION_DAYS (0 = off). Rows stay, with a timestamp and an event, so the project still
- * reads as history and "Retry" / "Re-render" bring the files back. Runs from the reconciler.
+ * reads as history. Re-rendering a clip brings its file back; an expired source is fetched again by
+ * the project's Retry (clips cannot be re-rendered until then). Runs from the reconciler.
  */
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { schema } from "./db/index.js";
 import type { Services } from "./services.js";
-import { removeScratchSource } from "./storage/sweep.js";
+import { removeScratchClip, removeScratchSource } from "./storage/sweep.js";
 import { deadlineIn, keysetLoop } from "./lib/batch.js";
 
 export const RETENTION_BATCH = 200;
@@ -52,17 +53,17 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
   }
   if (config.CLIP_RETENTION_DAYS > 0) {
     const cutoff = new Date(Date.now() - config.CLIP_RETENTION_DAYS * 86_400_000);
-    await keysetLoop<{ id: string; projectId: string; outputKey: string; at: string }, Cur>({
+    await keysetLoop<{ id: string; projectId: string; outputKey: string; thumbnailKey: string | null; at: string }, Cur>({
       size: RETENTION_BATCH,
       deadline: deadlineIn(RETENTION_BUDGET_MS),
       start: null,
       fetch: async (cur, size) => {
         const res = await svc.database.db.execute(sql`
-          select id, project_id as "projectId", output_key as "outputKey", updated_at::text as at from clips
+          select id, project_id as "projectId", output_key as "outputKey", thumbnail_key as "thumbnailKey", updated_at::text as at from clips
           where output_key is not null and status = 'done' and deleted_at is null and updated_at < ${cutoff.toISOString()}::timestamptz
             ${cur ? sql`and (updated_at, id) > (${cur.at}::timestamptz, ${cur.id})` : sql``}
           order by updated_at, id limit ${size}`);
-        return res.rows as Array<{ id: string; projectId: string; outputKey: string; at: string }>;
+        return res.rows as Array<{ id: string; projectId: string; outputKey: string; thumbnailKey: string | null; at: string }>;
       },
       cursorOf: (r) => ({ at: r.at, id: r.id }),
       handle: async (rows) => {
@@ -71,9 +72,16 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
         for (const [projectId, list] of byProject) {
           await svc.tx(async (u) => {
             for (const c of list) {
-              const [cur] = await u.db.update(schema.clips).set({ outputKey: null, updatedAt: new Date() }).where(and(eq(schema.clips.id, c.id), eq(schema.clips.outputKey, c.outputKey))).returning({ id: schema.clips.id });
+              const [cur] = await u.db.update(schema.clips).set({ outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(and(eq(schema.clips.id, c.id), eq(schema.clips.outputKey, c.outputKey))).returning({ id: schema.clips.id });
               if (!cur) continue;
-              u.afterCommit(() => svc.storage.delete(c.outputKey).catch((err) => log.warn({ err, clipId: c.id }, "clip delete failed")));
+              // the store object and the scratch copy: the local store hardlinks them, so both must go to free disk
+              u.afterCommit(async () => {
+                for (const key of [c.outputKey, c.thumbnailKey]) {
+                  if (!key) continue;
+                  await svc.storage.delete(key).catch((err) => log.warn({ err, clipId: c.id }, "clip delete failed"));
+                  await removeScratchClip(svc, projectId, key);
+                }
+              });
               clips++;
             }
             await u.emit(projectId, "clips.expired", { clips: list.length, days: config.CLIP_RETENTION_DAYS });
@@ -84,4 +92,29 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
   }
   if (sources || clips) log.info({ sources, clips }, "retention sweep removed files");
   return { sources, clips };
+}
+
+/**
+ * Drop the checkpoints (job_steps) of projects that finished (done or failed) and have not changed for
+ * STEP_RETENTION_DAYS; 0 keeps them. A project that is working, or was touched recently (a Retry soon after a failure
+ * reuses its steps), keeps them. Runs from the hourly sweep, a few projects per statement within a time budget.
+ */
+export async function pruneJobSteps(svc: Services): Promise<number> {
+  const days = svc.settings.get().STEP_RETENTION_DAYS;
+  if (days <= 0) return 0;
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const deadline = deadlineIn(RETENTION_BUDGET_MS);
+  let deleted = 0;
+  for (;;) {
+    const res = await svc.database.pool.query(
+      `delete from job_steps where project_id in (
+         select p.id from projects p where p.status in ('done', 'failed') and p.updated_at < $1
+           and exists (select 1 from job_steps s where s.project_id = p.id) limit 200)`,
+      [cutoff],
+    );
+    deleted += res.rowCount ?? 0;
+    if (!res.rowCount || Date.now() >= deadline) break;
+  }
+  if (deleted) svc.log.child({ module: "retention" }).info({ rows: deleted, days }, "pruned old pipeline checkpoints");
+  return deleted;
 }

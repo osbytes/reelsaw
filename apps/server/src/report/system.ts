@@ -8,7 +8,6 @@
  * `include.instance` (admin only) widens queue failures, usage, errors and adds unfinished work
  * across every account, for problems that are not just the reporter's projects.
  */
-import path from "node:path";
 import fsp from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -20,6 +19,7 @@ import { needsPrepare } from "../pipeline/manual.js";
 import type { Services } from "../services.js";
 import { storageReport } from "../storage/usage.js";
 import { hashOwner } from "./redact.js";
+import { logFiles } from "../log-read.js";
 
 const run = promisify(execFile);
 const MAX_ERROR_LINES = 2000;
@@ -44,8 +44,10 @@ function hashJobData(data: Record<string, unknown> | null) {
   return { ...rest, ownerHash: hashOwner(userId) };
 }
 
-export async function systemInfo(svc: Services, instance: boolean) {
+/** `full` (admin-generated reports only) adds the configuration dump: machine, models, storage driver, roles. Others get versions only. */
+export async function systemInfo(svc: Services, instance: boolean, full: boolean) {
   const c = svc.config;
+  if (!full) return { app: { version: c.REELSAW_VERSION, commit: c.REELSAW_COMMIT, builtAt: c.REELSAW_BUILT_AT }, runtime: { node: process.version, platform: process.platform, arch: process.arch } };
   const accounts = instance
     ? await svc.database.db.execute(sql`
         select
@@ -129,14 +131,12 @@ export async function usageInfo(svc: Services, scope: { userId: string } | { ins
 export async function recentErrors(svc: Services, own: { projectIds: string[]; clipIds: string[]; instance?: boolean }, redact: (s: string) => string): Promise<string[]> {
   const file = svc.config.LOG_FILE;
   if (!file) return [];
-  const dir = path.dirname(file);
-  const base = path.basename(file).replace(/\.log$/, "");
   const since = Date.now() - ERROR_WINDOW_DAYS * 864e5;
   const mine = new Set([...own.projectIds, ...own.clipIds]);
   const out: string[] = [];
-  const files = (await fsp.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith(base)).sort();
+  const files = await logFiles(file);
   for (const f of files) {
-    const text = await fsp.readFile(path.join(dir, f), "utf8").catch(() => "");
+    const text = await fsp.readFile(f, "utf8").catch(() => "");
     for (const line of text.split("\n")) {
       if (!line.includes('"level":50') && !line.includes('"level":60')) continue;
       let d: Record<string, unknown>;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShortcut } from "../lib/shortcuts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -95,7 +95,11 @@ export function ReportDialog() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      urls.current.add(url);
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        urls.current.delete(url);
+      }, 10_000);
       if (caps.feedback) {
         const client = clientContext();
         void sendIssueFeedback({
@@ -116,6 +120,16 @@ export function ReportDialog() {
 
   // "!" opens the report from anywhere (ignored while typing)
   useShortcut(REPORT_SHORTCUT, () => openReportHere(), { useKey: true });
+
+  // object URLs of downloaded reports still waiting for their delayed revoke; unmounting releases them
+  const urls = useRef(new Set<string>());
+  useEffect(() => {
+    const held = urls.current;
+    return () => {
+      for (const u of held) URL.revokeObjectURL(u);
+      held.clear();
+    };
+  }, []);
 
   // reset per opening
   useEffect(() => {

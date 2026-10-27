@@ -10,15 +10,19 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
 import { QuotaError } from "./quota.js";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, inArray } from "drizzle-orm";
+import { defaultStyle, resolveFraming, resolveStyle } from "@reelsaw/shared";
+import { exportPlan } from "./export.js";
+import { readClip } from "./clips/service.js";
 import type { Services } from "./services.js";
-import type { AuthUser } from "./auth.js";
+import type { AuthUser, Requester } from "./auth.js";
 import { appRouter } from "./trpc/router.js";
 import type { Context } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { resolveRequestId, type AppEnv } from "./request-log.js";
 import { assetMap, clipBumpersCall, effectiveBumpers, projectBumpersCall } from "./library/service.js";
 import { assetVisibleTo } from "./library/visible.js";
+import type { TranscriptFlag } from "@reelsaw/shared";
 import { INSTRUCTIONS, TOOLS, argSummary, fail, text } from "./mcp-tools.js";
 
 import { listReleasesResult } from "./releases.js";
@@ -31,9 +35,15 @@ function mmss(s: number) {
   return `${m}:${String(Math.floor(s - m * 60)).padStart(2, "0")}`;
 }
 
-export function createMcpServer(svc: Services, user: AuthUser, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
+/** The follow-up for a settings change that re-renders: `skipped` clips were still preparing or rendering and finish with the old settings. */
+function rerenderHint(rerendered: number, skipped: number): string {
+  const base = rerendered ? `Re-rendering ${rerendered} clip(s); follow with wait_for_project.` : "No finished clips to re-render; the next render uses it.";
+  return skipped ? `${base} ${skipped} clip(s) were still preparing or rendering and finish with the old setting; call rerender_clips for them once they are done.`.trim() : base;
+}
+
+export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">, req: Request, requestId = resolveRequestId(req.headers.get("x-request-id"))): McpServer {
   const log = svc.log.child({ module: "mcp", userId: user.id, requestId });
-  const ctx: Context = { svc, who: { user, via: "apikey", session: null, blocked: null }, req, requestId, log };
+  const ctx: Context = { svc, who: { user, via: access.via, canAdminister: access.canAdminister, session: null, blocked: null }, req, requestId, log };
   const api = appRouter.createCaller(ctx);
   const db = svc.database.db;
   const abs = (p: string | null) => (p ? new URL(p, svc.config.APP_URL).toString() : null);
@@ -68,6 +78,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     status: p.status,
     stage: p.stage,
     stageProgress: p.stageProgress,
+    stageDetail: p.stageDetail,
     error: p.error,
     sourceUrl: p.sourceUrl,
     durationSec: p.durationSec,
@@ -90,6 +101,19 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     layout: c.layout,
     videoUrl: abs(c.videoUrl),
     thumbnailUrl: abs(c.thumbnailUrl),
+  });
+
+  const flagView = (f: TranscriptFlag) => ({
+    id: f.id,
+    kind: f.kind,
+    subkind: f.subkind ?? null,
+    status: f.status,
+    start: f.start,
+    end: f.end,
+    heard: f.heard,
+    suggested: f.suggested,
+    replacement: f.replacement ?? null,
+    confidence: f.confidence,
   });
 
   /** Names and lengths of the assets these ids name (own uploads, removed ones still in use, or instance-shared rows). */
@@ -136,11 +160,11 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool(
     "create_project",
     TOOLS.create_project,
-    ({ sourceUrl, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+    ({ sourceUrl, uploadId, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
       run(async () => {
         // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
         const merged = { ...settings, ...(introAssetId !== undefined ? { introAssetId } : {}), ...(outroAssetId !== undefined ? { outroAssetId } : {}), ...(introSec !== undefined ? { introSec } : {}), ...(outroSec !== undefined ? { outroSec } : {}) };
-        return { ...(await api.projects.create({ sourceUrl, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
+        return { ...(await api.projects.create({ sourceUrl, uploadId, title, settings: Object.keys(merged).length ? merged : undefined })), next: "wait_for_project" };
       }),
   );
 
@@ -166,6 +190,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
               status: p.status,
               stage: p.stage,
               stageProgress: p.stageProgress,
+              stageDetail: p.stageDetail,
               error: p.error,
               clips: p.clips.map((c) => ({ id: c.id, title: c.title, status: c.status })),
               ...(finished ? {} : { hint: "Still running. Call wait_for_project again." }),
@@ -242,9 +267,9 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     TOOLS.get_project_events,
     ({ id, limit }) =>
       run(async () => {
-        await api.projects.get({ id }); // ownership
-        const rows = await db.query.projectEvents.findMany({ where: eq(schema.projectEvents.projectId, id), orderBy: desc(schema.projectEvents.id), limit });
-        return rows.map((e) => ({ at: e.createdAt.toISOString(), type: e.type, ...e.payload }));
+        // the same read as the Activity panel (projects.eventsPage): no progress ticks, newest first here
+        const page = await api.projects.eventsPage({ id, limit });
+        return page.events.reverse().map((e) => ({ at: e.createdAt, type: e.type, ...e.payload }));
       }),
   );
 
@@ -253,49 +278,93 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     TOOLS.get_clip,
     ({ id }) =>
       run(async () => {
-        const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id), columns: { projectId: true } });
-        if (!c) throw new TRPCError({ code: "NOT_FOUND" });
-        const p = await api.projects.get({ id: c.projectId });
+        // owner-scoped lookup first: someone else's clip is "not found", exactly like a missing one
+        const found = await readClip(db, { id: user.id, admin: false }, id);
+        const p = await api.projects.get({ id: found.projectId });
         const clip = p.clips.find((x) => x.id === id);
         if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: `This clip was deleted or replaced by a re-analyze. restore_clip brings it back (possible ${restorableFor(svc)} after that).` });
-        return { ...clip, bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsByIds([p.settings.introAssetId, p.settings.outroAssetId, clip.bumpers?.intro, clip.bumpers?.outro])) }, videoUrl: abs(clip.videoUrl), thumbnailUrl: abs(clip.thumbnailUrl), editorUrl: abs(`/p/${p.id}/clips/${clip.id}`) };
+        const ownStyle = clip.style && Object.keys(clip.style).length ? clip.style : null;
+        const effectiveStyle = resolveStyle(p.settings, clip.style);
+        const projectStyle = resolveStyle(p.settings);
+        const framing = resolveFraming(clip, p.settings);
+        return {
+          ...clip,
+          bumpers: { own: clip.bumpers, effective: effectiveBumpers(p.settings, clip, await assetsByIds([p.settings.introAssetId, p.settings.outroAssetId, clip.bumpers?.intro, clip.bumpers?.outro])) },
+          // what the next render uses, and whether the clip, the project or the built-in default decides it
+          style: { own: ownStyle, effective: effectiveStyle, from: ownStyle ? "clip" : JSON.stringify(projectStyle) !== JSON.stringify(defaultStyle) ? "project" : "default" },
+          framing: { own: { layoutOverride: clip.layoutOverride, layoutSections: clip.layoutSections }, effective: { mode: framing.mode, adjust: framing.adjust ?? null, sections: framing.sections }, from: framing.from },
+          videoUrl: abs(clip.videoUrl),
+          thumbnailUrl: abs(clip.thumbnailUrl),
+          editorUrl: abs(`/p/${p.id}/clips/${clip.id}`),
+        };
       }),
   );
 
   server.registerTool(
     "update_clip",
     TOOLS.update_clip,
-    (input) => run(async () => clipSummary(await api.clips.update(input))),
+    (input) =>
+      run(async () => {
+        const { changed, needsRerender, rerendered, ...clip } = await api.clips.update(input);
+        const hint = !changed.length
+          ? "Nothing changed."
+          : !needsRerender
+            ? "Saved. Nothing burned into the video changed, so no re-render was needed."
+            : rerendered
+              ? "Saved. Re-rendering in the background (about a minute); poll get_clip until status is done."
+              : "Saved, but the video still shows the old version. rerender_clip applies it.";
+        return { ...clipSummary(clip), changed, needsRerender, rerendered, hint };
+      }),
   );
 
   server.registerTool(
     "create_clip",
     TOOLS.create_clip,
-    (input) => run(async () => clipSummary(await api.clips.create(input))),
+    (input) =>
+      run(async () => {
+        const { queued, ...clip } = await api.clips.create(input);
+        return { ...clipSummary(clip), queued, hint: "Created. It gets its title and renders in the background (about a minute); poll get_clip until status is done." };
+      }),
   );
 
   server.registerTool(
     "delete_clip",
     TOOLS.delete_clip,
-    ({ id }) => run(() => api.clips.delete({ id })),
+    ({ id }) =>
+      run(async () => {
+        const r = await api.clips.delete({ id });
+        return { ...r, renderQueued: false };
+      }),
   );
 
   server.registerTool(
     "delete_clips",
     TOOLS.delete_clips,
-    (input) => run(() => api.clips.deleteMany(input)),
+    (input) =>
+      run(async () => {
+        const r = await api.clips.deleteMany(input);
+        return { ...r, renderQueued: false };
+      }),
   );
 
   server.registerTool(
     "rerender_clip",
     TOOLS.rerender_clip,
-    ({ id }) => run(() => api.clips.rerender({ id })),
+    ({ id }) =>
+      run(async () => {
+        const r = await api.clips.rerender({ id });
+        return { ...r, hint: r.step === "prepare" ? "This clip never got its AI title, so it is prepared first and renders after. Poll get_clip." : "Queued. The new video replaces the old when done; poll get_clip." };
+      }),
   );
 
   server.registerTool(
     "rerender_clips",
     TOOLS.rerender_clips,
-    (input) => run(() => api.clips.rerenderMany(input)),
+    (input) =>
+      run(async () => {
+        const r = await api.clips.rerenderMany(input);
+        return { ...r, ...(r.skipped ? { hint: `${r.skipped} clip(s) were skipped because they are still rendering or were never prepared (rerender_clip handles those one at a time).` } : {}) };
+      }),
   );
 
   server.registerTool(
@@ -303,15 +372,10 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     TOOLS.export_project,
     ({ id, clipIds }) =>
       run(async () => {
-        const p = await api.projects.get({ id });
-        const done = p.clips.filter((c) => c.status === "done");
+        // the same preconditions as the zip route and `reelsaw export`
+        const plan = await exportPlan(svc, { id: user.id, admin: false }, id, clipIds ?? []);
         const ids = [...new Set(clipIds ?? [])];
-        const known = new Set(p.clips.map((c) => c.id));
-        const unknown = ids.filter((x) => !known.has(x));
-        if (unknown.length) throw new Error(`Not clips of this project: ${unknown.join(", ")}`);
-        const picked = ids.length ? done.filter((c) => ids.includes(c.id)) : done;
-        if (!picked.length) throw new Error("No rendered clips to export");
-        return { url: abs(`/api/projects/${p.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`), clips: picked.length, notRendered: ids.length ? ids.length - picked.length : 0 };
+        return { url: abs(`/api/projects/${plan.project.id}/export.zip${ids.length ? `?clips=${ids.join(",")}` : ""}`), clips: plan.rendered, notRendered: plan.notRendered };
       }),
   );
 
@@ -322,7 +386,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
       run(async () => {
         const caps = reportCapabilities(svc, user);
         if (!caps.zip) throw new TRPCError({ code: "FORBIDDEN", message: "Send feedback from the app instead of downloading a report on this instance." });
-        if (instance && !caps.instance) throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
+        if (instance && !(caps.instance && access.canAdminister)) throw new TRPCError({ code: "FORBIDDEN", message: "Instance-wide diagnostics are for admins." });
         if (projectId) await api.projects.get({ id: projectId });
         const q = new URLSearchParams({ description });
         if (instance) q.set("instance", "1");
@@ -362,7 +426,7 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("asset_usage", TOOLS.asset_usage, ({ assetId }) => run(() => api.library.usage({ id: assetId })));
 
   // ── layer templates ──────────────────────────────────────────────────────
-  server.registerTool("list_layer_templates", TOOLS.list_layer_templates, () => run(() => api.layerTemplates.list()));
+  server.registerTool("list_layer_templates", TOOLS.list_layer_templates, ({ cursor, limit }) => run(() => api.layerTemplates.list({ cursor, limit })));
   server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers }) => {
     if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers) or layers (the template's layers with timings)."));
     return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers! })));
@@ -373,9 +437,8 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
   server.registerTool("apply_layer_template", TOOLS.apply_layer_template, (input) => run(() => api.layerTemplates.applyToClips(input)));
   server.registerTool("apply_framing", TOOLS.apply_framing, ({ clipId, at, keepOverrides, rerender }) =>
     run(async () => {
-      // the project procedure checks ownership; the clip is only read for its framing
-      const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId), columns: { projectId: true, startSec: true, layoutSections: true, layoutOverride: true } });
-      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+      // owner-scoped read of the clip's framing; the project procedure then checks ownership again
+      const c = await readClip(db, { id: user.id, admin: false }, clipId);
       return api.projects.applyFraming({ id: c.projectId, ...framingOfClip(c, at), keepOverrides, rerender });
     }),
   );
@@ -506,12 +569,115 @@ export function createMcpServer(svc: Services, user: AuthUser, req: Request, req
     ({ templateId }) => run(() => api.layerTemplates.purge({ id: templateId })),
   );
 
+  server.registerTool(
+    "list_transcript_flags",
+    TOOLS.list_transcript_flags,
+    ({ id, status, limit }) =>
+      run(async () => {
+        const t = await api.transcripts.get({ projectId: id });
+        if (!t) return { total: 0, flags: [], hint: "No transcript yet." };
+        const rows = t.flags.filter((f) => !status || f.status === status);
+        return {
+          total: rows.length,
+          flags: rows.slice(0, limit).map(flagView),
+          ...(rows.length > limit ? { hint: `Showing the first ${limit} of ${rows.length}; pass status to narrow the list.` } : {}),
+        };
+      }),
+  );
+
+  server.registerTool(
+    "review_transcript_flags",
+    TOOLS.review_transcript_flags,
+    ({ id, decisions, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.review({ projectId: id, decisions: decisions.map((d) => ({ id: d.flagId, status: d.status, replacement: d.replacement })), rerender });
+        const t = await api.transcripts.get({ projectId: id });
+        const asked = new Set(decisions.map((d) => d.flagId));
+        // a rejected manual fix is deleted, so it is no longer among the live flags
+        const flags = (t?.flags ?? []).filter((f) => asked.has(f.id)).map(flagView);
+        const needsRerender = !rerender && done.changed > 0;
+        const hint = done.changed
+          ? `${done.changed} fix${done.changed === 1 ? "" : "es"} changed the transcript; ${rerender ? `${done.rerendered} clip${done.rerendered === 1 ? "" : "s"} re-rendering` : "re-render the clips with rerender_clips to show it in the captions"}.`
+          : "Nothing changed: those fixes already had that decision.";
+        return { changed: done.changed, rerendered: done.rerendered, needsRerender, flags, hint };
+      }),
+  );
+
+  server.registerTool(
+    "add_transcript_correction",
+    TOOLS.add_transcript_correction,
+    ({ id, startSec, endSec, text, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.addCorrection({ projectId: id, start: startSec, end: endSec, text, rerender });
+        return { ...done, hint: `Captions now say "${text}" for that span; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.` };
+      }),
+  );
+
+  server.registerTool(
+    "add_transcript_cut",
+    TOOLS.add_transcript_cut,
+    ({ id, startSec, endSec, rerender }) =>
+      run(async () => {
+        const done = await api.transcripts.addCut({ projectId: id, start: startSec, end: endSec, rerender });
+        return { ...done, hint: `Those words are cut from the transcript; ${rerender ? `${done.rerendered} clip(s) re-rendering` : "re-render the clips with rerender_clips to show it"}.` };
+      }),
+  );
+
+  server.registerTool(
+    "get_project_defaults",
+    TOOLS.get_project_defaults,
+    () =>
+      run(async () => {
+        const me = await api.me.get();
+        return { projectDefaults: me.projectDefaults };
+      }),
+  );
+
+  server.registerTool(
+    "set_project_defaults",
+    TOOLS.set_project_defaults,
+    ({ defaults }) =>
+      run(async () => ({ ...(await api.me.updateProjectDefaults(defaults)), hint: "New projects start with these settings; existing projects are unchanged." })),
+  );
+
+  server.registerTool(
+    "set_project_source_text",
+    TOOLS.set_project_source_text,
+    ({ id, sourceText }) =>
+      run(async () => {
+        const r = await api.projects.setSourceText({ id, sourceText });
+        return { changed: ["sourceText"], needsRerender: r.skipped > 0, rerendered: r.rerendered, skipped: r.skipped, hint: rerenderHint(r.rerendered, r.skipped) };
+      }),
+  );
+
+  server.registerTool(
+    "update_project_style",
+    TOOLS.update_project_style,
+    ({ id, style, keepOverrides, rerender }) =>
+      run(async () => {
+        const r = await api.projects.updateStyle({ id, style, keepOverrides, rerender });
+        return {
+          changed: Object.keys(style),
+          needsRerender: !rerender || r.skipped > 0,
+          rerendered: r.rerendered,
+          skipped: r.skipped,
+          hint: rerender ? rerenderHint(r.rerendered, r.skipped) : "Saved; call rerender_clips to apply it to finished clips.",
+        };
+      }),
+  );
+
+  server.registerTool(
+    "billing_portal_url",
+    TOOLS.billing_portal_url,
+    () => run(() => api.billing.portal()),
+  );
+
   return server;
 }
 
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
-export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser): Promise<Response> {
-  const server = createMcpServer(svc, user, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
+export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
+  const server = createMcpServer(svc, user, access, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return (await transport.handleRequest(c)) ?? c.text("Not found", 404);

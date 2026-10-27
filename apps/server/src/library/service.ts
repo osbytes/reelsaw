@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { assertPublicHttpUrl, isPrivateAddress, UnsafeUrlError } from "../lib/safe-url.js";
+import { bodyChunks, fetchPublic, isPrivateAddress, UnsafeUrlError } from "../lib/safe-url.js";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -25,6 +25,7 @@ import { keys } from "../storage/index.js";
 import { ASSET_MIME, BUMPER_MAX_BYTES, BUMPER_IMAGE_SEC, resolveClipBumpers, bumperKind, assetKind, assetMime, bumperProblem, ensureBumperThumb, sha256File } from "../pipeline/bumpers.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { takeTxLock, txLock } from "../locks.js";
+import { assertStorageRoom } from "../quota.js";
 import { assetVisibleTo } from "./visible.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { dropAssetStorage } from "../storage/sweep.js";
@@ -196,6 +197,12 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
     if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
     const storageKey = keys.asset(id, ext);
     const contentHash = await sha256File(local);
+    // the object goes in first (as in the upload route): a row must never point at a missing file, and a failed
+    // transaction or a duplicate leaves an unreferenced object that is removed below
+    await svc.storage.putFile(storageKey, local);
+    // the picker thumbnail (none for audio); if this fails the media route makes it on first request
+    const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
+    let stored = false;
     const row = await svc.tx(async (u) => {
       const keep = async (asset: typeof schema.assets.$inferSelect, restored: boolean) => {
         if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, asset.id);
@@ -234,25 +241,20 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
           height: probe.height ?? 0,
           hasAudio: kind === "audio" || (kind === "video" && probe.hasAudio),
           sourceKey: storageKey,
+          thumbnailKey: thumbKey,
           sizeBytes: up.sizeBytes,
           contentHash,
         })
         .returning();
       if (input.setDefault) await setBumperDefault(u.db, actorId, input.setDefault, id);
-      // the file is copied only once the row exists; a render that beats the copy skips the bumper (never fails)
-      u.afterCommit(async () => {
-        try {
-          await svc.storage.putFile(storageKey, local);
-          // the picker thumbnail (none for audio); if this fails the media route makes it on first request
-          const thumbKey = kind === "audio" ? null : await ensureBumperThumb({ ffmpeg: (a) => svc.media.ffmpeg(a), storage: svc.storage, dir: svc.paths.tmp }, { id, kind, durationSec: probe.durationSec, sourceKey: storageKey, mime: assetMime(ext) }, local).catch(() => null);
-          if (thumbKey) await svc.database.db.update(schema.assets).set({ thumbnailKey: thumbKey }).where(eq(schema.assets.id, id)).catch(() => {});
-        } finally {
-          await fs.rm(local, { force: true }).catch(() => {});
-        }
+      u.afterCommit(() => {
+        stored = true; // set by the commit itself: a retried attempt of this unit never leaves it true
       });
       return { asset: asset!, duplicate: false as const, restored: false };
+    }).finally(async () => {
+      if (!stored) await dropAssetStorage(svc, storageKey).catch((err) => svc.log.warn({ err, assetId: id }, "could not remove the unreferenced library object"));
     });
-    if (row.duplicate) await fs.rm(local, { force: true }).catch(() => {}); // nothing was stored, so no afterCommit cleans it
+    await fs.rm(local, { force: true }).catch(() => {});
     const a = row.asset;
     return { id: a.id, name: a.name, kind: a.kind, mime: a.mime, durationSec: a.durationSec, width: a.width, height: a.height, hasAudio: a.hasAudio, duplicate: row.duplicate, restored: row.restored };
   } catch (err) {
@@ -281,13 +283,19 @@ export interface FetchDeps {
   lookup?: (host: string) => Promise<string[]>;
 }
 
-/** http(s) only, and never an address on a private network (the server must not become a proxy into its own). */
-async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["lookup"]>): Promise<URL> {
+
+/**
+ * The uploads row for an object already in storage, inserted only when the account has room (MAX_STORAGE_MB, checked under
+ * its quota lock in the same transaction). Without room the object is removed again and the storage refusal is thrown.
+ */
+export async function insertUploadWithinQuota(svc: Services, row: typeof schema.uploads.$inferInsert): Promise<void> {
   try {
-    return await assertPublicHttpUrl(raw, { lookup: async (h) => (await lookup(h)).map((address) => ({ address })) });
+    await svc.tx(async (u) => {
+      await assertStorageRoom(svc, u, row.userId, row.sizeBytes);
+      await u.db.insert(schema.uploads).values(row);
+    });
   } catch (err) {
-    // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
-    if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message)) throw new Error("That address is not reachable from the server (private or unresolvable)");
+    await svc.storage.delete(row.storageKey).catch((e) => svc.log.warn({ err: e, storageKey: row.storageKey }, "could not remove an upload object that was refused"));
     throw err;
   }
 }
@@ -297,20 +305,20 @@ async function assertPublicUrl(raw: string, lookup: NonNullable<FetchDeps["looku
  * `bumpers.create` takes it from there with its own type, size and ffprobe checks. Max 50 MB, 60 s, 3 redirects.
  */
 export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string; ext?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
-  const doFetch = deps.fetch ?? fetch;
   const lookup = deps.lookup ?? (async (h: string) => (await dnsLookup(h, { all: true })).map((a) => a.address));
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  let target = await assertPublicUrl(url, lookup);
-  let res: Response;
-  for (let hop = 0; ; hop++) {
-    res = await doFetch(target, { redirect: "manual", signal });
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-      if (hop >= MAX_REDIRECTS) throw new Error("Too many redirects");
-      target = await assertPublicUrl(new URL(res.headers.get("location")!, target).toString(), lookup);
-      continue;
-    }
-    break;
-  }
+  // resolved once, checked, and connected to at that address, hop by hop (lib/safe-url.ts): a name cannot rebind to a private address in between
+  const fetched = await fetchPublic(url, {
+    lookup: async (h) => (await lookup(h)).map((address) => ({ address })),
+    maxRedirects: MAX_REDIRECTS,
+    signal,
+    fetch: deps.fetch ? (u, init) => deps.fetch!(u, init) : undefined,
+  }).catch((err) => {
+    // the shared message points at ALLOW_PRIVATE_SOURCE_URLS, which governs project sources, not the library
+    if (err instanceof UnsafeUrlError && !/http|username|valid link/.test(err.message)) throw new Error("That address is not reachable from the server (private or unresolvable)");
+    throw err;
+  });
+  const { res, url: target } = fetched;
   if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status})`);
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (declared > FETCH_MAX_BYTES) throw new Error(`The file is ${Math.ceil(declared / 1024 / 1024)} MB; the limit is ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
@@ -325,7 +333,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
   try {
     await fs.mkdir(svc.paths.uploads, { recursive: true });
     let seen = 0;
-    const capped = Readable.fromWeb(res.body as never).map((chunk: Buffer) => {
+    const capped = Readable.from(bodyChunks(res)).map((chunk: Buffer) => {
       seen += chunk.length;
       if (seen > FETCH_MAX_BYTES) throw new Error(`The file is larger than ${FETCH_MAX_BYTES / 1024 / 1024} MB`);
       return chunk;
@@ -338,7 +346,7 @@ export async function downloadAsUpload(svc: Services, userId: string, url: strin
     const filename = (base && path.extname(base).toLowerCase() === ext ? base : `${base || "bumper"}${ext}`).slice(0, 200);
     const storageKey = keys.upload(id, ext);
     await svc.storage.putFile(storageKey, dest);
-    await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: size });
+    await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: size });
     svc.log.child({ module: "bumpers", userId }).info({ uploadId: id, host: target.host, bytes: size }, "bumper downloaded from a link");
     return { uploadId: id, filename, sizeBytes: size };
   } finally {
@@ -358,7 +366,7 @@ export async function uploadLocalFile(svc: Services, userId: string, file: strin
   const filename = path.basename(file).slice(0, 200);
   const storageKey = keys.upload(id, ext);
   await svc.storage.putFile(storageKey, file);
-  await svc.database.db.insert(schema.uploads).values({ id, userId, filename, storageKey, sizeBytes: st.size });
+  await insertUploadWithinQuota(svc, { id, userId, filename, storageKey, sizeBytes: st.size });
   return { uploadId: id, filename, sizeBytes: st.size };
 }
 
@@ -403,9 +411,9 @@ export const assetMap = (list: AssetRef[]) => new Map(list.map((a) => [a.id, a])
 type Api = ReturnType<typeof appRouter.createCaller>;
 
 /** The library as an agent or operator wants to read it: `bumpers.list` plus which asset is the user's default intro and outro. */
-export async function libraryView(svc: Services, api: Api, userId: string, abs: (p: string) => string = (p) => p) {
-  const [lib, defaults] = await Promise.all([api.library.list(), userDefaults(svc.database.db, userId)]);
-  const row = (a: (typeof lib.assets)[number]) => ({
+export async function libraryView(svc: Services, api: Api, userId: string, abs: (p: string) => string = (p) => p, page: { limit?: number; cursor?: string } = {}) {
+  const [lib, defaults] = await Promise.all([api.library.list({ limit: page.limit ?? 500, cursor: page.cursor }), userDefaults(svc.database.db, userId)]);
+  const row = (a: (typeof lib.items)[number]) => ({
     id: a.id,
     name: a.name,
     kind: a.kind,
@@ -426,7 +434,7 @@ export async function libraryView(svc: Services, api: Api, userId: string, abs: 
     /** the file itself (play the music, view the image or video); same auth as this server */
     url: abs(`/media/assets/${a.id}`),
   });
-  return { assets: lib.assets.map(row), deleted: lib.deleted.map(row) };
+  return { assets: lib.items.map(row), nextCursor: lib.nextCursor, total: lib.total, deleted: lib.deleted.map(row) };
 }
 
 // ---------- project coverage summaries (Projects list, projects.get, reelsaw status) ----------

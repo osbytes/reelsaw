@@ -49,6 +49,8 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
       return { text: done, tone: "ok" };
     }
     case "stage.failed":
+      // a refine step that gave up: optional work, the project went on without it
+      if (p.final === true && typeof p.step === "string") return { text: `${STAGE[String(p.stage)] ?? p.stage} step "${p.step}" gave up, continuing without it: ${errText(p.error)}`, tone: "warn" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };
     case "project.failed":
       return { text: `Stopped: ${errText(p.error)}`, tone: "err" };
@@ -86,7 +88,7 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     case "transcript.imported":
       return { text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`, tone: "ok" };
     case "job.stalled":
-      return { text: `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
+      return { text: typeof p.message === "string" ? `${p.message} ${p.hint ?? ""}`.trim() : `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
     default:
       return null;
   }

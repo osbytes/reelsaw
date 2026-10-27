@@ -28,12 +28,13 @@ const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
 
 /** One `library.list` row: kind, facts, usage, plus category, tags, provenance and whether it is a catalog item. */
-export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["assets"][number];
+export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["items"][number];
 
 /** The user's library (live assets and recently deleted ones). */
 export function useBumperLibrary() {
   const trpc = useTRPC();
-  return useQuery(trpc.library.list.queryOptions());
+  // the newest 500 uploads (the server pages; `total` says how many there are in all)
+  return useQuery(trpc.library.list.queryOptions({ limit: 500 }, { select: (d) => ({ assets: d.items, deleted: d.deleted, total: d.total, nextCursor: d.nextCursor }) }));
 }
 
 export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);

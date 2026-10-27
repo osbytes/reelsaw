@@ -10,6 +10,7 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { BASE, db, signUp } from "./helpers.js";
 
 const MOCK = process.env.STRIPE_MOCK_URL;
@@ -57,10 +58,16 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
   });
 
   it("the first video is free up to 60 minutes; the next ones count against the 20-minute month", async () => {
-    const mk = (title: string, sec: number) => pool.query(
-      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values (gen_random_uuid()::text, $1, $2, 'url', 'https://example.com/v.mp4', $3, 'done', '{}', now(), now())`,
-      [user.userId, title, sec],
-    );
+    // minutes come from source_usage (the ledger a purged project keeps), so each video is a project row and a usage row
+    let n = 0;
+    const mk = async (title: string, sec: number) => {
+      const id = randomUUID();
+      await pool.query(
+        `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, created_at, updated_at) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', $4, 'done', '{}', now(), now())`,
+        [id, user.userId, title, sec],
+      );
+      await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() + ($4 || ' seconds')::interval)`, [user.userId, id, sec, String(n++)]);
+    };
     await mk("First, 45 min", 45 * 60);
     let s = await state();
     assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0, "the first video does not count");
@@ -72,6 +79,23 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.equal(refused.error?.data.code, "TOO_MANY_REQUESTS");
     assert.match(refused.error!.message, /Monthly limit of 20 minutes of video reached \(25 used\); resets on .*Starter gives 100 minutes a month: http/);
     await pool.query(`delete from projects where user_id = $1`, [user.userId]);
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
+  });
+
+  // stack only: source_usage rows with no length (still downloading, or failed before the probe) never take the free first video
+  it("the first-video allowance goes to the earliest video whose length is known", async () => {
+    const mk = (title: string, sec: number | null, ageMin: number) => {
+      const id = `fv-${title}-${Date.now()}`;
+      return pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, $3, now() - ($4 || ' minutes')::interval)`, [user.userId, id, sec, String(ageMin)]);
+    };
+    await mk("pending", null, 30);
+    let s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 0);
+    await mk("first", 45 * 60, 20);
+    await mk("second", 15 * 60, 10);
+    s = await state();
+    assert.equal(s.usage.MAX_SOURCE_MINUTES_PER_MONTH, 15, "the 45-minute video is the free one, not the earlier row without a length");
+    await pool.query(`delete from source_usage where user_id = $1`, [user.userId]);
   });
 
   it("checkout returns the mock's page; completing it delivers events in reverse and twice, and the plan lands", async () => {
@@ -111,6 +135,16 @@ describe("billing (stack + stripe mock)", { skip: !MOCK && "STRIPE_MOCK_URL not 
     assert.match((r.data as { url: string }).url, /flow=subscription_update_confirm/);
     const same = await trpc(user.cookie, "billing.checkout", { plan: "creator", interval: "month" });
     assert.match(same.error?.message ?? "", /already on Creator/);
+  });
+
+  // stack + Stripe mock only: a lagging cache row must not lead to a second subscription
+  it("a stale cache row does not start a second Checkout: the existing subscription is resynced and the Portal offered", async () => {
+    await pool.query(`delete from billing_subscriptions where user_id = $1`, [user.userId]);
+    const r = await trpc(user.cookie, "billing.checkout", { plan: "pro", interval: "month" });
+    assert.equal(r.error, undefined, r.error?.message);
+    assert.equal((r.data as { kind: string }).kind, "portal");
+    const s = await until(state, (x) => x.subscription !== null);
+    assert.ok(s.subscription, "the row is back, rewritten from Stripe");
   });
 
   it("a plan change at Stripe reaches the row and writes billing.changed", async () => {

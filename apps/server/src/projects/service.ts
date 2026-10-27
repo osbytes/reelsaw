@@ -3,14 +3,17 @@
  * `deleted_at` set: every read path leaves it out, its jobs are cancelled, and restore clears the mark. After
  * DELETED_RETENTION_DAYS the hourly purge (`purgeDeleted`, run with the storage sweep) removes the rows and only
  * then the files. Storage still counts until remove-for-good (`purgeOwnedProject`). tRPC (`projects.delete` /
- * `restore` / `purge` / `reanalyze` / `update`, `clips.delete` / `restore` / `purge`), the MCP tools and the CLI all call these
- * functions.
+ * `restore` / `purge` / `reanalyze` / `update` / `create` / `retry` / `refine` / `setSourceText` / `setBumpers` / `updateStyle`,
+ * `clips.delete` / `restore` / `purge`), the MCP tools and the CLI all call these functions. Clip edits (`clips.update`,
+ * `create`, `rerender`, `setBumpersMany`) are in `clips/service.ts`.
  */
 import fs from "node:fs/promises";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { REFINE_STEPS, adjustOf, formatBytes, projectSettingsSchema, styleSchema, type ClearableSetting, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
-import { checkRestoreQuota, projectStoredBytes } from "../quota.js";
+import { REFINE_STEPS, adjustOf, bumperSecondsSchema, formatBytes, projectSettingsSchema, styleOverrideSchema, styleSchema, type ClearableSetting, type CreateProjectInput, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
+import { checkProjectQuota, checkRestoreQuota, projectStoredBytes, recordProjectCreated } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -20,9 +23,13 @@ import { keys } from "../storage/index.js";
 import { releaseUpload } from "../storage/uploads.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import { keepReason, listClips } from "../pipeline/analyze.js";
-import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, startRun, supersedeStages } from "../pipeline/lifecycle.js";
+import { finalizeProjectIfDone, lockProjectClips, requestPrepare, requestRender, stageSeqOf, startRun, supersedeStages } from "../pipeline/lifecycle.js";
 import { needsPrepare } from "../pipeline/manual.js";
-import { enqueueRefine } from "../pipeline/refine.js";
+import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
+import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
+import { syncProjectRefs } from "../library/refs.js";
+import { assetVisibleTo } from "../library/visible.js";
+import { peekUrlMeta } from "./peek.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
@@ -39,13 +46,28 @@ const days = (svc: Services) => svc.settings.get().DELETED_RETENTION_DAYS;
 export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc)} day${days(svc) === 1 ? "" : "s"}` : "until it is purged");
 
 /**
+ * Where a retry resumes, from what the project already has. Live clips mean render, except when the project failed in
+ * analyze and none of them is an AI pick: only clips the user made or kept survived a failed re-analyze, so picking
+ * moments still has to run. A source that retention removed is fetched again first, whatever else exists.
+ */
+export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; transcript: boolean; refineDone: boolean; stage: string | null; sourceKey: string | null; sourceExpired?: boolean }): QueueName {
+  if (s.sourceExpired) return QUEUES.ingest;
+  const picked = s.clips.some((c) => c.origin === "ai");
+  if (s.clips.length && !(s.stage === "analyze" && !picked)) return QUEUES.render;
+  if (s.transcript && s.refineDone) return QUEUES.analyze;
+  if (s.transcript) return QUEUES.refineEntities;
+  if (s.sourceKey) return QUEUES.transcribe;
+  return QUEUES.ingest;
+}
+
+/**
  * Resume a project from the furthest completed stage (each stage skips work that already exists).
  * Same path as the owner's Retry button; admin bulk retry and MCP retry_project call this too.
  * Lock order is transcript → clip → project. Returns null when the project is gone or deleted.
  */
 export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
   const [p] = await u.db
-    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey })
+    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, sourceExpiredAt: schema.projects.sourceExpiredAt, stage: schema.projects.stage, status: schema.projects.status })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) return null;
@@ -55,13 +77,12 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     .where(eq(schema.transcripts.projectId, p.id))
     .for("update");
   await lockProjectClips(u, p.id);
+  // deleted while we waited for the locks (deleting locks the clips first, so it is settled now): resume nothing
+  const [live] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.deletedAt))).for("no key update");
+  if (!live) return null;
   const clips = await listClips(u.db, p.id);
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
-  let queue: QueueName = QUEUES.ingest;
-  if (clips.length) queue = QUEUES.render;
-  else if (transcript && refineDone) queue = QUEUES.analyze;
-  else if (transcript) queue = QUEUES.refineEntities;
-  else if (p.sourceKey) queue = QUEUES.transcribe;
+  const queue = retryQueueFor({ clips, transcript: !!transcript, refineDone, stage: p.stage, sourceKey: p.sourceKey, sourceExpired: !!p.sourceExpiredAt });
 
   if (queue === QUEUES.render) {
     await startRun(u, p.id, { reason: "retry", status: "rendering", stage: "render", continueActive: true });
@@ -77,7 +98,7 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     await supersedeStages(u, p.id);
     await startRun(u, p.id, { reason: "retry", status: "refining", stage: "refine", continueActive: true });
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
-    await enqueueRefine(svc, p.id, undefined, u);
+    await enqueueRefine(svc, p.id, await stageSeqOf(u.db, p.id), undefined, u);
   } else {
     for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, p.id);
     await supersedeStages(u, p.id); // a cancelled job that is still running must not commit, or fail this retry
@@ -238,6 +259,8 @@ export async function deleteClip(svc: Services, actor: Actor, clipId: string) {
       ok: true,
       changed,
       clipId,
+      /** a render or preparation that was in flight was stopped */
+      stoppedRender: changed && c.status !== "done" && c.status !== "failed",
       restorable: restorableFor(svc),
       storedBytes: stored,
       message: `Deleted. restore_clip brings it back ${restorableFor(svc)}.`,
@@ -259,15 +282,17 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
     if (rows.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "A selected clip is not on this project" });
     let deleted = 0;
     let skipped = 0;
+    let stoppedRenders = 0;
     let storedBytes = 0;
     for (const c of rows) {
       if (await markClipDeleted(svc, u, c)) {
         deleted++;
         storedBytes += clipStored(c);
+        if (c.status !== "done" && c.status !== "failed") stoppedRenders++;
       } else skipped++;
     }
     if (deleted) await finalizeProjectIfDone(svc, u, projectId);
-    return { ok: true as const, deleted, skipped, restorable: restorableFor(svc), storedBytes };
+    return { ok: true as const, deleted, skipped, stoppedRenders, restorable: restorableFor(svc), storedBytes };
   });
 }
 
@@ -304,7 +329,7 @@ export async function deletedClips(db: Db, projectId: string) {
     .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, startSec: schema.clips.startSec, endSec: schema.clips.endSec, status: schema.clips.status, deletedAt: schema.clips.deletedAt })
     .from(schema.clips)
     .where(and(eq(schema.clips.projectId, projectId), isNotNull(schema.clips.deletedAt)))
-    .orderBy(sql`${schema.clips.deletedAt} desc`, schema.clips.index)
+    .orderBy(sql`${schema.clips.deletedAt} desc`, schema.clips.index, schema.clips.createdAt, schema.clips.id)
     .limit(200);
 }
 
@@ -320,7 +345,11 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const transcript = await u.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, p.id), columns: { projectId: true } });
     if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
-    const settings = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
+    // validate the merged result, but write only the keys given (atomic jsonb merge), so a settings change made
+    // meanwhile by another request is not overwritten with this read of the whole object
+    const merged = projectSettingsSchema.parse({ ...p.settings, ...(patch ?? {}) });
+    const write = Object.fromEntries(Object.keys(patch ?? {}).map((k) => [k, merged[k as keyof ProjectSettings]]));
+    const settings = sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`;
     await lockProjectClips(u, p.id);
     // before listing: an analyze committing its picks right now finishes first and they are replaced below, and one
     // still working (or this re-analyze clicked twice) is superseded and inserts nothing
@@ -346,6 +375,17 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
     u.afterCommit(() => svc.log.child({ module: "analyze", projectId: p.id }).info({ kept: kept.length, replaced: replaced.length }, "re-analyze keeps the clips the user made or edited"));
     return { ok: true, kept: kept.length, replaced: replaced.length, restorable: restorableFor(svc) };
   });
+}
+
+/**
+ * The jsonb expression that merges `write` into the settings column (atomic: only these keys change). A change to any
+ * style key also drops the legacy `captionPosition`, which `resolveStyle` would otherwise let override the new
+ * `captionY`. The one place that rule lives: `updateProject` and `updateProjectStyle` both write through it.
+ */
+function settingsWrite(base: SQL, write: Record<string, unknown>): SQL {
+  const touchesStyle = Object.keys(write).some((k) => k in styleSchema.shape);
+  const without = touchesStyle ? sql`(${base}) - 'captionPosition'` : base;
+  return sql`(${without}) || ${JSON.stringify(write)}::jsonb`;
 }
 
 /** Settings that only change which clips are picked: they apply on the next re-analyze. */
@@ -392,12 +432,10 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
     if (changed.length) {
       let expr = sql`${schema.projects.settings}`;
       for (const k of clear) expr = sql`(${expr}) - ${k}::text`;
-      // a style change replaces the legacy captionPosition, as projects.updateStyle does
-      if (Object.keys(patch).some((k) => k in styleSchema.shape)) expr = sql`(${expr}) - 'captionPosition'`;
       const write = Object.fromEntries(Object.keys(patch).map((k) => [k, merged[k as keyof ProjectSettings]]));
       await u.db
         .update(schema.projects)
-        .set({ ...(titleChanged ? { title } : {}), settings: sql`(${expr}) || ${JSON.stringify(write)}::jsonb`, updatedAt: new Date() })
+        .set({ ...(titleChanged ? { title } : {}), settings: settingsWrite(expr, write), updatedAt: new Date() })
         .where(eq(schema.projects.id, p.id));
       await u.emit(p.id, "project.updated", { changed });
     }
@@ -466,14 +504,20 @@ export async function applyProjectFraming(svc: Services, actor: Actor, projectId
  * The project as `actor` may see it. `deleted: false` = only a live project; `true` = live or deleted (restore).
  * NOT_FOUND for someone else's project unless the actor is an admin or the operator.
  */
-async function findProject(db: Db, actor: Actor, projectId: string, o: { deleted: boolean }) {
-  const p = await db.query.projects.findFirst({
-    where: and(eq(schema.projects.id, projectId), actor && !actor.admin ? eq(schema.projects.userId, actor.id) : undefined, o.deleted ? undefined : isNull(schema.projects.deletedAt)),
-  });
-  if (!p) throw new TRPCError({ code: "NOT_FOUND", message: o.deleted ? "No such project. A deleted project is gone for good once its restore window has passed." : "No such project" });
-  return p;
+export async function findProject(db: Db, actor: Actor, projectId: string, o: { deleted: boolean }) {
+  const mine = actor && !actor.admin ? eq(schema.projects.userId, actor.id) : undefined;
+  const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), mine, o.deleted ? undefined : isNull(schema.projects.deletedAt)) });
+  if (p) return p;
+  if (o.deleted) throw new TRPCError({ code: "NOT_FOUND", message: `${NO_PROJECT} A deleted project is gone for good once its restore window has passed.` });
+  // only on the failure path: tell "deleted" from "never yours / never existed"
+  const inDeleted = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), mine, isNotNull(schema.projects.deletedAt)), columns: { id: true } });
+  throw new TRPCError({ code: "NOT_FOUND", message: inDeleted ? "That project is deleted; restore_project (or Deleted in the app) brings it back." : NO_PROJECT });
 }
-const gone = (svc: Services, what: string) => `No such ${what}. Deleted items can be restored ${restorableFor(svc)}; after that they are gone for good.`;
+/** The sentence for a project id that is not the caller's or never existed. */
+export const NO_PROJECT = "No project with that id in your account.";
+/** The same for a clip; deleted clips are listed under Deleted. */
+export const NO_CLIP = "No clip with that id in your account (deleted clips are under Deleted; restore_clip brings one back).";
+export const gone = (svc: Services, what: string) => `No such ${what}. Deleted items can be restored ${restorableFor(svc)}; after that they are gone for good.`;
 
 // ── purge ──────────────────────────────────────────────────────────────────
 
@@ -566,4 +610,195 @@ export async function purgeDeleted(svc: Services, opts: { dryRun?: boolean; now?
     },
   });
   return out;
+}
+
+// ── create, retry, refine and the settings that re-render ──────────────────
+
+/** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. Returns how many were queued and how many live clips were left alone (still preparing or rendering: they finish with the old settings). */
+export async function rerenderProjectClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: typeof schema.clips.$inferSelect) => boolean = (c) => c.status === "done" || c.status === "failed") {
+  let n = 0;
+  let skipped = 0;
+  await lockProjectClips(u, projectId);
+  for (const c of await listClips(u.db, projectId)) {
+    if (!which(c)) skipped++;
+    else if ((await requestRender(svc, u, projectId, c.id)) !== null) n++;
+  }
+  return { queued: n, skipped };
+}
+
+/**
+ * Start a project for `userId` from a link or an upload: quota, the new row, its `project.created` event, the run and
+ * the first (ingest) job commit together, so there is never a "queued" project with no job behind it.
+ * tRPC `projects.create`, the MCP create_project tool and `reelsaw create-project` call this.
+ */
+export async function createProject(svc: Services, userId: string, input: CreateProjectInput): Promise<typeof schema.projects.$inferSelect> {
+  const db = svc.database.db;
+  const log = svc.log.child({ module: "projects", userId });
+  if (!input.sourceUrl && !input.uploadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a sourceUrl (a link to the video) or an uploadId." });
+  const quotaReached = (err: unknown): never => {
+    log.warn({ reason: err instanceof Error ? err.message : String(err) }, "project quota reached");
+    throw err;
+  };
+  // early refusal before the URL peek; the binding check runs again, locked, in the transaction that inserts
+  await checkProjectQuota(db, svc.settings.get(), userId, { ent: svc.entitlements }).catch(quotaReached);
+  let sourceMeta: (typeof schema.projects.$inferSelect)["sourceMeta"] = null;
+  let title = input.title?.trim() || "";
+  if (input.uploadId) {
+    const up = await db.query.uploads.findFirst({ where: and(eq(schema.uploads.id, input.uploadId), eq(schema.uploads.userId, userId)) });
+    if (!up) throw new TRPCError({ code: "NOT_FOUND", message: "No upload with that id in your account." });
+    sourceMeta = { uploadId: up.id, filename: up.filename };
+    title ||= up.filename.replace(/\.[^.]+$/, "");
+  } else if (input.sourceUrl) {
+    const peek = await peekUrlMeta(input.sourceUrl);
+    sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
+    title ||= peek.title ?? "";
+  }
+  title ||= "Untitled";
+  const id = randomUUID();
+  return svc.tx(async (u) => {
+    // counted under a per-user lock in the inserting transaction, so concurrent creates can't overshoot the cap
+    await checkProjectQuota(u.db, svc.settings.get(), userId, { lock: true, ent: svc.entitlements }).catch(quotaReached);
+    // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
+    const settings = await resolveProjectSettings(u.db, userId, input.settings);
+    if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+    const [row] = await u.db
+      .insert(schema.projects)
+      .values({ id, userId, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
+      .returning();
+    if (!row) throw new Error("the project row was not returned");
+    await recordProjectCreated(u.db, userId, id, row.createdAt);
+    await syncProjectRefs(u.db, row); // the defaults' intro/outro
+    await u.emit(id, "project.created", { title });
+    await startRun(u, id, { reason: "created", status: "queued" });
+    await u.enqueue(QUEUES.ingest, { projectId: id });
+    return row;
+  });
+}
+
+/** Resume a project from its furthest completed stage (the Retry button, retry_project, `reelsaw retry`). */
+export async function retryOwnedProject(svc: Services, actor: Actor, projectId: string) {
+  return svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    const r = await retryProject(svc, u, p.id);
+    if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "That project was deleted while it was being retried; restore_project brings it back." });
+    return r;
+  });
+}
+
+export const refineInput = {
+  steps: z.array(z.enum(REFINE_STEPS)).optional().describe("Which refine steps to re-run; default all"),
+  vocabulary: z.string().max(1000).optional().describe("Names and terms the transcript should spell this way; empty string clears it"),
+};
+
+/** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
+export async function refineProject(svc: Services, actor: Actor, projectId: string, input: { steps?: ReadonlyArray<(typeof REFINE_STEPS)[number]>; vocabulary?: string }) {
+  const steps = input.steps?.length ? [...new Set(input.steps)] : [...REFINE_STEPS];
+  await svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    // transcript first, then the project row (vocabulary, startRun)
+    const [cur] = await u.db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, p.id)).for("update");
+    if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
+    // a refine already running restarts; anything else running (renders, picking) would have its status
+    // overwritten and never finalize, so wait for it
+    if (!["done", "failed", "refining"].includes(p.status)) throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
+    if (input.vocabulary !== undefined) {
+      const vocabulary = input.vocabulary || undefined;
+      const check = projectSettingsSchema.safeParse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
+      if (!check.success) throw new TRPCError({ code: "BAD_REQUEST", message: check.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+      const settings = vocabulary ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb` : sql`${schema.projects.settings} - 'vocabulary'`;
+      await u.db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+    }
+    // a step of the refine being restarted that is still running is superseded too, so it runs again with the rest
+    const rerun = [...new Set([...steps, ...REFINE_STEPS.filter((s) => cur.refine[s] !== "done" && cur.refine[s] !== "failed")])];
+    for (const s of rerun) await u.cancelLiveJobs(REFINE_QUEUE[s], p.id);
+    await supersedeStages(u, p.id);
+    await startRun(u, p.id, { reason: "refine", status: "refining", stage: "refine" });
+    const refine = { ...cur.refine };
+    for (const s of steps) delete refine[s];
+    await u.db.update(schema.transcripts).set({ refine }).where(eq(schema.transcripts.projectId, p.id));
+    const started = await enqueueRefine(svc, p.id, await stageSeqOf(u.db, p.id), rerun, u, { onlyIfIdle: true });
+    if (!started) throw new TRPCError({ code: "CONFLICT", message: "The project is busy; wait for it to finish before refining." });
+  });
+  return { ok: true as const, steps };
+}
+
+/** Hide or keep text burned into the source (captions, logos); re-renders the finished clips so the whole set agrees. */
+export async function setProjectSourceText(svc: Services, actor: Actor, projectId: string, sourceText: "hide" | "keep" | "always") {
+  const { queued: rerendered, skipped } = await svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    // clips first (locked in id order), the project row last; the jobs only start once this commits with the new setting
+    const n = await rerenderProjectClips(svc, u, p.id);
+    // atomic JSON merge: no read-modify-write, so concurrent settings edits can't drop each other
+    await u.db.update(schema.projects).set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText })}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+    return n;
+  });
+  return { ok: true as const, rerendered, skipped };
+}
+
+const bumperChoice = z.string().min(1).max(100);
+export const projectBumpersInput = z.object({
+  intro: bumperChoice.optional(),
+  outro: bumperChoice.optional(),
+  introSec: bumperSecondsSchema.optional(),
+  outroSec: bumperSecondsSchema.optional(),
+  rerender: z.boolean().default(false),
+});
+export type ProjectBumpersInput = z.input<typeof projectBumpersInput>;
+
+/**
+ * Per-project intro/outro: for each slot "default" (the owner's current default), "none" (even if the default has one) or
+ * a library asset id. Re-renders every finished clip only when `rerender` is set. The library is the project owner's.
+ */
+export async function setProjectBumpers(svc: Services, actor: Actor, projectId: string, input: ProjectBumpersInput) {
+  const rerendered = await svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    const mine = await userDefaults(u.db, p.userId);
+    let expr = sql`${schema.projects.settings}`;
+    const patch: Record<string, string | number | null> = {};
+    for (const [slot, key, choice, secs] of [["intro", "introAssetId", input.intro, input.introSec], ["outro", "outroAssetId", input.outro, input.outroSec]] as const) {
+      if (choice === undefined) continue;
+      expr = sql`(${expr}) - ${key}::text - ${`${slot}Sec`}::text`;
+      if (secs !== undefined && choice !== "none") patch[`${slot}Sec`] = secs;
+      if (choice === "none") patch[key] = null;
+      else if (choice === "default") {
+        if (mine[key]) patch[key] = mine[key]!;
+      } else {
+        // a library asset of this user; the one the project already uses stays valid even if it was since removed
+        const [asset] = await u.db.select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt }).from(schema.assets).where(and(eq(schema.assets.id, choice), assetVisibleTo(p.userId)));
+        if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
+        patch[key] = choice;
+      }
+    }
+    // clips first, the project row last (lock order clip → project)
+    const n = input.rerender ? (await rerenderProjectClips(svc, u, p.id)).queued : 0;
+    const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
+    if (after) await syncProjectRefs(u.db, after);
+    return n;
+  });
+  return { ok: true as const, rerendered };
+}
+
+export const projectStyleInput = z.object({ style: styleOverrideSchema, keepOverrides: z.boolean().optional(), rerender: z.boolean().default(true) });
+export type ProjectStyleInput = z.input<typeof projectStyleInput>;
+
+/**
+ * Change the project-wide caption/hook style. Clears per-clip style overrides unless keepOverrides, and re-renders every
+ * finished clip (unless rerender is false) so the whole set stays consistent.
+ */
+export async function updateProjectStyle(svc: Services, actor: Actor, projectId: string, input: ProjectStyleInput) {
+  const { queued: rerendered, skipped } = await svc.tx(async (u) => {
+    const p = await findProject(u.db, actor, projectId, { deleted: false });
+    // validate against the whole settings object, but write only the changed keys (atomic merge)
+    const check = projectSettingsSchema.safeParse({ ...p.settings, ...input.style });
+    if (!check.success) throw new TRPCError({ code: "BAD_REQUEST", message: check.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+    const merged: Record<string, unknown> = { ...check.data };
+    const patch = Object.fromEntries(Object.keys(input.style).map((k) => [k, merged[k]]));
+    // clips first (locked in id order, then cleared and re-rendered), the project row last
+    await lockProjectClips(u, p.id);
+    if (!input.keepOverrides) await u.db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
+    const n = input.rerender !== false ? await rerenderProjectClips(svc, u, p.id) : { queued: 0, skipped: 0 };
+    await u.db.update(schema.projects).set({ settings: settingsWrite(sql`${schema.projects.settings}`, patch), updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+    return n;
+  });
+  return { ok: true as const, rerendered, skipped };
 }

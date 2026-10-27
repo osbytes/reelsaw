@@ -1,4 +1,6 @@
 /** Keyset pagination helpers: opaque cursors and LIKE escaping. Pure, no database. */
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 
 /** Opaque cursor: the sort-key tuple of the last row on a page, as base64url JSON. */
 export function encodeCursor(parts: readonly (string | number)[]): string {
@@ -14,6 +16,25 @@ export function decodeCursor(cursor: string, arity: number): (string | number)[]
   } catch {
     return null;
   }
+}
+
+/** Lists that used to return everything (library, layer templates): a page is 100 rows unless asked for more, at most 500. */
+export const LIST_LIMIT_DEFAULT = 100;
+export const LIST_LIMIT_MAX = 500;
+/** The `{ limit, cursor }` input of those lists; omitted = the first page of the default size. */
+export const listPageInput = z
+  .object({
+    limit: z.number().int().min(1).max(LIST_LIMIT_MAX).default(LIST_LIMIT_DEFAULT).describe(`Items per page (1-${LIST_LIMIT_MAX}, default ${LIST_LIMIT_DEFAULT})`),
+    cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
+  })
+  .optional();
+
+/** The tuple of a page cursor, or a plain BAD_REQUEST when it is not one this server made. */
+export function pageCursor(cursor: string | undefined, arity: number): (string | number)[] | null {
+  if (!cursor) return null;
+  const c = decodeCursor(cursor, arity);
+  if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "That page link is not valid. Start again from the first page." });
+  return c;
 }
 
 /** Escape LIKE wildcards so user text matches literally (use with `escape '\'`). */

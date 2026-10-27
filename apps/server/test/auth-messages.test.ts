@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { apiKeyCanAdminister } from "../src/auth.js";
 import {
   ACCOUNT_EXISTS_MESSAGE,
   CONFIRM_EMAIL_THEN_SIGN_IN,
@@ -109,5 +110,17 @@ describe("operator must-change password", () => {
     assert.equal(passwordLengthError("x".repeat(129)), "Use at most 128 characters.");
     assert.match(MUST_CHANGE_PASSWORD_MESSAGE, /Choose a new password/);
     assert.match(MUST_CHANGE_PASSWORD_REUSE, /different password/);
+  });
+});
+
+describe("apiKeyCanAdminister", () => {
+  it("allows only an explicit admin write grant", () => {
+    assert.equal(apiKeyCanAdminister({ admin: ["write"] }), true);
+    assert.equal(apiKeyCanAdminister({ admin: [] }), false);
+    assert.equal(apiKeyCanAdminister({ other: ["write"] }), false);
+  });
+  it("treats a key with no permission record as not admin", () => {
+    assert.equal(apiKeyCanAdminister(null), false);
+    assert.equal(apiKeyCanAdminister(undefined), false);
   });
 });

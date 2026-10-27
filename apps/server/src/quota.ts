@@ -6,7 +6,7 @@
  * upgrade hint when there is one. Checked where the number is known: project count and rate at creation,
  * source minutes once ffprobe has run, storage at upload. The watermark follows the same chain.
  */
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { deletedProjectsPath, type QuotaAction, type QuotaRefusal } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
@@ -14,6 +14,7 @@ import type { RuntimeSettings } from "./instance-settings.js";
 import type { Admission } from "./queue/boss.js";
 import type { UserRole } from "./db/schema.js";
 import { takeTxLock, txLock } from "./locks.js";
+import { NonRetryableError } from "./pipeline/common.js";
 
 export const LIMIT_KEYS = ["MAX_PROJECTS_PER_USER", "MAX_SOURCE_MINUTES_PER_DAY", "MAX_SOURCE_MINUTES_PER_MONTH", "MAX_NEW_PROJECTS_PER_HOUR", "MAX_LIVE_JOBS_PER_USER", "MAX_RERENDERS_PER_HOUR", "MAX_STORAGE_MB", "MAX_REQUESTS_PER_MINUTE", "MAX_REQUESTS_PER_HOUR"] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
@@ -87,6 +88,17 @@ export class QuotaError extends TRPCError {
   constructor(message: string, quota?: QuotaRefusal) {
     super({ code: "TOO_MANY_REQUESTS", message });
     this.quota = quota;
+  }
+}
+
+/**
+ * A video was refused for its length (daily or monthly minutes). Not a fault and not worth a retry: the stage
+ * worker fails the project at once instead of downloading the same video again.
+ */
+export class QuotaExceededError extends NonRetryableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuotaExceededError";
   }
 }
 
@@ -197,8 +209,9 @@ export async function checkRestoreQuota(db: Db, instance: InstanceLimits, userId
 
 /**
  * Minutes that count against the monthly allowance: every project created since `start`, minus the first-video
- * allowance when the plan has one (the account's earliest project, up to `firstVideoFreeMinutes`, is free).
- * `firstPending` = the allowance is still unused (no project yet), so a creation must not be refused on the cap.
+ * allowance when the plan has one (the account's earliest project whose length is known, up to `firstVideoFreeMinutes`,
+ * is free; a project still downloading, or one that failed before it was probed, has no length and never takes it).
+ * `firstPending` = the allowance is still unused (no project has a length yet), so a creation must not be refused on the cap.
  */
 export async function monthlyMinutes(db: Db, userId: string, start: Date, grants: Grants | null, exceptProjectId?: string): Promise<{ used: number; firstFree: number; firstPending: boolean }> {
   const total = await minutesSince(db, userId, start, exceptProjectId);
@@ -207,7 +220,7 @@ export async function monthlyMinutes(db: Db, userId: string, start: Date, grants
   const [first] = await db
     .select({ id: schema.sourceUsage.projectId, durationSec: schema.sourceUsage.durationSec, createdAt: schema.sourceUsage.createdAt })
     .from(schema.sourceUsage)
-    .where(and(eq(schema.sourceUsage.userId, userId), exceptProjectId ? sql`${schema.sourceUsage.projectId} <> ${exceptProjectId}` : undefined))
+    .where(and(eq(schema.sourceUsage.userId, userId), isNotNull(schema.sourceUsage.durationSec), exceptProjectId ? sql`${schema.sourceUsage.projectId} <> ${exceptProjectId}` : undefined))
     .orderBy(schema.sourceUsage.createdAt)
     .limit(1);
   if (!first) return { used: total, firstFree: free, firstPending: true };
@@ -219,20 +232,30 @@ export async function monthlyMinutes(db: Db, userId: string, start: Date, grants
 
 /**
  * Before work a person asked for is queued (uow.ts `enqueue`, under the user's job lock): jobs in flight
- * across every queue, and renders / new clips asked for in the last hour. `admission` already counts the
+ * across every queue, and renders, new clips and re-runs (analysis, refinement) asked for in the last hour. `admission` already counts the
  * unit's own earlier enqueues, so a bulk re-render that would pass the limit is refused whole.
  */
 export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
   if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.live >= l.MAX_LIVE_JOBS_PER_USER)
     throw new QuotaError(`You have ${a.live} jobs queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`);
   if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR)
-    throw new QuotaError(`${a.userRendersLastHour} renders requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`);
+    throw new QuotaError(`${a.userRendersLastHour} re-renders and re-runs requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`);
 }
 
 /** Before an upload or a new project: what the account stores now (sources, uploads, renders, intros/outros) plus what is arriving. */
 export async function checkStorageQuota(db: Db, instance: InstanceLimits, userId: string, incomingBytes = 0, ent?: Entitlements | null) {
   const d = await limitsDetail(db, instance, userId, ent);
   if (d.limits.MAX_STORAGE_MB > 0) checkStorage(d, (await storedBytes(db, userId)) + incomingBytes);
+}
+
+/**
+ * Room for `incomingBytes` more, decided under the account's quota lock so concurrent uploads cannot all pass a cap they
+ * jointly exceed. Call it inside the unit of work that inserts the row the bytes belong to (the lock lasts to commit).
+ * Throws the same plain-language storage refusal as the advisory check.
+ */
+export async function assertStorageRoom(svc: { settings: { get(): InstanceLimits }; entitlements: Entitlements | null }, u: { db: Db }, userId: string, incomingBytes: number): Promise<void> {
+  await takeTxLock(u.db, txLock.quota(userId));
+  await checkStorageQuota(u.db, svc.settings.get(), userId, incomingBytes, svc.entitlements);
 }
 
 function checkStorage(d: LimitsDetail, bytes: number) {
@@ -244,6 +267,13 @@ function checkStorage(d: LimitsDetail, bytes: number) {
 }
 
 /**
+ * An upload whose bytes were not copied into a project's source yet. Ingest copies the upload to the source key and
+ * keeps the uploads row (for Retry), so once a project has `source_bytes` the same file would count twice.
+ * Expects the uploads table aliased `x`.
+ */
+const uploadNotCopied = sql`not exists (select 1 from projects p where p.source_meta->>'uploadId' = x.id and p.source_bytes is not null)`;
+
+/**
  * Bytes one account keeps in storage: downloaded sources, uploads, rendered clips and intro/outro assets (removed
  * ones too until remove-for-good / the retention purge). Thumbnails and scratch files are not counted. `output_bytes` counts only while
  * `output_key` is set (a re-render or retention clears the key); clips rendered before it existed count 0.
@@ -253,7 +283,7 @@ export async function storedBytes(db: Db, userId: string): Promise<number> {
     await db.execute<{ bytes: string | number }>(sql`
     select
       coalesce((select sum(source_bytes) from projects where user_id = ${userId}), 0)
-      + coalesce((select sum(size_bytes) from uploads where user_id = ${userId}), 0)
+      + coalesce((select sum(size_bytes) from uploads x where x.user_id = ${userId} and ${uploadNotCopied}), 0)
       + coalesce((select sum(c.output_bytes) from clips c join projects p on p.id = c.project_id where p.user_id = ${userId} and c.output_key is not null), 0)
       + coalesce((select sum(size_bytes) from assets where user_id = ${userId}), 0) as bytes`)
   ).rows;
@@ -314,7 +344,7 @@ export async function minutesSince(db: Db, userId: string, start: Date, exceptPr
   return Number(m);
 }
 
-/** What each limit counts right now, for the admin Limits dialog and the Billing page: kept projects, minutes since 00:00 UTC and since the period started, projects in the last hour, jobs in flight, renders asked for in the last hour, MB stored. */
+/** What each limit counts right now, for the admin Limits dialog and the Billing page: kept projects, minutes since 00:00 UTC and since the period started, projects in the last hour, jobs in flight, renders and re-runs asked for in the last hour, MB stored. */
 export async function limitUsage(db: Db, userId: string, grants: Grants | null = null): Promise<Record<LimitKey, number>> {
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
   const [{ hour }] = await db
@@ -325,7 +355,7 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
     await db.execute<{ live: number; renders: number }>(sql`
     select
       (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'userId' = ${userId}) as live,
-      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)
+      (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare','project.analyze','refine.entities','refine.disfluency','refine.scenes') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)
   ).rows;
   const [rate] = (await db.execute<{ minute: number; hour: number }>(sql`select coalesce(sum(n) filter (where bucket = date_trunc('minute', now())), 0)::int as minute, coalesce(sum(n), 0)::int as hour from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour'`)).rows;
   return {
@@ -377,7 +407,11 @@ export async function usageByUser(db: Db, days: number | null, userIds?: string[
       .innerJoin(P, eq(P.id, C.projectId))
       .where(and(inArray(P.userId, ids), eq(C.status, "done"), sql`${C.updatedAt} >= ${since}`))
       .groupBy(P.userId),
-    db.select({ id: U.userId, bytes: sql<number>`coalesce(sum(${U.sizeBytes}), 0)` }).from(U).where(inArray(U.userId, ids)).groupBy(U.userId),
+    db
+      .select({ id: U.userId, bytes: sql<number>`coalesce(sum(${U.sizeBytes}), 0)` })
+      .from(U)
+      .where(and(inArray(U.userId, ids), sql`not exists (select 1 from projects p where p.source_meta->>'uploadId' = ${U.id} and p.source_bytes is not null)`))
+      .groupBy(U.userId),
     db
       .select({
         id: L.userId,

@@ -13,11 +13,15 @@ import { generateText, Output, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
-import type { StageContext } from "./common.js";
+import { ProjectGoneError, StageTimeoutError, StaleJobError, type StageContext } from "./common.js";
 import { snapCandidate } from "./analyze.js";
-import { extractJson, mapChunk, normalizeCandidate, scoreCandidates, type LlmOpts, type SelectContext, type Chunk } from "./select.js";
+import { callSignal, isAbortError } from "./steps.js";
+import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, extractJson, mapChunk, normalizeCandidate, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import type { Logger } from "../log.js";
+import { mapLimit } from "../lib/batch.js";
+import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
-import { clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
+import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
 import { layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
 
@@ -27,6 +31,9 @@ const describeSchema = z.object({
   caption: z.string().default(""),
   hashtags: z.array(z.string()).max(8).default([]),
 });
+
+/** Bump when the describe prompt changes: saved describe steps (job_steps) are keyed on it. */
+export const DESCRIBE_PROMPT_VERSION = "describe-1";
 
 function segmentsIn(segments: TranscriptSegment[], start: number, end: number) {
   return segments.filter((s) => s.end > start + 0.05 && s.start < end - 0.05);
@@ -46,7 +53,7 @@ Write:
 
 Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":["..."]}`;
   try {
-    const { output } = await generateText({ model: o.model, prompt, abortSignal: o.signal, maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
+    const { output } = await generateText({ model: o.model, prompt, abortSignal: callSignal(o.signal, o.timeoutMs), maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
     return output;
   } catch (err) {
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
@@ -58,6 +65,11 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
       hashtags: Array.isArray(r.hashtags) ? r.hashtags.map(String).slice(0, 8) : [],
     };
   }
+}
+
+/** The title / hook / caption call as one saved clip-scoped step. */
+export function describeStep(ctx: Pick<StageContext, "step">, clipId: string, o: LlmOpts, modelId: string, unitMs: number, title: string, text: string) {
+  return ctx.step("describe", { input: { title, text }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION }, (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text), { schema: describeSchema, timeoutMs: unitMs, model: modelId, clipId });
 }
 
 /**
@@ -85,6 +97,53 @@ export function preparedPatch(started: Packaging, current: Packaging, prepared: 
   return out;
 }
 
+/**
+ * Rubric scores for candidates as one saved step (clip-scoped): the batches' raw answers are what is stored, and the
+ * totals are worked out from them. A cancelled or timed-out call is never swallowed (scoreSample rethrows it).
+ */
+export async function scoreStep(ctx: Pick<StageContext, "step">, name: string, clipId: string, o: LlmOpts, modelId: string, unitMs: number, items: ScoreInput[], sc: SelectContext): Promise<Map<number, ScoreResult>> {
+  const batches = scoreBatches(items);
+  const answers = await ctx.step(
+    name,
+    { input: items, model: modelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples: 1 } },
+    async (sig) => {
+      const out: Array<z.infer<typeof scoreItem>> = [];
+      for (const b of batches) out.push(...(await scoreSample({ ...o, signal: sig, timeoutMs: undefined }, b, sc, 1)));
+      return out;
+    },
+    { schema: z.array(scoreItem), timeoutMs: unitMs * Math.max(1, batches.length), model: modelId, clipId },
+  );
+  return aggregateScores(items, sc, [answers]);
+}
+
+/**
+ * The "ai" mode search over the user's selection: windowed like a full analysis (a long selection in one prompt is read
+ * badly and times out), every window a saved clip-scoped step so a retry maps only the windows still missing. A window
+ * the model answered badly is skipped; a timeout, a cancel or a superseded job ends the run.
+ */
+export async function mapSelection(
+  ctx: Pick<StageContext, "step" | "signal" | "progress">,
+  o: LlmOpts,
+  a: { inside: TranscriptSegment[]; sc: SelectContext; clipId: string; modelId: string; unitMs: number; concurrency: number; log: Logger },
+): Promise<ClipCandidate[]> {
+  const chunks = chunkTranscript(a.inside);
+  const candidatesSchema = z.array(clipCandidateSchema);
+  let mapped = 0;
+  const perChunk = await mapLimit(chunks, a.concurrency, async (ch, i) => {
+    ctx.signal.throwIfAborted();
+    const found = await ctx
+      .step(`map:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: a.modelId, promptVersion: MAP_PROMPT_VERSION, params: a.sc }, (sig) => mapChunk({ ...o, signal: sig, timeoutMs: undefined }, ch, a.sc), { schema: candidatesSchema, timeoutMs: a.unitMs, model: a.modelId, clipId: a.clipId })
+      .catch((err: unknown): ClipCandidate[] => {
+        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted) throw err;
+        a.log.warn({ err, window: i }, "candidate search failed for a window");
+        return [];
+      });
+    await ctx.progress(0.1 + 0.4 * (++mapped / chunks.length), `Looking for the best moment in your selection (${mapped}/${chunks.length})`, { clipId: a.clipId }).catch(() => {});
+    return found;
+  });
+  return perChunk.flat();
+}
+
 export async function prepareClip(ctx: StageContext, clipId: string, mode: "exact" | "ai") {
   const { svc, db, projectId } = ctx;
   const clip = await db.query.clips.findFirst({ where: eq(schema.clips.id, clipId) });
@@ -96,7 +155,12 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const segments = transcript.segments;
   const durationSec = project.durationSec ?? transcript.words.at(-1)?.end ?? clip.endSec;
   const log = ctx.log.child({ clipId, mode });
-  const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log };
+  const modelId = svc.models.get().language;
+  const unitMs = ctx.unitTimeoutMs(modelId);
+  // each call is a saved, clip-scoped step with its own limit (inside a step the step's signal carries it)
+  const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log, timeoutMs: unitMs };
+  const selfHosted = isSelfHostedModel({ AI_MODEL: modelId, OPENAI_BASE_URL: svc.providers.get("openai").baseUrl });
+  const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
   const selLen = clip.endSec - clip.startSec;
 
   let pick: ClipCandidate = { title: clip.title, hook: clip.hook, startSec: clip.startSec, endSec: clip.endSec, score: 50, reasoning: clip.reasoning, caption: "", hashtags: [] };
@@ -108,13 +172,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     const minSec = Math.max(5, Math.min(settings.minClipSeconds, Math.round(selLen * 0.4)));
     const maxSec = Math.max(minSec + 1, Math.min(settings.maxClipSeconds, Math.ceil(selLen)));
     const sc: SelectContext = { title: project.title, durationSec, minSec, maxSec, focus: settings.focus, instructions: settings.instructions };
-    const chunk: Chunk = { lines: inside.map((s) => `[${fmtTs(s.start)} - ${fmtTs(s.end)}] ${s.text}`), start: clip.startSec, end: clip.endSec };
-    const found = inside.length
-      ? await mapChunk(o, chunk, sc).catch((err) => {
-          log.warn({ err }, "candidate search failed");
-          return [] as ClipCandidate[];
-        })
-      : [];
+    const found = await mapSelection(ctx, o, { inside, sc, clipId, modelId, unitMs, concurrency, log });
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };
     const snapped = found
       .map((c) => snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, { words: transcript.words, log, bounds: [clip.startSec, clip.endSec] }))
@@ -123,7 +181,7 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     if (snapped.length) {
       await ctx.progress(0.5, `Scoring ${snapped.length} option(s)`, { clipId });
       const texts = snapped.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: segmentsIn(segments, c.startSec, c.endSec).map((s) => s.text.trim()).join(" ") }));
-      const scored = await scoreCandidates(o, texts, sc, 1, 1);
+      const scored = await scoreStep(ctx, "pick-score", clipId, o, modelId, unitMs, texts, sc);
       const best = snapped.map((c, id) => ({ c, t: scored.get(id)?.total ?? c.score })).sort((a, b) => b.t - a.t)[0]!;
       pick = best.c;
       note = `AI picked ${fmtTs(pick.startSec)}–${fmtTs(pick.endSec)} from your selection (${snapped.length} option${snapped.length > 1 ? "s" : ""}). ${pick.reasoning}`;
@@ -139,12 +197,12 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     .slice(0, 4000);
   if (mode === "exact" || !pick.caption) {
     await ctx.progress(0.6, "Writing title, hook and caption", { clipId });
-    const d = await describe(o, project.title, text);
+    const d = await describeStep(ctx, clipId, o, modelId, unitMs, project.title, text);
     pick = normalizeCandidate({ ...pick, title: d.title || pick.title, hook: d.hook || pick.hook, caption: d.caption, hashtags: d.hashtags });
   }
   await ctx.progress(0.8, "Scoring", { clipId });
   const sc: SelectContext = { title: project.title, durationSec, minSec: 1, maxSec: 9999, focus: settings.focus };
-  const scored = (await scoreCandidates(o, [{ id: 0, durationSec: pick.endSec - pick.startSec, text }], sc, 1, 1)).get(0);
+  const scored = (await scoreStep(ctx, "score", clipId, o, modelId, unitMs, [{ id: 0, durationSec: pick.endSec - pick.startSec, text }], sc)).get(0);
 
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const prepared: Packaging = {

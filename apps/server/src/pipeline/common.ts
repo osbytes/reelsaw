@@ -7,6 +7,45 @@ import type { PipelineStage, ProjectStatus } from "@reelsaw/shared";
 import type { Logger } from "../log.js";
 import type { DiskLease } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
+import { isSelfHostedModel } from "../ai/self-hosted.js";
+import { StepRunner, dbStepStore, stageTimeoutMessage, type StageDetail, type StageTimeoutInfo, type StepKeyInput, type StepOptions, type StepsOptions } from "./steps.js";
+
+/**
+ * A failure that trying again cannot fix (the source is gone, a quota refuses the video). Workers end the run at
+ * once instead of spending retries on it.
+ */
+export class NonRetryableError extends Error {}
+
+/** A stage ran out of time: one model call past its limit, or no unit of work finished for the idle limit. */
+export class StageTimeoutError extends Error {
+  readonly stage: string;
+  readonly done: number;
+  readonly total: number;
+  readonly model: string;
+  readonly unitMs: number | null;
+  readonly kind: "unit" | "idle";
+  readonly elapsedMs: number;
+  constructor(info: StageTimeoutInfo) {
+    super(stageTimeoutMessage(info));
+    this.stage = info.stage;
+    this.done = info.done;
+    this.total = info.total;
+    this.model = info.model;
+    this.unitMs = info.unitMs;
+    this.kind = info.kind;
+    this.elapsedMs = info.elapsedMs;
+  }
+}
+
+/**
+ * The stored source was removed by retention (SOURCE_RETENTION_DAYS). Retrying the job cannot bring it
+ * back, so workers fail the clip or step at once and point at the project's Retry, which fetches it again.
+ */
+export class SourceExpiredError extends NonRetryableError {
+  constructor(days: number) {
+    super(`The source video was removed after ${days} days of inactivity (SOURCE_RETENTION_DAYS). Use Retry on the project to fetch it again, then re-render.`);
+  }
+}
 
 export class ProjectGoneError extends Error {
   constructor(id: string) {
@@ -51,16 +90,23 @@ export function sourceScratchMB(knownBytes?: number | null): number {
 
 /** Shared helpers for pipeline stages; thin wrappers over the injected services. */
 export class StageContext {
+  /** the job's signal, plus the stage's own idle timeout (see `step`): aborting either ends the attempt */
+  readonly signal: AbortSignal;
+  private readonly idle = new AbortController();
+  private _runner?: StepRunner;
+
   constructor(
     readonly svc: Services,
     readonly projectId: string,
     readonly stage: PipelineStage,
-    readonly signal: AbortSignal,
+    jobSignal: AbortSignal,
     /** extra ids carried on every line of ctx.log: jobId, runSeq, clipId, queue */
     readonly ids: Record<string, string | number> = {},
     /** projects.stage_seq this job belongs to; its state writes commit only while it is current (undefined: unversioned) */
     readonly seq?: number,
-  ) {}
+  ) {
+    this.signal = AbortSignal.any([jobSignal, this.idle.signal]);
+  }
 
   /**
    * A context whose logger also carries the job id and the project's current run sequence. `seq` is the stage job's
@@ -124,6 +170,7 @@ export class StageContext {
    * ingest's download and given back once the bytes are on disk; the local store hardlinks and writes nothing.
    */
   async ensureSource(project: Project): Promise<string> {
+    if (project.sourceExpiredAt) throw new SourceExpiredError(this.svc.settings.get().SOURCE_RETENTION_DAYS);
     if (!project.sourceKey) throw new Error("Project has no source; ingest must run first");
     const local = path.join(await this.dir(), path.posix.basename(project.sourceKey));
     if (this.svc.storage.driver === "s3" && !(await exists(local))) {
@@ -141,7 +188,7 @@ export class StageContext {
     await this.svc.tx(async (u) => {
       const [row] = await u.db
         .update(schema.projects)
-        .set({ status, stage: this.stage, stageProgress: 0, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
+        .set({ status, stage: this.stage, stageProgress: 0, stageDetail: null, error: null, stageStartedAt: sql`now()`, updatedAt: new Date() })
         .where(currentStage(this.projectId, this.seq))
         .returning({ id: schema.projects.id });
       if (!row) throw new StaleJobError(this.projectId, this.seq);
@@ -150,37 +197,96 @@ export class StageContext {
   }
 
   private lastProgressAt = 0;
-  async progress(fraction: number, message?: string, extra: Record<string, unknown> = {}) {
+  async progress(fraction: number, message?: string, extra: Record<string, unknown> = {}, detail?: StageDetail) {
     const pct = Math.max(0, Math.min(1, fraction));
     const now = Date.now();
     if (pct < 1 && now - this.lastProgressAt < 1500) return; // throttle writes
     this.lastProgressAt = now;
     // a superseded job's ticks must not move the newer run's bar
-    const [row] = await this.db.update(schema.projects).set({ stageProgress: pct, updatedAt: new Date() }).where(currentStage(this.projectId, this.seq)).returning({ id: schema.projects.id });
+    const [row] = await this.db.update(schema.projects).set({ stageProgress: pct, ...(detail ? { stageDetail: detail } : {}), updatedAt: new Date() }).where(currentStage(this.projectId, this.seq)).returning({ id: schema.projects.id });
     if (!row) return;
     // the column above is the state a reload reads; the tick itself is live-only (NOTIFY, no event row)
-    await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
+    await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(detail ? { detail } : {}), ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
   }
 
   /**
    * Finish the stage. `handoff` runs in the same transaction: the results it writes, the
    * stage.completed event and the next stage's job commit together (or not at all, and the job
-   * retries), so a crash can't leave "completed" with nothing queued after it.
+   * retries), so a crash can't leave "completed" with nothing queued after it. `extra` may be a function: it runs in
+   * the same transaction once the stage is locked (before the event), for a payload that depends on what the handoff will do.
    */
-  async complete(extra: Record<string, unknown> = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
+  async complete(extra: Record<string, unknown> | ((u: UnitOfWork) => Promise<Record<string, unknown>>) = {}, handoff?: (u: UnitOfWork) => Promise<unknown>) {
     await this.svc.tx(async (u) => {
       // first, so the results below land only while this job's version is current (and a re-analyze waits for them)
       if (!(await lockCurrentStage(u.db, this.projectId, this.seq))) throw new StaleJobError(this.projectId, this.seq);
       const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
-      await u.db.update(schema.projects).set({ stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
+      // reconcileRequeues counts lost jobs of the stage that just ended: the next stage starts from zero, so a project that
+      // loses its job once per stage never reaches the cap that fails it
+      await u.db.update(schema.projects).set({ stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
-      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...extra, ...(durationSec !== undefined ? { durationSec } : {}) });
+      const payload = typeof extra === "function" ? await extra(u) : extra;
+      await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...payload, ...(durationSec !== undefined ? { durationSec } : {}) });
       if (handoff) await handoff(u);
     });
   }
 
+  /** Seconds one model call may take: LLM_CALL_TIMEOUT_SECONDS, else 120 for a hosted model and 600 for a self-hosted one. */
+  unitTimeoutMs(model: string): number {
+    const set = this.svc.settings.get().LLM_CALL_TIMEOUT_SECONDS;
+    if (set > 0) return set * 1000;
+    return isSelfHostedModel({ AI_MODEL: model, OPENAI_BASE_URL: this.svc.providers.get("openai").baseUrl }) ? 600_000 : 120_000;
+  }
+
+  private get runner(): StepRunner {
+    return (this._runner ??= new StepRunner({
+      stage: this.stage,
+      store: dbStepStore(this.db, this.projectId, this.stage, this.seq),
+      signal: this.signal,
+      log: this.log,
+      progress: (fraction, message, detail) => this.progress(fraction, message, {}, detail),
+      idleMs: (unitMs) => {
+        const min = this.svc.settings.get().STAGE_IDLE_TIMEOUT_MINUTES;
+        return min > 0 ? min * 60_000 : Math.round(unitMs * 1.5);
+      },
+      timeoutError: (info) => new StageTimeoutError({ stage: this.stage, ...info }),
+      onIdle: (err) => this.idle.abort(err),
+      stale: () => new StaleJobError(this.projectId, this.seq),
+    }));
+  }
+
+  /**
+   * One checkpointed unit of work. If this project already holds a saved result for the same content, model, prompt
+   * version and parameters (`keyInput`), that comes back without calling `fn`; otherwise `fn` runs under its own time
+   * limit and its result is saved (only while this job's stage version is current). Aborts and timeouts are never
+   * swallowed: a unit past `timeoutMs` throws a StageTimeoutError, a cancelled job rethrows as it was.
+   */
+  step<T>(name: string, keyInput: StepKeyInput, fn: (signal: AbortSignal) => Promise<T>, o: StepOptions<T>): Promise<T> {
+    return this.runner.step(name, keyInput, fn, o);
+  }
+
+  /** `step` over many items with bounded concurrency; reports progress, with the time left, as they finish. */
+  steps<I, R>(items: readonly I[], o: Pick<StepsOptions, "concurrency"> & Partial<StepsOptions>, fn: (item: I, index: number, signal: AbortSignal) => Promise<R>): Promise<R[]> {
+    return this.runner.steps(items, { concurrency: o.concurrency, range: o.range ?? [0, 1], message: o.message ?? ((d, t) => `${d} of ${t}`) }, fn);
+  }
+
+  /** The error that ended this attempt when the stage idled out (the worker reports it instead of whatever the abort surfaced as). */
+  get timedOut(): Error | undefined {
+    return this._runner?.idled;
+  }
+
+  /** Steps this attempt finished and saved (not counting reused ones). */
+  get stepsCompleted(): number {
+    return this._runner?.completed ?? 0;
+  }
+
+  /** End of the attempt: give back the disk and stop the idle timer. */
+  async close() {
+    this._runner?.stop();
+    await this.release();
+  }
+
   throwIfAborted() {
-    if (this.signal.aborted) throw new Error("job aborted (expired or cancelled)");
+    if (this.signal.aborted) throw this.timedOut ?? new Error("job aborted (expired or cancelled)");
   }
 }
 

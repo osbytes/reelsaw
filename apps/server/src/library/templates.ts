@@ -17,6 +17,7 @@ import { requestRender } from "../pipeline/lifecycle.js";
 import { assetVisibleTo } from "./visible.js";
 import { syncClipsRefs } from "./refs.js";
 import { cleanLayers } from "./layers.js";
+import { LIST_LIMIT_DEFAULT, pageCursor, pageOf } from "../pagination.js";
 
 /** Removed templates stay restorable this long; after that they drop off the list (the row remains until purge). */
 export const TEMPLATE_RESTORE_DAYS = 30;
@@ -54,14 +55,28 @@ export function publicTemplate(t: schema.LayerTemplate) {
 
 const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `No such layer template. A removed template can be restored for ${RESTORE_DAYS} days (restore_layer_template).` });
 
-/** The account's templates, newest change first, and the ones removed in the last 30 days (restorable). */
-export async function listLayerTemplates(db: Db, userId: string) {
-  const rows = await db.select().from(schema.layerTemplates).where(eq(schema.layerTemplates.userId, userId)).orderBy(desc(schema.layerTemplates.updatedAt), desc(schema.layerTemplates.id));
-  const cutoff = Date.now() - RESTORE_DAYS * 86_400_000;
-  return {
-    templates: rows.filter((r) => !r.deletedAt).map(publicTemplate),
-    deleted: rows.filter((r) => r.deletedAt && r.deletedAt.getTime() > cutoff).map(publicTemplate),
-  };
+/**
+ * One keyset page of the account's templates, newest change first (`items`, `nextCursor`, `total` of all live ones), and
+ * the ones removed in the last 30 days (restorable; at most 200, newest first).
+ */
+export async function listLayerTemplates(db: Db, userId: string, opts: { limit?: number; cursor?: string } = {}) {
+  const T = schema.layerTemplates;
+  const limit = opts.limit ?? LIST_LIMIT_DEFAULT;
+  const cur = pageCursor(opts.cursor, 2);
+  const live = and(eq(T.userId, userId), isNull(T.deletedAt));
+  const cutoff = new Date(Date.now() - RESTORE_DAYS * 86_400_000);
+  const [fetched, [counted], removed] = await Promise.all([
+    db
+      .select({ row: T, ts: sql<string>`${T.updatedAt}::text` })
+      .from(T)
+      .where(and(live, cur ? sql`(${T.updatedAt}, ${T.id}) < (${String(cur[0])}::timestamptz, ${String(cur[1])})` : undefined))
+      .orderBy(desc(T.updatedAt), desc(T.id))
+      .limit(limit + 1),
+    db.select({ total: sql<number>`count(*)::int` }).from(T).where(live),
+    db.select().from(T).where(and(eq(T.userId, userId), isNotNull(T.deletedAt), gt(T.deletedAt, cutoff))).orderBy(desc(T.updatedAt), desc(T.id)).limit(200),
+  ]);
+  const { items, nextCursor } = pageOf(fetched, limit, (r) => [r.ts, r.row.id]);
+  return { items: items.map((r) => publicTemplate(r.row)), nextCursor, total: counted?.total ?? 0, deleted: removed.map(publicTemplate) };
 }
 
 /** One live template of the account (`deleted: true` also finds a removed one, for restore). NOT_FOUND otherwise. */

@@ -83,7 +83,7 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 
 **Operations**
 
-- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; a worker that stops heartbeating (every 15 s) has its job re-queued by pg-boss within about a minute or two, and a reconciler re-enqueues anything orphaned. Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
+- **Reliable, resumable, scalable** – every stage is a [pg-boss](https://github.com/timgit/pg-boss) job in Postgres that checkpoints its output, so a crashed or restarted worker picks up where it left off; a worker that stops heartbeating (every 15 s) has its job re-queued by pg-boss within about a minute or two, and a reconciler re-enqueues anything orphaned. A long stage saves its parts as they finish (each 3-minute window of Finding moments), so a retry or a timeout on a slow local model continues where it stopped instead of starting over, and a timeout says how far it got (`LLM_CALL_TIMEOUT_SECONDS`, `STAGE_IDLE_TIMEOUT_MINUTES`). Run extra `worker` containers to scale. Every run (first pass, retry, re-render, re-analyze) is recorded with its own timings, and the UI shows elapsed against expected time per stage, learned from your finished projects. The browser gets live updates over a tRPC SSE subscription with automatic reconnect.
 - **Storage and install** – local volume or `s3` (AWS S3, MinIO, Cloudflare R2, Backblaze B2…); superseded renders, expired sources and orphaned files are swept hourly (`reelsaw storage` reports, `reelsaw storage sweep` runs it). One-line installers for macOS/Linux (bash) and Windows (PowerShell), and **Report an issue** saves a zip of a project's data, decisions and logs, with secrets left out.
 - **Observable and fail-fast** – every service is built in `main` and self-checks, so the process exits with a readable reason if a model id is wrong, a key is missing, a binary is absent, the bucket is unreachable or the DB is down. `LLM_TRACE=logs` or `langfuse` captures every prompt/response (tokens, latency, project/clip/stage), and `OTEL_ENABLED=true` turns on OTLP traces and metrics for HTTP, Postgres, pg-boss jobs, AI SDK calls, ffmpeg/yt-dlp and each stage, with stage, download and transcription time per second of video and per-proxy download health.
 
@@ -247,7 +247,7 @@ Every stage scales with the length of the video. Expected seconds for a stage �
 | find moments | LLM latency × (video minutes ÷ 5 + 1) calls | 0.2 | 0.02–0.07 |
 | render | ffmpeg + face tracking per clip, ÷ render concurrency | 0.04 (3 clips) | 0.05 (3 clips) |
 
-Rule of thumb: **a vendor stack finishes a video in about a fifth of its length; a local CPU stack takes about as long as the video.** Refine runs alongside finding moments, so the stages don't add up exactly.
+Rule of thumb: **a vendor stack finishes a video in about a fifth of its length; a local CPU stack takes about as long as the video.** Refine runs alongside finding moments, so the stages don't add up exactly. Finding moments saves each part it finishes, so on a long video and a slow model a retry or a timeout continues from the last finished part instead of starting over, and the project shows "N of M parts, about X left".
 
 ¹ Apple-silicon laptop, `qwen2.5:14b` on Ollama + `faster-whisper-small` on Speaches (CPU), 20-minute podcast: download 15 s, transcribe 4.9 min, refine 10 min, find moments 4 min, render 47 s; 20 min in all. On a local 14B model the disfluency verifier (one call per candidate, ~40 s each) is the bottleneck, not transcription; a smaller model or `DISFLUENCY_LLM=false` cuts refine to a fraction. ² Same video through the Vercel AI Gateway, `whisper-1` + `claude-haiku-4.5`: download 13 s, transcribe 77 s, refine 31 s, find moments 24 s, render 56 s; 3.4 min in all. Gemini 2.5 Flash took 5 min (long "thinking" outputs), Sonnet 4.5 about 4. Mixing a vendor LLM with a *local* `TRANSCRIPT_ALIGN_MODEL` makes render the slowest stage (5–9 min: every cut is re-aligned on the CPU); keep alignment on the same vendor as transcription. Full numbers in `eval/bench/results/`.
 
@@ -307,19 +307,25 @@ Everything below is off by default and switched on by environment (`deploy/.env.
 them), so a single-user box stays as it is:
 
 - **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_SOURCE_MINUTES_PER_MONTH`,
-  `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB` (0 = unlimited), with per-user overrides on the Users
-  page. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
+  `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB`, `MAX_LIVE_JOBS_PER_USER` (jobs queued or running from
+  one account's own requests), `MAX_RERENDERS_PER_HOUR` (re-renders, hand-made clips and re-runs such as
+  re-analyze and refine, per hour), `MAX_REQUESTS_PER_MINUTE` and `MAX_REQUESTS_PER_HOUR` (0 = unlimited),
+  with per-user overrides on the Users page. Storage counts sources, uploads (an upload already copied into
+  a project counts once), rendered clips and intros/outros, and is checked on every way a file arrives. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
-  plan, else the UTC calendar month. Length is checked once the video is probed, so an over-long
-  download fails the project with that reason.
+  plan, else the UTC calendar month. A link's length is checked before it is downloaded when the
+  site reports it, and again once the file is probed, so an over-long video fails the project with that
+  reason, once, without being fetched again. The first video of a plan with a free allowance is the first
+  one whose length is known.
 - **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
   `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan
   removes it, and an admin can switch it per user on the Users page (Limits). Decided at render time,
-  so a re-render after the change applies it.
+  so a re-render after the change applies it. Clips already rendered keep what they were rendered with.
 - **Usage** (Users → Usage): projects, minutes of source, clips rendered, model calls and tokens
   (every model call writes a `llm_usage` row attributed to the project's owner), stored bytes.
 - **Retention**: `SOURCE_RETENTION_DAYS` / `CLIP_RETENTION_DAYS` delete stored files from finished
-  projects; rows and history stay, the project page offers "fetch again" and clips re-render.
+  projects (the store object and the local copy); rows and history stay. A clip re-renders from its
+  source; once the source is removed, "fetch again" (Retry on the project) downloads it first.
   `reelsaw retention` runs a sweep by hand. With an S3 store, `SCRATCH_CACHE_HOURS` (24) is how long
   a worker keeps its local copies of stored files once a project is finished and idle; the bucket
   copy stays and comes back when a job needs it.
@@ -347,7 +353,15 @@ them), so a single-user box stays as it is:
   MCP connectors (claude.ai, Claude Desktop): dynamic client registration, sign-in and a consent
   page in the browser, discovery at `/.well-known/oauth-protected-resource/api/mcp` (which names
   the issuer, `<APP_URL>/api/auth`, whose metadata is at
-  `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs.
+  `/.well-known/oauth-authorization-server/api/auth`). API keys keep working for CLIs. The
+  consent page shows the address the approval returns to, registrations are capped at 20 per
+  network address per day, and each person lists and revokes the apps they allowed under
+  Settings → Account → Connected apps.
+- **Client address behind a proxy** (`TRUST_PROXY`, `TRUSTED_PROXY_HEADER`, `TRUSTED_PROXY_HOPS`):
+  the sign-up cap and the registration limit key on the client address. With the default
+  `x-forwarded-for` it is the entry `TRUSTED_PROXY_HOPS` places from the right (1 behind Caddy,
+  2 behind Cloudflare and Caddy), so addresses a client prepends do not count; the other headers
+  are read only when selected.
 
 ## Billing (enterprise edition)
 
@@ -364,10 +378,13 @@ ships in the same image, and runs only with `REELSAW_EE=true` plus `STRIPE_SECRE
   row from Stripe, so events that arrive late, twice or out of order converge. A daily reconcile
   and `reelsaw billing sync` repair anything a lost webhook left behind.
 - Settings → Billing shows the plan, the period's usage and the plan grid; Checkout and the
-  Billing Portal are Stripe's pages. `get_billing` and `billing_checkout_url` do the same over MCP;
+  Billing Portal are Stripe's pages. `get_billing`, `billing_checkout_url` and `billing_portal_url` do the same over MCP;
   `reelsaw billing <email>` shows the row, Stripe's view and the last webhook events.
 - A failed payment keeps the plan for `BILLING_GRACE_DAYS` (7), then the account is on Free.
   Admins can grant a plan without Stripe (Users → Limits → Plan, or `reelsaw billing set-plan`).
+  A lapse or downgrade does not re-watermark clips already rendered; only new renders get the watermark.
+  An account that already has a live Stripe subscription is sent to the Billing Portal to change it,
+  never to a second Checkout.
 - Setting up a Stripe account: `pnpm --filter @reelsaw/server stripe:setup --webhook --portal` (rebuilds `@reelsaw/shared` first)
   creates the products, prices (by lookup key), webhook endpoint and portal configuration from the
   plan list, idempotently. Developing without a Stripe account: `pnpm --filter @reelsaw/server
@@ -388,6 +405,17 @@ claude mcp add --transport http reelsaw https://your-host/api/mcp --header "Auth
 ```json
 { "mcpServers": { "reelsaw": { "type": "http", "url": "https://your-host/api/mcp", "headers": { "Authorization": "Bearer rs_…" } } } }
 ```
+
+**Key permissions.** A key acts as you, with one exception: the instance-administration tools
+(`get_instance_settings`, `set_instance_settings`, `list_workers`, `get_queue`, `list_failures`,
+`get_failure`, `retry_failures`, `check_for_update`, and instance-wide `report_issue`) need a key
+created with **Allow instance administration (admin tools over MCP)**, a checkbox admins see in
+Settings. Keys are created without it by default, and a key that lacks it is refused with "This
+key cannot change instance settings". Keys created before permissions existed were given the administration grant when the
+database upgraded, so they keep working; it shows on the key in Settings, where you can revoke it
+or replace the key. A key with no permission record is never an administrator.
+Connectors that sign in through OAuth (`MCP_OAUTH=true`) never get the admin tools, whoever
+signs in.
 
 Clients that launch a command instead of calling a URL with a header (Claude Desktop without
 `MCP_OAUTH`, Cursor's stdio entries) use `reelsaw mcp`: the same tools over stdio, forwarded to a
@@ -414,7 +442,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | --- | --- |
 | `list_projects` | Your projects, most recently updated first. |
 | `get_project` | One of your projects: status, settings, effective intro/outro, transcript summary, and every clip (id, title, hook, bounds, score, status, download links); replacedClips lists deleted or replaced clips for restore_clip. |
-| `create_project` | Start clipping a video from a URL (YouTube, Vimeo, a direct link; anything yt-dlp fetches). |
+| `create_project` | Start clipping a video from a URL (anything yt-dlp fetches) or a file you uploaded: POST /api/upload with the file as the body, header x-filename and your API key as Authorization: Bearer, then pass the uploadId it returns. |
 | `update_project` | Rename a project and/or change its saved settings (focus, instructions, clip length, maxClips, caption style, framing, pauses, refineEntities, refineDisfluency, disfluencyLlm, refineScenes); only the fields you pass change. |
 | `wait_for_project` | Block until the project is done or failed, or timeoutSeconds pass. |
 | `get_transcript` | The project's transcript as timed lines "[m:ss] text", optionally only a time range. |
@@ -422,9 +450,9 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `get_project_transcript_file` | The project transcript as an SRT or WebVTT subtitle file, one cue per transcript segment, in source-video seconds. |
 | `import_transcript` | Use an SRT or WebVTT file as the project's transcript instead of transcribing: right after create_project (only the video is fetched) or on a done or failed project (it then re-cleans the transcript and picks clips again). |
 | `search_clips` | Find your clips and projects by words in their title, hook or caption (every word must match; case-insensitive, typo-tolerant; best first). |
-| `get_project_events` | The project's pipeline history, newest first: stage starts and completions, clip renders, retries, failures with reasons. |
-| `get_clip` | Everything about one clip: text, bounds, scores, framing, style, emphasis, own and effective intro/outro, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links. |
-| `update_clip` | Edit one clip: only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). |
+| `get_project_events` | The project's pipeline history, newest first (the same events the Activity panel shows; live progress ticks are not stored): stage starts and completions, clip renders, retries, failures with reasons. |
+| `get_clip` | Everything about one clip: text, bounds, scores, emphasis, layers (assets, text, sounds), render diagnostics, video/thumbnail/editor links, and what the next render will use with where each comes from: style { own, effective, from: clip\|project\|default }, framing { own, effective: { mode, adjust, sections }, from }, bumpers { own, effective } (intro/outro). |
+| `update_clip` | Edit one clip (3 s-10 min): only the fields you pass change; style, layoutSections and layers replace the whole value (null = project's / none). |
 | `create_clip` | Add a clip from a time range of the source (needs a transcript). |
 | `delete_clip` | Delete one clip of a live project; a render in progress stops. |
 | `delete_clips` | Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. |
@@ -444,7 +472,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `set_default_bumper` | Make a library item your default intro or outro for projects you create from now on (assetId null clears it). |
 | `set_project_bumpers` | Set one project's intro and/or outro: "default" (your current default), "none", or a library asset id; a slot left out is untouched, and introSec/outroSec are saved with the project. |
 | `set_clip_bumpers` | Override the intro and/or outro of up to 200 clips of one project: "inherit" (follow the project), "none", or a library asset id; a slot left out is untouched. |
-| `list_layer_templates` | Your layer templates (sets of layers that fit any clip length). |
+| `list_layer_templates` | Your layer templates (sets of layers that fit any clip length), newest first, paged. |
 | `save_layer_template` | Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge) or layers (each with a timing, see list_layer_templates). |
 | `update_layer_template` | Rename a layer template and/or replace its layers (the whole list, each with a timing); a field left out is untouched. |
 | `delete_layer_template` | Delete a template (it goes to Deleted) and drop it from your project defaults; clips that already got its layers keep them. |
@@ -470,6 +498,15 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
 | `get_billing` | Hosted instances: your plan and subscription, the billing period, the limits in force with where each comes from (instance, plan, an admin's override), what you have used this period, whether renders carry a watermark, and the plans on offer. |
 | `billing_checkout_url` | Hosted instances: a Stripe Checkout URL for a plan (or, when the account already pays, the Billing Portal page that confirms the plan change). |
+| `list_transcript_flags` | The fixes Reelsaw made or suggests in a project's transcript: misheard names, fillers and repetitions to cut, and your own cuts and corrections. |
+| `review_transcript_flags` | Accept or reject suggested transcript fixes (ids from list_transcript_flags), optionally with your own replacement text for an accepted name fix. |
+| `add_transcript_correction` | Make captions show "text" instead of the words spoken between startSec and endSec (a misheard name, say); the span must cover whole words. |
+| `add_transcript_cut` | Remove the words spoken between startSec and endSec from the transcript, so captions and the rendered video skip them; the span must cover whole words. |
+| `get_project_defaults` | The settings every new project starts with (Settings, Project defaults): language, vocabulary, instructions, focus, clip lengths, pauses, caption look and refine steps. |
+| `set_project_defaults` | Replace the settings every new project starts with; existing projects keep theirs. |
+| `set_project_source_text` | Hide or keep text burned into the source video (captions, logos) for the whole project: hide covers it, keep leaves it, always shows it. |
+| `update_project_style` | Change the caption/hook look for the whole project (font, colors, size, position, words per line). |
+| `billing_portal_url` | Hosted instances: a Stripe Billing Portal URL to see invoices, change the card or cancel at period end. |
 <!-- /generated -->
 
 `get_project` / `get_clip` show each clip's effective intro/outro and where it comes from.
@@ -505,7 +542,17 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw transcript-file <projectId> [--format srt\|vtt] [--words]` | print a project's transcript as an SRT or VTT file (same as projects.transcriptFile and get_project_transcript_file) |
 | `reelsaw import-transcript <projectId> <file.srt\|file.vtt> [--language xx]` | use a subtitle file as the transcript instead of transcribing (same as projects.importTranscript and import_transcript) |
 | `reelsaw update-project <projectId> [--title t] [--set key=value]… [--clear key]…` | rename a project or change its settings without re-running anything (same as projects.update and update_project); values are JSON or text |
-| `reelsaw purge` | [--dry-run]                     remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
+| `reelsaw source-text <projectId> <hide\|keep\|always>` | hide or keep text burned into the source and re-render finished clips (same as projects.setSourceText and set_project_source_text) |
+| `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]` | change the caption/hook style of the whole project, clearing per-clip overrides and re-rendering (same as projects.updateStyle and update_project_style); values are JSON or text |
+| `reelsaw create-project <url> [--user <email\|id>] [--title t] [--set key=value]…` | start a project from a link for an account (the given user, else the only account); same as projects.create and create_project; takes the same settings as update-project |
+| `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
+| `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
+| `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
+| `reelsaw delete-project <projectId>` | delete a project, restorable like a clip (same as projects.delete and delete_project) |
+| `reelsaw export <projectId> [clipId…] --out <file.zip>` | write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and export_project (every picked clip must belong to the project, at least one rendered) |
+| `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact\|ai]` | add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them (same as clips.create and create_clip) |
+| `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender\|--no-rerender]` | edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip) |
+| `reelsaw purge [--dry-run]` | remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
 | `reelsaw purge-project <projectId>` | delete one already-deleted project forever (frees storage; minutes stay counted) |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
@@ -515,22 +562,22 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw retry-failures [--stage s] [--q text] [--since 24h] [--json]` | retry failed projects and clips matching a reason after a platform fix (same as Settings → System → Queue → Retry all matching) |
 | `reelsaw status <projectId>` | project, refine steps, clips, live jobs, last error |
 | `reelsaw events <projectId> [n=30]` | recent pipeline events |
-| `reelsaw clip` | <clipId>                        everything about one clip incl. render diagnostics |
-| `reelsaw faces` | <clipId> [a-b] [--json]         face boxes per sampled frame + split speaker tracks |
-| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips (same as the UI buttons) |
+| `reelsaw clip <clipId>` | everything about one clip incl. render diagnostics |
+| `reelsaw faces <clipId> [a-b] [--json]` | face boxes per sampled frame + split speaker tracks |
+| `reelsaw rerender <clipId…>` | queue a re-render of one or several clips; a clip that never got its AI title is prepared first (same as the UI buttons, clips.rerender / rerenderMany and rerender_clip / rerender_clips) |
 | `reelsaw import-report <zip> [--user <email>] [--source <file>] [--no-download] [--allow-any-url]` | rehydrate an issue report as a new project (dev only; the zip's contents are untrusted data, see its README) |
 | `reelsaw report [projectId] [--out file.zip] [--instance] [--description text] [--user email]` | write an issue-report zip (same as Report an issue); --instance adds unfinished work, failed jobs, usage and error logs across every account (operator) |
-| `reelsaw cuts` | <clipId> [--save <dir>] [--fixture <dir>] dry-run the disfluency cut search for a clip and print every candidate verdict; --save writes removed/context audio; --fixture exports each flagged span as an offline regression case for `pnpm eval:cuts` |
-| `reelsaw align` | <projectId> <start> <end>       word timestamps from the align model for a source window |
-| `reelsaw hear` | <clipId> [start] [dur]          transcribe a range of the RENDERED clip (what viewers hear) |
-| `reelsaw flags` | <projectId> [from] [to]         transcript flags (entities / disfluencies / collapsed loops) with status |
+| `reelsaw cuts <clipId> [--save <dir>] [--fixture <dir>]` | dry-run the disfluency cut search for a clip and print every candidate verdict; can save the removed and context audio, and export each flagged span as an offline regression case for `pnpm eval:cuts` |
+| `reelsaw align <projectId> <start> <end>` | word timestamps from the align model for a source window |
+| `reelsaw hear <clipId> [start] [dur]` | transcribe a range of the RENDERED clip (what viewers hear) |
+| `reelsaw flags <projectId> [from] [to]` | transcript flags (entities / disfluencies / collapsed loops) with status |
 | `reelsaw storage [sweep [--dry-run] \| reclaim <MB> [--dry-run]]` | disk use: unique, scratch-only, scratch copies of stored files (S3), leased to jobs in flight, duplicate-source, expired-but-present bytes; `sweep` removes leftover files nothing points at and evicts idle cache copies (the reconciler's hourly sweep); `reclaim` evicts least-recently-used copies until that many MB are freed (what a job short of disk does on its own) |
 | `reelsaw stuck` | every unfinished project/clip: age, last event, live jobs, problems |
-| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); project: reconcile |
-| `reelsaw logs` | <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw] log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
+| `reelsaw recover <clipId\|projectId>` | clip: re-run the right step (prepare or render); failed project: retry it; any other project: put its lost jobs back |
+| `reelsaw logs <id> [n=60] [--since 2h] [--level debug] [--module render] [--raw]` | log lines mentioning a project/clip/job/request id from LOG_FILE (survives redeploys) |
 | `reelsaw log-level [<level\|module=level,...>\|reset] [--for 15m]` | show the log levels in force, or set them for a while (e.g. render=debug); all processes follow within ~5 s |
 | `reelsaw scenes <projectId> [--store]` | re-detect shot cuts (adaptive); --store saves them for layout/snapping/overlays |
-| `reelsaw library list [--kind video\|image\|audio] [--q text]` | \| search <q…> [--source library\|catalog\|<provider>] [--kind video\|image\|audio] [--license cc0\|by] \| add <file\|url\|provider:externalId> [--name n] [--tags a,b] [--color #hex] \| update <id> --tags a,b \| rename <id> <name…> \| delete <id> \| restore <id> \| purge <id> \| usage <id> \| default <intro\|outro> <id\|none> \| reindex            [--user <email>] the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and sound effects. `search` looks in your library, the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a file, a link or a search hit (license and credit are recorded). The user is --user, else the only account on this install; otherwise pass --user. `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion |
+| `reelsaw library list\|search\|add\|update\|rename\|delete\|restore\|purge\|usage\|default\|reindex [--user <email>]` | the library: intro/outro videos and images, logos, stickers, GIFs, SVGs, music and sound effects. `list` shows your files, `search` looks in your library, the Reelsaw catalog (default) or an enabled provider (pexels, pixabay, freesound, iconify, openverse, giphy, klipy); `add` takes a file, a link or a search hit (license and credit are recorded); `update` sets tags, `rename` the name, `default` the intro or outro for new projects. Acts as the given user, else the only account on this install. `reindex` rebuilds the asset reference table ("used by", purge safety) for every project, to completion |
 | `reelsaw catalog status\|refresh` | the Reelsaw catalog manifest in force (version, source, last check); refresh asks CATALOG_URL now |
 | `reelsaw project-bumpers <projectId> [--intro default\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a project's intro/outro: the library default, none or a specific item |
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
@@ -538,9 +585,9 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]` | make one clip's framing (its section at --at, else its first framed one: mode plus nudge / subject / crop) the project's default for every clip, clearing the others' own sections and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing) |
 | `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative); `save` builds one from a clip's layers, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
-| `reelsaw usage` | [--days 30]                     per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
+| `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
-| `reelsaw abuse` | [--run]                         accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
+| `reelsaw abuse [--run]` | accounts the hourly abuse pass flagged (shared sign-up address, bursts, temporary domains); --run recomputes the flags now |
 | `reelsaw billing <email> \| sync [<email>] \| set-plan <email> <plan\|none>` | hosted (REELSAW_EE): an account's plan, subscription, Stripe's view and its last webhook events; `sync` re-reads Stripe for one account or every subscription (the daily reconcile, by hand); `set-plan` grants a plan without Stripe (none removes it) |
 | `reelsaw settings [KEY=value…] [--clear KEY…]` | instance settings in force (sign-up mode, quotas, retention, …): .env default, admin override, effective; KEY=value changes one without a restart, --clear KEY goes back to .env (same as Settings → System and set_instance_settings) |
 | `reelsaw mcp` | the MCP server over stdio for clients that launch a command: same tools as /api/mcp, forwarded to REELSAW_URL with REELSAW_API_KEY (needs no database; see src/mcp-stdio.ts) |
@@ -579,7 +626,7 @@ apps/server   Hono + tRPC + Better Auth + Drizzle (Postgres) + pg-boss workers +
 packages/shared  zod schemas and types shared by both
 ```
 
-Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
+Server composition (`apps/server/src/services.ts`): `createServices()` builds `config → media tools → ai → storage → database (+migrations) → events → queue → auth`, checking each one. The resulting `Services` object is injected into the tRPC context, the HTTP app and every pipeline stage (`StageContext`), so nothing reaches for a global. Boot logs one `boot step ok` line per step (JSON, or pretty on a terminal) with the step name and its duration in `ms`: config, data dir, resources, media tools, LLM call capture, AI models, the on-device detectors, storage, database, model settings, event bus, job queue, email, auth. Steps whose feature is switched off say so in their name (`face detector (disabled)`). A failing step stops the process with exit code 78 and a message that names the step and the fix, for example a transcription model that returns no word timestamps or a model server that is unreachable. Some steps depend on the process's role: a process with `RUN_WORKERS=false` only warns when free disk is under `MIN_FREE_DISK_MB` (so a full disk cannot lock out the admin UI that frees it) and skips the face, text and voice detectors; a process with `RUN_HTTP=false` skips the mail server check. The AI-models step checks the environment's models; once the database is up the effective models (after an admin's runtime override) are checked too.
 
 Pipeline (each box is a pg-boss queue; each stage emits events and enqueues the next):
 
@@ -677,6 +724,12 @@ Every variable, with its default and meaning, is in [docs/CONFIG.md](docs/CONFIG
 
 ## Observability
 
+**Health.** `GET /api/health` is a readiness check, not a ping. It answers `200 {"ok": true, "checks": {…}}` when
+Postgres answers, the event listener is connected, the job queue is started and (in a process that runs workers) its
+worker heartbeat is fresh; each check has a 2 s timeout. Otherwise it answers `503 {"ok": false, "checks": {…}}` with a
+short reason per failing check (`db`, `events`, `queue`, `workers`), and the log has the detail. The Docker
+`HEALTHCHECK` and any load balancer pointed at it restart or drain a process that is up but cannot work.
+
 **Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports boot
 failures, 5xx API errors and a job's final failed attempt; the web app reports render errors.
 `POSTHOG_KEY` (and `POSTHOG_HOST`, EU cloud or self-hosted) turns on PostHog: the server sends
@@ -735,7 +788,7 @@ Whisper mishears names ("Copia" → "Copious"). Three layers fix that, all optio
 
 ### Disfluencies
 
-Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover. Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Long pauses are shortened too (project setting **Pauses**: natural 0.6 s, tight 0.35 s, or keep), detected with Silero VAD on the clip audio. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is first located by CTC forced alignment (wav2vec2, exact word boundaries at 20 ms from the audio plus the known words, ~0.2 s on CPU) and verified with one transcription of the seam; only if that fails is it re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
+Fillers ("um"), repetitions ("the the") and false starts ("your pay actual pay dates") are detected after transcription (`DISFLUENCY_REMOVAL=true`): a rule pass with near-certain confidence, then a model pass (`DISFLUENCY_LLM=true`) that rewrites each window cleanly and is diffed against the original so it can only ever delete. A model deletion is kept only when every removed word is a filler or is restated within the next few words; repairs land as pending flags for review. Flags appear inline in the transcript (struck through once applied) with the same accept/reject popover (over MCP: `list_transcript_flags`, `review_transcript_flags`, `add_transcript_correction`, `add_transcript_cut`). Captions drop accepted disfluencies, and they are always cut from the audio/video with jump cuts. Long pauses are shortened too (project setting **Pauses**: natural 0.6 s, tight 0.35 s, or keep), detected with Silero VAD on the clip audio. Cut boundaries are not taken from the chunk-level ASR timestamps (they drift by up to a word): every cut is first located by CTC forced alignment (wav2vec2, exact word boundaries at 20 ms from the audio plus the known words, ~0.2 s on CPU) and verified with one transcription of the seam; only if that fails is it re-aligned by transcribing windows around it (`TRANSCRIPT_ALIGN_MODEL`) twice with different offsets (word timings shift with the window), boundaries snap to the quietest 5 ms frame beside the neighbouring words, and a candidate search keeps the first seam that passes verification: both neighbours heard back to back, nothing left between them, and the deleted words gone (or, when the recogniser fills them back in from context, the removed audio on its own is heard as those words). Unverifiable cuts are skipped and listed on the clip. Seams get a 20 ms equal-power crossfade (`acrossfade`) with length-compensated trims so audio and video stay in sync. Substitution repairs between function words ("into between", "a the") are caught by a rule; legitimate compounds ("out of", "up to") are excluded.
 
 ### Eval
 

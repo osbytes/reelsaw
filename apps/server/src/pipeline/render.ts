@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode, type SectionAdjust } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, resolveFraming, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
@@ -248,10 +248,11 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const srcH = project.height ?? 1080;
 
   // framing: user sections (absolute seconds) over a default mode (legacy clip/project override, else auto)
-  const defaultMode = (clip.layoutOverride ?? settings.reframe ?? "auto") as TimelineMode;
-  const sections = (clip.layoutSections ?? []).map((sc) => ({ ...sc, start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode }));
-  // the project's adjustment (nudge or crop) goes with the project's mode, not with a legacy per-clip override
-  const timeline = coverTimeline(duration, sections, defaultMode, clip.layoutOverride ? undefined : (settings.reframeAdjust ?? undefined));
+  // (resolveFraming is the same reading get_clip reports; the project's adjustment goes with the project's mode, not with a legacy per-clip override)
+  const framing = resolveFraming(clip, settings);
+  const defaultMode: TimelineMode = framing.mode;
+  const sections = framing.sections.map((sc) => ({ ...sc, start: sc.start - clip.startSec, end: sc.end - clip.startSec, mode: sc.mode as TimelineMode }));
+  const timeline = coverTimeline(duration, sections, defaultMode, framing.adjust);
   log.debug({ defaultMode, sections: sections.length, timeline: timeline.map((pc) => ({ start: Number(pc.start.toFixed(2)), end: Number(pc.end.toFixed(2)), mode: pc.mode })) }, "framing requested");
   const needsFaces = timeline.some((pc) => pc.mode === "auto" || pc.mode === "face" || pc.mode === "split" || pc.mode === "stack");
   const transcriptMeta = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { sceneCuts: true, overlays: true, textProfile: true } });
@@ -297,7 +298,11 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const cutsFrom: "project" | "clip" | "none" = transcriptMeta?.sceneCuts ? "project" : needsFaces && svc.faces ? "clip" : "none";
   const sceneCuts =
     cutsFrom === "clip"
-      ? (await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration })).filter((c) => c > 0 && c < duration)
+      ? (await svc.media.detectScenes(sourcePath, undefined, ctx.signal, { start: clip.startSec, duration }).catch((err: unknown) => {
+          if (ctx.signal.aborted) throw err;
+          log.warn({ err }, "shot changes of the clip not detected, rendering without cuts");
+          return [] as number[];
+        })).filter((c) => c > 0 && c < duration)
       : (transcriptMeta?.sceneCuts ?? []).map((c) => c - clip.startSec).filter((c) => c > 0 && c < duration);
   let samples: FaceSample[] = [];
   if (svc.faces && needsFaces) {
@@ -1044,12 +1049,16 @@ export function overlayChain(items: LoadedOverlay[], firstInput: number, outW: n
   return { chain: `${parts.join(";")};`, out: prev };
 }
 
-export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number) {
+/**
+ * Mark a clip failed. `gen`: only while that render generation is current. `ifStatus`: only while the clip is still in
+ * that status (a prepare that gives up must not fail a clip a newer prepare or render has taken over).
+ */
+export async function markClipFailed(svc: Services, projectId: string, clipId: string, err: unknown, gen?: number, o: { ifStatus?: schema.Clip["status"] } = {}) {
   const message = err instanceof Error ? err.message : String(err);
   await svc.tx(async (u) => {
     // a failing stale render must not mark the newer, pending version as failed
-    const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
-    if (!cur || (gen !== undefined && cur.gen !== gen)) return;
+    const [cur] = await u.db.select({ gen: schema.clips.renderGen, status: schema.clips.status }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
+    if (!cur || (gen !== undefined && cur.gen !== gen) || (o.ifStatus !== undefined && cur.status !== o.ifStatus)) return;
     await u.db.update(schema.clips).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000) });
     await finalizeInTx(svc, u, projectId);

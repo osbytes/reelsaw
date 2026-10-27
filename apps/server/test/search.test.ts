@@ -124,7 +124,8 @@ describe("users search", () => {
 
   it("finds a name through a typo", async () => assert.deepEqual(await find("rosalnd"), ["Rosalind Franklin"]));
   it("matches part of an email, with punctuation", async () => {
-    assert.deepEqual(await find(`bench-${tag.slice(0, 4)}`), ["Ada Lovelace"]);
+    // the query must not carry part of the shared tag: four random hex characters trigram-match the other mailboxes now and then
+    assert.deepEqual(await find("bench-"), ["Ada Lovelace"]);
     assert.deepEqual(await find("ghopper-"), ["Grace Hopper"]);
     assert.deepEqual(await find(`@example.test ${tag}`).then((n) => n.length), 3);
   });

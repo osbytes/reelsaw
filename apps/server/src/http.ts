@@ -17,16 +17,17 @@ import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
-import { checkStorageQuota, QuotaError } from "./quota.js";
+import { assertStorageRoom, checkStorageQuota, QuotaError } from "./quota.js";
 import { keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
-import { createExportZip, parseClipIds, pickExportClips } from "./export.js";
+import { createExportZip, exportPlan, parseClipIds } from "./export.js";
 import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
+import { clientIp, WindowCounter } from "./abuse.js";
 import { createReportZip, reportCapabilities, reportPreview } from "./report/bundle.js";
 import { reportRequestSchema, TEXT_FONTS } from "@reelsaw/shared";
 import { execFile } from "node:child_process";
@@ -35,6 +36,7 @@ import { assetVisibleTo } from "./library/visible.js";
 const execFileAsync = promisify(execFile);
 import { requestLogger, logTrpcError, type AppEnv } from "./request-log.js";
 import { z } from "zod";
+import { runHealthChecks } from "./health.js";
 import { planCutPreview, cutPreviewAudio } from "./pipeline/cutpreview.js";
 import { TRPCError } from "@trpc/server";
 import { clipCaptionsFile, projectTranscriptFile, type CaptionFile, type CaptionFormat } from "./transcript-files.js";
@@ -107,14 +109,26 @@ export function createApp(svc: Services) {
   // Public OTLP config for the browser. The production HTML embeds the same object so the SDK
   // starts before the first API call; Vite dev has no embed and fetches this instead.
   app.get("/api/otel", (c) => c.json(svc.otel.public));
-  // liveness for anyone; machine numbers for admins (or HEALTH_DETAILS=true on a private network)
+  // readiness for anyone: 200 when the database, event listener, job queue and (with workers) this process's heartbeat all
+  // answer within 2 s each, else 503 with the same `checks` map saying which did not (health.ts). Machine numbers for
+  // admins (or HEALTH_DETAILS=true on a private network).
   app.get("/api/health", async (c) => {
     const open = svc.settings.get().HEALTH_DETAILS;
     const who = open ? null : await activeRequester(auth, db, c.req.raw.headers);
     const details = open || who?.user.role === "admin";
-    return c.json({ ok: true, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) });
+    const { ok, checks } = await runHealthChecks(svc);
+    return c.json({ ok, checks, ...version, ...(details ? { resources: await svc.resources.snapshot() } : {}) }, ok ? 200 : 503);
   });
+  // OAuth dynamic client registration is open to anyone (claude.ai registers itself); cap it per address so the client table cannot be flooded
+  const registrations = new WindowCounter(20);
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+    if (config.MCP_OAUTH && c.req.method === "POST" && c.req.path === "/api/auth/oauth2/register") {
+      const ip = clientIp(c.req.raw.headers, config);
+      if (ip && !registrations.hit(ip)) {
+        c.get("log").warn({ ip }, "oauth client registration refused: too many from this address today");
+        return c.json({ error: "too_many_requests", error_description: "Too many apps were registered from this network today. Try again tomorrow." }, 429);
+      }
+    }
     if (c.req.method === "GET" && c.req.path === "/api/auth/verify-email") {
       const gate = await gateEmailVerification(db, c.req.query("token") ?? "");
       if (!gate.ok) {
@@ -170,18 +184,18 @@ export function createApp(svc: Services) {
         if (!user) return c.json({ error: "unauthorized" }, 401);
         const why = cannotUseApp(user, "oauth");
         if (why) return c.json({ error: "forbidden", message: why }, 403);
-          return handleMcp(c, svc, user);
+          return handleMcp(c, svc, user, { via: "oauth", canAdminister: false });
         },
         // the JWKS is served by this very process: fetch it over loopback, not through APP_URL (which may not resolve from inside a container)
         { resource: mcpResource(config), jwksUrl: `http://127.0.0.1:${config.PORT}/api/auth/jwks` },
       );
       return guarded(c.req.raw);
     }
-    const who = await requester(auth, db, c.req.raw.headers);
+    const who = await requester(auth, db, c.req.raw.headers, svc.log.child({ module: "auth" }));
     if (!who) return mcpUnauthorized(c);
     const why = cannotUseApp(who.user, who.via);
     if (why) return c.json({ error: "forbidden", message: why }, 403);
-    return handleMcp(c, svc, who.user);
+    return handleMcp(c, svc, who.user, who);
   });
 
   // Raw upload: body is the file, original name in x-filename. Streams to disk, then into storage.
@@ -196,11 +210,19 @@ export function createApp(svc: Services) {
       return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
     }
     try {
-      await checkStorageQuota(db, svc.settings.get(), session.user.id, length, svc.entitlements);
+      // a chunked body carries no length: reserve the largest upload allowed (the actual size is re-checked under the lock below)
+      await checkStorageQuota(db, svc.settings.get(), session.user.id, length > 0 ? length : maxUploadMb * 1024 * 1024, svc.entitlements);
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       const quota = err instanceof QuotaError ? err.quota : undefined;
       return c.json({ error: (err as Error).message, ...(quota ? { quota } : {}) }, 429);
+    }
+    // refuse before writing a byte rather than fill the disk the pipeline needs (a read, not a lease: the file is gone after the copy to the store)
+    const freeMB = (await svc.resources.snapshot()).diskFreeMB;
+    const needMB = svc.config.MIN_FREE_DISK_MB + Math.ceil((length > 0 ? length : maxUploadMb * 1024 * 1024) / 1048576);
+    if (freeMB >= 0 && freeMB < needMB) {
+      c.get("log").warn({ bytes: length, freeMB, needMB }, "upload rejected: not enough disk");
+      return c.json({ error: "This server is low on disk space right now. Try again later, or ask the administrator to free some space." }, 507);
     }
     if (!c.req.raw.body) return c.json({ error: "empty body" }, 400);
     const id = randomUUID();
@@ -222,9 +244,13 @@ export function createApp(svc: Services) {
       const storageKey = keys.upload(id, ext);
       await storage.putFile(storageKey, dest);
       try {
-        await db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        // the real size, under the account's quota lock, in the transaction that inserts the row: parallel uploads cannot all pass
+        await svc.tx(async (u) => {
+          await assertStorageRoom(svc, u, session.user.id, st.size);
+          await u.db.insert(schema.uploads).values({ id, userId: session.user.id, filename, storageKey, sizeBytes: st.size });
+        });
       } catch (err) {
-        // put first (the row must never point at a missing object), so a failed insert leaves an orphan: remove it
+        // put first (the row must never point at a missing object), so a failed insert or a refusal leaves an orphan: remove it
         await storage.delete(storageKey).catch((e) => c.get("log").warn({ err: e, storageKey }, "could not remove the orphaned upload object"));
         throw err;
       }
@@ -234,6 +260,10 @@ export function createApp(svc: Services) {
       if (err instanceof UploadTooLarge) {
         c.get("log").warn({ bytes: received, maxMb: maxUploadMb }, "upload rejected: too large");
         return c.json({ error: `file exceeds ${maxUploadMb} MB` }, 413);
+      }
+      if (err instanceof QuotaError) {
+        c.get("log").warn({ uploadId: id, bytes: received, reason: err.message }, "upload rejected: storage limit");
+        return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
       return c.json({ error: (err as Error).message }, 500);
@@ -282,11 +312,24 @@ export function createApp(svc: Services) {
     if (!session) return c.text("unauthorized", 401);
     const asset = await db.query.assets.findFirst({ where: and(eq(schema.assets.id, c.req.param("id")), assetVisibleTo(session.user.id)) });
     if (!asset) return c.text("not found", 404);
-    const loc = await storage.resolve(asset.sourceKey);
-    if ("url" in loc) return c.redirect(loc.url, 302);
-    const res = await sendFile(c.req.raw, loc.file);
     // an uploaded SVG is a document: never let one run script or load anything in the app's origin
-    if (asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg")) res.headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    const svgCsp = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    const isSvg = asset.mime === "image/svg+xml" || asset.sourceKey.endsWith(".svg");
+    const loc = await storage.resolve(asset.sourceKey);
+    if ("url" in loc) {
+      // a redirect to the bucket would skip the sandbox header, so an SVG is read through this server (they are small)
+      if (!isSvg) return c.redirect(loc.url, 302);
+      const tmp = path.join(paths.tmp, `svg-${asset.id}-${randomUUID()}.svg`);
+      try {
+        await storage.ensureLocal(asset.sourceKey, tmp);
+        const body = await fsp.readFile(tmp);
+        return new Response(body, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": svgCsp, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=300" } });
+      } finally {
+        await fsp.rm(tmp, { force: true });
+      }
+    }
+    const res = await sendFile(c.req.raw, loc.file);
+    if (isSvg) res.headers.set("Content-Security-Policy", svgCsp);
     return res;
   });
 
@@ -334,18 +377,14 @@ export function createApp(svc: Services) {
     const session = await actor(c);
     if (!session) return c.text("unauthorized", 401);
     const projectId = c.req.param("projectId");
-    const project = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, session.user.id), isNull(schema.projects.deletedAt)) });
-    if (!project) return c.text("not found", 404);
-    const [clips, transcript] = await Promise.all([
-      db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)) }),
-      db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { language: true } }),
-    ]);
-    const ids = parseClipIds(c.req.query("clips"));
-    if (!ids) return c.text("bad clips list", 400);
-    const picked = pickExportClips(clips, ids);
-    if (picked.unknown.length) return c.text("some of those clips are not in this project", 404);
-    if (!picked.clips.some((cl) => cl.status === "done" && cl.outputKey)) return c.text("no rendered clips yet", 409);
-    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project, clips: picked.clips, language: transcript?.language ?? null, subset: picked.subset });
+    let plan;
+    try {
+      plan = await exportPlan(svc, { id: session.user.id, admin: false }, projectId, parseClipIds(c.req.query("clips")));
+    } catch (err) {
+      if (!(err instanceof TRPCError)) throw err;
+      return c.text(err.message, err.code === "BAD_REQUEST" ? 400 : err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" ? 409 : 500);
+    }
+    const { stream, filename } = await createExportZip({ storage, paths, log: c.get("log") }, { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset });
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     c.header("Cache-Control", "no-store");

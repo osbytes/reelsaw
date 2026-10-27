@@ -38,7 +38,7 @@ export function TemplatesPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const highlighted = useHashParams().get("template");
-  const list = useQuery(trpc.layerTemplates.list.queryOptions());
+  const list = useQuery(trpc.layerTemplates.list.queryOptions({ limit: 500 }));
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() });
   const create = useMutation(trpc.layerTemplates.create.mutationOptions());
   const update = useMutation(trpc.layerTemplates.update.mutationOptions({ onSuccess: () => invalidate() }));
@@ -49,7 +49,8 @@ export function TemplatesPage() {
   const [draft, setDraft] = useState("");
   const [confirm, setConfirm] = useState<TemplateRow | null>(null);
 
-  const templates = list.data?.templates ?? [];
+  const templates = list.data?.items ?? [];
+  const totalTemplates = list.data?.total ?? templates.length;
   const deleted = list.data?.deleted ?? [];
   const highlight = (id: string) => nav({ pathname: loc.pathname, hash: `#template=${id}` }, { replace: true });
 
@@ -199,6 +200,7 @@ export function TemplatesPage() {
               {templates.map((t) => row(t))}
             </ul>
           )}
+          {templates.length > 0 && <p className="pt-1 text-xs tabular-nums text-ink3">Showing {templates.length.toLocaleString()} of {totalTemplates.toLocaleString()} templates</p>}
         </section>
 
         {deleted.length > 0 && (
