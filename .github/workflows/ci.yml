@@ -120,6 +120,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # the server imports @reelsaw/shared from its dist, which only a build produces
+      - run: pnpm --filter @reelsaw/shared build
       - name: mock AI provider (OpenAI-compatible, deterministic)
         run: |
           nohup node scripts/mock-ai.mjs > mock-ai.log 2>&1 &
