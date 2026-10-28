@@ -5,8 +5,6 @@
   </picture>
 </p>
 
-# Reelsaw
-
 <p align="center">
   <a href="https://www.osbytes.io" target="_blank" rel="noopener noreferrer" title="osbytes — open source bytes"><img src="https://www.osbytes.io/badge.svg" alt="osbytes — open source bytes" width="24" height="24"></a>
   <a href="https://github.com/osbytes/reelsaw/releases"><img src="https://img.shields.io/github/v/release/osbytes/reelsaw?label=release" alt="Latest release"></a>
