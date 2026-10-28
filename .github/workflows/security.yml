@@ -3,8 +3,9 @@
 #   workflows     zizmor lints .github/workflows (template injection, credential persistence,
 #                 dangerous triggers, …); exceptions live in .github/zizmor.yml with a reason each
 #   secrets       gitleaks over the whole history (GitHub push protection only knows provider tokens)
-#   image         Grype scans the published :latest image once a week, because new CVEs land in
-#                 Debian and ffmpeg after a release; results go to the Security tab
+#   image         Grype scans the published :latest image after every release and once a week,
+#                 because new CVEs land in Debian and ffmpeg between releases; results go to the
+#                 Security tab, and alerts a release fixed close on the next scan
 # None of the PR jobs write anything, so they work the same on fork PRs.
 name: security
 
@@ -14,6 +15,11 @@ on:
     branches: [main]
   schedule:
     - cron: "43 5 * * 2"
+  # after a release has pushed the new :latest (zizmor: workflow_run is a dangerous trigger because
+  # a job could act on the triggering run's data; this one only pulls a public image, see zizmor.yml)
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -31,7 +37,7 @@ jobs:
           comment-summary-in-pr: never
 
   workflows:
-    if: github.event_name != 'schedule'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,7 +51,7 @@ jobs:
           annotations: true
 
   secrets:
-    if: github.event_name != 'schedule'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +72,8 @@ jobs:
       - run: '"$RUNNER_TEMP/gitleaks" git --redact --no-banner .'
 
   image:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # a failed or cancelled release has not pushed a new image: nothing to scan
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
