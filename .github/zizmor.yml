@@ -12,3 +12,8 @@ rules:
       # the stack job's build-push-action only loads the image into the runner's Docker (load: true)
       # to test it; nothing is pushed, so a poisoned pnpm or layer cache cannot reach a release
       - ci.yml
+  dangerous-triggers:
+    ignore:
+      # workflow_run (after release) only pulls the public :latest image for Grype and uploads the
+      # SARIF; it never checks out code or reads anything from the triggering run
+      - security.yml
