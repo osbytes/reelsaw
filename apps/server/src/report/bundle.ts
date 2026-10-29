@@ -300,6 +300,8 @@ export async function createReportZip(
       archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
       await archive.finalize();
     } catch (err) {
+      // the response is already streaming, so the browser only sees a broken download: the log is the only record
+      svc.log.error({ err, kind: manifest.kind, instance: include.instance }, "issue report failed");
       archive.destroy(err as Error);
     }
   })();

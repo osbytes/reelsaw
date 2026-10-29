@@ -134,11 +134,11 @@ export async function transcribe(ctx: StageContext) {
     return chunkStepOutput(i, result.text, result.segments.length, Date.now() - t0);
   };
   await ctx.progress(0.1, `Transcribing ${chunkFiles.length} chunk(s), ${concurrency} at a time`);
-  const unitMs = ctx.unitTimeoutMs(transcriptionModel);
   await ctx.steps(chunkFiles, { concurrency, range: [0.1, 0.95], message: (d, t) => `Transcribed chunk ${d}/${t}` }, async (file, i, signal) => {
     const audio = await fs.readFile(path.join(chunkDir, file));
     const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });
-    return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), { schema: chunkStepSchema, timeoutMs: unitMs, model: transcriptionModel, signal });
+    const timeoutMs = ctx.unitTimeoutMs(transcriptionModel, { audioSec: (offsets[i + 1] ?? acc) - offsets[i]! });
+    return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), { schema: chunkStepSchema, timeoutMs, model: transcriptionModel, signal });
   });
 
   const chunks = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), orderBy: asc(schema.transcriptChunks.index) });

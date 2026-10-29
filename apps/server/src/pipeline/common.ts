@@ -230,11 +230,16 @@ export class StageContext {
     });
   }
 
-  /** Seconds one model call may take: LLM_CALL_TIMEOUT_SECONDS, else 120 for a hosted model and 600 for a self-hosted one. */
-  unitTimeoutMs(model: string): number {
+  /**
+   * Milliseconds one model call may take: LLM_CALL_TIMEOUT_SECONDS, else 120 s for a hosted model and 600 s for a
+   * self-hosted one. A self-hosted transcription of `audioSec` gets at least twice the audio's length: a CPU-only
+   * whisper runs near real time when it shares the machine, so a fixed 10 minutes failed every 10-minute chunk.
+   */
+  unitTimeoutMs(model: string, o: { audioSec?: number } = {}): number {
     const set = this.svc.settings.get().LLM_CALL_TIMEOUT_SECONDS;
     if (set > 0) return set * 1000;
-    return isSelfHostedModel({ AI_MODEL: model, OPENAI_BASE_URL: this.svc.providers.get("openai").baseUrl }) ? 600_000 : 120_000;
+    if (!isSelfHostedModel({ AI_MODEL: model, OPENAI_BASE_URL: this.svc.providers.get("openai").baseUrl })) return 120_000;
+    return Math.max(600_000, Math.round((o.audioSec ?? 0) * 2000));
   }
 
   private get runner(): StepRunner {

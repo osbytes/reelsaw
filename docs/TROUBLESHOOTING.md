@@ -265,8 +265,11 @@ windows and died in the same place, and the user saw "This operation was aborted
   restart or a timeout continues where it stopped: the debug lines `step reused` show what was skipped. The project page and
   `reelsaw status` show "13 of 43 parts, about 1 h left" (`projects.stage_detail`; `get_project` has it as `stageDetail`).
 - **Two limits, both runtime settings.** `LLM_CALL_TIMEOUT_SECONDS` bounds one model call, every HTTP attempt of it together
-  (0 = auto: 120 s hosted, 600 s self-hosted). `STAGE_IDLE_TIMEOUT_MINUTES` stops a stage in which no part finished for that
-  long (0 = auto: 1.5 x the call limit). Neither is the total time: a stage may take hours as long as parts keep finishing.
+  (0 = auto: 120 s hosted, 600 s self-hosted, at least twice the chunk's audio for a self-hosted transcription).
+  `STAGE_IDLE_TIMEOUT_MINUTES` stops a stage in which no part finished for that long (0 = auto: 1.5 x the call limit).
+  Neither is the total time: a stage may take hours as long as parts keep finishing. Neither counts time a call waits
+  for a provider slot (`PROVIDER_CONCURRENCY`): a project queued behind other projects on one local model is waiting,
+  not slow (`ai/slot-wait.ts` tells the step's limit when a wait starts and ends).
   A CPU-only 14B model needs about 2-3 min per part; raise the call limit if a single call really takes longer.
 - **Timeouts read as sentences:** "Finding moments timed out: 13 of 43 parts done in 30 min on qwen2.5:14b (~2.3 min per part).
   Retry continues where it stopped; a smaller or GPU-backed model is faster." That text is the project's error and the
@@ -465,7 +468,10 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   `select name, priority, data->>'userId', state from pgboss.job where state in ('created','retry','active') order by priority desc, created_on`.
 - **One model server, many jobs: `PROVIDER_CONCURRENCY`.** `ANALYZE_CONCURRENCY` / `TRANSCRIBE_CONCURRENCY` are per
   job; the provider gate (`ai/gate.ts`) caps calls per provider across all jobs and processes (default 2 for a
-  self-hosted Ollama / Speaches, unlimited for cloud). Each process has an in-memory semaphore, and the cross-process
+  self-hosted Ollama or compatible server, 1 for `openai` pointed at a local server such as Speaches, unlimited for
+  cloud). A CPU whisper uses every core per call, so two at once only halve each other: on a 4-core box two projects
+  transcribing together timed out every 10-minute chunk. When Ollama and Speaches share one CPU box, `compat=1` keeps
+  them from fighting as well. Each process has an in-memory semaphore, and the cross-process
   limit is N Postgres session advisory locks per provider (`pg_locks` rows with `locktype = 'advisory'`) held on a
   dedicated connection for the length of the call, so each process holds at most N extra database connections
   per gated provider. A process that dies drops its slot with its connection. Calls waiting for a slot log
