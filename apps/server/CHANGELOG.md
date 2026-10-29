@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.28.0
+
+### Minor Changes
+
+- [#201](https://github.com/osbytes/reelsaw/pull/201) [`c6ac53c`](https://github.com/osbytes/reelsaw/commit/c6ac53cb56f01914e34f974543fbe5987009560b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Burned-in captions in tight close-ups are blurred again: a caption band that reaches a speaker's chin is trimmed to below the face instead of being dropped, each blur covers only the text on screen at that moment (still scene text beside the band, like a label on a desk, is left alone), and blurs have a soft edge and fade in and out instead of switching on as a hard box. In split and stack sections, captions now sit on the line between the two panes (a switch in the editor's caption settings turns it off).
+
+- [#199](https://github.com/osbytes/reelsaw/pull/199) [`ee84e55`](https://github.com/osbytes/reelsaw/commit/ee84e55083105edae5d5899fa5e7c4128126e907) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Layer templates can carry an intro and outro. Pick them in the template editor's new Intro & outro block (Clip's own, None or a library video or image); applying the template sets them on the clips as their own choice, in the same step as the layers, and new clips of a project that uses the template get them too. Save as template keeps the clip's intro and outro. Also in the `save_layer_template` / `update_layer_template` MCP tools (`bumpers`) and `reelsaw templates set --intro / --outro`.
+
 ## 0.27.2
 
 ### Patch Changes
