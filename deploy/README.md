@@ -184,3 +184,17 @@ docker compose logs app                      # boot and job logs
 docker compose exec app reelsaw status <id>  # one project's pipeline state (id from the URL)
 docker compose exec app reelsaw machine      # cpus, memory, disk, GPU, ffmpeg encoder in use
 ```
+
+**`password authentication failed for user "reelsaw"` at boot.** The `reelsaw_pgdata` volume keeps the
+password it was created with, and a new `.env` (a deleted install folder, a second checkout, an
+install made by another tool under the same project name) carries a different one. The installer
+handles this on every run: it keeps the volume and sets the database password from `.env` before the
+app starts, so re-running `install.sh` / `install.ps1` is the fix. By hand, from the install folder:
+
+```bash
+docker compose up -d db
+docker compose exec -T db psql -U reelsaw -d reelsaw -c "alter user reelsaw password '$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)'"
+docker compose up -d
+```
+
+To start over instead (drops every project): `docker compose down && docker volume rm reelsaw_pgdata reelsaw_data`.
