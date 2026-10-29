@@ -494,14 +494,18 @@ export function ProjectPage() {
   const header = (
     <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}>
       <div className="min-w-0 flex-[1_1_320px]">
-        <div className={`gap-1.5 text-xs text-ink3 ${compact ? "hidden" : "flex"}`}>
-          <Link to="/" className="text-ink3 no-underline hover:text-ink">
-            Projects
-          </Link>
-          <span>/</span>
-          <span className="truncate">{p.title}</span>
+        {/* the breadcrumb is the heading: its last crumb is the title, so the name is not printed twice */}
+        <div className={`flex min-w-0 items-baseline gap-1.5 ${compact ? "" : "text-sm"}`}>
+          {!compact && (
+            <>
+              <Link to="/" className="shrink-0 text-ink3 no-underline hover:text-ink">
+                Projects
+              </Link>
+              <span className="shrink-0 text-ink3">/</span>
+            </>
+          )}
+          <h1 className={`min-w-0 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "truncate text-xl"}`}>{p.title}</h1>
         </div>
-        <h1 className={`mt-0.5 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "text-xl"}`}>{p.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 text-[13px] text-ink2">
           {dur ? <span className="font-mono text-xs leading-5">{formatTime(dur)}</span> : null}
           {p.width && p.height ? <span>{p.height}p</span> : null}

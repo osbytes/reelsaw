@@ -26,8 +26,7 @@ export function ProjectPageSkeleton({ compact, width }: { compact: boolean; widt
   const header = (
     <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "gap-3 py-2.5" : "gap-5 py-3.5"}`}>
       <div className="min-w-0 flex-1">
-        {!compact && <Skeleton className="h-4 w-40" />}
-        <Skeleton className={`mt-1 ${compact ? "h-5 w-3/4" : "h-6 w-1/2"}`} />
+        <Skeleton className={compact ? "h-5 w-3/4" : "h-6 w-1/2"} />
         <div className="mt-2 flex gap-3.5">
           <Skeleton className="h-4 w-12" />
           <Skeleton className="h-4 w-10" />
