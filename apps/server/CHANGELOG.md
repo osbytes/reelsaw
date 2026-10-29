@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.28.1
+
+### Patch Changes
+
+- [#202](https://github.com/osbytes/reelsaw/pull/202) [`c441b3b`](https://github.com/osbytes/reelsaw/commit/c441b3b3d02603570c3825bad075cca0a7746ec7) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Several projects at once on a CPU-only box no longer time out over and over while transcribing: a call waiting its turn for a local model no longer counts against its time limit, a local whisper (Speaches) now takes one transcription at a time unless `PROVIDER_CONCURRENCY` says otherwise, and a self-hosted transcription gets at least twice the chunk's audio length before it times out. An admin's issue report with instance-wide diagnostics no longer fails while projects are in progress, and a report that fails now logs why.
+
 ## 0.28.0
 
 ### Minor Changes
