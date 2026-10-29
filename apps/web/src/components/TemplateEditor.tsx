@@ -28,6 +28,7 @@ import {
   type ClipLayer,
   type LayerTiming,
   type Style,
+  type TemplateBumpers,
   type TemplateLayer,
 } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
@@ -40,7 +41,7 @@ import { ScrollArea } from "./scroll-area";
 import { VerticalPreview, OverlayMenuItem, OverlayMenuSeparator, type Framing, type PreviewAssetOverlay } from "./VerticalPreview";
 import { Timeline, type EditorSection, type LayerBlock } from "./Timeline";
 import { Modal, Segmented, Select } from "./ui";
-import { useBumperLibrary, type LibraryAsset } from "./BumperField";
+import { BumperSelects, useBumperLibrary, type LibraryAsset, type SlotChoices } from "./BumperField";
 import { AssetFinderDialog, type PickedAsset } from "./AssetFinder";
 import { Thumb, clockText } from "./BumperCombobox";
 import { ShortcutSheet } from "./ShortcutSheet";
@@ -51,6 +52,7 @@ export interface EditorTemplate {
   id: string;
   name: string;
   layers: TemplateLayer[];
+  bumpers: TemplateBumpers | null;
 }
 
 interface Props {
@@ -67,7 +69,27 @@ type Mode = LayerTiming["mode"];
 interface TemplateDoc {
   name: string;
   layers: TemplateLayer[];
+  /** intro / outro the template sets; null = neither (clips keep their own) */
+  bumpers: TemplateBumpers | null;
 }
+
+/** A template slot as the intro / outro picker shows it: unset = "keep" (clips keep their own), null = "none". */
+const toChoices = (b: TemplateBumpers | null): SlotChoices => ({
+  intro: b?.intro === undefined ? "keep" : (b.intro ?? "none"),
+  outro: b?.outro === undefined ? "keep" : (b.outro ?? "none"),
+  ...(b?.introSec ? { introSec: b.introSec } : {}),
+  ...(b?.outroSec ? { outroSec: b.outroSec } : {}),
+});
+const fromChoices = (c: SlotChoices): TemplateBumpers | null => {
+  const b: TemplateBumpers = {};
+  for (const s of ["intro", "outro"] as const) {
+    if (c[s] === "keep") continue;
+    b[s] = c[s] === "none" ? null : c[s];
+    const sec = c[`${s}Sec`];
+    if (b[s] && sec) b[`${s}Sec`] = clamp(sec, 1, 10);
+  }
+  return Object.keys(b).length ? b : null;
+};
 
 const PREVIEW_KEY = "rs-template-preview-sec";
 const SNAP_KEY = "rs-editor-snap";
@@ -468,10 +490,10 @@ const noop = () => {};
 export function TemplateEditor({ template, onExit }: Props) {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const history = useHistory<TemplateDoc>(() => ({ name: template.name, layers: template.layers }));
+  const history = useHistory<TemplateDoc>(() => ({ name: template.name, layers: template.layers, bumpers: template.bumpers ?? null }));
   const doc = history.state;
-  const { name, layers } = doc;
-  const [saved, setSaved] = useState<TemplateDoc>(() => ({ name: template.name, layers: template.layers }));
+  const { name, layers, bumpers } = doc;
+  const [saved, setSaved] = useState<TemplateDoc>(() => ({ name: template.name, layers: template.layers, bumpers: template.bumpers ?? null }));
   const edit = (fn: (d: TemplateDoc) => TemplateDoc, key?: string) => history.set(fn, key);
 
   const [previewSec, setPreviewSecRaw] = useState(readPreviewSec);
@@ -749,7 +771,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     }
     const sent = doc;
     try {
-      await update.mutateAsync({ id: template.id, name: sent.name.trim(), layers: sent.layers });
+      await update.mutateAsync({ id: template.id, name: sent.name.trim(), layers: sent.layers, bumpers: sent.bumpers });
       setSaved(sent);
       await Promise.all([qc.invalidateQueries({ queryKey: trpc.layerTemplates.list.queryKey() }), qc.invalidateQueries({ queryKey: trpc.layerTemplates.get.queryKey({ id: template.id }) })]);
       toast("Saved");
@@ -837,6 +859,13 @@ export function TemplateEditor({ template, onExit }: Props) {
                 onRemove={() => removeLayer(l.id)}
               />
             ))}
+          <section aria-labelledby="template-bumpers" className="flex flex-col gap-2 border-t border-line pt-3">
+            <span id="template-bumpers" className="text-[13px] font-bold">
+              Intro & outro
+            </span>
+            <BumperSelects template value={toChoices(bumpers)} onChange={(v) => edit((d) => ({ ...d, bumpers: fromChoices(v) }), "bumpers")} />
+            <p className="text-[11px] leading-snug text-ink3">Played before and after the clip. Applying the template sets them as the clip’s own; Clip’s own leaves each clip’s choice alone.</p>
+          </section>
           <p className="text-[11px] leading-snug text-ink3">
             From the start and Before the end keep their seconds on every clip; Whole clip stretches; Proportional is a share of the clip. Change the preview length to see the template fit a shorter or longer clip. Drag a picture or text on the preview to move it, a block on the timeline to change its timing.
           </p>

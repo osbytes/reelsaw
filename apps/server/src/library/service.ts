@@ -30,6 +30,7 @@ import { assetVisibleTo } from "./visible.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { dropAssetStorage } from "../storage/sweep.js";
 import { assetRefsReady } from "./refs.js";
+import { templateAssetUses } from "./template-assets.js";
 import { TRPCError } from "@trpc/server";
 import type { Db } from "../db/index.js";
 import { bumperCoverage, type BumperCoverage, type SlotCoverage } from "./summary.js";
@@ -496,12 +497,12 @@ export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<str
     where r.clip_id is null or c.deleted_at is null
     group by r.asset_id`);
   const out = new Map((res.rows as Array<{ asset_id: string; projects: number; clips: number; roles: Array<"intro" | "outro" | "layer"> }>).map((r) => [r.asset_id, { projects: r.projects, clips: r.clips, templates: 0, roles: [...(r.roles ?? [])] as Array<"intro" | "outro" | "layer" | "template"> }]));
-  // the user's live layer templates name assets in their jsonb layers (a small per-user table; see docs/specs/layer-templates.md)
+  // the user's live layer templates name assets in their layers and intro / outro (templateAssetUses)
   const tpl = await db.execute<{ asset_id: string; templates: number }>(sql`
-    select l->>'assetId' as asset_id, count(distinct t.id)::int as templates
-    from layer_templates t, jsonb_array_elements(t.layers) l
-    where t.user_id = ${userId} and t.deleted_at is null and l->>'assetId' is not null
-    group by l->>'assetId'`);
+    select tu.asset_id, count(distinct tu.template_id)::int as templates
+    from (${templateAssetUses}) tu
+    where tu.user_id = ${userId} and tu.deleted_at is null
+    group by tu.asset_id`);
   for (const r of tpl.rows) {
     const cur = out.get(r.asset_id) ?? { projects: 0, clips: 0, templates: 0, roles: [] };
     cur.templates = r.templates;
@@ -511,17 +512,19 @@ export async function bumperUsageCounts(db: Db, userId: string): Promise<Map<str
   return out;
 }
 
-/** A live layer template that names the asset; `layers` = how many of its layers do. */
-export type AssetUsageTemplate = { id: string; name: string; layers: number };
+/** A live layer template that names the asset; `layers` = how many of its layers do, `slots` = as its intro / outro. */
+export type AssetUsageTemplate = { id: string; name: string; layers: number; slots: Array<"intro" | "outro"> };
 
-/** The user's live layer templates that name an asset, with how many layers do. */
+/** The user's live layer templates that name an asset, with how many layers do and whether it is their intro / outro. */
 export async function templateAssetUsage(db: Db, userId: string, assetId: string): Promise<AssetUsageTemplate[]> {
   const res = await db.execute<AssetUsageTemplate>(sql`
-    select t.id as id, t.name as name, count(*)::int as layers
-    from layer_templates t, jsonb_array_elements(t.layers) l
-    where t.user_id = ${userId} and t.deleted_at is null and l->>'assetId' = ${assetId}
-    group by t.id, t.name, t.updated_at
-    order by t.updated_at desc
+    select tu.template_id as id, tu.name as name,
+      (count(*) filter (where tu.role = 'layer'))::int as layers,
+      coalesce(array_agg(tu.role order by tu.role) filter (where tu.role <> 'layer'), '{}') as slots
+    from (${templateAssetUses}) tu
+    where tu.user_id = ${userId} and tu.deleted_at is null and tu.asset_id = ${assetId}
+    group by tu.template_id, tu.name, tu.updated_at
+    order by tu.updated_at desc
     limit 200`);
   return res.rows;
 }
@@ -626,7 +629,7 @@ export async function purgeOwnedAsset(svc: Services, userId: string, assetId: st
     if (!(await assetRefsReady(u.db))) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The library is still indexing which projects use what. Try again in a few minutes." });
     const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${assetId}) as used`);
     const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
-    const tpl = await u.db.execute(sql`select exists (select 1 from layer_templates t, jsonb_array_elements(t.layers) l where t.deleted_at is null and l->>'assetId' = ${assetId}) as used`);
+    const tpl = await u.db.execute(sql`select exists (select 1 from (${templateAssetUses}) tu where tu.deleted_at is null and tu.asset_id = ${assetId}) as used`);
     const inTemplate = !!(tpl.rows[0] as { used: boolean } | undefined)?.used;
     if (used || inTemplate) {
       throw new TRPCError({

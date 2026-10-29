@@ -8,6 +8,7 @@ import { z } from "zod";
 import { DECISION_KINDS, CLEARABLE_SETTINGS, layerTemplateNameSchema, layerTemplateLayersSchema, projectSettingsPatchSchema, userProjectDefaultsSchema, reframeModeSchema, layoutSectionSchema, styleOverrideSchema, clipLayerSchema, assetTagsSchema, MAX_CLIP_LAYERS, REFINE_STEPS } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
+import { templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
@@ -19,7 +20,7 @@ Which tool when:
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
 - recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
-Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip): save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
+Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip), optionally with an intro and outro: save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers and get the template's intro / outro as their own choice), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 Reelsaw learns from what you decide: accepts, rejects, cuts, corrections and clip edits go in your decision log (list_decisions, export_decisions for evals), which outlives deleted projects; forget_decisions or purge_project forgetDecisions: true removes entries, set_learning turns recording off.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
@@ -367,7 +368,7 @@ export const TOOLS = {
   },
   list_layer_templates: {
     title: "List layer templates",
-    description: "Your layer templates (sets of layers that fit any clip length), newest first, paged. Returns { items: [{ id, name, layerCount, layers, updatedAt }], nextCursor, total, deleted } (nextCursor goes in cursor; deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
+    description: "Your layer templates (layers that fit any clip length, plus an optional intro / outro), newest first. Returns { items: [{ id, name, layerCount, layers, bumpers, updatedAt }], nextCursor, total, deleted } (nextCursor goes in cursor; deleted = restorable). A layer has the clip-layer fields plus timing { mode, start, end, minSec, maxSec }: head = seconds after the start; tail = seconds before the end (end 0 = the very end); fill = whole clip; relative = fractions 0-1 of the length, held between minSec and maxSec",
     inputSchema: {
       cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
       limit: z.number().int().min(1).max(500).default(100).describe("Templates per page (1-500, default 100)"),
@@ -376,13 +377,13 @@ export const TOOLS = {
   },
   save_layer_template: {
     title: "Save layer template",
-    description: "Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge) or layers (each with a timing, see list_layer_templates). Returns the template { id, name, layerCount, layers }. Use apply_layer_template to put it on clips",
+    description: "Create a template from exactly one of clipId (that clip's layers: spanning = fill, touching the start = head, touching the end = tail, else anchored to the nearer edge; plus the intro and outro the clip renders with) or layers (each with a timing, see list_layer_templates; [] with bumpers = an intro / outro only template). Returns the template { id, name, layerCount, layers, bumpers }. Use apply_layer_template to put it on clips",
     inputSchema: saveLayerTemplateInput,
   },
   update_layer_template: {
     title: "Update layer template",
-    description: "Rename a layer template and/or replace its layers (the whole list, each with a timing); a field left out is untouched. Clips that already got the template keep the layers they have; apply_layer_template again to refresh them. Returns the template.",
-    inputSchema: { templateId: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() },
+    description: "Rename a layer template, replace its layers (the whole list, each with a timing) and/or replace its intro / outro (bumpers; null = it sets neither); a field left out is untouched. Clips that already got the template keep what they have; apply_layer_template again to refresh them. Returns the template.",
+    inputSchema: { templateId: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional(), bumpers: templateBumpersSchema.nullable().optional() },
     annotations: { idempotentHint: true },
   },
   delete_layer_template: {
@@ -410,7 +411,7 @@ export const TOOLS = {
   },
   apply_layer_template: {
     title: "Apply layer template to clips",
-    description: "Write a template's layers onto clips of one project (up to 200 clipIds, or all), fitted to each clip's length. Clips keep the layers as their own; the template is not linked. mode replace (default) swaps their layers, add keeps them and adds. rerender true re-renders finished clips now, else the next render shows them. update_project settings.layerTemplateId only affects clips created later. Returns { updated, rerendered, skipped: [{ clipId, reason }], layersSkipped }",
+    description: "Write a template onto clips of one project (up to 200 clipIds, or all): its layers fitted to each clip's length, and the intro / outro it sets as each clip's own. Not linked afterwards. mode replace (default) swaps the clips' layers, add keeps them and adds. rerender true re-renders finished clips now, else the next render shows them. update_project settings.layerTemplateId only affects clips created later. Returns { updated, rerendered, skipped: [{ clipId, reason }], layersSkipped, bumpers: slots set }",
     inputSchema: applyLayerTemplateInput,
   },
   delete_project: {

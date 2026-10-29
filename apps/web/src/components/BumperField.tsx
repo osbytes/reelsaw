@@ -572,7 +572,7 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
             <Link to={`/templates/${t.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
               {t.name}
             </Link>
-            <span className="shrink-0 text-ink3">{t.layers > 1 ? `layer ×${t.layers}` : "layer"} · template</span>
+            <span className="shrink-0 text-ink3">{[...t.slots, ...(t.layers ? [t.layers > 1 ? `layer ×${t.layers}` : "layer"] : [])].join(" + ")} · template</span>
           </div>
         ))}
         {projects.map((p) => (
@@ -652,19 +652,28 @@ export const effectiveAsset = (own: string | null | undefined, project: string |
 /** Seconds a slot lasts on a clip: its own, else the project's, else the asset's own length. */
 export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string | null | undefined, projectSec: number | undefined, assetSec: number | undefined) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
 
-/** Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset. */
-export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean }) {
+/**
+ * Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset.
+ * `template`: a layer template's slots instead (Clip's own / None / each asset; there is no project to follow).
+ */
+export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false, template = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean; template?: boolean }) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   // music is for the audio lane, never a slot
   const assets = (library.data?.assets ?? []).filter((a) => a.kind !== "audio");
   const known = [...assets, ...(library.data?.deleted ?? [])];
   const name = (id: string | null | undefined) => (id ? (known.find((a) => a.id === id)?.name ?? (library.isPending ? "…" : "deleted")) : "none");
-  const fixed = (projectId: string | null | undefined): FixedOption[] => [
-    ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
-    { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
-    { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
-  ];
+  const fixed = (projectId: string | null | undefined): FixedOption[] =>
+    template
+      ? [
+          { value: "keep", label: "Clip’s own", hint: "Clips keep the one they have", icon: <Equal className="h-4 w-4" /> },
+          { value: "none", label: "None", hint: "Takes it off the clips", icon: <Ban className="h-4 w-4" /> },
+        ]
+      : [
+          ...(keep ? [{ value: "keep", label: "Leave as it is", hint: "Don’t change this slot", icon: <Equal className="h-4 w-4" /> }] : []),
+          { value: "inherit", label: `Project default (${name(projectId)})`, hint: "Follow the project", icon: <Star className="h-4 w-4" /> },
+          { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
+        ];
   const row = (slot: "intro" | "outro", label: string, projectId: string | null | undefined, defaultId: string | undefined) => (
     <SlotRow
       slot={slot}

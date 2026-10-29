@@ -400,6 +400,8 @@ export const layerTemplates = pgTable(
     name: text("name").notNull(),
     /** the layers with their timing (TemplateLayer[], max MAX_CLIP_LAYERS) */
     layers: jsonb("layers").$type<TemplateLayer[]>().notNull().default([]),
+    /** intro / outro applied with the layers (clip-bumper shape; a missing slot leaves the clip's own); null = none */
+    bumpers: jsonb("bumpers").$type<ClipBumpers>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

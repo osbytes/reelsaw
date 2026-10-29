@@ -22,7 +22,7 @@ import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { fmtTs } from "./transcript.js";
 import { clipCandidateSchema, clipLayers, type ClipCandidate, type TranscriptSegment } from "@reelsaw/shared";
-import { layersForNewClip, templateForNewClips } from "../library/templates.js";
+import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
 
 const describeSchema = z.object({
@@ -221,10 +221,12 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     if (!cur || !needsPrepare(cur)) return log.info("clip deleted or prepared meanwhile; nothing to write");
     const patch = preparedPatch(clip, cur, prepared);
     const bounds = { startSec: patch.startSec ?? cur.startSec, endSec: patch.endSec ?? cur.endSec };
-    // the project's layer template, placed against the final bounds; a clip that already has layers keeps them
+    // the project's layer template, placed against the final bounds; a clip that already has layers keeps them, and
+    // an intro / outro the user already chose for it wins over the template's
     const layers = clipLayers(cur).length ? null : layersForNewClip(template, bounds);
-    await requestRender(svc, u, projectId, clipId, { ...patch, score: scored?.total ?? 50, scores: scored?.scores ?? null, reasoning: note.slice(0, 1000), ...(layers ? { layers } : {}) });
-    if (layers) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: cur.bumpers, layers }]);
+    const bumpers = template?.bumpers ? bumpersForNewClip(template, cur.bumpers) : undefined;
+    await requestRender(svc, u, projectId, clipId, { ...patch, score: scored?.total ?? 50, scores: scored?.scores ?? null, reasoning: note.slice(0, 1000), ...(layers ? { layers } : {}), ...(bumpers !== undefined ? { bumpers } : {}) });
+    if (layers || bumpers !== undefined) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: bumpers !== undefined ? bumpers : cur.bumpers, layers: layers ?? cur.layers, overlays: cur.overlays, audio: cur.audio }]);
     await u.emit(projectId, "clip.created", { clipId, index: cur.index, title: patch.title ?? cur.title });
   });
   void db;
