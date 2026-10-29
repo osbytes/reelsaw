@@ -523,6 +523,13 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   sampled frames). Regions now grow to the boxes seen in them (`growOverlays`, core-anchored so they don't
   chain into nearby logos), and each render re-detects inside its own clip. Measured by masking frames and
   re-running the detector (eval `overlays/mask-residual`): 0 frames with caption text left.
+- **Caption bands in close-ups touch faces.** A motivation edit cut the speaker as a tight close-up with its
+  subtitles over the chin (report, 2026-10-29): the clip's grown band reached up to 0.54 of the frame, touched the
+  face in more than 10% of frames, and the face check dropped the whole band, so nothing was blurred.
+  `dropFaceOverlaps` now trims a band's edge back to where the faces end (90th percentile of the chins) and drops
+  only what still touches a face or is left under 4% of the frame tall. Each render also tightens a timed band into
+  pieces per stretch of text (`tightenOverlays`, at most 12 per region), so a stray box widens only its own stretch,
+  and every blur has a soft edge and fades in and out over 0.25 s around its window (`sourceVideo`).
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
 - **Overlay skipped.** `clip.overlay_skipped` (payload `clipId`, `overlayId`, `reason`, sometimes `error`) means a

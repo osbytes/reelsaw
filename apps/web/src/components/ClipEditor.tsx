@@ -64,6 +64,9 @@ import {
   projectDefaultSection,
   adjustOf,
   FULL_FRAME,
+  layoutSeamY,
+  mergeSeamRuns,
+  type SeamRun,
   type ContentRegion,
   type SectionMode,
   type SourceOverlay,
@@ -834,6 +837,16 @@ export function ClipEditor(props: Props) {
     };
   }, [sections, clip.layoutSegments, clip.layout]);
   const framing = useMemo(() => framingAt(current), [framingAt, current]);
+  // where each stretch's panes meet, on the clip's clock (the captions' clock): the preview puts caption lines there like the renderer
+  const seams = useMemo((): SeamRun[] => {
+    const runs: SeamRun[] = [];
+    const step = 0.1;
+    for (let t = range[0]; t < range[1]; t += step) {
+      const f = framingAt(t);
+      runs.push({ start: t - range[0], end: Math.min(range[1], t + step) - range[0], y: layoutSeamY(f.layout, f.content, srcW, srcH) });
+    }
+    return mergeSeamRuns(runs);
+  }, [framingAt, range, srcW, srcH]);
   const autoChoiceFor = (s: EditorSection) => [...new Set(clip.layoutSegments.filter((d) => !d.manual && d.end > s.start && d.start < s.end).map(layoutLabel))].join(" / ");
 
   const panKey = useRef<string>("");
@@ -1504,6 +1517,7 @@ export function ClipEditor(props: Props) {
               Reset
             </button>
           </div>
+          <Switch checked={style.captionSeam} onChange={(v) => setStyle({ captionSeam: v })} label="Between the panes in split and stack sections" />
         </>
       )}
       <div className="flex flex-col gap-3 border-t border-line pt-4">
@@ -1874,6 +1888,7 @@ export function ClipEditor(props: Props) {
           srcH={srcH}
           style={style}
           words={clipWords}
+          seams={seams}
           hook={hook}
           emphasis={emphasis}
           onPan={panPane}
