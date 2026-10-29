@@ -1,0 +1,1 @@
+ALTER TABLE "layer_templates" ADD COLUMN "bumpers" jsonb;

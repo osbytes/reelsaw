@@ -4,7 +4,8 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layers, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { DELETED_PATH, layerTemplateNameSchema, type TemplateLayer } from "@reelsaw/shared";
+import { DELETED_PATH, layerTemplateNameSchema, type TemplateBumpers, type TemplateLayer } from "@reelsaw/shared";
+import { templateSummary } from "../components/TemplatePicker";
 import { useTRPC } from "../lib/trpc";
 import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
@@ -19,13 +20,14 @@ interface TemplateRow {
   name: string;
   layers: TemplateLayer[];
   layerCount: number;
+  bumpers: TemplateBumpers | null;
   updatedAt: string;
   deletedAt: string | null;
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-/** one column grid: name | layers | updated | actions */
-const GRID = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_6rem_8.5rem_8.5rem]";
+/** one column grid: name | what it holds (layers, intro / outro) | updated | actions */
+const GRID = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_10rem_8.5rem_8.5rem]";
 
 /**
  * Layer templates (docs/specs/layer-templates.md): sets of layers that fit any clip length. New template opens the
@@ -114,10 +116,12 @@ export function TemplatesPage() {
           </Link>
           {/* narrow screens fold the layer count and the time into a second line inside the name cell */}
           <span className="block truncate text-xs text-ink3 sm:hidden">
-            {plural(t.layerCount, "layer")} · updated {ago(t.updatedAt)}
+            {templateSummary(t)} · updated {ago(t.updatedAt)}
           </span>
         </span>
-        <span className="hidden text-right font-mono text-xs tabular-nums text-ink2 sm:block">{plural(t.layerCount, "layer")}</span>
+        <span className="hidden truncate text-right font-mono text-xs tabular-nums text-ink2 sm:block" title={templateSummary(t)}>
+          {templateSummary(t)}
+        </span>
         <span className="hidden text-xs text-ink3 sm:block">updated {ago(t.updatedAt)}</span>
         <span className="flex items-center justify-end gap-1.5">
           <Link to={`/templates/${t.id}`} className="btn-ghost w-[4.5rem] justify-center text-xs no-underline">

@@ -9,11 +9,12 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { MAX_CLIP_LAYERS, clipLayers, layerTemplateLayersSchema, layerTemplateNameSchema, resolveTemplateLayers, templateFromLayers, type ClipLayer, type TemplateLayer } from "@reelsaw/shared";
+import { MAX_CLIP_LAYERS, clipLayers, layerTemplateLayersSchema, layerTemplateNameSchema, mergeTemplateBumpers, resolveTemplateLayers, templateBumperSlots, templateBumpersSchema, templateFromLayers, type ClipBumpers, type ClipLayer, type TemplateBumpers, type TemplateLayer } from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { Logger } from "../log.js";
 import { requestRender } from "../pipeline/lifecycle.js";
+import { resolveClipBumpers } from "../pipeline/bumpers.js";
 import { assetVisibleTo } from "./visible.js";
 import { syncClipsRefs } from "./refs.js";
 import { cleanLayers } from "./layers.js";
@@ -38,6 +39,7 @@ export const saveLayerTemplateInput = {
   name: layerTemplateNameSchema,
   clipId: z.string().optional().describe("Build the template from this clip's layers (get_project or search_clips). Pass clipId or layers, not both"),
   layers: layerTemplateLayersSchema.optional().describe("Or the layers themselves, each with a timing: { kind: asset|text|audio, id, timing: { mode: head|tail|fill|relative, start, end, minSec, maxSec }, ...the layer's own fields (assetId, x, y, w / text, size, color / volume, duck, fade, loop) }"),
+  bumpers: templateBumpersSchema.optional().describe("With layers: the intro / outro the template puts on clips ({ intro, introSec, outro, outroSec }; a slot left out = clips keep their own, null = none, an id = that video or image). With clipId the clip's intro and outro are saved too"),
 };
 
 export type PublicLayerTemplate = ReturnType<typeof publicTemplate>;
@@ -47,6 +49,8 @@ export function publicTemplate(t: schema.LayerTemplate) {
     name: t.name,
     layers: t.layers,
     layerCount: t.layers.length,
+    /** intro / outro the template sets on clips (a missing slot = clips keep their own); null = it sets neither */
+    bumpers: t.bumpers ?? null,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
     deletedAt: t.deletedAt?.toISOString() ?? null,
@@ -90,9 +94,16 @@ export async function getLayerTemplate(db: Db, userId: string, id: string, opts:
   return row;
 }
 
-/** Every asset a template names is one the account may use (own upload or instance-shared) and still in the library. */
-async function assertTemplateAssets(db: Db, userId: string, layers: TemplateLayer[]) {
-  const want = [...new Set(layers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])))];
+/**
+ * Every asset a template names is one the account may use (own upload or instance-shared) and still in the library;
+ * an intro / outro is a video or an image, never a sound.
+ */
+async function assertTemplateAssets(db: Db, userId: string, layers: TemplateLayer[], bumpers?: TemplateBumpers | null) {
+  const slots = templateBumperSlots(bumpers).flatMap((s) => {
+    const id = bumpers?.[s];
+    return id ? [[s, id] as const] : [];
+  });
+  const want = [...new Set([...layers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), ...slots.map(([, id]) => id)])];
   if (!want.length) return;
   const rows = await db.select({ id: schema.assets.id, kind: schema.assets.kind }).from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
   const kinds = new Map(rows.map((r) => [r.id, r.kind]));
@@ -103,7 +114,15 @@ async function assertTemplateAssets(db: Db, userId: string, layers: TemplateLaye
     if (l.kind === "audio" && kind !== "audio") throw new TRPCError({ code: "BAD_REQUEST", message: `Layer “${l.id}”: a sound layer needs an audio file, not a ${kind}` });
     if (l.kind === "asset" && kind === "audio") throw new TRPCError({ code: "BAD_REQUEST", message: `Layer “${l.id}”: that library item is a sound; use an audio layer` });
   }
+  for (const [slot, id] of slots) {
+    const kind = kinds.get(id);
+    if (!kind) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
+    if (kind === "audio") throw new TRPCError({ code: "BAD_REQUEST", message: `An ${slot} is a video or an image, not a sound` });
+  }
 }
+
+/** The stored form: a value that sets no slot is null, so "sets neither" has one spelling. */
+const storedBumpers = (b: TemplateBumpers | null | undefined): ClipBumpers | null => (templateBumperSlots(b).length ? mergeTemplateBumpers(null, b) : null);
 
 /** Ids unique; nothing else to normalise here (windows are resolved per clip and cleaned there). */
 function checkTemplateLayers(layers: TemplateLayer[]) {
@@ -114,24 +133,27 @@ function checkTemplateLayers(layers: TemplateLayer[]) {
   }
 }
 
-export async function createLayerTemplate(svc: Services, userId: string, input: { name: string; layers: TemplateLayer[] }) {
+export async function createLayerTemplate(svc: Services, userId: string, input: { name: string; layers: TemplateLayer[]; bumpers?: TemplateBumpers | null }) {
   checkTemplateLayers(input.layers);
+  const bumpers = storedBumpers(input.bumpers);
   return svc.tx(async (u) => {
-    await assertTemplateAssets(u.db, userId, input.layers);
-    const [row] = await u.db.insert(schema.layerTemplates).values({ id: randomUUID(), userId, name: input.name.trim(), layers: input.layers }).returning();
-    svc.log.child({ module: "templates", userId }).info({ templateId: row!.id, layers: input.layers.length }, "layer template created");
+    await assertTemplateAssets(u.db, userId, input.layers, bumpers);
+    const [row] = await u.db.insert(schema.layerTemplates).values({ id: randomUUID(), userId, name: input.name.trim(), layers: input.layers, bumpers }).returning();
+    svc.log.child({ module: "templates", userId }).info({ templateId: row!.id, layers: input.layers.length, bumpers: templateBumperSlots(bumpers) }, "layer template created");
     return publicTemplate(row!);
   });
 }
 
-export async function updateLayerTemplate(svc: Services, userId: string, id: string, patch: { name?: string; layers?: TemplateLayer[] }) {
+/** `bumpers`: undefined = unchanged, null = the template sets no intro / outro, an object replaces the template's choice. */
+export async function updateLayerTemplate(svc: Services, userId: string, id: string, patch: { name?: string; layers?: TemplateLayer[]; bumpers?: TemplateBumpers | null }) {
   if (patch.layers) checkTemplateLayers(patch.layers);
+  const bumpers = patch.bumpers === undefined ? undefined : storedBumpers(patch.bumpers);
   return svc.tx(async (u) => {
     await getLayerTemplate(u.db, userId, id, { lock: true });
-    if (patch.layers) await assertTemplateAssets(u.db, userId, patch.layers);
+    if (patch.layers || bumpers) await assertTemplateAssets(u.db, userId, patch.layers ?? [], bumpers);
     const [row] = await u.db
       .update(schema.layerTemplates)
-      .set({ ...(patch.name !== undefined ? { name: patch.name.trim() } : {}), ...(patch.layers !== undefined ? { layers: patch.layers } : {}), updatedAt: new Date() })
+      .set({ ...(patch.name !== undefined ? { name: patch.name.trim() } : {}), ...(patch.layers !== undefined ? { layers: patch.layers } : {}), ...(bumpers !== undefined ? { bumpers } : {}), updatedAt: new Date() })
       .where(eq(schema.layerTemplates.id, id))
       .returning();
     return publicTemplate(row!);
@@ -183,16 +205,26 @@ export async function purgeLayerTemplate(svc: Services, userId: string, id: stri
   });
 }
 
-/** A template from one clip's current layers (templateFromLayers decides each layer's timing). */
+/**
+ * A template from one clip's current look: its layers (templateFromLayers decides each layer's timing) and the intro /
+ * outro it renders with, whether its own or the project's. A slot with neither is left unset, so applying the template
+ * never takes an intro away.
+ */
 export async function layerTemplateFromClip(svc: Services, userId: string, input: { clipId: string; name: string }) {
-  const [clip] = await svc.database.db
-    .select({ id: schema.clips.id, startSec: schema.clips.startSec, endSec: schema.clips.endSec, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio })
+  const [row] = await svc.database.db
+    .select({ id: schema.clips.id, startSec: schema.clips.startSec, endSec: schema.clips.endSec, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio, bumpers: schema.clips.bumpers, settings: schema.projects.settings })
     .from(schema.clips)
-    .where(and(eq(schema.clips.id, input.clipId), isNull(schema.clips.deletedAt), sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${userId} and ${schema.projects.deletedAt} is null)`));
-  if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
-  const layers = templateFromLayers(clipLayers(clip), clip);
-  if (!layers.length) throw new TRPCError({ code: "BAD_REQUEST", message: "This clip has no layers to save as a template" });
-  return createLayerTemplate(svc, userId, { name: input.name, layers });
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
+    .where(and(eq(schema.clips.id, input.clipId), isNull(schema.clips.deletedAt), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
+  const layers = templateFromLayers(clipLayers(row), row);
+  const r = resolveClipBumpers(row.settings ?? {}, row);
+  const bumpers: ClipBumpers = {
+    ...(r.introId ? { intro: r.introId, ...(r.introSec !== undefined ? { introSec: r.introSec } : {}) } : {}),
+    ...(r.outroId ? { outro: r.outroId, ...(r.outroSec !== undefined ? { outroSec: r.outroSec } : {}) } : {}),
+  };
+  if (!layers.length && !templateBumperSlots(bumpers).length) throw new TRPCError({ code: "BAD_REQUEST", message: "This clip has no layers, intro or outro to save as a template" });
+  return createLayerTemplate(svc, userId, { name: input.name, layers, bumpers });
 }
 
 export interface ApplyResult {
@@ -202,11 +234,14 @@ export interface ApplyResult {
   skipped: Array<{ clipId: string; reason: string }>;
   /** template layers that had no room on some clip (a tail longer than the clip, a relative window under its minimum) */
   layersSkipped: number;
+  /** the intro / outro slots the template set on the updated clips (empty = it sets neither) */
+  bumpers: Array<"intro" | "outro">;
 }
 
 /**
  * Materialise a template on clips of one project: each clip gets the template's layers resolved against its own
- * length (replacing its layers, or added to them), is marked edited (so a re-analyze keeps it) and, with `rerender`,
+ * length (replacing its layers, or added to them) and the intro / outro slots the template sets (in both modes: a clip
+ * has one intro and one outro; slots the template leaves unset keep the clip's own), is marked edited (so a re-analyze keeps it) and, with `rerender`,
  * re-rendered when finished. One transaction: clips locked in id order (like lockProjectClips), asset refs rewritten
  * with the layers. A clip still being prepared has no final bounds and is skipped with a reason.
  */
@@ -216,16 +251,17 @@ export async function applyLayerTemplate(svc: Services, userId: string, input: {
     const [p] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "No such project" });
     const t = await getLayerTemplate(u.db, userId, input.templateId);
-    await assertTemplateAssets(u.db, userId, t.layers);
+    await assertTemplateAssets(u.db, userId, t.layers, t.bumpers);
+    const slots = templateBumperSlots(t.bumpers);
     const ids = input.clipIds ? [...new Set(input.clipIds)] : undefined;
     const clips = await u.db
-      .select({ id: schema.clips.id, status: schema.clips.status, startSec: schema.clips.startSec, endSec: schema.clips.endSec, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio })
+      .select({ id: schema.clips.id, status: schema.clips.status, startSec: schema.clips.startSec, endSec: schema.clips.endSec, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio, bumpers: schema.clips.bumpers })
       .from(schema.clips)
       .where(and(eq(schema.clips.projectId, p.id), isNull(schema.clips.deletedAt), ids ? inArray(schema.clips.id, ids) : undefined))
       .orderBy(schema.clips.id)
       .for("update");
     if (ids && clips.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
-    const result: ApplyResult = { updated: 0, rerendered: 0, skipped: [], layersSkipped: 0 };
+    const result: ApplyResult = { updated: 0, rerendered: 0, skipped: [], layersSkipped: 0, bumpers: slots };
     const touched: string[] = [];
     const now = new Date();
     for (const c of clips) {
@@ -238,7 +274,8 @@ export async function applyLayerTemplate(svc: Services, userId: string, input: {
       const next = input.mode === "add" ? [...clipLayers(c), ...resolved.layers] : resolved.layers;
       if (next.length > MAX_CLIP_LAYERS) throw new TRPCError({ code: "BAD_REQUEST", message: `Clip ${c.id} would have ${next.length} layers; a clip can have at most ${MAX_CLIP_LAYERS}. Use mode "replace" or remove some layers first.` });
       const cleaned = cleanLayers(next, c) ?? [];
-      await u.db.update(schema.clips).set({ layers: cleaned, overlays: null, audio: null, editedAt: now, updatedAt: now }).where(eq(schema.clips.id, c.id));
+      const bumpers = slots.length ? { bumpers: mergeTemplateBumpers(c.bumpers, t.bumpers) } : {};
+      await u.db.update(schema.clips).set({ layers: cleaned, overlays: null, audio: null, ...bumpers, editedAt: now, updatedAt: now }).where(eq(schema.clips.id, c.id));
       touched.push(c.id);
       result.updated++;
     }
@@ -249,28 +286,67 @@ export async function applyLayerTemplate(svc: Services, userId: string, input: {
     if (input.rerender) {
       for (const c of clips) if (touched.includes(c.id) && (c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) result.rerendered++;
     }
-    log.info({ mode: input.mode, clips: clips.length, updated: result.updated, rerendered: result.rerendered, skipped: result.skipped.length, layersSkipped: result.layersSkipped }, "layer template applied");
+    log.info({ mode: input.mode, bumpers: slots, clips: clips.length, updated: result.updated, rerendered: result.rerendered, skipped: result.skipped.length, layersSkipped: result.layersSkipped }, "layer template applied");
     return result;
   });
 }
 
+/** What a project's new clips take from its template. */
+export interface NewClipTemplate {
+  layers: TemplateLayer[];
+  bumpers: TemplateBumpers | null;
+}
+
 /**
  * The template a project's new clips get, read when the pipeline creates them: null when the project names none, or
- * names one that was removed (a warning says so; the clips are created without layers, never failed).
+ * names one that was removed (a warning says so; the clips are created without its layers or intro / outro, never failed).
  */
-export async function templateForNewClips(db: Db, userId: string, templateId: string | null | undefined, log: Logger): Promise<TemplateLayer[] | null> {
+export async function templateForNewClips(db: Db, userId: string, templateId: string | null | undefined, log: Logger): Promise<NewClipTemplate | null> {
   if (!templateId) return null;
-  const [row] = await db.select({ layers: schema.layerTemplates.layers, deletedAt: schema.layerTemplates.deletedAt }).from(schema.layerTemplates).where(and(eq(schema.layerTemplates.id, templateId), eq(schema.layerTemplates.userId, userId)));
+  const [row] = await db.select({ layers: schema.layerTemplates.layers, bumpers: schema.layerTemplates.bumpers, deletedAt: schema.layerTemplates.deletedAt }).from(schema.layerTemplates).where(and(eq(schema.layerTemplates.id, templateId), eq(schema.layerTemplates.userId, userId)));
   if (!row || row.deletedAt) {
     log.warn({ templateId, reason: row ? "removed" : "missing" }, "the project's layer template is not available; new clips get no layers");
     return null;
   }
-  return row.layers;
+  return { layers: row.layers, bumpers: row.bumpers ?? null };
 }
 
 /** The stored layers a new clip gets from a template (null = none): resolved against the clip, then cleaned. */
-export function layersForNewClip(template: TemplateLayer[] | null, clip: { startSec: number; endSec: number }): ClipLayer[] | null {
-  if (!template?.length) return null;
-  const { layers } = resolveTemplateLayers(template, clip);
+export function layersForNewClip(template: NewClipTemplate | null, clip: { startSec: number; endSec: number }): ClipLayer[] | null {
+  if (!template?.layers.length) return null;
+  const { layers } = resolveTemplateLayers(template.layers, clip);
   return cleanLayers(layers, clip);
+}
+
+/**
+ * The intro / outro a new clip gets from a template, over what the clip already chose (`own`: a manual clip the user
+ * gave an intro while it was being prepared keeps it). Null = follow the project for both.
+ */
+export function bumpersForNewClip(template: NewClipTemplate | null, own: ClipBumpers | null = null): ClipBumpers | null {
+  return mergeTemplateBumpers(own, template?.bumpers, { onlyUnset: true });
+}
+
+/**
+ * A template's intro / outro after a CLI-style change: per slot "keep" = the template leaves clips' own choice alone,
+ * "none" = no intro / outro, an id = that asset; a slot not mentioned stays as it is. Seconds go with the slot.
+ */
+export function templateBumpersWith(cur: TemplateBumpers | null, change: { intro?: string; outro?: string; introSec?: number; outroSec?: number }): TemplateBumpers | null {
+  const next: TemplateBumpers = { ...(cur ?? {}) };
+  for (const s of ["intro", "outro"] as const) {
+    const choice = change[s];
+    if (choice !== undefined) {
+      delete next[s];
+      delete next[`${s}Sec`];
+      if (choice !== "keep") next[s] = choice === "none" ? null : choice;
+    }
+    const sec = change[`${s}Sec`];
+    if (sec !== undefined && next[s]) next[`${s}Sec`] = sec;
+  }
+  return templateBumperSlots(next).length ? next : null;
+}
+
+/** "; intro <id>, outro none" for listings; "" when the template sets neither. */
+export function templateBumpersText(b: TemplateBumpers | null): string {
+  const parts = templateBumperSlots(b).map((s) => `${s} ${b![s] ?? "none"}${b![`${s}Sec`] ? ` ${b![`${s}Sec`]} s` : ""}`);
+  return parts.length ? `; ${parts.join(", ")}` : "";
 }

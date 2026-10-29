@@ -427,9 +427,10 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
 
   // ── layer templates ──────────────────────────────────────────────────────
   server.registerTool("list_layer_templates", TOOLS.list_layer_templates, ({ cursor, limit }) => run(() => api.layerTemplates.list({ cursor, limit })));
-  server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers }) => {
-    if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers) or layers (the template's layers with timings)."));
-    return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers! })));
+  server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers, bumpers }) => {
+    if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers, intro and outro) or layers (the template's layers with timings; [] for an intro / outro only template)."));
+    if (clipId !== undefined && bumpers !== undefined) return Promise.resolve(fail("bumpers goes with layers; with clipId the clip's own intro and outro are saved (update_layer_template changes them after)."));
+    return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers!, bumpers })));
   });
   server.registerTool("update_layer_template", TOOLS.update_layer_template, ({ templateId, ...patch }) => run(() => api.layerTemplates.update({ id: templateId, ...patch })));
   server.registerTool("delete_layer_template", TOOLS.delete_layer_template, ({ templateId }) => run(() => api.layerTemplates.delete({ id: templateId })));

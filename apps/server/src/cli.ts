@@ -123,11 +123,13 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
  *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
  *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
- *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
- *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
- *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
- *                                           (all of them without clip ids; --add keeps the clip's own layers, default replaces);
- *                                           --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools
+ *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative),
+ *                                           plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a
+ *                                           clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them
+ *                                           without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it
+ *                                           sets replaces the clip's either way); --rerender re-renders the finished ones. Same
+ *                                           procedures as the Templates page and the MCP tools
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  *   usage [--days 30]                       per account: projects, source minutes, clips, model calls / tokens / reported
@@ -182,7 +184,8 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer } from "@reelsaw/shared";
+import { templateBumpersText, templateBumpersWith } from "./library/templates.js";
+import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer, type TemplateBumpers } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall, uploadLocalFile } from "./library/service.js";
@@ -1466,17 +1469,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 
   async templates(svc) {
-    const { pos: p, rerender, addMode, layers } = bumperArgs();
+    const { pos: p, rerender, addMode, layers, ...slot } = bumperArgs();
     const usage =
-      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
-    const show = (t: { id: string; name: string; layerCount: number }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s))`);
+    const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s)${templateBumpersText(t.bumpers)})`);
     if (sub === "list") {
       const r = await api.layerTemplates.list({ limit: 500 });
       if (!r.items.length) console.log("no layer templates");
-      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
+      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, "intro/outro": templateBumpersText(t.bumpers).replace(/^; /, ""), updated: t.updatedAt })));
       if (r.nextCursor) console.log(`showing the newest ${r.items.length} of ${r.total}`);
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
@@ -1509,10 +1512,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log("renamed:");
       show(t);
     } else if (sub === "set") {
-      if (!a || layers === undefined) throw new Error(usage);
-      const parsed = z.array(templateLayerSchema).safeParse(JSON.parse(layers));
-      if (!parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-      const t = await api.layerTemplates.update({ id: a, layers: parsed.data });
+      const slots = slot.intro !== undefined || slot.outro !== undefined || slot.introSec !== undefined || slot.outroSec !== undefined;
+      if (!a || (layers === undefined && !slots)) throw new Error(usage);
+      const parsed = layers === undefined ? undefined : z.array(templateLayerSchema).safeParse(JSON.parse(layers));
+      if (parsed && !parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      const bumpers = slots ? templateBumpersWith((await api.layerTemplates.get({ id: a })).bumpers, slot) : undefined;
+      const t = await api.layerTemplates.update({ id: a, ...(parsed ? { layers: parsed.data } : {}), ...(bumpers !== undefined ? { bumpers } : {}) });
       console.log("updated:");
       show(t);
     } else if (sub === "delete") {
@@ -1531,7 +1536,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!a || !b) throw new Error(usage);
       const clipIds = p.slice(3);
       const r = await api.layerTemplates.applyToClips({ templateId: a, projectId: b, ...(clipIds.length ? { clipIds } : {}), mode: addMode ? "add" : "replace", rerender });
-      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
       if (r.layersSkipped) console.log(`${r.layersSkipped} template layer(s) had no room on their clip and were left out`);
       for (const s of r.skipped) console.log(`skipped clip ${s.clipId}: ${s.reason}`);
     } else throw new Error(usage);

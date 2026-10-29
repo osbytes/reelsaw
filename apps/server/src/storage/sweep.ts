@@ -23,6 +23,7 @@ import { QUEUES } from "../queue/boss.js";
 import { chunk, deadlineIn, expired, keysetLoop, mapLimit } from "../lib/batch.js";
 import { getState, setState } from "../lib/state.js";
 import { assetRefsReady } from "../library/refs.js";
+import { templateAssetUses } from "../library/template-assets.js";
 import { volumeId } from "../disk-leases.js";
 
 /** Files younger than this are never touched: a worker may be writing or about to commit them. */
@@ -452,8 +453,8 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
   // Keyset over (deleted_at, id), 200 per batch. Still-referenced assets are excluded in SQL (`not exists`), so
   // they neither consume the batch nor starve the assets behind them. The timestamp travels as text to keep
   // microseconds: a JS Date would round the cursor and re-read or skip rows.
-  // A live layer template that names the asset keeps it too (a small per-user table, so the jsonb walk is cheap).
-  const templateUsesAsset = sql`select 1 from layer_templates t, jsonb_array_elements(t.layers) l where t.deleted_at is null and l->>'assetId' = a.id`;
+  // A live layer template that names the asset (a layer, its intro or its outro) keeps it too (templateAssetUses).
+  const templateUsesAsset = sql`select 1 from (${templateAssetUses}) tu where tu.deleted_at is null and tu.asset_id = a.id`;
   type Cur = { at: string; id: string };
   await keysetLoop<{ id: string; at: string }, Cur>({
     size: PURGE_BATCH,

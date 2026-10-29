@@ -508,6 +508,18 @@ export function ClipEditor(props: Props) {
   const { range, sections, title, hook, caption, hashtags, style, emphasis, bumpers, layers } = history.state;
   const navigate = useNavigate();
   const [bumpersDialog, setBumpersDialog] = useState(false);
+  // the intro / outro this clip renders with (its own choice, else the project's), as "Save as template" keeps them
+  const templateBumpers = useMemo((): ClipBumpers | null => {
+    const slot = (s: "intro" | "outro") => {
+      const own = bumpers[s];
+      const id = effectiveAsset(own, s === "intro" ? settings.introAssetId : settings.outroAssetId);
+      if (!id) return {};
+      const sec = own !== undefined ? bumpers[`${s}Sec`] : s === "intro" ? settings.introSec : settings.outroSec;
+      return { [s]: id, ...(sec !== undefined ? { [`${s}Sec`]: sec } : {}) };
+    };
+    const b: ClipBumpers = { ...slot("intro"), ...slot("outro") };
+    return Object.keys(b).length ? b : null;
+  }, [bumpers, settings.introAssetId, settings.outroAssetId, settings.introSec, settings.outroSec]);
   /** the crop dialog: which section and which of its crops it opened on */
   const [cropDialog, setCropDialog] = useState<{ section: number; key: CropKey } | null>(null);
   /** the section whose framing is about to become the project's (confirm first: every clip re-renders) */
@@ -1682,19 +1694,19 @@ export function ClipEditor(props: Props) {
             onRemove={() => removeLayer(l.id)}
           />
         ))}
-      {layers.length > 0 && (
-        <button className="btn-ghost self-start text-xs" onClick={() => setSaveTemplateOpen(true)} title="Save these layers as a template to use on other clips, whatever their length">
+      {(layers.length > 0 || templateBumpers) && (
+        <button className="btn-ghost self-start text-xs" onClick={() => setSaveTemplateOpen(true)} title="Save these layers, with the clip's intro and outro, as a template to use on other clips, whatever their length">
           <LayoutTemplate className="h-3.5 w-3.5" /> Save as template…
         </button>
       )}
       <p className="text-[11px] leading-snug text-ink3">Drag a picture or text on the preview to move it, its corner to resize it. On the timeline: drag a block to move it, its edges to trim it, double-click the lane to add one.</p>
     </div>
   );
-  /** A template into the document (one undo step): the first new layer is selected and shown. */
+  /** A template into the document (layers and intro / outro, one undo step): the first new layer is selected and shown. */
   const applyTemplate = (template: Parameters<typeof applyTemplateLocally>[0], mode: Parameters<typeof applyTemplateLocally>[1]) => {
-    const r = applyTemplateLocally(template, mode, layers, range);
+    const r = applyTemplateLocally(template, mode, layers, range, bumpers);
     if (!r) return;
-    setLayers(r.next);
+    edit((d) => ({ layers: clampLayers(r.next, d.range), bumpers: r.bumpers }));
     const first = r.added[0];
     if (first) {
       setSelectedLayer(first.id);
@@ -2298,7 +2310,7 @@ export function ClipEditor(props: Props) {
           ) : undefined
         }
       />
-      <SaveAsTemplateDialog open={saveTemplateOpen} onOpenChange={setSaveTemplateOpen} layers={layers} range={range} defaultName={title} />
+      <SaveAsTemplateDialog open={saveTemplateOpen} onOpenChange={setSaveTemplateOpen} layers={layers} range={range} defaultName={title} bumpers={templateBumpers} />
 
       <AssetFinderDialog
         open={picker?.kind === "asset"}

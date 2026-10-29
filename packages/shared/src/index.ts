@@ -634,6 +634,49 @@ export const DEFAULT_IMAGE_BUMPER_SEC = 3;
 export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), introSec: bumperSecondsSchema.optional(), outro: z.string().min(1).max(100).nullable().optional(), outroSec: bumperSecondsSchema.optional() });
 export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
 
+/**
+ * A layer template's intro / outro (docs/specs/layer-templates.md, "Intro and outro"): the clip shape, where a
+ * missing slot means "leave the clip's own choice alone", `null` means "no intro/outro" and a string is a library
+ * asset id. Applying the template writes these slots onto `clips.bumpers`, like it writes layers.
+ */
+const templateSlotSchema = (slot: "intro" | "outro") =>
+  z.string().min(1).max(100).nullable().optional().describe(`Library video or image id (list_bumpers) for the ${slot}; null = no ${slot}; left out = clips keep their own`);
+export const templateBumpersSchema = z
+  .object({
+    intro: templateSlotSchema("intro"),
+    introSec: bumperSecondsSchema.optional(),
+    outro: templateSlotSchema("outro"),
+    outroSec: bumperSecondsSchema.optional(),
+  })
+  .describe("Intro / outro the template puts on clips, as each clip's own choice");
+export type TemplateBumpers = ClipBumpers;
+const BUMPER_SLOTS = ["intro", "outro"] as const;
+
+/** The slots a template sets (an empty or missing value sets none). */
+export function templateBumperSlots(t: TemplateBumpers | null | undefined): Array<"intro" | "outro"> {
+  return t ? BUMPER_SLOTS.filter((s) => t[s] !== undefined) : [];
+}
+
+/**
+ * A template's intro / outro written onto a clip's own choice: each slot the template sets replaces the clip's (with
+ * its seconds, which only travel with an asset); other slots are untouched. `onlyUnset` fills just the slots the clip
+ * has not chosen itself (a clip created while the user already picked one). Null when nothing is left (follow the
+ * project for both).
+ */
+export function mergeTemplateBumpers(own: ClipBumpers | null | undefined, t: TemplateBumpers | null | undefined, opts: { onlyUnset?: boolean } = {}): ClipBumpers | null {
+  const next: ClipBumpers = { ...(own ?? {}) };
+  for (const s of templateBumperSlots(t)) {
+    if (opts.onlyUnset && own?.[s] !== undefined) continue;
+    const v = t![s] as string | null;
+    delete next[s];
+    delete next[`${s}Sec`];
+    next[s] = v;
+    const sec = t![`${s}Sec`];
+    if (v && sec !== undefined) next[`${s}Sec`] = sec;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
