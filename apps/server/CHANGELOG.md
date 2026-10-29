@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.27.2
+
+### Patch Changes
+
+- [#196](https://github.com/osbytes/reelsaw/pull/196) [`ba0a96d`](https://github.com/osbytes/reelsaw/commit/ba0a96de2c1a03f05266c32d08cd3fabcaa1eea4) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The installers (`install.sh`, `install.ps1`) now find a database volume left by an earlier install under the same project name, keep its data and set its password from `.env` before the app starts, so a lost `.env` or a second install folder no longer leaves the app looping on `password authentication failed`. That boot error now says why and points at the fix. On a first boot the log now says that the speech-to-text model is being downloaded and that the app answers only afterwards, with a line every 20 seconds while it runs and the elapsed time when it is done.
+
+- [#197](https://github.com/osbytes/reelsaw/pull/197) [`081850f`](https://github.com/osbytes/reelsaw/commit/081850fdac991aa72ecb1fc25ec64fcfb215ef9c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The project page header no longer prints the title twice: the breadcrumb's last crumb is the heading.
+
 ## 0.27.1
 
 ### Patch Changes
