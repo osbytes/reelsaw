@@ -12,6 +12,7 @@ import { schema, type Db } from "../db/index.js";
 import type { Logger } from "../log.js";
 import { histogram } from "../metrics.js";
 import { mapLimit } from "../lib/batch.js";
+import { withSlotWaitListener, type SlotWaitListener } from "../ai/slot-wait.js";
 
 /** What a unit of work is keyed on: change any part and the saved result no longer applies. */
 export interface StepKeyInput {
@@ -209,6 +210,53 @@ export interface StepRunnerDeps {
 
 const RECENT = 20;
 
+/**
+ * One unit's time limit, which stops counting while the unit waits for a provider slot (ai/slot-wait.ts): only the
+ * time the model spends on the unit counts. Several calls of one unit may wait at once; it counts again when none does.
+ */
+class UnitDeadline implements SlotWaitListener {
+  private readonly ctl = new AbortController();
+  private timer?: ReturnType<typeof setTimeout>;
+  private left: number;
+  private since = 0;
+  private waits = 0;
+  constructor(
+    ms: number,
+    private readonly changed: () => void,
+  ) {
+    this.left = ms;
+    this.start();
+  }
+  get signal() {
+    return this.ctl.signal;
+  }
+  /** a call of the unit is queued for a slot, so its clock is stopped */
+  get queued() {
+    return this.waits > 0;
+  }
+  private start() {
+    this.since = Date.now();
+    this.timer = setTimeout(() => this.ctl.abort(new DOMException("The unit ran past its time limit", "TimeoutError")), Math.max(0, this.left));
+    this.timer.unref();
+  }
+  waiting() {
+    if (this.waits++ > 0 || !this.timer) return;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.left -= Date.now() - this.since;
+    this.changed();
+  }
+  acquired() {
+    if (this.waits === 0 || --this.waits > 0 || this.ctl.signal.aborted) return;
+    this.start();
+    this.changed();
+  }
+  dispose() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+}
+
 export class StepRunner {
   private recent: number[] = [];
   private timer?: ReturnType<typeof setTimeout>;
@@ -223,13 +271,17 @@ export class StepRunner {
   idled?: Error;
   /** steps this attempt ran and saved (reused ones do not count): the worker re-queues an attempt that made progress */
   completed = 0;
+  /** the time limits of the units running now */
+  private live = new Set<UnitDeadline>();
+  /** every running unit is queued for a provider slot: other jobs have the model, so this stage is waiting, not stuck */
+  private queued = false;
 
   constructor(private readonly d: StepRunnerDeps) {}
 
   private arm() {
     const ms = this.d.idleMs(this.lastUnitMs);
     this.disarm();
-    if (ms <= 0 || this.idled) return;
+    if (ms <= 0 || this.idled || this.queued) return;
     this.timer = setTimeout(() => {
       const err = this.d.timeoutError({ done: this.doneInPhase, total: this.totalInPhase, model: this.model, unitMs: medianOf(this.recent), kind: "idle", elapsedMs: Date.now() - this.startedAt });
       this.idled = err;
@@ -241,6 +293,15 @@ export class StepRunner {
   private disarm() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+  }
+
+  /** The idle timer pauses while every running unit waits for a slot, and starts afresh once one gets it. */
+  private slotWaitChanged() {
+    const queued = this.live.size > 0 && [...this.live].every((u) => u.queued);
+    if (queued === this.queued) return;
+    this.queued = queued;
+    if (queued) this.disarm();
+    else if (this.live.size) this.arm();
   }
 
   /** After a finished unit: inside a batch the next one is expected soon (re-arm); on its own, whatever follows is not a step (disarm). */
@@ -272,23 +333,28 @@ export class StepRunner {
       this.d.log.warn({ step: name }, "saved step no longer matches its schema; running it again");
     }
     this.arm();
-    const timeout = AbortSignal.timeout(o.timeoutMs);
-    const signal = AbortSignal.any([parent, timeout]);
+    const timeout = new UnitDeadline(o.timeoutMs, () => this.slotWaitChanged());
+    const signal = AbortSignal.any([parent, timeout.signal]);
     const t0 = Date.now();
     let out: T;
+    this.live.add(timeout);
     try {
-      out = await fn(signal);
+      out = await withSlotWaitListener(timeout, () => fn(signal));
     } catch (err) {
       const ms = Date.now() - t0;
       // the job was cancelled or superseded, or the idle timer ended the attempt: say so, record nothing
       if (this.idled) throw this.idled;
       if (parent.aborted) throw err;
-      const timedOut = timeout.aborted;
+      const timedOut = timeout.signal.aborted;
       const failure = timedOut ? this.d.timeoutError({ done: this.doneInPhase, total: this.totalInPhase, model: this.model, unitMs: medianOf(this.recent), kind: "unit", elapsedMs: ms }) : err;
       histogram("reelsaw.pipeline.step.duration", ms / 1000, "s", { stage: this.d.stage, outcome: timedOut ? "timeout" : "error" }, "Wall time of one pipeline step, by outcome");
       const ok = await this.d.store.write({ name, key, ...(o.clipId ? { clipId: o.clipId } : {}), status: "failed", lastError: (failure instanceof Error ? failure.message : String(failure)).slice(0, 1000) });
       if (!ok) throw this.d.stale();
       throw failure;
+    } finally {
+      timeout.dispose();
+      this.live.delete(timeout);
+      this.slotWaitChanged();
     }
     const ms = Date.now() - t0;
     const ok = await this.d.store.write({ name, key, ...(o.clipId ? { clipId: o.clipId } : {}), status: "done", output: out, ms });

@@ -13,6 +13,7 @@ import { QuotaExceededError } from "../src/quota.js";
 import { StepRunner, attemptOutcome, callSignal, etaSeconds, medianOf, stableStringify, stageTimeoutMessage, stepKey, type StageDetail, type StepKeyInput, type StepStore, type StepWrite, type StoredStep } from "../src/pipeline/steps.js";
 import { MAP_PROMPT_VERSION, chunkTranscript, mapChunk, type SelectContext } from "../src/pipeline/select.js";
 import { clipCandidateSchema } from "@reelsaw/shared";
+import { createProviderGate } from "../src/ai/gate.js";
 
 // AbortSignal.timeout and the idle timer are unref'd: keep the loop alive while a test waits on them
 const alive = setInterval(() => {}, 1000);
@@ -298,6 +299,36 @@ describe("retry accounting", () => {
     assert.ok(new QuotaExceededError("too long") instanceof NonRetryableError);
     assert.ok(new SourceExpiredError(30) instanceof NonRetryableError);
     assert.ok(!(new StageTimeoutError({ stage: "analyze", done: 1, total: 2, model: "m", unitMs: 1, kind: "idle", elapsedMs: 1 }) instanceof NonRetryableError));
+  });
+});
+
+describe("waiting for a provider slot", () => {
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+  it("does not count against the unit's limit or the idle timer; the model's own time still does", async () => {
+    const gate = createProviderGate("local=1", "ollama", () => false, quiet);
+    // another job holds the only slot for longer than this unit's limit and the idle limit together
+    const other = gate.run("local", () => sleep(120));
+    const store = new MemoryStore();
+    const { r } = runner(store, { idleMs: 40 });
+    const out = await r.steps([0], { concurrency: 1, range: [0, 1], message: () => "" }, (_, i, signal) =>
+      r.step(`s${i}`, key({ input: i }), (sig) => gate.run("local", async () => (await sleep(20), [i]), sig), { schema: numbers, timeoutMs: 50, signal }),
+    );
+    await other;
+    assert.deepEqual(out, [[0]]);
+    assert.equal(r.idled, undefined);
+
+    // once the slot is taken, the limit counts again: a call slower than it times out
+    await assert.rejects(
+      r.step("slow", key({ input: "slow" }), (sig) => gate.run("local", () => hang(sig)), { schema: numbers, timeoutMs: 30 }),
+      (e) => e instanceof StageTimeoutError && e.kind === "unit",
+    );
+    r.stop();
+  });
+
+  it("a call outside a step waits as before", async () => {
+    const gate = createProviderGate("local=1", "ollama", () => false, quiet);
+    assert.deepEqual(await Promise.all([gate.run("local", async () => 1), gate.run("local", async () => 2)]), [1, 2]);
   });
 });
 
