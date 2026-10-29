@@ -77,6 +77,8 @@ export const styleSchema = z.object({
   captionSize: z.number().min(0.5).max(2).describe("Caption size multiplier (0.5-2, default 1)").default(1),
   captionX: frac("Caption centre, horizontal").default(0.5),
   captionY: frac("Caption centre, vertical (default 0.72)").default(0.72),
+  /** Split and stack sections: captions sit on the line between the two panes instead of on the lower speaker. */
+  captionSeam: z.boolean().describe("In split and stack sections, put captions on the line between the two panes instead of at captionY (default true)").default(true),
   /** Karaoke active-word colour. */
   highlightColor: hexColor.describe("Karaoke active-word colour, #RRGGBB (default #FFD700)").default("#FFD700"),
   /** Max words on screen at once (1 = one-word-at-a-time "Hormozi" style). */
@@ -1171,6 +1173,53 @@ export const FULL_FRAME: ContentRegion = { x1: 0, y1: 0, x2: 1, y2: 1 };
 export function isFullFrame(c: ContentRegion | undefined | null): boolean {
   return !c || (c.x1 <= 0.01 && c.y1 <= 0.01 && c.x2 >= 0.99 && c.y2 >= 0.99);
 }
+
+/**
+ * Where the two panes of a split or stack meet, as a fraction of the 9:16 frame height (mirrors
+ * `layoutFilter` in render.ts: a split and a content stack are two halves, a full-frame stack is the
+ * source letterboxed to the frame width over the speaker). Null for one-pane layouts, and for a seam
+ * too close to an edge to carry captions (a portrait source in a stack).
+ */
+export function layoutSeamY(layout: string, content: ContentRegion | undefined | null, srcW: number, srcH: number): number | null {
+  if (layout === "split") return 0.5;
+  if (layout !== "stack") return null;
+  if (!isFullFrame(content)) return 0.5;
+  const topH = Math.min(Math.round((1080 * srcH) / srcW / 2) * 2, 1918);
+  const y = topH / 1920;
+  return y >= 0.15 && y <= 0.85 ? Number(y.toFixed(4)) : null;
+}
+
+/** A stretch of the clip and the seam its layout has (null = one pane), on the clock the captions use. */
+export interface SeamRun {
+  start: number;
+  end: number;
+  y: number | null;
+}
+/** Sections shorter than this keep captions at captionY, so the captions don't hop for a moment and back. */
+export const CAPTION_SEAM_MIN_SEC = 2.5;
+
+/** Neighbouring runs with the same seam merged (two split sections across a cut are one stretch). */
+export function mergeSeamRuns(runs: SeamRun[]): SeamRun[] {
+  const out: SeamRun[] = [];
+  for (const r of runs.filter((x) => x.end > x.start).sort((a, b) => a.start - b.start)) {
+    const last = out.at(-1);
+    if (last && last.y === r.y && r.start <= last.end + 0.05) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+/**
+ * Vertical caption centre for a caption line shown around time `t`: the seam of a split / stack that
+ * lasts at least CAPTION_SEAM_MIN_SEC when `captionSeam` is on, else the style's captionY. The
+ * renderer and the editor preview both place each line with this, at the line's midpoint.
+ */
+export function captionYAt(style: Pick<Style, "captionY" | "captionSeam">, runs: SeamRun[], t: number): number {
+  if (!style.captionSeam) return style.captionY;
+  const run = runs.find((r) => t >= r.start && t < r.end);
+  return run?.y != null && run.end - run.start >= CAPTION_SEAM_MIN_SEC ? run.y : style.captionY;
+}
+
 /** Which edge a full-height region hugs, or null for any other shape. */
 export function contentSide(c: ContentRegion): "left" | "right" | null {
   if (c.y1 > 0.01 || c.y2 < 0.99) return null;

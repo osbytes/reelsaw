@@ -154,14 +154,17 @@ function toFaceInput(rgb: Uint8Array): Uint8Array {
 }
 
 /**
- * Burned-in captions and logos are placed clear of faces. A "text" region that keeps landing on a
- * face (cabinet edges or a shelf above a speaker's head in a static shot) is scene texture: drop it,
- * so a render never blurs someone's face. `share` = fraction of face-bearing frames it may touch.
+ * A render never blurs someone's face. A text region that keeps landing on a face is either scene
+ * texture (cabinet edges, a shelf above a speaker's head in a static shot) or a caption band in a tight
+ * close-up, where the subtitles sit over the chin and chest. So first trim the region's edge back to
+ * where the faces end (the band keeps the lines below the chin); only a region that still touches
+ * faces, or is left too thin to hold a line of text, is dropped. `share` = fraction of face-bearing
+ * frames it may touch.
  */
-export function dropFaceOverlaps<O extends Box>(overlays: O[], frames: Array<{ t?: number; faces: Box[] }>, opts: { share?: number; active?: (o: O, t: number) => boolean } = {}): { kept: O[]; dropped: O[] } {
+export function dropFaceOverlaps<O extends Box>(overlays: O[], frames: Array<{ t?: number; faces: Box[] }>, opts: { share?: number; active?: (o: O, t: number) => boolean } = {}): { kept: O[]; dropped: O[]; trimmed: Array<{ from: O; to: O }> } {
   const limit = opts.share ?? 0.1;
   const withFaces = frames.filter((f) => f.faces.length);
-  if (!withFaces.length) return { kept: overlays, dropped: [] };
+  if (!withFaces.length) return { kept: overlays, dropped: [], trimmed: [] };
   const touches = (o: Box, f: Box) => {
     const ix = Math.max(0, Math.min(o.x2, f.x2) - Math.max(o.x1, f.x1));
     const iy = Math.max(0, Math.min(o.y2, f.y2) - Math.max(o.y1, f.y1));
@@ -169,12 +172,33 @@ export function dropFaceOverlaps<O extends Box>(overlays: O[], frames: Array<{ t
   };
   const kept: O[] = [];
   const dropped: O[] = [];
+  const trimmed: Array<{ from: O; to: O }> = [];
   for (const o of overlays) {
-    const hit = withFaces.filter((f) => (f.t === undefined || !opts.active || opts.active(o, f.t)) && f.faces.some((fb) => touches(o, fb))).length;
-    (hit / withFaces.length > limit ? dropped : kept).push(o);
+    const live = withFaces.filter((f) => f.t === undefined || !opts.active || opts.active(o, f.t));
+    const hitsOf = (r: Box) => live.filter((f) => f.faces.some((fb) => touches(r, fb)));
+    const hits = hitsOf(o);
+    if (hits.length / withFaces.length <= limit) {
+      kept.push(o);
+      continue;
+    }
+    // faces reaching in from above push the top edge down to their chins, faces from below the bottom
+    // edge up; a quantile lets the same share of frames through that the check above allows
+    const mid = (o.y1 + o.y2) / 2;
+    const touching = hits.flatMap((f) => f.faces.filter((fb) => touches(o, fb)));
+    const above = touching.filter((fb) => (fb.y1 + fb.y2) / 2 < mid).map((fb) => fb.y2);
+    const below = touching.filter((fb) => (fb.y1 + fb.y2) / 2 >= mid).map((fb) => fb.y1);
+    const y1 = above.length ? Math.max(o.y1, quant(above, 1 - limit)) : o.y1;
+    const y2 = below.length ? Math.min(o.y2, quant(below, limit)) : o.y2;
+    const cut = { ...o, y1: Number(y1.toFixed(3)), y2: Number(y2.toFixed(3)) };
+    if (cut.y2 - cut.y1 >= Math.max(MIN_TRIMMED_H, 0.35 * (o.y2 - o.y1)) && hitsOf(cut).length / withFaces.length <= limit) {
+      kept.push(cut);
+      trimmed.push({ from: o, to: cut });
+    } else dropped.push(o);
   }
-  return { kept, dropped };
+  return { kept, dropped, trimmed };
 }
+/** A trimmed region thinner than this (fraction of the frame height) can't hold a line of text: dropped instead. */
+const MIN_TRIMMED_H = 0.04;
 
 function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSignal): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -401,4 +425,104 @@ export function overlayWindows(overlays: SourceOverlay[], frames: ClipTextFrame[
     }
     return { ...o, share, windows: windows.map(([a, b]) => [Number(a.toFixed(2)), Number(b.toFixed(2))] as [number, number]) };
   });
+}
+
+/**
+ * Tighten each timed region into pieces: stretches of the clip where the text seen in it keeps about
+ * the same extent, each blurred only over the boxes seen during that stretch. A band grown to the
+ * longest two-line caption of the clip then no longer blurs that whole area under a one-word line,
+ * and a stray box (a second line once, a sign) widens only its own stretch. Every piece gets one
+ * window (the renderer fades each in and out). Watermarks, and every region when there are no
+ * frames, are returned as they are.
+ */
+export function tightenOverlays(overlays: SourceOverlay[], frames: ClipTextFrame[], durationSec: number, opts: { fps?: number; pad?: number; boxPad?: number; grow?: number; maxPieces?: number; cores?: Box[]; staticSec?: number } = {}): SourceOverlay[] {
+  const fps = opts.fps ?? 2;
+  const pad = opts.pad ?? 0.6;
+  const boxPad = opts.boxPad ?? 0.008;
+  // a new piece starts when the next frame's text would grow the piece by more than this share of its area
+  const grow = opts.grow ?? 0.35;
+  const maxPieces = opts.maxPieces ?? 12;
+  if (!frames.length) return overlays;
+  const area = (b: Box) => Math.max(0, b.x2 - b.x1) * Math.max(0, b.y2 - b.y1);
+  const union = (a: Box, b: Box): Box => ({ x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1), x2: Math.max(a.x2, b.x2), y2: Math.max(a.y2, b.y2) });
+  const iou = (a: Box, b: Box) => {
+    const i = area({ x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), x2: Math.min(a.x2, b.x2), y2: Math.min(a.y2, b.y2) });
+    return i / (area(a) + area(b) - i || 1);
+  };
+  // scene text next to a caption band (a label on a bottle on the desk) is pulled in when the band
+  // grows, but it holds still while subtitles change: a box seen at the same place for `staticSec` or
+  // more, outside every region the project scan found (`cores`), is not blurred. A handle inside the
+  // band holds still too, but the project scan found it, so it stays.
+  const minStatic = Math.ceil((opts.staticSec ?? 3) * fps);
+  const inCores = (b: Box) => {
+    const cx = (b.x1 + b.x2) / 2;
+    const cy = (b.y1 + b.y2) / 2;
+    return (opts.cores ?? []).some((c) => cx >= c.x1 && cx <= c.x2 && cy >= c.y1 && cy <= c.y2);
+  };
+  const scene = (b: Box) => opts.cores !== undefined && !inCores(b) && frames.filter((f) => !f.slide && f.boxes.some((x) => iou(x, b) >= 0.7)).length >= minStatic;
+  const out: SourceOverlay[] = [];
+  for (const o of overlays) {
+    // a logo or handle has one extent; a missed detection would only make its blur flicker
+    if (o.kind === "watermark") {
+      out.push(o);
+      continue;
+    }
+    const on = (t: number) => !o.windows || o.windows.some(([a, b]) => t >= a - 1e-6 && t <= b + 1e-6);
+    // the text of this region in each frame (same overlap test as overlayWindows), kept inside the region
+    const seen: Array<{ t: number; box: Box }> = [];
+    for (const f of frames) {
+      if (f.slide || !on(f.t)) continue;
+      const mine = f.boxes.filter((b) => b.x2 > o.x1 && b.x1 < o.x2 && b.y2 > o.y1 && b.y1 < o.y2 && !scene(b));
+      if (!mine.length) continue;
+      const u = mine.reduce(union);
+      seen.push({ t: f.t, box: { x1: Math.max(o.x1, u.x1), y1: Math.max(o.y1, u.y1), x2: Math.min(o.x2, u.x2), y2: Math.min(o.y2, u.y2) } });
+    }
+    if (!seen.length) {
+      out.push(o);
+      continue;
+    }
+    // runs of frames: a new one after a gap in the text or a jump in its extent, up (a longer line) or
+    // down (one word after a two-line caption), so each run's box stays close to every frame in it
+    const runs: Array<{ t0: number; t1: number; box: Box }> = [];
+    for (const s of seen) {
+      const last = runs.at(-1);
+      const u = last ? area(union(last.box, s.box)) : 0;
+      if (last && s.t - last.t1 <= 1 / fps + 1.2 && u <= area(last.box) * (1 + grow) + 1e-4 && u <= area(s.box) * (1 + grow) ** 2 + 1e-4) {
+        last.t1 = s.t;
+        last.box = union(last.box, s.box);
+      } else runs.push({ t0: s.t, t1: s.t, box: s.box });
+    }
+    // windows padded like overlayWindows (longer than the sample interval): where the text changes
+    // between two samples, the next piece is already on, so the switch is never uncovered
+    let pieces = runs.map((r) => ({ a: Math.max(0, r.t0 - pad), b: Math.min(durationSec, r.t1 + 1 / fps + pad), box: r.box }));
+    // a bounded number of blur patches per region: merge the neighbours whose union adds the least blurred area × time
+    const cost = (p: { a: number; b: number; box: Box }) => area(p.box) * (p.b - p.a);
+    while (pieces.length > maxPieces) {
+      let best = 0;
+      let bestCost = Infinity;
+      for (let i = 0; i < pieces.length - 1; i++) {
+        const p = pieces[i]!;
+        const q = pieces[i + 1]!;
+        const c = cost({ a: p.a, b: Math.max(p.b, q.b), box: union(p.box, q.box) }) - cost(p) - cost(q);
+        if (c < bestCost) {
+          bestCost = c;
+          best = i;
+        }
+      }
+      const p = pieces[best]!;
+      const q = pieces[best + 1]!;
+      pieces = [...pieces.slice(0, best), { a: p.a, b: Math.max(p.b, q.b), box: union(p.box, q.box) }, ...pieces.slice(best + 2)];
+    }
+    for (const p of pieces) {
+      out.push({
+        ...o,
+        x1: Number(Math.max(0, p.box.x1 - boxPad).toFixed(3)),
+        y1: Number(Math.max(0, p.box.y1 - boxPad).toFixed(3)),
+        x2: Number(Math.min(1, p.box.x2 + boxPad).toFixed(3)),
+        y2: Number(Math.min(1, p.box.y2 + boxPad).toFixed(3)),
+        windows: [[Number(p.a.toFixed(2)), Number(p.b.toFixed(2))]],
+      });
+    }
+  }
+  return out;
 }

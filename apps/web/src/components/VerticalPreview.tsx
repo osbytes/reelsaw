@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { textFontFamily } from "../lib/fonts";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, defaultStyle, type ContentRegion, type Style, type SourceOverlay } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, CAPTION_FONT_FRAC, HOOK_FONT_FRAC, groupCaptionLines, lineSecondsFor, captionMaxChars, lineDisplayEnd, emphasisKey, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, defaultStyle, captionYAt, type ContentRegion, type Style, type SourceOverlay, type SeamRun } from "@reelsaw/shared";
 
 export type PreviewLayout = "face" | "split" | "stack" | "fit" | "center" | "none";
 export interface Framing {
@@ -141,6 +141,8 @@ interface Props {
   framing: Framing;
   style: Style;
   words: PreviewWord[];
+  /** split / stack stretches on the words' clock: caption lines there sit on the seam, as the renderer places them */
+  seams?: SeamRun[];
   /** clip-relative playback time (drives karaoke + hook visibility) */
   time: number;
   hook?: string;
@@ -296,7 +298,7 @@ export function safeZoneWarning(platform: Platform, x: number, y: number) {
  * `layoutFilter` (render.ts), captions/hook are HTML on top at the same fractional positions and font
  * sizes as the ASS file, and can be dragged to move them.
  */
-export function VerticalPreview({ source, srcW, srcH, framing, style, words, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, paneMenu, onHookChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
+export function VerticalPreview({ source, srcW, srcH, framing, style, words, seams, time, hook, emphasis, alwaysShowHook, onStyleChange, onPan, onPanEnd, assetOverlays = [], selectedOverlay = null, onOverlaySelect, onOverlayChange, overlayMenu, paneMenu, onHookChange, playing = true, still, showSafeZones, platform = "tiktok", tag, overlays, className = "" }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
@@ -360,6 +362,8 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
   const lineIdx = lines.findIndex((l, i) => time >= l[0]!.start && time <= lineDisplayEnd(lines, i));
   const line = lineIdx >= 0 ? lines[lineIdx] : alwaysShowHook ? lines[0] : undefined;
   const em = useMemo(() => new Set(style.emphasis ? (emphasis ?? []).map(emphasisKey) : []), [emphasis, style.emphasis]);
+  // placed once per line, at its midpoint (captionYAt), like the ASS file
+  const captionY = line ? captionYAt(style, seams ?? [], lineIdx >= 0 ? (line[0]!.start + lineDisplayEnd(lines, lineIdx)) / 2 : time) : style.captionY;
   const activeIdx = line ? line.findIndex((w, i) => time >= (i === 0 ? line[0]!.start : w.start) && time < (i === line.length - 1 ? line[line.length - 1]!.end : line[i + 1]!.start)) : -1;
   const showHook = style.showHook && !!hook && (alwaysShowHook || editingHook || time < style.hookSeconds);
   const width = (h * 9) / 16;
@@ -662,7 +666,7 @@ export function VerticalPreview({ source, srcW, srcH, framing, style, words, tim
           className={`absolute -translate-x-1/2 -translate-y-1/2 text-center font-bold leading-tight ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${drag === "caption" ? "outline-1 outline-dashed outline-white/60" : draggable ? "hover:outline-1 hover:outline-dashed hover:outline-white/50" : ""}`}
           style={{
             left: `${style.captionX * 100}%`,
-            top: `${style.captionY * 100}%`,
+            top: `${(drag === "caption" ? style.captionY : captionY) * 100}%`,
             fontFamily: FONT,
             fontSize: capPx,
             maxWidth: width * 0.88,

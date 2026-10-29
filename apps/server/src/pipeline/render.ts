@@ -15,7 +15,7 @@ import { cutRanges, cutPlan } from "./disfluency.js";
 import { needsPrepare } from "./manual.js";
 import { attachText, voteTrace } from "./content-region.js";
 import { createHash } from "node:crypto";
-import { growOverlays, sampleClipText, overlayWindows, dropFaceOverlaps, mergeRegions } from "./overlays.js";
+import { growOverlays, sampleClipText, overlayWindows, tightenOverlays, dropFaceOverlaps, mergeRegions } from "./overlays.js";
 import { speechSegments, pauseCuts, VAD_SR } from "../audio/vad.js";
 import { alignWordTimes } from "../audio/align.js";
 import { activeSpeakers, speechAt, envelopeAt } from "./speaker.js";
@@ -24,7 +24,7 @@ import { refineCuts, type CutRange, type RefineResult } from "./audiocuts.js";
 import { normalizeToken } from "@reelsaw/shared";
 import { toWords } from "./transcript.js";
 import { textHeavyRuns, fitTextHeavy, sampleFaces, dropStaticFaces, piecewiseExpr, localTrack, suffixLabels, coverTimeline, resolveSegments, newLayoutDiag, trackCenter, sparseTrack, type Layout, type LayoutDecision, type FaceSample, type TimelineMode, type SectionAdjust } from "./layout.js";
-import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, resolveFraming, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
+import { OVERLAY_PAD_X, OVERLAY_PAD_Y, verticalCrop, resolveStyle, resolveFraming, speakerCrop, cropX, contentStackGeometry, isFullFrame, tileCrop, shiftRegion, overlayKind, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, clipLayers, isStickerAsset, type AssetLayer, type TextLayer, type AudioLayer, type ContentRegion, masksSourceText, layoutSeamY, mergeSeamRuns, type DetectedSegment, type ClipDiagnostics, type SourceOverlay, type ClipOverlay, type ClipAudio } from "@reelsaw/shared";
 import { WATERMARK_LOGO, type TextOverlayEvent } from "./captions.js";
 import type { Logger } from "../log.js";
 import { ffmpegThreadArgs, type VideoEncoder } from "../media.js";
@@ -32,6 +32,10 @@ import { bumperConcat, bumperFrames, resolveClipBumpers, ensureNormalised, ensur
 
 const OUT_W = 1080;
 const OUT_H = 1920;
+/** Soft edge of a burned-in text blur, as a fraction of the source height (`sourceVideo`). */
+const BLUR_FEATHER = 0.01;
+/** How long a burned-in text blur takes to fade in before its text shows and out after it goes. */
+const BLUR_FADE_SEC = 0.25;
 
 export const FIT_CHAIN = (w: number, h: number) =>
   `[0:v]split=2[bg][fg];` +
@@ -274,8 +278,10 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     const grown = mergeRegions(growOverlays(overlays, clipBoxes, { quantile: 1, pad: 0.008 }));
     // blur only while the text is on screen; regions never seen in this clip are dropped
     const timed = overlayWindows(grown, frames, duration).filter((o) => !o.windows || o.windows.length > 0);
-    log.info({ projectRegions: overlays, clipRegions: timed, clipBoxes: clipBoxes.length, slides: frames.filter((f) => f.slide).length }, "burned-in text regions");
-    overlays = timed;
+    // and only over the text of each stretch, not the clip-wide extent of the band
+    const pieces = tightenOverlays(timed, frames, duration, { cores: overlays });
+    log.info({ projectRegions: overlays, clipRegions: timed, pieces: pieces.length, clipBoxes: clipBoxes.length, slides: frames.filter((f) => f.slide).length }, "burned-in text regions");
+    overlays = pieces;
   }
   // keep speaker crops clear only of text that is on screen for much of the clip; brief text is just blurred
   let avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
@@ -313,12 +319,14 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
     // text boxes seen by the per-clip scan (one pass, no extra decode) tell a content region beside the speaker from a plain talking head
     samples = attachText(filtered.samples, frames.map((f) => ({ t: f.t, all: f.all })));
   }
-  // never blur a face: a region that keeps landing on one (while it is "on") is scene texture, not an overlay
+  // never blur a face: a region that keeps landing on one (while it is "on") is trimmed back to where
+  // the faces end (captions under a close-up's chin), or dropped as scene texture
   if (overlays.length && samples.length) {
     const active = (o: SourceOverlay, t: number) => !o.windows || o.windows.some(([a, b]) => t >= a && t <= b);
-    const { kept, dropped } = dropFaceOverlaps(overlays, samples.map((sm) => ({ t: sm.t, faces: sm.boxes })), { active });
-    if (dropped.length) {
-      log.info({ dropped }, "text regions over faces dropped");
+    const { kept, dropped, trimmed } = dropFaceOverlaps(overlays, samples.map((sm) => ({ t: sm.t, faces: sm.boxes })), { active });
+    if (trimmed.length) log.info({ trimmed: trimmed.map((x) => ({ windows: x.to.windows, y1: [x.from.y1, x.to.y1], y2: [x.from.y2, x.to.y2] })) }, "text regions trimmed clear of faces");
+    if (dropped.length) log.info({ dropped }, "text regions over faces dropped");
+    if (trimmed.length || dropped.length) {
       overlays = kept;
       avoid = overlays.filter((o) => (o.share ?? 1) >= 0.5).map((o) => ({ y1: o.y1, y2: o.y2 }));
     }
@@ -524,9 +532,12 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
   const visualLayerCount = layers.filter((l) => l.kind !== "audio").length;
   const audioLayerCount = layers.length - visualLayerCount;
   const assPath = path.join(clipsDir, `${clip.id}.ass`);
+  const style = resolveStyle(settings, clip.style);
+  // split / stack stretches on the body's post-cut clock: captions there sit on the line between the panes
+  const seams = mergeSeamRuns(segments.map((sg) => ({ start: plan.mapTime(sg.start), end: plan.mapTime(sg.end), y: layoutSeamY(sg.decision.layout, sg.decision.content, srcW, srcH) })));
   await fs.writeFile(
     assPath,
-    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style: resolveStyle(settings, clip.style), hook: clip.hook, emphasis: clip.emphasis ?? [], texts: textOverlayEvents(layers.filter((l): l is TextLayer => l.kind === "text"), clip.startSec, duration, plan.mapTime), ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}) }),
+    buildAss(words, { width, height, font: svc.config.CAPTION_FONT, style, seams, hook: clip.hook, emphasis: clip.emphasis ?? [], texts: textOverlayEvents(layers.filter((l): l is TextLayer => l.kind === "text"), clip.startSec, duration, plan.mapTime), ...(watermark.on ? { watermark: watermark.text, watermarkUnderLogo: logo.length > 0 } : {}) }),
     "utf8",
   );
 
@@ -1123,26 +1134,52 @@ export async function planClipCuts(
  * Source video labels for the filtergraph. With burned-in text to hide, the source is masked once
  * (each text region blurred in place) and split for every consumer; otherwise every consumer reads
  * [0:v] directly.
+ *
+ * Each blurred patch has a soft edge (an alpha ramp `BLUR_FEATHER` wide, outside the padded text box
+ * so the text itself is fully covered; none along a frame edge), and a patch with one window fades
+ * in before it and out after it (`BLUR_FADE_SEC`), so the blur doesn't switch on and off as a hard box.
  */
 export function sourceVideo(overlays: SourceOverlay[], srcW: number, srcH: number, consumers: number): { prefix: string; labels: string[] } {
   if (!overlays.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };
   const parts: string[] = [];
   let cur = "[0:v]";
+  // the mask is a box inset by `f` and blurred with radius f/2 (power 2): it ramps 0 → 1 over ~1.6 f
+  // from the patch edge, so a margin of 2 f keeps the padded text box fully opaque
+  const f = Math.max(2, Math.round(BLUR_FEATHER * srcH));
+  const margin = 2 * f;
   overlays.forEach((o, i) => {
     // pad a little: detector boxes hug the glyphs, glows and outlines extend past them
-    const padX = OVERLAY_PAD_X * srcW;
-    const padY = OVERLAY_PAD_Y * srcH;
-    const x = Math.max(0, Math.floor(o.x1 * srcW - padX));
-    const y = Math.max(0, Math.floor(o.y1 * srcH - padY));
-    const w = Math.min(srcW - x, Math.ceil((o.x2 - o.x1) * srcW + 2 * padX));
-    const h = Math.min(srcH - y, Math.ceil((o.y2 - o.y1) * srcH + 2 * padY));
+    const padX = OVERLAY_PAD_X * srcW + margin;
+    const padY = OVERLAY_PAD_Y * srcH + margin;
+    // even edges: yuv420p crops snap to even sizes, and the mask (gray) must match the patch exactly
+    const x = Math.max(0, Math.floor((o.x1 * srcW - padX) / 2) * 2);
+    const y = Math.max(0, Math.floor((o.y1 * srcH - padY) / 2) * 2);
+    const x2 = Math.min(Math.floor(srcW / 2) * 2, Math.ceil((o.x2 * srcW + padX) / 2) * 2);
+    const y2 = Math.min(Math.floor(srcH / 2) * 2, Math.ceil((o.y2 * srcH + padY) / 2) * 2);
+    const w = x2 - x;
+    const h = y2 - y;
     if (w < 4 || h < 4) return;
     // boxblur caps each plane's radius at half its size; chroma planes are half resolution (yuv420p)
     const r = Math.max(1, Math.min(40, Math.floor(Math.min(w, h) / 2) - 1));
     const rc = Math.max(1, Math.min(r, Math.floor(Math.min(w, h) / 4) - 1));
-    // timed regions: the blurred patch is only composited while the text is on screen
-    const enable = o.windows?.length ? `:enable='${o.windows.map(([a, b]) => `between(t,${a},${b})`).join("+")}'` : "";
-    parts.push(`${cur}split=2[mk${i}a][mk${i}b];[mk${i}b]crop=${w}:${h}:${x}:${y},boxblur=luma_radius=${r}:luma_power=3:chroma_radius=${rc}:chroma_power=3[mk${i}c];[mk${i}a][mk${i}c]overlay=${x}:${y}${enable}[mk${i}]`);
+    // a side on the frame edge is not feathered (the text may run to the edge)
+    const [l, t, rr, b] = [x > 0 ? f : 0, y > 0 ? f : 0, x2 < srcW - 1 ? f : 0, y2 < srcH - 1 ? f : 0];
+    const feather = w - l - rr >= 4 && h - t - b >= 4 && Math.min(w, h) / 2 > f;
+    // one window: fade in just before it and out just after, so the text is fully covered inside it
+    const win = o.windows?.length === 1 ? o.windows[0]! : null;
+    const fadeIn = win && win[0] > 0.01 ? Math.max(0, win[0] - BLUR_FADE_SEC) : null;
+    const fades = win ? `${fadeIn !== null ? `,fade=t=in:st=${fadeIn.toFixed(2)}:d=${BLUR_FADE_SEC}` : ""},fade=t=out:st=${win[1].toFixed(2)}:d=${BLUR_FADE_SEC}` : "";
+    const enable = win
+      ? `:enable='between(t,${(fadeIn ?? 0).toFixed(2)},${(win[1] + BLUR_FADE_SEC).toFixed(2)})'`
+      : o.windows?.length
+        ? `:enable='${o.windows.map(([a, bb]) => `between(t,${a},${bb})`).join("+")}'`
+        : "";
+    const blurred = `[mk${i}b]crop=${w}:${h}:${x}:${y},boxblur=luma_radius=${r}:luma_power=3:chroma_radius=${rc}:chroma_power=3`;
+    const patch =
+      feather || fades
+        ? `${blurred},format=yuva420p,split=2[mk${i}p][mk${i}q];[mk${i}q]alphaextract,lutyuv=y=255${feather ? `,crop=${w - l - rr}:${h - t - b}:${l}:${t},pad=${w}:${h}:${l}:${t}:black,boxblur=${Math.max(1, Math.ceil(f / 2))}:2` : ""}${fades}[mk${i}m];[mk${i}p][mk${i}m]alphamerge[mk${i}c]`
+        : `${blurred}[mk${i}c]`;
+    parts.push(`${cur}split=2[mk${i}a][mk${i}b];${patch};[mk${i}a][mk${i}c]overlay=${x}:${y}${enable}[mk${i}]`);
     cur = `[mk${i}]`;
   });
   if (!parts.length) return { prefix: "", labels: Array.from({ length: consumers }, () => "[0:v]") };
