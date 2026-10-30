@@ -133,7 +133,7 @@ function cliCommands(): Array<{ name: string; usage: string; description: string
     }
   }
   // the usage line the CLI prints for an unknown command must list the same commands
-  const printed = /console\.log\("usage: reelsaw <([^>]+)>/.exec(src)?.[1]?.split("|") ?? [];
+  const printed = /console\.log\(\s*"usage: reelsaw <([^>]+)>/.exec(src)?.[1]?.split("|") ?? [];
   const names = new Set(cmds.map((c) => c.name));
   for (const n of printed) if (!names.has(n)) problems.push(`cli.ts prints '${n}' in its usage line but the header comment has no entry for it`);
   for (const n of names) if (!printed.includes(n)) problems.push(`cli.ts header documents '${n}' but its printed usage line does not list it`);

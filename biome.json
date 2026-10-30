@@ -13,7 +13,10 @@
       "!website/next-env.d.ts"
     ]
   },
-  "formatter": { "enabled": false },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineEnding": "lf", "lineWidth": 160 },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "jsxQuoteStyle": "double", "semicolons": "always", "trailingCommas": "all", "arrowParentheses": "always" }
+  },
   "assist": { "enabled": false },
   "linter": {
     "enabled": true,

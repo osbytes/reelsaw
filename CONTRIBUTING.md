@@ -8,8 +8,11 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
   change follows. Agent instructions live in `AGENTS.md` (the only agent file; see the process principles).
 - Everyday commands (typecheck, lint, build, deploy, evals, tests) are listed in `AGENTS.md`.
 - Files are UTF-8 with LF line endings (`.gitattributes` normalises them on commit, `.editorconfig`
-  tells your editor). Lint is Biome (`biome.json`, `pnpm lint`, the app and `website/`): errors fail
-  CI, warnings are known debt to fix as you touch the code. Formatting is not enforced yet.
+  tells your editor). Biome lints and formats the TypeScript and JavaScript in the app and `website/`
+  (`biome.json`): `pnpm format` formats, `pnpm lint` lints. Unformatted code and lint errors fail CI
+  and the pre-commit hook; lint warnings are known debt to fix as you touch the code. Your editor's
+  Biome extension can format on save. The one-time reformat is listed in `.git-blame-ignore-revs`
+  (GitHub skips it in blame; locally, `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
 - TypeScript runs `strict` plus `noUncheckedIndexedAccess` (an index read may be `undefined`) and
   `exactOptionalPropertyTypes` (`foo?: T` means absent, not `undefined`: write `foo?: T | undefined`
   when a caller passes `undefined`, or leave the key out with `...(x ? { foo: x } : {})`).

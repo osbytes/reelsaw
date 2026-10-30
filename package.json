@@ -10,6 +10,7 @@
     "typecheck": "pnpm --filter @reelsaw/shared build && pnpm -r typecheck",
     "lint": "biome lint",
     "lint:fix": "biome lint --write",
+    "format": "biome format --write",
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
     "start": "pnpm --filter @reelsaw/server start",
     "mock-ai": "node scripts/mock-ai.mjs",
