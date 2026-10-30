@@ -96,8 +96,11 @@ jobs:
             REELSAW_VERSION=${{ steps.v.outputs.version }}
             REELSAW_COMMIT=${{ steps.v.outputs.commit }}
             REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # layer cache in GHCR, not the Actions cache: Actions caches are scoped to the ref, so a cache
+          # written by one tag was never readable by the next (every release built from scratch and
+          # spent ~7 min uploading a cache nothing used). The ci.yml stack job reads it too.
+          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd
 
       - name: No source in the image; bundle and ONNX models load on both architectures
         env:

@@ -148,7 +148,7 @@ async function main() {
       const meterSummary = { llm: meter.summary("llm"), stt: meter.summary("stt") };
       // baselines describe the default configuration only
       const basePath = path.join(root, "baselines", `${s.name}${offline && s.offlineBaseline ? ".offline" : ""}.json`);
-      const baseline = !matrix && existsSync(basePath) ? (JSON.parse(await fs.readFile(basePath, "utf8")) as Baseline) : null;
+      const baseline = !matrix && !s.noBaseline && existsSync(basePath) ? (JSON.parse(await fs.readFile(basePath, "utf8")) as Baseline) : null;
       const cmp = compare(baseline, results, metrics);
       printTable(results);
       for (const [k, m] of Object.entries(metrics)) {
@@ -159,12 +159,14 @@ async function main() {
       if (calls) console.log(`  ${"calls".padEnd(28)} ${calls}`);
       for (const r of cmp.regressions) console.log(`  ✗ REGRESSION ${r}`);
       for (const r of cmp.improvements) console.log(`  ✓ improved ${r}`);
-      if (!baseline && !matrix) console.log(`  (no baseline yet; run with --update to record one)`);
+      if (!baseline && !matrix && !s.noBaseline) console.log(`  (no baseline yet; run with --update to record one)`);
       console.log(`  ${(ms / 1000).toFixed(1)}s`);
       const accepting = update && cmp.regressions.length > 0 && acceptReason !== undefined;
       if (cmp.regressions.length && !accepting) failed = true;
       if (update && cmp.regressions.length && !accepting) {
         console.log(`  ✗ baseline NOT updated: ${cmp.regressions.length} regression(s) above. Fix them, or record them on purpose with --accept-regressions "<reason>" (the reason is stored in the baseline).`);
+      } else if (update && s.noBaseline) {
+        console.log("  baseline NOT updated: this suite replays data from outside the repo and has no baseline");
       } else if (update && has("split")) {
         console.log("  baseline NOT updated: --split runs score a subset; rerun without --split to update");
       } else if (update && !ran.length) {

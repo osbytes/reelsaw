@@ -1,5 +1,83 @@
 # @reelsaw/server
 
+## 0.28.1
+
+### Patch Changes
+
+- [#202](https://github.com/osbytes/reelsaw/pull/202) [`c441b3b`](https://github.com/osbytes/reelsaw/commit/c441b3b3d02603570c3825bad075cca0a7746ec7) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Several projects at once on a CPU-only box no longer time out over and over while transcribing: a call waiting its turn for a local model no longer counts against its time limit, a local whisper (Speaches) now takes one transcription at a time unless `PROVIDER_CONCURRENCY` says otherwise, and a self-hosted transcription gets at least twice the chunk's audio length before it times out. An admin's issue report with instance-wide diagnostics no longer fails while projects are in progress, and a report that fails now logs why.
+
+## 0.28.0
+
+### Minor Changes
+
+- [#201](https://github.com/osbytes/reelsaw/pull/201) [`c6ac53c`](https://github.com/osbytes/reelsaw/commit/c6ac53cb56f01914e34f974543fbe5987009560b) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Burned-in captions in tight close-ups are blurred again: a caption band that reaches a speaker's chin is trimmed to below the face instead of being dropped, each blur covers only the text on screen at that moment (still scene text beside the band, like a label on a desk, is left alone), and blurs have a soft edge and fade in and out instead of switching on as a hard box. In split and stack sections, captions now sit on the line between the two panes (a switch in the editor's caption settings turns it off).
+
+- [#199](https://github.com/osbytes/reelsaw/pull/199) [`ee84e55`](https://github.com/osbytes/reelsaw/commit/ee84e55083105edae5d5899fa5e7c4128126e907) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Layer templates can carry an intro and outro. Pick them in the template editor's new Intro & outro block (Clip's own, None or a library video or image); applying the template sets them on the clips as their own choice, in the same step as the layers, and new clips of a project that uses the template get them too. Save as template keeps the clip's intro and outro. Also in the `save_layer_template` / `update_layer_template` MCP tools (`bumpers`) and `reelsaw templates set --intro / --outro`.
+
+## 0.27.2
+
+### Patch Changes
+
+- [#196](https://github.com/osbytes/reelsaw/pull/196) [`ba0a96d`](https://github.com/osbytes/reelsaw/commit/ba0a96de2c1a03f05266c32d08cd3fabcaa1eea4) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The installers (`install.sh`, `install.ps1`) now find a database volume left by an earlier install under the same project name, keep its data and set its password from `.env` before the app starts, so a lost `.env` or a second install folder no longer leaves the app looping on `password authentication failed`. That boot error now says why and points at the fix. On a first boot the log now says that the speech-to-text model is being downloaded and that the app answers only afterwards, with a line every 20 seconds while it runs and the elapsed time when it is done.
+
+- [#197](https://github.com/osbytes/reelsaw/pull/197) [`081850f`](https://github.com/osbytes/reelsaw/commit/081850fdac991aa72ecb1fc25ec64fcfb215ef9c) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The project page header no longer prints the title twice: the breadcrumb's last crumb is the heading.
+
+## 0.27.1
+
+### Patch Changes
+
+- [#193](https://github.com/osbytes/reelsaw/pull/193) [`074b44b`](https://github.com/osbytes/reelsaw/commit/074b44b70dc3a217ab74cc6b6e56d901e2fa8b6d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The sign-in, sign-up and password cards now show the title on the left with the logo at the top right, and no longer print the host the app runs on.
+
+## 0.27.0
+
+### Minor Changes
+
+- [#191](https://github.com/osbytes/reelsaw/pull/191) [`5016e2a`](https://github.com/osbytes/reelsaw/commit/5016e2a069272dab6ba58c41d7a7a909f0879dbf) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Decision log: what you accept, reject, cut, correct and edit is recorded (with the words or clip text it was about, the models that proposed it and a fingerprint of the source) and outlives deleted projects, so Reelsaw keeps learning after "Delete forever" (rejected cuts from deleted projects still teach the filler detector). Settings → Learning turns it off or forgets everything; the delete and "Delete forever" dialogs can forget one project's decisions (a choice made at delete time holds for the automatic purge too). New MCP tools `list_decisions`, `export_decisions`, `forget_decisions`, `set_learning` (and `forgetDecisions` on `delete_project` and `purge_project`), CLI `reelsaw decisions` (list, export, forget, backfill of decisions made before this release), `DECISION_RETENTION_DAYS` (default keep). Ingest records the source's sha256, video id and format. Evals: `harvest-decisions.ts` turns an export into disfluency candidates split by project, and the `decisions` suite replays today's detector against users' decisions.
+
+### Patch Changes
+
+- [#189](https://github.com/osbytes/reelsaw/pull/189) [`3afa8dd`](https://github.com/osbytes/reelsaw/commit/3afa8ddcb274457ec910b0df0f5f673d3f7b8cf0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Game and app interfaces are no longer blurred as burned-in captions. The on-screen text scan now tells interface text (scores, player lists and menu buttons pinned to the side of a gameplay or screen recording) from subtitles, logos and lower thirds, and leaves the interface visible. New projects get this automatically. For an existing project, an operator can re-scan with `reelsaw overlays <projectId> --store` and then re-render the clips.
+
+## 0.26.4
+
+### Patch Changes
+
+- [#187](https://github.com/osbytes/reelsaw/pull/187) [`0979432`](https://github.com/osbytes/reelsaw/commit/0979432cae87902696f594e8c8028383d53f0108) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Leaner, cleaner container image: the image no longer ships tools the app never runs (drizzle-kit, tsx and their esbuild binaries, npm, corepack, yarn, gosu), which cleared every fixable vulnerability the image scanner reported. The entrypoint, `reelsaw` CLI and health check drop to the `node` user with `setpriv` instead of `gosu`.
+
+## 0.26.3
+
+### Patch Changes
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`1d0bceb`](https://github.com/osbytes/reelsaw/commit/1d0bceb7e409c6d5d732baf00d193aa2c080854f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Filler and repeat removal with the language model (`DISFLUENCY_LLM`) and the AI packaging of clips you cut by hand now save their work as they go, so a timeout or restart continues where it stopped. A timeout used to finish the filler pass with only part of the transcript checked and no warning; it now fails the step so Retry completes it. A long selection for "find the best moment" is searched in parts instead of one prompt.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`f3a94cc`](https://github.com/osbytes/reelsaw/commit/f3a94cc8bcf0120ac930e21f9c15e23c42408837) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Shot cuts are saved the moment they are found and the on-screen text scan is its own resumable step, so a text-scan timeout no longer loses them. A failed shot-change decode now retries and, if it keeps failing, shows as a failed scenes step with its reason instead of being stored as "no cuts".
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`bf26baf`](https://github.com/osbytes/reelsaw/commit/bf26baf0cd2a7b8d59165e0b2f5481d7fc54b088) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Transcription now saves each audio chunk as a step, so its progress, time left and timeouts behave like finding moments and a retry continues after the last finished chunk. With S3 storage the speech-to-text cache is shared across hosts. A "no progress" warning now says which stage is stuck, how many parts are done and when the last one finished, and it also fires when a model keeps ticking but finishes no part.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`389a4de`](https://github.com/osbytes/reelsaw/commit/389a4de071063bc4c2cfe3c2b6b9fe6566052343) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Fixes several races that could leave a project stuck or out of date: re-analyze no longer overwrites a settings change made at the same time, Retry after a failed re-analyze picks clips again, deleting the last clip of a rendering project finishes it, and a rename during the download survives. Refining a busy project is refused instead of overwriting its status.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`e3d14fe`](https://github.com/osbytes/reelsaw/commit/e3d14fe06b62e10a0abc609539441a1626f5d537) Thanks [@dillonstreator](https://github.com/dillonstreator)! - New MCP tools for agents: review and correct transcript fixes (`list_transcript_flags`, `review_transcript_flags`, `add_transcript_correction`, `add_transcript_cut`), read and set project defaults, open the billing portal, and start a project from an uploaded file with `create_project`'s new `uploadId`.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`3f6c629`](https://github.com/osbytes/reelsaw/commit/3f6c629cdfb5f29fc3f45cb3a1c333f266864f36) Thanks [@dillonstreator](https://github.com/dillonstreator)! - "Not found" answers now say what is missing in plain words, and the MCP clip tools report what changed and whether a render was queued (`update_clip`, `create_clip`, `delete_clip(s)`, `rerender_clip(s)`; `get_clip` also shows the style and framing it will render with and where they come from). Editing a clip's length now has the same 3 second to 10 minute limits as creating one. The command line can create projects, retry, re-analyze, refine, delete, export and create or edit clips, `rerender` prepares clips that never got a title, and `recover` retries a failed project. The templates and library lists load a page at a time.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`86e9b35`](https://github.com/osbytes/reelsaw/commit/86e9b356c948e85cbb27b180d040a9a0bf32f083) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Each Reelsaw process now writes its own log file (`reelsaw.<worker id>.<date>.log`), so scaled workers no longer delete each other's logs; `reelsaw logs` and issue reports read and merge them all. Stopping the app now ends open event streams and waits briefly for open requests before draining jobs, and `STOP_GRACE_PERIOD` in `.env` sets how long Docker waits (raise it with `SHUTDOWN_GRACE_SECONDS`). Analysis and refine steps get more time on long videos (up to 3 hours, twice the video length), and the database pool is configurable with `DB_POOL_MAX`, with connect and idle-transaction timeouts, so model calls cannot starve job heartbeats. **Upgrade:** the release notes now list the irreversible migrations; take a `pg_dump` before upgrading.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`59de27d`](https://github.com/osbytes/reelsaw/commit/59de27da38e97b6bb38d9d5188f4f627e548f328) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A job that keeps crashing its worker now fails with "Processing was interrupted 4 times" and a Retry button instead of being re-queued forever, and a worker short of disk no longer hangs while handing its job to another worker. `/api/health` now checks the database, live-update connection, job queue and worker heartbeat and answers 503 when one is down, and the live-update connection keeps retrying after a failed reconnect.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`2d994c7`](https://github.com/osbytes/reelsaw/commit/2d994c794b924f617468bda7a1a0582b27e7093d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A plan's free first video now goes to your first video whose length is known, not to one that was still downloading or failed early. Uploads that became a project are no longer counted twice against storage, and the storage limit is enforced on every upload path, including library imports and parallel uploads. Links longer than your allowance are refused before they are downloaded, and are not retried. Re-analyze and refine runs now count toward the hourly re-render limit. An unknown Stripe price is reported to admins, and an account with an existing Stripe subscription is sent to the Billing Portal instead of a second Checkout.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`7bef402`](https://github.com/osbytes/reelsaw/commit/7bef4027b017c74d41b9519ac51fec65bd595f4f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Follow-up fixes from review: a lost job no longer burns a retry when it was still running, uploads without a size reserve disk for the largest allowed file, a deleted project's late job is no longer reported as a failure, and the analysis step no longer times out on work that follows a finished step. Changing source text or caption style now tells you which clips were still rendering and need a re-render, cancelling uploads keeps projects that were already being created, and API keys without a permission record are no longer administrators (older keys were granted it explicitly, visible in Settings).
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`2bc2caa`](https://github.com/osbytes/reelsaw/commit/2bc2caae26f598c9939b44dddc0effcf0325356d) Thanks [@dillonstreator](https://github.com/dillonstreator)! - API keys now have permissions: admins choose whether a key may change instance settings over MCP, and OAuth connectors never can. Connected apps can be reviewed and revoked in Settings, the consent screen shows where approval returns to, and client registration is rate-limited. New TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS settings stop spoofed client addresses, server-side link fetches can no longer be redirected inside your network, CSV exports neutralise spreadsheet formulas, uploaded SVGs from S3 keep their sandbox, and sign-up no longer reveals whether an email has an account.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`92351f2`](https://github.com/osbytes/reelsaw/commit/92351f2fa2aa27b57e6e8c1af7bf5ad4a5678a93) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Long videos on slow local models no longer fail after 30 minutes: finding moments now saves each part of the transcript as it finishes, so Retry (and any automatic retry) continues where it stopped instead of starting over, and the project page shows "13 of 43 parts, about 1 h left". A timeout now says how far it got and what to do, and two new settings, `LLM_CALL_TIMEOUT_SECONDS` and `STAGE_IDLE_TIMEOUT_MINUTES`, set how long a model call and a stage without progress may take.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`bd0e4b8`](https://github.com/osbytes/reelsaw/commit/bd0e4b8de7f6cea2c3b6b45e4f7b710c3b0b7fe9) Thanks [@dillonstreator](https://github.com/dillonstreator)! - A crash during audio extraction can no longer leave a truncated file that a retry transcribes silently. Clip retention now frees the disk it promised (clips and thumbnails, local and S3 scratch), a project whose source was removed by retention is fetched again by Retry (clips then re-render on demand, with a clear message until then), abandoned uploads are cleaned up after a day, and S3 storage checks write access at boot and handles concurrent source pulls safely.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`b44e634`](https://github.com/osbytes/reelsaw/commit/b44e634cf50f6315712b1025c37f35dd46aceca3) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Agents and the CLI can now hide or keep text burned into the source (`set_project_source_text`, `reelsaw source-text`) and change a project's caption style (`update_project_style`, `reelsaw update-style`), as the screens already could. Docs say that a retry on a long video resumes from the last finished part.
+
+- [#185](https://github.com/osbytes/reelsaw/pull/185) [`2093120`](https://github.com/osbytes/reelsaw/commit/2093120437ee03394579190b0ce8e66e6370e386) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Live updates on the project page and the clip editor now recover after a sign-in expiry or a network blip (with a small "reconnecting" note), and a long activity log stays complete after a reconnect. Uploads check the file size against the server's limit up front, can be cancelled one by one or all at once, and warn before you close the tab mid-upload.
+
 ## 0.26.2
 
 ### Patch Changes

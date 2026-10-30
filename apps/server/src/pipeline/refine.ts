@@ -14,6 +14,7 @@ import { toSentences } from "./transcript.js";
 import { skipReason, supports, type LanguageStage } from "./language.js";
 import { REFINE_STEPS, type RefineStep, type RefineStatus, type TranscriptFlag } from "@reelsaw/shared";
 import { refineStepOn, resolveRefineOptions, type RefineOptions } from "./refine-options.js";
+import { rejectedCutRows } from "../decisions/service.js";
 
 /**
  * Refine stage = three independent jobs after transcription:
@@ -239,25 +240,41 @@ export async function refineEntities(ctx: StageContext) {
   await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } }, ctx.seq);
 }
 
+/** "… [words] …": a rejected cut in its sentence, the way the verifier is shown it. */
+function cutSnippet(ws: ReadonlyArray<{ text: string }>, a: number, b: number): string {
+  return `…${ws.slice(Math.max(0, a - 6), a).map((w) => w.text).join(" ")} [${ws.slice(a, b).map((w) => w.text).join(" ")}] ${ws.slice(b, b + 5).map((w) => w.text).join(" ")}…`;
+}
+
+const rejectedContext = z.object({ words: z.array(z.object({ text: z.string() })), target: z.object({ index: z.number().int().min(0), span: z.number().int().min(1) }) });
+
 /**
  * Cuts the user rejected in their other projects, as "… [words] …" snippets: the verifier sees them
- * as examples of what not to cut, so the detector learns this user's taste over time.
+ * as examples of what not to cut, so the detector learns this user's taste over time. Read from the
+ * decision log first (newest first, including projects deleted since), then topped up from the
+ * transcripts of their recent projects for rejections made before the log existed.
  */
 async function rejectedCutExamples(svc: Services, projectId: string, max = 8): Promise<string[]> {
   const db = svc.database.db;
   const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
   if (!p) return [];
-  const others = await db.query.projects.findMany({ where: eq(schema.projects.userId, p.userId), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
   const out: string[] = [];
+  for (const r of await rejectedCutRows(db, p.userId, projectId, max)) {
+    const c = rejectedContext.safeParse(r.context);
+    if (c.success) out.push(cutSnippet(c.data.words, c.data.target.index, c.data.target.index + c.data.target.span));
+  }
+  if (out.length >= max) return out;
+  const seen = new Set(out);
+  // projects deleted with "forget what Reelsaw learned" teach nothing while they wait for the purge
+  const others = await db.query.projects.findMany({ where: and(eq(schema.projects.userId, p.userId), eq(schema.projects.forgetDecisionsOnPurge, false)), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
   for (const o of others) {
     if (o.id === projectId || out.length >= max) continue;
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, o.id), columns: { flags: true, rawWords: true, words: true } });
     const ws = t?.rawWords ?? t?.words ?? [];
     for (const f of t?.flags ?? []) {
       if (f.kind !== "disfluency" || f.status !== "rejected" || f.subkind === "manual" || out.length >= max) continue;
-      const a = f.wordIndex;
-      const b = f.wordIndex + f.span;
-      out.push(`…${ws.slice(Math.max(0, a - 6), a).map((w) => w.text).join(" ")} [${ws.slice(a, b).map((w) => w.text).join(" ")}] ${ws.slice(b, b + 5).map((w) => w.text).join(" ")}…`);
+      const s = cutSnippet(ws, f.wordIndex, f.wordIndex + f.span);
+      if (!seen.has(s)) out.push(s);
+      seen.add(s);
     }
   }
   return out;
@@ -310,7 +327,7 @@ export async function refineDisfluency(ctx: StageContext) {
 }
 
 /** Bump when the text scan's behaviour changes: the saved text-scan step stops applying. */
-const TEXT_SCAN_VERSION = "text-scan-1";
+const TEXT_SCAN_VERSION = "text-scan-2";
 const overlayBox = z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), kind: z.enum(["caption", "watermark"]), coverage: z.number(), windows: z.array(z.tuple([z.number(), z.number()])).optional(), share: z.number().optional() });
 const textScanSchema = z.object({
   overlays: z.array(overlayBox),
@@ -320,6 +337,7 @@ const textScanSchema = z.object({
   slides: z.number(),
   faceDropped: z.number(),
   moving: z.number(),
+  ui: z.number(),
 });
 
 export async function refineScenes(ctx: StageContext) {
@@ -345,13 +363,13 @@ export async function refineScenes(ctx: StageContext) {
         async (signal) => {
           const sourcePath = await ctx.ensureSource(project);
           const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
-          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length };
+          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length, ui: r.ui.length };
         },
         { schema: textScanSchema, timeoutMs: Math.max(30 * 60_000, Math.round(durationSec * 1000)), model: "text-detector" },
       );
       overlays = scan.overlays;
       textProfile = scan.textProfile;
-      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, textProfile: scan.textProfile, overlays }, "on-screen text scan");
+      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, ui: scan.ui, textProfile: scan.textProfile, overlays }, "on-screen text scan");
     } catch (err) {
       // a stop or a timeout ends the attempt (the cuts are already saved and the scan restarts alone); anything else only costs the text scan
       if (ctx.signal.aborted || err instanceof StageTimeoutError || err instanceof StaleJobError) throw err;

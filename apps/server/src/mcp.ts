@@ -427,9 +427,10 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
 
   // ── layer templates ──────────────────────────────────────────────────────
   server.registerTool("list_layer_templates", TOOLS.list_layer_templates, ({ cursor, limit }) => run(() => api.layerTemplates.list({ cursor, limit })));
-  server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers }) => {
-    if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers) or layers (the template's layers with timings)."));
-    return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers! })));
+  server.registerTool("save_layer_template", TOOLS.save_layer_template, ({ name, clipId, layers, bumpers }) => {
+    if ((clipId === undefined) === (layers === undefined)) return Promise.resolve(fail("Pass exactly one of clipId (save that clip's layers, intro and outro) or layers (the template's layers with timings; [] for an intro / outro only template)."));
+    if (clipId !== undefined && bumpers !== undefined) return Promise.resolve(fail("bumpers goes with layers; with clipId the clip's own intro and outro are saved (update_layer_template changes them after)."));
+    return run(() => (clipId !== undefined ? api.layerTemplates.fromClip({ clipId, name }) : api.layerTemplates.create({ name, layers: layers!, bumpers })));
   });
   server.registerTool("update_layer_template", TOOLS.update_layer_template, ({ templateId, ...patch }) => run(() => api.layerTemplates.update({ id: templateId, ...patch })));
   server.registerTool("delete_layer_template", TOOLS.delete_layer_template, ({ templateId }) => run(() => api.layerTemplates.delete({ id: templateId })));
@@ -530,13 +531,42 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
   server.registerTool(
     "delete_project",
     TOOLS.delete_project,
-    ({ id }) => run(() => api.projects.delete({ id })),
+    ({ id, forgetDecisions }) => run(() => api.projects.delete({ id, forgetDecisions })),
   );
 
   server.registerTool(
     "purge_project",
     TOOLS.purge_project,
-    ({ id }) => run(() => api.projects.purge({ id })),
+    ({ id, forgetDecisions }) => run(() => api.projects.purge({ id, forgetDecisions })),
+  );
+
+  server.registerTool(
+    "list_decisions",
+    TOOLS.list_decisions,
+    (input) =>
+      run(async () => {
+        const [summary, page] = await Promise.all([api.decisions.summary(), api.decisions.list(input)]);
+        return { summary, ...page };
+      }),
+  );
+
+  server.registerTool(
+    "export_decisions",
+    TOOLS.export_decisions,
+    (input) => run(() => api.decisions.export(input)),
+  );
+
+  server.registerTool(
+    "forget_decisions",
+    TOOLS.forget_decisions,
+    ({ projectId }) => run(() => api.decisions.forget({ projectId })),
+  );
+
+  server.registerTool(
+    "set_learning",
+    TOOLS.set_learning,
+    ({ enabled }) =>
+      run(async () => ({ ...(await api.decisions.setLearning({ enabled })), hint: enabled ? "Your decisions are recorded from now on." : "New decisions are no longer recorded; what is kept stays until forget_decisions." })),
   );
 
   server.registerTool(

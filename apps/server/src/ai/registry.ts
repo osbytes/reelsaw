@@ -230,11 +230,21 @@ export function createAi(
     // Speaches: pull from its registry on demand
     const reg = await get(`/registry?task=automatic-speech-recognition`).catch(() => undefined);
     if (reg?.ok) {
-      log.info({ model: modelId, server: shown }, "transcription model not installed; downloading via POST /models (first boot only)");
-      const dl = await fetch(`${base}/models/${encodeURIComponent(modelId)}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch((err) => {
-        throw new Error(`download of ${modelId} from ${shown} failed: ${(err as Error).message}`);
-      });
-      if (!dl.ok && dl.status !== 409) throw new Error(`download of ${modelId} from ${shown} failed: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
+      // Speaches answers the POST only once the files are in its cache and reports no progress meanwhile, so
+      // boot (and the HTTP port) waits here for minutes on a first install; a heartbeat says the wait is this
+      log.info({ model: modelId, server: shown, timeoutMin: 15 }, "transcription model not installed; downloading it via POST /models (first boot only; hundreds of MB to GBs, the app answers once it is done)");
+      const started = Date.now();
+      const elapsedSec = () => Math.round((Date.now() - started) / 1000);
+      const heartbeat = setInterval(() => log.info({ model: modelId, server: shown, elapsedSec: elapsedSec() }, "still downloading the transcription model; boot continues when it finishes"), 20_000);
+      try {
+        const dl = await fetch(`${base}/models/${encodeURIComponent(modelId)}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch((err) => {
+          throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: ${(err as Error).message}`);
+        });
+        if (!dl.ok && dl.status !== 409) throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
+        log.info({ model: modelId, server: shown, elapsedSec: elapsedSec(), status: dl.status }, "transcription model downloaded");
+      } finally {
+        clearInterval(heartbeat);
+      }
       return;
     }
     const hint = /11434/.test(shown) ? ` Run: ollama pull ${modelId}` : "";

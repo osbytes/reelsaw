@@ -33,6 +33,8 @@ another editor. Today branding is added by hand. Appetite: about 3 days for phas
   pipeline re-runs. Set it in the editor (two selects under the transport), from the clip card's
   ⋯ menu ("Intro / outro..." dialog), or for many clips at once from the selection bar's "Intro/outro..." popover
   (`#sel=id1,id2` in the hash, `clips.setBumpersMany`). Each goes through Save / Save & re-render.
+- **Layer templates** can carry an intro and outro (docs/specs/layer-templates.md, decision 8): applying
+  one writes the slots it sets as the clip's own choice, like the per-clip picker does.
 
 ### Accepted assets and limits
 | Type | Accepted | Limits |

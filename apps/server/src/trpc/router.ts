@@ -7,6 +7,8 @@ import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
+import { decisionSummary, EXPORT_MAX, exportDecisions, fixDecisions, forgetDecisions, LIST_MAX, listDecisions, recordDecisions, setLearning } from "../decisions/service.js";
+import { DECISION_KINDS } from "@reelsaw/shared";
 import { applyProjectFraming, createProject, deleteClip, deleteClips, deleteOwnedProject, deletedClips, findProject, projectBumpersInput, projectStyleInput, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineInput, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectBumpers, setProjectSourceText, updateProject, updateProjectStyle } from "../projects/service.js";
 import { clipBumpersManyInput, createClip, createClipInput, rerenderClip, rerenderClips, rerenderManyInput, setClipBumpers, updateClip, updateClipInput } from "../clips/service.js";
 import { peekUrlMeta } from "../projects/peek.js";
@@ -27,6 +29,7 @@ import { keys } from "../storage/index.js";
 import { svgSize, svgHasExternalRefs } from "../pipeline/raster.js";
 import { bumperKind, assetKind, bumperProblem, ensureBumperThumb, sha256File, assetMime, BUMPER_IMAGE_SEC } from "../pipeline/bumpers.js";
 import { projectBumperSummaries, bumperUsageCounts, bumperAssetUsage, bumperNameSchema, updateBumperAsset, createAsset, setBumperDefault, requireOneSource, downloadAsUpload, restoreOwnedAsset, purgeOwnedAsset } from "../library/service.js";
+import { templateBumpersSchema } from "@reelsaw/shared";
 import { applyLayerTemplate, applyLayerTemplateInput, createLayerTemplate, getLayerTemplate, layerTemplateFromClip, listLayerTemplates, publicTemplate, purgeLayerTemplate, removeLayerTemplate, restoreLayerTemplate, templateIdSchema, updateLayerTemplate } from "../library/templates.js";
 import { asTrpc, catalogSearch, importAsset, libraryProviders, type ImportedAsset } from "../library/import.js";
 import { applyFlags } from "../pipeline/entities.js";
@@ -163,6 +166,15 @@ async function addManualFix(svc: Services, userId: string, input: { projectId: s
   };
   const flags = [...t.flags.filter((f) => !merged.includes(f)), flag].sort((a, b) => a.wordIndex - b.wordIndex);
   const rerendered = await saveFlags(svc, u, p, t, flags, t.deletedFlags ?? [], flag, input.rerender);
+  // a cut drawn over the detector's unreviewed cuts implies they were right, but only implies it: the user may have cut a
+  // whole passage without looking at them, so each gets an inferred fix.accept (kept, never an eval label) next to the fix.manual
+  const confirmed = what.kind === "disfluency" ? merged.filter((f) => f.kind === "disfluency" && f.subkind !== "manual" && (f.status === "pending" || f.status === "auto")) : [];
+  await recordDecisions(svc, u.db, p, () =>
+    fixDecisions(u.db, p.id, raw, [
+      ...confirmed.map((f) => ({ kind: "fix.accept" as const, flag: f, before: f, after: { ...f, status: "accepted" as const }, explicit: false })),
+      { kind: "fix.manual", flag, before: null, after: flag },
+    ]),
+  );
   return { ok: true, flagId: flag.id, rerendered };
   });
 }
@@ -1012,8 +1024,31 @@ const restRouter = router({
       .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
       .mutation(({ ctx, input }) => restoreDeleted(ctx.svc, actorOf(ctx.user), input.items)),
     purge: protectedProcedure
-      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200) }))
-      .mutation(({ ctx, input }) => purgeDeleted(ctx.svc, actorOf(ctx.user), input.items)),
+      .input(z.object({ items: z.array(deletedItemRefSchema).min(1).max(200), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => purgeDeleted(ctx.svc, actorOf(ctx.user), input.items, { forgetDecisions: input.forgetDecisions })),
+  }),
+
+  /**
+   * The decision log (docs/specs/decision-log.md): what the user accepted, rejected, cut and edited, kept after the
+   * project is deleted so Reelsaw can learn from it. Settings → Learning, MCP list_decisions / export_decisions /
+   * forget_decisions and `reelsaw decisions` call the same service.
+   */
+  decisions: router({
+    summary: protectedProcedure.query(({ ctx }) => decisionSummary(ctx.svc.database.db, ctx.user.id)),
+    list: protectedProcedure
+      .input(z.object({ kind: z.enum(DECISION_KINDS).optional(), projectId: z.string().max(100).optional(), cursor: z.number().int().positive().optional(), limit: z.number().int().min(1).max(LIST_MAX).default(50) }))
+      .query(({ ctx, input }) => listDecisions(ctx.svc.database.db, ctx.user.id, input)),
+    export: protectedProcedure
+      .input(z.object({ kind: z.enum(DECISION_KINDS).optional(), since: z.string().datetime({ offset: true }).optional(), cursor: z.number().int().positive().optional(), limit: z.number().int().min(1).max(EXPORT_MAX).default(200) }))
+      .query(({ ctx, input }) => exportDecisions(ctx.svc.database.db, ctx.user.id, { ...input, since: input.since ? new Date(input.since) : undefined })),
+    /** Forget one project's decisions (`projectId`, live or purged) or all of them. */
+    forget: protectedProcedure.input(z.object({ projectId: z.string().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
+      const forgotten = await ctx.svc.tx((u) => forgetDecisions(u.db, ctx.user.id, input));
+      ctx.log.info({ projectId: input.projectId ?? null, forgotten }, "decisions forgotten");
+      return { ok: true as const, forgotten, message: forgotten ? `Forgot ${forgotten} decision${forgotten === 1 ? "" : "s"}.` : "Nothing to forget." };
+    }),
+    /** Turn recording on or off; what is already kept stays until forgotten. */
+    setLearning: protectedProcedure.input(z.object({ enabled: z.boolean() })).mutation(({ ctx, input }) => setLearning(ctx.svc.database.db, ctx.user.id, input.enabled)),
   }),
 
   /** ⌘K palette before anything is typed: the 20 projects changed most recently, with their clip counts. */
@@ -1138,13 +1173,17 @@ const restRouter = router({
       .mutation(({ ctx, input }) => applyProjectFraming(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
 
     /** Soft delete: hidden everywhere and its work stopped; restorable for DELETED_RETENTION_DAYS. Storage still counts until purge. */
-    delete: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    delete: protectedProcedure
+      .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
 
     /** Undo a delete (the owner, or an admin for anyone's project). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),
 
     /** Remove a deleted project for good: files go, storage is freed. Minutes already used stay counted. */
-    purge: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => purgeOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id)),
+    purge: protectedProcedure
+      .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => purgeOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
 
     /**
      * SSE stream of project events. It replays the newest `EVENT_REPLAY_LIMIT` non-progress events (after
@@ -1217,6 +1256,7 @@ const restRouter = router({
         const db = u.db;
         const raw = t.rawWords ?? t.words;
         const changed: Array<{ start: number; end: number }> = [];
+        const decided: Array<{ before: TranscriptFlag; after: TranscriptFlag }> = [];
         const flags = t.flags.map((f) => {
           const d = input.decisions.find((x) => x.id === f.id);
           if (!d) return f;
@@ -1226,7 +1266,9 @@ const restRouter = router({
           const textChanged = willApply && (replacement ?? f.suggested) !== (f.replacement ?? f.suggested);
           if (d.status === f.status && !textChanged) return f;
           if (wasApplied !== willApply || textChanged) changed.push({ start: f.start, end: f.end });
-          return { ...f, status: d.status, replacement };
+          const next = { ...f, status: d.status, replacement };
+          decided.push({ before: f, after: next });
+          return next;
         });
         // rejecting your own cut deletes it (soft): it moves to deletedFlags and gives back what it replaced
         let live = flags;
@@ -1237,6 +1279,20 @@ const restRouter = router({
         await writeTranscript(u, p.id, t, { words, rawWords: raw, flags: live, deletedFlags, segments, text: segments.map((s) => s.text).join(" ") });
         const rerendered = input.rerender ? await rerenderOverlapping(svc, u, p, changed) : 0;
         await u.emit(p.id, "stage.started", { stage: "review", changed: changed.length, rerendered });
+        // rejecting your own fix is deleting it: one fix.delete, like deleteFlag
+        await recordDecisions(
+          svc,
+          db,
+          p,
+          () => fixDecisions(
+            db,
+            p.id,
+            raw,
+            decided.map(({ before, after }) =>
+              before.subkind === "manual" && after.status === "rejected" ? { kind: "fix.delete" as const, flag: before, before, after: null } : { kind: after.status === "accepted" ? ("fix.accept" as const) : ("fix.reject" as const), flag: before, before, after },
+            ),
+          ),
+        );
         return { ok: true, changed: changed.length, rerendered };
         }),
       ),
@@ -1257,6 +1313,7 @@ const restRouter = router({
           if (!f) throw new TRPCError({ code: "NOT_FOUND", message: "Fix not found" });
           const next = softDelete(t.flags, t.deletedFlags ?? [], f.id);
           const rerendered = await saveFlags(ctx.svc, u, p, t, next.flags, next.deletedFlags, f, input.rerender);
+          await recordDecisions(ctx.svc, u.db, p, () => fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.delete", flag: f, before: f, after: null }]));
           return { ok: true, rerendered };
         }),
       ),
@@ -1284,6 +1341,7 @@ const restRouter = router({
         }
         live = [...live, flag].sort((a, b) => a.wordIndex - b.wordIndex);
         const rerendered = await saveFlags(svc, u, p, t, live, (t.deletedFlags ?? []).filter((x) => x.id !== d.id), flag, input.rerender);
+        await recordDecisions(svc, u.db, p, () => fixDecisions(u.db, p.id, t.rawWords ?? t.words, [{ kind: "fix.restore", flag, before: null, after: flag }]));
         return { ok: true, rerendered };
         }),
       ),
@@ -1356,15 +1414,16 @@ const layerTemplatesRouter = router({
   /** A page of the account's templates (`items`, `nextCursor`, `total`) plus the ones removed in the last 30 days (`deleted`). */
   list: protectedProcedure.input(listPageInput).query(({ ctx, input }) => listLayerTemplates(ctx.svc.database.db, ctx.user.id, input ?? {})),
   get: protectedProcedure.input(z.object({ id: templateIdSchema })).query(async ({ ctx, input }) => publicTemplate(await getLayerTemplate(ctx.svc.database.db, ctx.user.id, input.id))),
-  create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
-  update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers })),
+  create: protectedProcedure.input(z.object({ name: layerTemplateNameSchema, layers: layerTemplateLayersSchema, bumpers: templateBumpersSchema.nullable().optional() })).mutation(({ ctx, input }) => createLayerTemplate(ctx.svc, ctx.user.id, input)),
+  /** `bumpers` replaces the template's intro / outro (null = it sets neither); left out = unchanged. */
+  update: protectedProcedure.input(z.object({ id: templateIdSchema, name: layerTemplateNameSchema.optional(), layers: layerTemplateLayersSchema.optional(), bumpers: templateBumpersSchema.nullable().optional() })).mutation(({ ctx, input }) => updateLayerTemplate(ctx.svc, ctx.user.id, input.id, { name: input.name, layers: input.layers, bumpers: input.bumpers })),
   delete: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => removeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   restore: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => restoreLayerTemplate(ctx.svc, ctx.user.id, input.id)),
   /** Hard-delete a removed template (no media files). */
   purge: protectedProcedure.input(z.object({ id: templateIdSchema })).mutation(({ ctx, input }) => purgeLayerTemplate(ctx.svc, ctx.user.id, input.id)),
-  /** A new template from one clip's layers: a layer that spans the clip fills, the rest anchor to the nearer edge with their length. */
+  /** A new template from one clip's layers (a layer that spans the clip fills, the rest anchor to the nearer edge with their length) and the intro / outro it renders with. */
   fromClip: protectedProcedure.input(z.object({ clipId: z.string(), name: layerTemplateNameSchema })).mutation(({ ctx, input }) => layerTemplateFromClip(ctx.svc, ctx.user.id, input)),
-  /** Materialise a template on clips of one project (all of them, or `clipIds`), replacing or adding to their layers. (`apply` is a word tRPC reserves.) */
+  /** Materialise a template on clips of one project (all of them, or `clipIds`): replacing or adding to their layers, and setting the intro / outro slots it names. (`apply` is a word tRPC reserves.) */
   applyToClips: protectedProcedure.input(z.object(applyLayerTemplateInput)).mutation(({ ctx, input }) => applyLayerTemplate(ctx.svc, ctx.user.id, input)),
 });
 

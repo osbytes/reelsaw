@@ -55,6 +55,8 @@ describe("issue reports", () => {
     );
     await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, 0, 'Clip', 'Hook', 0, 1, 80, 'why', '[]', 'done')`, [clipId, projectId]);
     await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'stage.failed', $2)`, [projectId, JSON.stringify({ stage: "render", error: `upstream said ${planted.header}; key=${planted.apiKey}`, planted })]);
+    // a stuck project with an event: stuckInfo reads its time from a raw row (once broke every instance report)
+    await pool.query(`insert into project_events (project_id, type, payload) values ($1, 'stage.started', '{"stage":"render"}')`, [stuckProjectId]);
     await pool.query(`insert into stage_artifacts (project_id, stage, kind, models, data) values ($1, 'analyze', 'candidates', $2, $3)`, [projectId, JSON.stringify({ language: "test:model" }), JSON.stringify({ candidates: [] })]);
   });
 
@@ -198,8 +200,11 @@ describe("issue reports", () => {
       for (const name of ["stuck.json", "projects.json", "system.json", "queue.json", "usage.json", "errors.jsonl"]) {
         assert.ok(files.has(name), `missing ${name}`);
       }
-      const stuck = JSON.parse(files.get("stuck.json")!.toString()) as { projects: Array<{ id: string; title: string; ownerHash: string }> };
-      assert.ok(stuck.projects.some((p) => p.id === stuckProjectId && p.title === "STUCK_OTHER_TITLE"));
+      const stuck = JSON.parse(files.get("stuck.json")!.toString()) as { projects: Array<{ id: string; title: string; ownerHash: string; lastEvent: { type: string; at: string } | null }> };
+      const mine = stuck.projects.find((p) => p.id === stuckProjectId);
+      assert.equal(mine?.title, "STUCK_OTHER_TITLE");
+      assert.equal(mine?.lastEvent?.type, "stage.started");
+      assert.ok(Number.isFinite(Date.parse(mine!.lastEvent!.at)), "lastEvent.at is an ISO time");
       const summaries = JSON.parse(files.get("projects.json")!.toString()) as { projects: Array<{ id: string; title: string; ownerHash: string }> };
       assert.ok(summaries.projects.some((p) => p.id === otherProjectId && p.title === "OTHER_ACCOUNT_TITLE"));
       assert.ok(summaries.projects.some((p) => p.id === stuckProjectId));

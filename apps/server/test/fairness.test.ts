@@ -97,12 +97,14 @@ describe("provider concurrency gate", () => {
     await pool.end();
   });
 
-  it("parses PROVIDER_CONCURRENCY and defaults self-hosted providers to 2, cloud to unlimited", () => {
+  it("parses PROVIDER_CONCURRENCY and defaults self-hosted providers to 2 (a local whisper on openai to 1), cloud to unlimited", () => {
     assert.deepEqual([...parseProviderConcurrency("compat=3, openai=16", "ollama")], [["ollama", 3], ["openai", 16]]);
     assert.throws(() => parseProviderConcurrency("ollama", "ollama"), /provider=number/);
-    const gate = createProviderGate("", "ollama", (p) => p === "ollama", quiet);
+    const gate = createProviderGate("", "ollama", (p) => p === "ollama" || p === "openai", quiet);
     assert.equal(gate.limitOf("ollama"), 2);
+    assert.equal(gate.limitOf("openai"), 1);
     assert.equal(gate.limitOf("anthropic"), 0);
+    assert.equal(createProviderGate("openai=3", "ollama", () => true, quiet).limitOf("openai"), 3);
   });
 
   it("holds the limit across processes (two gates on one database never run more than N calls together)", async () => {

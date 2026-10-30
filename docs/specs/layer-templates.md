@@ -68,6 +68,20 @@ mode per layer, never the default.
    opposite the captions) instead of at a fixed `x`/`y`. The data model leaves room (`timing` is one field
    among the layer's own; a `placement` field would sit beside it) and nothing in this phase depends on
    it. Build the fixed-position template first and learn from use.
+8. **Intro and outro travel with the template** (Oct 28 2026, migration `0050_layer_template_bumpers`). A look
+   is often "logo sting before, follow card after" as much as layers, and the per-clip intro / outro already
+   exists (`clips.bumpers`, docs/specs/bumpers.md). `layer_templates.bumpers` has the clip shape
+   (`templateBumpersSchema` = `clipBumpersSchema`): a slot left out means "clips keep their own", `null`
+   means "no intro / outro", an id is a library video or image (never a sound), `introSec` / `outroSec`
+   go with an image. Like layers it is materialised: applying writes the slots it sets onto `clips.bumpers`
+   as the clip's own choice (`mergeTemplateBumpers`, in both Replace and Keep modes, since a clip has one
+   intro and one outro), and new clips of a project whose settings name the template get the same, except
+   a slot the user already chose on a manual clip while it was being prepared. The project's own intro /
+   outro stays the default for clips the template leaves alone; the precedence chain is unchanged
+   (a template slot is a clip override). Save from a clip keeps the intro / outro the clip renders with
+   (its own or the project's); a slot with neither is left out, so the template never takes one away. A
+   template may hold only an intro / outro (no layers). Assets a template names as intro / outro count as
+   used (`templateAssetUses` in `library/template-assets.ts`: usage, "used by", the purge guard and the sweep).
 
 ## What the user sees
 - **Templates page** (`/templates`, nav next to Library; `#template=<id>` deep link): a list of templates
@@ -79,15 +93,18 @@ mode per layer, never the default.
   **Timing** row: Segmented From the start / Before the end / Whole clip / Proportional, with the mode's
   fields). A **Preview length** control (15 / 30 / 45 / 60 / 90 s) re-lays the lane and the canvas so the
   user sees the template stretch and contract; dragging a block edits the timing in the current mode
-  (seconds from the anchor, or fractions). Save writes `layerTemplates.update`; the unsaved-changes guard
-  is the editor's.
+  (seconds from the anchor, or fractions). Under the layer cards an **Intro & outro** block has the two
+  slot pickers of the clip editor (Clip's own / None / a library video or image, seconds for an image).
+  Save writes `layerTemplates.update`; the unsaved-changes guard is the editor's.
 - **Putting a template on a clip is one dialog everywhere** (`ApplyTemplateDialog`, `TemplatePicker.tsx`):
   the templates as cards, each with a small map of where its layers sit on the 9:16 frame and a line per
   layer ("copia-qr · First 3 s", "“Link in bio” · Last 4 s", "Music · Whole clip"), so the choice is not
   blind. The Keep-and-add / Replace question (two radio rows, Keep the default) appears only when the
   target already has layers, worded with the count ("This clip has 3 layers." / "4 of the 10 selected
   clips already have layers."); a clean clip gets no question, and a template never wipes hand-placed
-  layers unless Replace is chosen. Second design pass: the first cut had three plain dropdowns, asked
+  layers unless Replace is chosen. A template with an intro / outro lists them first on its card and the
+  dialog says "Also sets the intro and outro, replacing the clip's own." (a line that is always there, so
+  choosing a template never moves the buttons). Second design pass: the first cut had three plain dropdowns, asked
   Replace / Add on every clip with Replace preselected (so the lane's `+` → Template wiped the clip's
   layers), could wipe hand-placed layers from the selection bar without saying so, and left nothing
   selected after applying in the editor.
@@ -96,7 +113,8 @@ mode per layer, never the default.
     thing it changes). Applying
     writes into the editor's document (one undo step, saved with the clip), selects the first new layer and
     parks the playhead on it so the canvas shows the change. "Save as template…" sits under the layer cards
-    (`templateFromLayers` decides the timings; the Templates page fixes them).
+    (`templateFromLayers` decides the timings; the Templates page fixes them) and keeps the clip's intro / outro.
+    Applying a template with an intro / outro sets those slots in the document too, in the same undo step.
   - **Project page**: a clip card's ⋯ menu has "Layer template…" next to "Intro / outro…" (one clip,
     server side, Apply or Apply & re-render); the selection bar's "Template…" slot does the same for the
     selection (`layerTemplates.applyToClips`; `apply` is a word tRPC reserves). Both say what happened in
@@ -108,16 +126,16 @@ mode per layer, never the default.
 | what | web | tRPC | MCP | CLI |
 |---|---|---|---|---|
 | list / get | Templates page | `layerTemplates.list` (a page: `items`, `nextCursor`, `total`, plus `deleted`) / `get` | `list_layer_templates` | `reelsaw templates list` / `show <id>` |
-| create (from layers or a clip) | editor "Save as template…", page "New template" | `create` / `fromClip` | `save_layer_template { name, clipId \| layers }` | `templates save <projectId> <clipId> <name…>` |
-| edit | template editor | `update` | `update_layer_template` | `templates rename <id> <name…>` / `templates set <id> --layers '<json>'` |
+| create (from layers or a clip) | editor "Save as template…", page "New template" | `create` / `fromClip` | `save_layer_template { name, clipId \| layers, bumpers? }` | `templates save <projectId> <clipId> <name…>` |
+| edit | template editor | `update` (`bumpers` replaces the intro / outro, null = neither) | `update_layer_template { name?, layers?, bumpers? }` | `templates rename <id> <name…>` / `templates set <id> [--layers '<json>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n]` |
 | delete / restore / purge | page (toast: Undo / Delete forever / See deletions); restore and delete forever on Deleted (compact bar, Delete forever in ⋯) | `delete` / `restore` / `purge`; bulk `deleted.restore` / `deleted.purge` | `delete_layer_template` / `restore_layer_template` / `purge_layer_template` | `templates delete <id>` / `restore <id>` / `purge <id>` |
 | apply to clips | editor, selection bar | `applyToClips` | `apply_layer_template { templateId, projectId, clipIds?, mode, rerender }` | `templates apply <templateId> <projectId> [clipId…] [--add] [--rerender]` |
 | default for new clips | Settings, project settings | `me.updateProjectDefaults`, `projects.update { settings.layerTemplateId }` | `update_project { settings: { layerTemplateId } }` | `update-project` |
 
 One implementation: `apps/server/src/library/templates.ts` (`listLayerTemplates`, `createLayerTemplate`,
 `updateLayerTemplate`, `removeLayerTemplate`, `restoreLayerTemplate`, `purgeLayerTemplate`, `layerTemplateFromClip`,
-`applyLayerTemplate`, `templateForNewClips` + `layersForNewClip` for the pipeline); the pure parts
-(`templateWindow`, `resolveTemplateLayers`, `templateFromLayers`, `timingText`) live in `packages/shared`
+`applyLayerTemplate`, `templateForNewClips` + `layersForNewClip` + `bumpersForNewClip` for the pipeline); the pure parts
+(`templateWindow`, `resolveTemplateLayers`, `templateFromLayers`, `timingText`, `mergeTemplateBumpers`) live in `packages/shared`
 so the editor previews exactly what the server writes. `cleanLayers` moved from the router to
 `library/layers.ts` so the apply path and `clips.update` store layers the same way.
 

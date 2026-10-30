@@ -135,6 +135,15 @@ if ($Existing) {
   $p = EnvGet 'PORT'; if ($p) { $Port = [int]$p }
   $pinned = EnvGet 'REELSAW_IMAGE'; if ($pinned) { $Image = $pinned }
 }
+# Volumes outlive a deleted folder or .env: a database from an earlier install under the same project
+# name keeps the password it was created with. The installer keeps that data and resets the password
+# from .env once the database is up (below), so .env is always the source of truth.
+$PriorDb = Ok { docker volume inspect "${Project}_pgdata" }
+$PriorDir = ''
+try {
+  $PriorDir = @(docker ps -a --filter "label=com.docker.compose.project=$Project" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>$null |
+    Where-Object { $_ -and $_ -ne $Dir } | Select-Object -First 1) -join ''
+} catch { }
 
 # ---- Ollama on this host: running, installed, and which models are already pulled ----
 $OllamaApi = 'http://localhost:11434'
@@ -324,6 +333,8 @@ function Compose { docker compose -p $Project @Profiles @args }
 Say 'Plan'
 if ($Existing) { Note "Update the install in $Dir (its .env is kept; delete it to start over)" } else { Note "Install into $Dir" }
 Note "Image: $Image"
+if (-not $Existing -and $PriorDb) { Note "Database: keeping ${Project}_pgdata from an earlier install; its password is set from the new .env" }
+if ($PriorDir) { Note "Containers started from $PriorDir are replaced (their volumes are kept)" }
 if ($Ai -eq 'local') {
   Note "Language model: $Llm in Ollama ($LlmWhy)"
   if ($OllamaInstall -eq 'winget') { Note 'Ollama: install with winget, run natively' }
@@ -504,6 +515,18 @@ if ($Ai -eq 'local') {
     for ($i = 0; $i -lt 30 -and -not (Ok { Compose exec -T ollama ollama list }); $i++) { Start-Sleep -Seconds 1 }
     Compose exec -T ollama ollama pull $Llm
     if ($LASTEXITCODE -ne 0) { Die "couldn't pull $Llm in the Ollama container" }
+  }
+}
+
+# the database first: an existing volume keeps the password it was created with, so set it from .env
+# before the app connects (idempotent; psql over the container's socket needs no password)
+Say 'Starting the database'
+Compose up -d db
+for ($i = 0; $i -lt 60 -and -not (Ok { Compose exec -T db pg_isready -U reelsaw -d reelsaw }); $i++) { Start-Sleep -Seconds 1 }
+$pw = (EnvGet 'POSTGRES_PASSWORD') -replace "'", "''"
+if ($pw) {
+  if (-not (Ok { Compose exec -T db psql -U reelsaw -d reelsaw -q -v ON_ERROR_STOP=1 -c "alter user reelsaw password '$pw'" })) {
+    Warn "couldn't set the database password from .env; if the app logs 'password authentication failed', see the troubleshooting section of deploy/README.md"
   }
 }
 

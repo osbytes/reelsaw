@@ -17,7 +17,8 @@ import { needsPrepare } from "../pipeline/manual.js";
 import { cleanLayers } from "../library/layers.js";
 import { syncClipRefs, syncClipsRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { findProject, NO_CLIP, type Actor } from "../projects/service.js";
+import { byOwner, findProject, NO_CLIP, type Actor } from "../projects/service.js";
+import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/service.js";
 
 /** Every asset id is one of the owner's library (an id the clip already uses stays valid even if it was removed since). */
 export async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
@@ -145,6 +146,7 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     const clip = fresh ?? row;
     if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
     if (bumpersChanged || cleanedLayers !== undefined) await syncClipRefs(u.db, p.id, clip);
+    if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, async () => [await clipEditDecision(u.db, p.id, c, clip, changed)].filter((d) => d !== null));
     return { clip, changed, needsRerender, rerendered };
   });
 }
@@ -191,6 +193,12 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     // born "preparing": the prepare job and the run start go through the one prepare path
     await requestPrepare(svc, u, p.id, inserted.id, { mode: input.mode, reason: "clip_added" });
     await u.emit(p.id, "clip.created", { clipId: inserted.id, index, title: inserted.title });
+    if (byOwner(actor, p)) {
+      await recordDecisions(svc, u.db, p, async () => {
+        const [text] = await rangeTexts(u.db, p.id, [inserted]);
+        return [{ kind: "clip.create", clipId: inserted.id, before: null, after: { startSec: inserted.startSec, endSec: inserted.endSec, mode: input.mode }, context: { text: text ?? "", startSec: inserted.startSec, endSec: inserted.endSec, origin: inserted.origin } }];
+      });
+    }
     return { clip: inserted, queued: "prepare" as const };
   });
 }

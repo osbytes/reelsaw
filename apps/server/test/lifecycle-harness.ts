@@ -59,7 +59,7 @@ export function lifecycleHarness() {
     tx,
     queue,
     log,
-    config: { CLEANUP_WORKDIR: false },
+    config: { CLEANUP_WORKDIR: false, REELSAW_VERSION: "test" },
     // the runtime settings a service function reads (instance-settings.ts); tests change the object in place
     settings: { get: () => runtime },
     database: { db: database, pool },

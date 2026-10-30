@@ -3,13 +3,14 @@
  * serves every place a template lands on a clip: the clip editor (local: the layers join the editor's document, saved
  * with the clip), a clip card's ⋯ menu and the selection bar (server: `layerTemplates.applyToClips`, one transaction).
  * It shows the templates as cards with a small map of where their layers sit and when, and asks Replace / Keep only
- * when the target already has layers. `TemplateSelect` is the plain select the settings forms use.
+ * when the target already has layers. A template can also carry an intro / outro: applying it sets those slots on the
+ * clips (the editor: in its document). `TemplateSelect` is the plain select the settings forms use.
  */
 import { useEffect, useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { ASSET_OVERLAY_DEFAULT_W, MAX_CLIP_LAYERS, resolveTemplateLayers, templateFromLayers, timingText, type ClipLayer, type TemplateLayer } from "@reelsaw/shared";
+import { ASSET_OVERLAY_DEFAULT_W, MAX_CLIP_LAYERS, mergeTemplateBumpers, resolveTemplateLayers, templateBumperSlots, templateFromLayers, timingText, type ClipBumpers, type ClipLayer, type TemplateBumpers, type TemplateLayer } from "@reelsaw/shared";
 import { useTRPC } from "../lib/trpc";
 import { Modal, Select, Skeleton, SkeletonRegion, type SelectOption } from "./ui";
 import { ScrollArea } from "./scroll-area";
@@ -33,7 +34,7 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 export function TemplateSelect({ value, onChange, lead, ariaLabel = "Layer template", className, size, manage = true, disabled }: { value: string; onChange: (id: string) => void; lead?: SelectOption[]; ariaLabel?: string; className?: string; size?: "sm" | "md"; manage?: boolean; disabled?: boolean }) {
   const list = useLayerTemplates();
   const live = list.data?.templates ?? [];
-  const options: SelectOption[] = [...(lead ?? [{ value: "", label: "None" }]), ...live.map((t) => ({ value: t.id, label: t.name, hint: plural(t.layerCount, "layer") }))];
+  const options: SelectOption[] = [...(lead ?? [{ value: "", label: "None" }]), ...live.map((t) => ({ value: t.id, label: t.name, hint: templateSummary(t) }))];
   const missing = value !== "" && !!list.data && !options.some((o) => o.value === value);
   if (missing) options.push({ value, label: "Deleted template", disabled: true });
   return (
@@ -68,18 +69,38 @@ export function TemplateMap({ layers, className = "" }: { layers: TemplateLayer[
   );
 }
 
-/** "copia-qr · First 3 s", "“Link in bio” · Last 4 s", "Music · Whole clip": one line per layer. */
-function templateLines(layers: TemplateLayer[], names: Map<string, string>): string[] {
-  return layers.map((l) => {
-    const what = l.kind === "text" ? `“${l.text}”` : (names.get(l.assetId) ?? (l.kind === "audio" ? "Sound" : "Picture"));
-    return `${what} · ${timingText(l.timing)}`;
+const SLOT_LABEL = { intro: "Intro", outro: "Outro" } as const;
+
+/** "3 layers", "3 layers · intro + outro", "Outro only": what a template puts on a clip, in a few words. */
+export function templateSummary(t: { layerCount: number; bumpers: TemplateBumpers | null }): string {
+  const slots = templateBumperSlots(t.bumpers);
+  if (!t.layerCount && slots.length) return slots.length === 2 ? "Intro + outro" : `${SLOT_LABEL[slots[0]!]} only`;
+  return [t.layerCount ? plural(t.layerCount, "layer") : "No layers", slots.join(" + ")].filter(Boolean).join(" · ");
+}
+
+/** "Intro · Brand sting", "Outro · None": one line per slot the template sets. */
+export function templateBumperLines(b: TemplateBumpers | null, names: Map<string, string>): string[] {
+  return templateBumperSlots(b).map((s) => {
+    const id = b![s];
+    return `${SLOT_LABEL[s]} · ${id ? (names.get(id) ?? "Video or image") : "None"}`;
   });
 }
 
-/** The asset names a set of templates refer to (own uploads and shared imports; at most 40 ids per call). */
+/** "copia-qr · First 3 s", "“Link in bio” · Last 4 s", "Music · Whole clip": one line per layer, intro and outro first. */
+function templateLines(t: { layers: TemplateLayer[]; bumpers: TemplateBumpers | null }, names: Map<string, string>): string[] {
+  return [
+    ...templateBumperLines(t.bumpers, names),
+    ...t.layers.map((l) => {
+      const what = l.kind === "text" ? `“${l.text}”` : (names.get(l.assetId) ?? (l.kind === "audio" ? "Sound" : "Picture"));
+      return `${what} · ${timingText(l.timing)}`;
+    }),
+  ];
+}
+
+/** The asset names a set of templates refer to, layers and intro / outro (own uploads and shared imports; at most 40 ids per call). */
 function useTemplateAssetNames(templates: Template[]) {
   const trpc = useTRPC();
-  const ids = useMemo(() => [...new Set(templates.flatMap((t) => t.layers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId]))))].slice(0, 40), [templates]);
+  const ids = useMemo(() => [...new Set(templates.flatMap((t) => [...t.layers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), ...templateBumperSlots(t.bumpers).flatMap((s) => t.bumpers?.[s] ?? [])]))].slice(0, 40), [templates]);
   const q = useQuery({ ...trpc.library.get.queryOptions({ ids }), enabled: ids.length > 0 });
   return useMemo(() => new Map((q.data?.assets ?? []).map((a) => [a.id, a.name])), [q.data]);
 }
@@ -111,7 +132,7 @@ export function TemplateGallery({ value, onChange, emptyExtra }: { value: string
     return (
       <div className="flex flex-col items-start gap-2 rounded-[12px] border border-dashed border-line p-4 text-sm">
         <b>No templates yet</b>
-        <p className="text-xs leading-snug text-ink2">A template is a set of layers (a logo in the first seconds, a call to action at the end, a watermark, a music bed) that fits any clip length.</p>
+        <p className="text-xs leading-snug text-ink2">A template is a set of layers (a logo in the first seconds, a call to action at the end, a watermark, a music bed) that fits any clip length, with an intro and outro if you like.</p>
         <Link to="/templates" className="text-xs font-semibold text-acc-text no-underline">
           Build one on the Templates page
         </Link>
@@ -122,13 +143,13 @@ export function TemplateGallery({ value, onChange, emptyExtra }: { value: string
     <div role="radiogroup" aria-label="Templates" className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
       {templates.map((t) => {
         const on = t.id === value;
-        const lines = templateLines(t.layers, names);
+        const lines = templateLines(t, names);
         return (
           <button key={t.id} type="button" role="radio" aria-checked={on} onClick={() => onChange(t.id)} className={`${card} ${on ? "border-acc bg-acc-soft" : "border-line hover:bg-sunk"}`}>
             <TemplateMap layers={t.layers} className="w-full" />
             <div className="min-w-0">
               <div className="truncate text-[13px] font-semibold">{t.name}</div>
-              <div className="text-[11px] text-ink3">{t.layerCount ? plural(t.layerCount, "layer") : "No layers"}</div>
+              <div className="text-[11px] text-ink3">{templateSummary(t)}</div>
             </div>
             {lines.length > 0 && (
               <ul className="flex flex-col gap-0.5 text-[11px] leading-snug text-ink2">
@@ -181,11 +202,14 @@ export function ApplyTemplateDialog({ open, onOpenChange, title, existing, actio
     if (open && !templateId && list.data?.templates[0]) setTemplateId(list.data.templates[0].id);
   }, [open, templateId, list.data]);
   const template = list.data?.templates.find((t) => t.id === templateId);
+  const slots = templateBumperSlots(template?.bumpers);
   return (
     <Modal open={open} onOpenChange={onOpenChange} title={title} width={560}>
       <ScrollArea className="max-h-[min(52dvh,520px)] -mx-1 px-1">
         <TemplateGallery value={templateId} onChange={setTemplateId} emptyExtra={emptyExtra} />
       </ScrollArea>
+      {/* always present, so choosing a template with an intro never moves the buttons */}
+      <p className="min-h-4 text-xs text-ink3">{slots.length ? `Also sets the ${slots.join(" and ")}, replacing the clip’s own.` : ""}</p>
       {existing && (
         <div role="radiogroup" aria-labelledby={`${modeName}-l`} className="flex flex-col gap-1.5 rounded-[10px] bg-sunk p-2.5 text-xs">
           <span id={`${modeName}-l`} className="mb-0.5 text-ink2">
@@ -235,8 +259,8 @@ export function ApplyTemplateToClipsDialog({ open, onOpenChange, projectId, clip
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
-          const parts = [`Applied ${t.name} to ${plural(r.updated, "clip")}`, r.rerendered ? `re-rendering ${r.rerendered}` : "", r.skipped.length ? `${r.skipped.length} skipped (still preparing)` : "", r.layersSkipped ? `${plural(r.layersSkipped, "layer")} had no room` : ""].filter(Boolean);
-          toast(parts.join(" · "), { description: rerender || !r.updated ? undefined : "The layers show on the next render." });
+          const parts = [`Applied ${t.name} to ${plural(r.updated, "clip")}`, r.bumpers.length && r.updated ? `${r.bumpers.join(" and ")} set` : "", r.rerendered ? `re-rendering ${r.rerendered}` : "", r.skipped.length ? `${r.skipped.length} skipped (still preparing)` : "", r.layersSkipped ? `${plural(r.layersSkipped, "layer")} had no room` : ""].filter(Boolean);
+          toast(parts.join(" · "), { description: rerender || !r.updated ? undefined : "The changes show on the next render." });
           onOpenChange(false);
           onDone?.();
         },
@@ -280,10 +304,10 @@ export function BulkTemplateButton({ projectId, clips, rerenderable, onDone, cla
 
 /**
  * The editor's local apply: the template is resolved against the clip's range and written into the editor's document
- * (one undo step, saved with the clip; nothing reaches the server until the clip is saved). Returns the layers it added
- * so the caller can select and show them.
+ * (one undo step, saved with the clip; nothing reaches the server until the clip is saved), its intro / outro over the
+ * clip's own choice. Returns the layers it added so the caller can select and show them.
  */
-export function applyTemplateLocally(template: Template, mode: ApplyMode, layers: ClipLayer[], range: [number, number]): { next: ClipLayer[]; added: ClipLayer[]; noRoom: number } | null {
+export function applyTemplateLocally(template: Template, mode: ApplyMode, layers: ClipLayer[], range: [number, number], bumpers: ClipBumpers): { next: ClipLayer[]; added: ClipLayer[]; noRoom: number; bumpers: ClipBumpers } | null {
   const resolved = resolveTemplateLayers(template.layers, { startSec: range[0], endSec: range[1] });
   const room = MAX_CLIP_LAYERS - (mode === "add" ? layers.length : 0);
   if (room <= 0) {
@@ -292,12 +316,17 @@ export function applyTemplateLocally(template: Template, mode: ApplyMode, layers
   }
   const added = resolved.layers.slice(0, room);
   const noRoom = resolved.skipped.length + (resolved.layers.length - added.length);
-  toast(`Applied “${template.name}” · ${plural(added.length, "layer")}${noRoom ? ` (${noRoom} had no room on this clip)` : ""}`, { description: "Save the clip to render them." });
-  return { next: mode === "add" ? [...layers, ...added] : added, added, noRoom };
+  const slots = templateBumperSlots(template.bumpers);
+  toast(`Applied “${template.name}” · ${plural(added.length, "layer")}${slots.length ? ` + ${slots.join(" and ")}` : ""}${noRoom ? ` (${noRoom} had no room on this clip)` : ""}`, { description: "Save the clip to render them." });
+  return { next: mode === "add" ? [...layers, ...added] : added, added, noRoom, bumpers: mergeTemplateBumpers(bumpers, template.bumpers) ?? {} };
 }
 
-/** Name the editor's current layers and save them as a template (`templateFromLayers` decides each layer's timing). */
-export function SaveAsTemplateDialog({ open, onOpenChange, layers, range, defaultName }: { open: boolean; onOpenChange: (o: boolean) => void; layers: ClipLayer[]; range: [number, number]; defaultName: string }) {
+/**
+ * Name the editor's current layers and save them as a template (`templateFromLayers` decides each layer's timing), with
+ * the intro / outro the clip renders with (`bumpers`: only the slots that have one).
+ */
+export function SaveAsTemplateDialog({ open, onOpenChange, layers, range, defaultName, bumpers }: { open: boolean; onOpenChange: (o: boolean) => void; layers: ClipLayer[]; range: [number, number]; defaultName: string; bumpers?: TemplateBumpers | null }) {
+  const slots = templateBumperSlots(bumpers);
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -320,14 +349,17 @@ export function SaveAsTemplateDialog({ open, onOpenChange, layers, range, defaul
         onSubmit={(e) => {
           e.preventDefault();
           if (!name.trim() || create.isPending) return;
-          create.mutate({ name: name.trim(), layers: templateFromLayers(layers, { startSec: range[0], endSec: range[1] }) });
+          create.mutate({ name: name.trim(), layers: templateFromLayers(layers, { startSec: range[0], endSec: range[1] }), bumpers: slots.length ? bumpers : null });
         }}
       >
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Name
           <input className="input" value={name} maxLength={120} autoFocus onChange={(e) => setName(e.target.value)} />
         </label>
-        <p className="text-xs leading-snug text-ink3">Saves the {plural(layers.length, "layer")} as they are in the editor now: one that spans the clip fills, the rest keep their length and anchor to the nearer edge.</p>
+        <p className="text-xs leading-snug text-ink3">
+          Saves {[layers.length ? `the ${plural(layers.length, "layer")}` : "", slots.length ? `the ${slots.join(" and ")}` : ""].filter(Boolean).join(" and ")} as they are in the editor now
+          {layers.length ? ": a layer that spans the clip fills, the rest keep their length and anchor to the nearer edge." : "."}
+        </p>
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={() => onOpenChange(false)}>
             Cancel

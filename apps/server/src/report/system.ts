@@ -183,8 +183,9 @@ export async function stuckInfo(svc: Services) {
 
   const ids = projects.map((p) => p.id);
   const [lastEvents, clips, jobs] = await Promise.all([
-    db.execute<{ project_id: string; type: string; created_at: Date }>(sql`
-      select distinct on (project_id) project_id, type, created_at
+    // raw rows keep timestamptz as text (drizzle's node-postgres driver), so it is cast and read as a string
+    db.execute<{ project_id: string; type: string; at: string }>(sql`
+      select distinct on (project_id) project_id, type, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at
       from project_events where project_id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
       order by project_id, id desc`),
     db.query.clips.findMany({
@@ -230,7 +231,7 @@ export async function stuckInfo(svc: Services) {
         runSeq: p.runSeq,
         runStartedAt: p.runStartedAt?.toISOString() ?? null,
         error: p.error,
-        lastEvent: last ? { type: last.type, at: last.created_at.toISOString() } : null,
+        lastEvent: last ? { type: last.type, at: last.at } : null,
         liveJobs: live.map((j) => ({ name: j.name, state: j.state, retries: j.retries, singletonKey: j.singletonKey, startedOn: j.startedOn, output: j.output })),
         unfinishedClips: unfinished.map((c) => {
           const js = live.filter((j) => j.singletonKey === c.id);

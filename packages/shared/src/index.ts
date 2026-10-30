@@ -77,6 +77,8 @@ export const styleSchema = z.object({
   captionSize: z.number().min(0.5).max(2).describe("Caption size multiplier (0.5-2, default 1)").default(1),
   captionX: frac("Caption centre, horizontal").default(0.5),
   captionY: frac("Caption centre, vertical (default 0.72)").default(0.72),
+  /** Split and stack sections: captions sit on the line between the two panes instead of on the lower speaker. */
+  captionSeam: z.boolean().describe("In split and stack sections, put captions on the line between the two panes instead of at captionY (default true)").default(true),
   /** Karaoke active-word colour. */
   highlightColor: hexColor.describe("Karaoke active-word colour, #RRGGBB (default #FFD700)").default("#FFD700"),
   /** Max words on screen at once (1 = one-word-at-a-time "Hormozi" style). */
@@ -634,6 +636,49 @@ export const DEFAULT_IMAGE_BUMPER_SEC = 3;
 export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), introSec: bumperSecondsSchema.optional(), outro: z.string().min(1).max(100).nullable().optional(), outroSec: bumperSecondsSchema.optional() });
 export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
 
+/**
+ * A layer template's intro / outro (docs/specs/layer-templates.md, "Intro and outro"): the clip shape, where a
+ * missing slot means "leave the clip's own choice alone", `null` means "no intro/outro" and a string is a library
+ * asset id. Applying the template writes these slots onto `clips.bumpers`, like it writes layers.
+ */
+const templateSlotSchema = (slot: "intro" | "outro") =>
+  z.string().min(1).max(100).nullable().optional().describe(`Library video or image id (list_bumpers) for the ${slot}; null = no ${slot}; left out = clips keep their own`);
+export const templateBumpersSchema = z
+  .object({
+    intro: templateSlotSchema("intro"),
+    introSec: bumperSecondsSchema.optional(),
+    outro: templateSlotSchema("outro"),
+    outroSec: bumperSecondsSchema.optional(),
+  })
+  .describe("Intro / outro the template puts on clips, as each clip's own choice");
+export type TemplateBumpers = ClipBumpers;
+const BUMPER_SLOTS = ["intro", "outro"] as const;
+
+/** The slots a template sets (an empty or missing value sets none). */
+export function templateBumperSlots(t: TemplateBumpers | null | undefined): Array<"intro" | "outro"> {
+  return t ? BUMPER_SLOTS.filter((s) => t[s] !== undefined) : [];
+}
+
+/**
+ * A template's intro / outro written onto a clip's own choice: each slot the template sets replaces the clip's (with
+ * its seconds, which only travel with an asset); other slots are untouched. `onlyUnset` fills just the slots the clip
+ * has not chosen itself (a clip created while the user already picked one). Null when nothing is left (follow the
+ * project for both).
+ */
+export function mergeTemplateBumpers(own: ClipBumpers | null | undefined, t: TemplateBumpers | null | undefined, opts: { onlyUnset?: boolean } = {}): ClipBumpers | null {
+  const next: ClipBumpers = { ...(own ?? {}) };
+  for (const s of templateBumperSlots(t)) {
+    if (opts.onlyUnset && own?.[s] !== undefined) continue;
+    const v = t![s] as string | null;
+    delete next[s];
+    delete next[`${s}Sec`];
+    next[s] = v;
+    const sec = t![`${s}Sec`];
+    if (v && sec !== undefined) next[`${s}Sec`] = sec;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
 /** What the last render actually did, for the UI and for debugging (`reelsaw status`). */
 export interface ClipDiagnostics {
   renderedAt: string;
@@ -1128,6 +1173,53 @@ export const FULL_FRAME: ContentRegion = { x1: 0, y1: 0, x2: 1, y2: 1 };
 export function isFullFrame(c: ContentRegion | undefined | null): boolean {
   return !c || (c.x1 <= 0.01 && c.y1 <= 0.01 && c.x2 >= 0.99 && c.y2 >= 0.99);
 }
+
+/**
+ * Where the two panes of a split or stack meet, as a fraction of the 9:16 frame height (mirrors
+ * `layoutFilter` in render.ts: a split and a content stack are two halves, a full-frame stack is the
+ * source letterboxed to the frame width over the speaker). Null for one-pane layouts, and for a seam
+ * too close to an edge to carry captions (a portrait source in a stack).
+ */
+export function layoutSeamY(layout: string, content: ContentRegion | undefined | null, srcW: number, srcH: number): number | null {
+  if (layout === "split") return 0.5;
+  if (layout !== "stack") return null;
+  if (!isFullFrame(content)) return 0.5;
+  const topH = Math.min(Math.round((1080 * srcH) / srcW / 2) * 2, 1918);
+  const y = topH / 1920;
+  return y >= 0.15 && y <= 0.85 ? Number(y.toFixed(4)) : null;
+}
+
+/** A stretch of the clip and the seam its layout has (null = one pane), on the clock the captions use. */
+export interface SeamRun {
+  start: number;
+  end: number;
+  y: number | null;
+}
+/** Sections shorter than this keep captions at captionY, so the captions don't hop for a moment and back. */
+export const CAPTION_SEAM_MIN_SEC = 2.5;
+
+/** Neighbouring runs with the same seam merged (two split sections across a cut are one stretch). */
+export function mergeSeamRuns(runs: SeamRun[]): SeamRun[] {
+  const out: SeamRun[] = [];
+  for (const r of runs.filter((x) => x.end > x.start).sort((a, b) => a.start - b.start)) {
+    const last = out.at(-1);
+    if (last && last.y === r.y && r.start <= last.end + 0.05) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+/**
+ * Vertical caption centre for a caption line shown around time `t`: the seam of a split / stack that
+ * lasts at least CAPTION_SEAM_MIN_SEC when `captionSeam` is on, else the style's captionY. The
+ * renderer and the editor preview both place each line with this, at the line's midpoint.
+ */
+export function captionYAt(style: Pick<Style, "captionY" | "captionSeam">, runs: SeamRun[], t: number): number {
+  if (!style.captionSeam) return style.captionY;
+  const run = runs.find((r) => t >= r.start && t < r.end);
+  return run?.y != null && run.end - run.start >= CAPTION_SEAM_MIN_SEC ? run.y : style.captionY;
+}
+
 /** Which edge a full-height region hugs, or null for any other shape. */
 export function contentSide(c: ContentRegion): "left" | "right" | null {
   if (c.y1 > 0.01 || c.y2 < 0.99) return null;
@@ -1268,3 +1360,4 @@ export * from "./quota.js";
 export * from "./accounts.js";
 export * from "./captions-format.js";
 export * from "./releases.js";
+export * from "./decisions.js";

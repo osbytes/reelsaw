@@ -1,4 +1,4 @@
-import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, type Word, type Style, type RenderedCaptions } from "@reelsaw/shared";
+import { CAPTION_FONT_FRAC, HOOK_FONT_FRAC, lineSecondsFor, captionMaxChars, lineDisplayEnd, monotonicWords, emphasisKey, captionYAt, type Word, type Style, type RenderedCaptions, type SeamRun } from "@reelsaw/shared";
 
 export interface CaptionOptions {
   /** burned-in text for accounts whose plan or instance asks for it (quota.ts `watermarkFor`); bottom centre, above the platform UI zone */
@@ -16,6 +16,8 @@ export interface CaptionOptions {
   maxLineSeconds?: number;
   /** text overlays (clip overlays of kind "text"), in the body's own seconds; drawn above the captions */
   texts?: TextOverlayEvent[];
+  /** split / stack stretches in the body's own seconds: caption lines there sit on the seam (`captionYAt`) */
+  seams?: SeamRun[];
 }
 
 /** One text overlay as the ASS file draws it: centre position and size as fractions of the frame. */
@@ -115,7 +117,8 @@ export function buildAss(input: Word[], opts: CaptionOptions): string {
   const outline = Math.max(2, Math.round(4 * scale));
   const margin = Math.round(width * 0.06);
   const pos = (x: number, y: number) => `{\\an5\\pos(${Math.round(x * width)},${Math.round(y * height)})}`;
-  const capPos = pos(style.captionX, style.captionY);
+  // each line is placed once, at its midpoint, so a line never moves while it is on screen
+  const capPosAt = (start: number, end: number) => pos(style.captionX, captionYAt(style, opts.seams ?? [], (start + end) / 2));
   const hookPos = pos(style.hookX, style.hookY);
   const hi = assColor(style.highlightColor);
   const tx = (t: string) => esc(style.uppercase ? t.toUpperCase() : t);
@@ -179,6 +182,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines.forEach((line, li) => {
       const start = line[0]!.start;
       const end = lineDisplayEnd(lines, li);
+      const capPos = capPosAt(start, end);
       if (style.captions === "plain" || style.captions === "box") {
         events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Caption,,0,0,0,,${capPos}${line.map(plainWord).join(" ")}`);
         return;

@@ -14,6 +14,7 @@ import { summarizeError } from "../lib/errors";
 import { writeHash, readHash, linkWith, fmtSec, useHashParams } from "../lib/hash";
 import { ProjectPageSkeleton } from "../components/PageSkeletons";
 import { ConfirmDialog, MoreButton, ProgressBar, Skeleton, SkeletonRegion } from "../components/ui";
+import { ForgetDecisionsOption } from "../components/ForgetDecisionsOption";
 import { NotFound } from "../components/NotFound";
 import { ScrollArea } from "../components/scroll-area";
 import { ShortcutSheet } from "../components/ShortcutSheet";
@@ -93,6 +94,7 @@ export function ProjectPage() {
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
   const [confirm, setConfirm] = useState<null | "repick" | "refine" | "delete">(null);
+  const [forgetDecisions, setForgetDecisions] = useState(false);
   const keepWindow = useRestoreWindow("project", confirm === "delete");
   const [actOpen, setActOpen] = useState(false);
   const [bumpersOpen, setBumpersOpen] = useState(false);
@@ -492,14 +494,18 @@ export function ProjectPage() {
   const header = (
     <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}>
       <div className="min-w-0 flex-[1_1_320px]">
-        <div className={`gap-1.5 text-xs text-ink3 ${compact ? "hidden" : "flex"}`}>
-          <Link to="/" className="text-ink3 no-underline hover:text-ink">
-            Projects
-          </Link>
-          <span>/</span>
-          <span className="truncate">{p.title}</span>
+        {/* the breadcrumb is the heading: its last crumb is the title, so the name is not printed twice */}
+        <div className={`flex min-w-0 items-baseline gap-1.5 ${compact ? "" : "text-sm"}`}>
+          {!compact && (
+            <>
+              <Link to="/" className="shrink-0 text-ink3 no-underline hover:text-ink">
+                Projects
+              </Link>
+              <span className="shrink-0 text-ink3">/</span>
+            </>
+          )}
+          <h1 className={`min-w-0 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "truncate text-xl"}`}>{p.title}</h1>
         </div>
-        <h1 className={`mt-0.5 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "text-xl"}`}>{p.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 text-[13px] text-ink2">
           {dur ? <span className="font-mono text-xs leading-5">{formatTime(dur)}</span> : null}
           {p.width && p.height ? <span>{p.height}p</span> : null}
@@ -996,13 +1002,16 @@ export function ProjectPage() {
       />
       <ConfirmDialog
         open={confirm === "delete"}
-        onOpenChange={(o) => !o && setConfirm(null)}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+          setForgetDecisions(false);
+        }}
         title="Delete this project?"
         body={`The project, its transcript and every clip are hidden. Work in progress stops. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete project"
         danger
         onConfirm={() =>
-          del.mutateAsync({ id }).then((r) => {
+          del.mutateAsync({ id, forgetDecisions }).then((r) => {
             nav("/"); // leave first, so this page never refetches the project it just deleted
             void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
             const title = q.data?.title ?? "Project";
@@ -1014,7 +1023,9 @@ export function ProjectPage() {
             });
           })
         }
-      />
+      >
+        <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
+      </ConfirmDialog>
       <TranscriptFileModal
         open={filesOpen}
         onOpenChange={setFilesOpen}

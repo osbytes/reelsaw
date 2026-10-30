@@ -15,7 +15,7 @@ import { QUEUES } from "../queue/boss.js";
 import { type ClipCandidate, type ProjectSettings, type TranscriptSegment, type Word } from "@reelsaw/shared";
 import { finishThought } from "./thought.js";
 import type { Logger } from "../log.js";
-import { layersForNewClip, templateForNewClips } from "../library/templates.js";
+import { bumpersForNewClip, layersForNewClip, templateForNewClips } from "../library/templates.js";
 import { syncClipsRefs } from "../library/refs.js";
 
 export { normalizeCandidate, parseClipsLeniently } from "./select.js";
@@ -447,7 +447,7 @@ export async function analyze(ctx: StageContext) {
   }
 
   if (kept.length) log.debug({ kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length }, "new picks avoid the clips the user kept");
-  // the project's layer template (brand overlays, music bed, CTA), materialised on every new clip against its own length
+  // the project's layer template (brand overlays, music bed, CTA, intro / outro), materialised on every new clip against its own length
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const rows = chosen.map(({ c, id, r, total }, index) => ({
     id: randomUUID(),
@@ -458,6 +458,7 @@ export async function analyze(ctx: StageContext) {
     startSec: c.startSec,
     endSec: c.endSec,
     layers: layersForNewClip(template, c),
+    bumpers: bumpersForNewClip(template),
     score: total,
     scores: r ? { ...r.scores, ...(ranks?.has(id) ? { rank: ranks.get(id)! } : {}) } : null,
     emphasis: r?.emphasis.length ? r.emphasis : null,

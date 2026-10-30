@@ -59,7 +59,11 @@ export function createDatabase(connectionString: string, log: Logger, opts: { po
       } catch (err) {
         const e = err as NodeJS.ErrnoException & { errors?: Error[] };
         const detail = e.errors?.map((x) => x.message).join("; ") || e.message;
-        throw new Error(`cannot connect to Postgres at ${safeUrl(connectionString)}: ${detail}`);
+        // a database volume keeps the password it was created with: a fresh .env over an old volume
+        const hint = /password authentication failed/i.test(detail)
+          ? " (the database volume was created with another password; re-run the installer, or see Troubleshooting in deploy/README.md)"
+          : "";
+        throw new Error(`cannot connect to Postgres at ${safeUrl(connectionString)}: ${detail}${hint}`);
       }
     },
     async migrate() {

@@ -43,7 +43,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *                                           by hand stay (same as projects.reanalyze and reanalyze_project)
  *   refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]
  *                                           re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project)
- *   delete-project <projectId>              delete a project, restorable like a clip (same as projects.delete and delete_project)
+ *   delete-project <projectId> [--forget-decisions]   delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged
  *   export <projectId> [clipId…] --out <file.zip>
  *                                           write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and
  *                                           export_project (every picked clip must belong to the project, at least one rendered)
@@ -53,7 +53,12 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]
  *                                           edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip)
  *   purge [--dry-run]                       remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now
- *   purge-project <projectId>               delete one already-deleted project forever (frees storage; minutes stay counted)
+ *   purge-project <projectId> [--forget-decisions]   delete one already-deleted project forever (frees storage; minutes stay counted); its decisions stay in the decision log unless --forget-decisions
+ *   decisions <email> [--kind k] [--project id]      the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions)
+ *   decisions export <email> [--out f.jsonl] [--since iso]   the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite)
+ *   decisions forget <email> [--project id]          delete the account's decisions, or one project's (forget_decisions)
+ *   decisions learning <email> on|off                record the account's decisions or stop (Settings → Learning / set_learning)
+ *   decisions backfill [--dry-run]                   write decisions still held in transcripts from before the log existed
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
@@ -118,11 +123,13 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   make one clip's framing (its section at --at, else its first framed one: mode plus
  *                                           nudge / subject / crop) the project's default for every clip, clearing the others' own sections
  *                                           and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing)
- *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
- *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative);
- *                                           `save` builds one from a clip's layers, `apply` writes them onto the clips of a project
- *                                           (all of them without clip ids; --add keeps the clip's own layers, default replaces);
- *                                           --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools
+ *   templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]
+ *                                           layer templates: layers whose timing fits any clip length (head / tail / fill / relative),
+ *                                           plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a
+ *                                           clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them
+ *                                           without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it
+ *                                           sets replaces the clip's either way); --rerender re-renders the finished ones. Same
+ *                                           procedures as the Templates page and the MCP tools
  *   overlays <projectId> [--store]          scan the source for burned-in captions / watermarks;
  *                                           --store saves them (renders then hide them)
  *   usage [--days 30]                       per account: projects, source minutes, clips, model calls / tokens / reported
@@ -159,7 +166,8 @@ import { summarizeQueue } from "./ops/queue.js";
 import { FAILURE_STAGES, getFailure, listFailures, retryFailures, type FailureStage } from "./ops/failures.js";
 import { flagAccounts, FLAG_HELP } from "./abuse.js";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { backfillDecisions, decisionSummary, EXPORT_MAX, exportDecisions, forgetDecisions, listDecisions, setLearning } from "./decisions/service.js";
 import fsSync from "node:fs";
 import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
@@ -176,7 +184,8 @@ import { detectOverlays } from "./pipeline/overlays.js";
 import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
-import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer } from "@reelsaw/shared";
+import { templateBumpersText, templateBumpersWith } from "./library/templates.js";
+import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer, type TemplateBumpers } from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall, uploadLocalFile } from "./library/service.js";
@@ -189,7 +198,7 @@ import { listDeleted } from "./deleted.js";
 import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectSourceText, updateProject, updateProjectStyle } from "./projects/service.js";
 import { createClip, readClip, rerenderClip, rerenderClips, updateClip } from "./clips/service.js";
 import { createExportZip, exportPlan } from "./export.js";
-import { CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
+import { DECISION_KINDS, CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -487,8 +496,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
   /** Soft-delete a project: `reelsaw delete-project <projectId>`. Same function as projects.delete and the delete_project tool. */
   async "delete-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId>");
-    const r = await deleteOwnedProject(svc, null, pos[0]);
+    if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId> [--forget-decisions]");
+    const r = await deleteOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.changed ? r.message : `${pos[0]} was already deleted`);
   },
   /** The zip of rendered clips with platform metadata: `reelsaw export <projectId> [clipId…] --out file.zip`. Same preconditions as the Export button and the export_project tool. */
@@ -540,9 +549,80 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
   /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
   async "purge-project"(svc) {
-    if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId>   (reelsaw deleted lists them; they must already be deleted)");
-    const r = await purgeOwnedProject(svc, null, pos[0]);
+    if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId> [--forget-decisions]   (reelsaw deleted lists them; they must already be deleted)");
+    const r = await purgeOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.message);
+  },
+  /**
+   * The decision log (docs/specs/decision-log.md), same service as Settings → Learning and the *_decisions tools:
+   *   reelsaw decisions <email> [--kind fix.reject] [--project <id>] [--limit 50]
+   *   reelsaw decisions export <email> [--out f.decisions.jsonl] [--since <iso>] [--kind <k>]   (JSON lines, for evals)
+   *   reelsaw decisions forget <email> [--project <id>]
+   *   reelsaw decisions learning <email> on|off   (Settings → Learning's switch, set_learning)
+   *   reelsaw decisions backfill [--dry-run]    (decisions still held in transcripts, from before the log existed)
+   */
+  async decisions(svc) {
+    const db = svc.database.db;
+    const sub = ["export", "forget", "learning", "backfill"].includes(pos[0] ?? "") ? pos[0] : undefined;
+    const usage = "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | learning <email> on|off | backfill [--dry-run]";
+    const kindArg = flag("kind");
+    const kind = kindArg ? DECISION_KINDS.find((k) => k === kindArg) : undefined;
+    if (kindArg && !kind) throw new Error(`--kind must be one of ${DECISION_KINDS.join(", ")}`);
+    if (sub === "backfill") {
+      const dry = args.includes("--dry-run");
+      const r = await backfillDecisions(svc, { dryRun: dry });
+      console.log(`${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`);
+      return;
+    }
+    const email = sub ? pos[1] : pos[0];
+    if (!email) throw new Error(usage);
+    const u = await userByEmail(svc, email);
+    if (sub === "learning") {
+      const on = pos[2] === "on" ? true : pos[2] === "off" ? false : undefined;
+      if (on === undefined) throw new Error("usage: reelsaw decisions learning <email> on|off");
+      await svc.tx((tx) => setLearning(tx.db, u.id, on));
+      console.log(`learning ${on ? "on" : "off"} for ${u.email}${on ? "" : " (decisions already kept stay; reelsaw decisions forget removes them)"}`);
+      return;
+    }
+    if (sub === "forget") {
+      const n = await svc.tx((tx) => forgetDecisions(tx.db, u.id, { projectId: flag("project") }));
+      console.log(`forgot ${n} decision(s) of ${u.email}${flag("project") ? ` about ${flag("project")}` : ""}`);
+      return;
+    }
+    if (sub === "export") {
+      const out = flag("out");
+      const since = flag("since");
+      const lines: string[] = [];
+      let cursor: number | undefined;
+      let cases = 0;
+      for (;;) {
+        const page = await exportDecisions(db, u.id, { cursor, limit: EXPORT_MAX, since: since ? new Date(since) : undefined, kind });
+        lines.push(...page.items.map((d) => JSON.stringify(d)));
+        cases += page.cases.disfluency.length;
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      if (!out) {
+        for (const l of lines) console.log(l);
+        return;
+      }
+      await writeFile(out, lines.length ? lines.join("\n") + "\n" : "");
+      console.log(`wrote ${lines.length} decision(s) of ${u.email} to ${out} (${cases} disfluency case(s)); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`);
+      return;
+    }
+    const s = await decisionSummary(db, u.id);
+    console.log(`${u.email}: learning ${s.enabled ? "on" : "off"}; ${s.total} decision(s) about ${s.projects} project(s)${s.total ? ` (${Object.entries(s.byKind).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`);
+    const page = await listDecisions(db, u.id, { kind, projectId: flag("project"), limit: Number(flag("limit") ?? 50) || 50 });
+    if (!page.items.length) return;
+    const what = (d: (typeof page.items)[number]) => {
+      const c = d.context;
+      if (Array.isArray(c.words) && c.target && typeof c.target === "object" && "index" in c.target && "span" in c.target && typeof c.target.index === "number" && typeof c.target.span === "number") {
+        return c.words.slice(c.target.index, c.target.index + c.target.span).map((w: { text?: string }) => w.text ?? "").join(" ").slice(0, 40);
+      }
+      return Array.isArray(c.fields) ? c.fields.join(",") : String(d.before?.title ?? d.after?.title ?? "").slice(0, 40);
+    };
+    table(page.items.map((d) => ({ id: d.id, at: d.createdAt.slice(0, 16), kind: d.kind, explicit: d.explicit ? "yes" : "no", project: d.projectId.slice(0, 8), what: what(d) })));
+    if (page.nextCursor) console.log(`showing ${page.items.length} of ${page.total}; --limit raises it (max 200)`);
   },
   abuse: async (svc) => {
     if (args.includes("--run")) {
@@ -1389,17 +1469,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
 
   async templates(svc) {
-    const { pos: p, rerender, addMode, layers } = bumperArgs();
+    const { pos: p, rerender, addMode, layers, ...slot } = bumperArgs();
     const usage =
-      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> --layers '<json array>' | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
+      "usage: reelsaw templates list | show <id> | save <projectId> <clipId> <name…> | rename <id> <name…> | set <id> [--layers '<json array>'] [--intro keep|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] | delete <id> | restore <id> | purge <id> | apply <templateId> <projectId> [clipId…] [--add] [--rerender]   [--user <email>]";
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
-    const show = (t: { id: string; name: string; layerCount: number }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s))`);
+    const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s)${templateBumpersText(t.bumpers)})`);
     if (sub === "list") {
       const r = await api.layerTemplates.list({ limit: 500 });
       if (!r.items.length) console.log("no layer templates");
-      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, updated: t.updatedAt })));
+      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, "intro/outro": templateBumpersText(t.bumpers).replace(/^; /, ""), updated: t.updatedAt })));
       if (r.nextCursor) console.log(`showing the newest ${r.items.length} of ${r.total}`);
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
@@ -1432,10 +1512,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log("renamed:");
       show(t);
     } else if (sub === "set") {
-      if (!a || layers === undefined) throw new Error(usage);
-      const parsed = z.array(templateLayerSchema).safeParse(JSON.parse(layers));
-      if (!parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-      const t = await api.layerTemplates.update({ id: a, layers: parsed.data });
+      const slots = slot.intro !== undefined || slot.outro !== undefined || slot.introSec !== undefined || slot.outroSec !== undefined;
+      if (!a || (layers === undefined && !slots)) throw new Error(usage);
+      const parsed = layers === undefined ? undefined : z.array(templateLayerSchema).safeParse(JSON.parse(layers));
+      if (parsed && !parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      const bumpers = slots ? templateBumpersWith((await api.layerTemplates.get({ id: a })).bumpers, slot) : undefined;
+      const t = await api.layerTemplates.update({ id: a, ...(parsed ? { layers: parsed.data } : {}), ...(bumpers !== undefined ? { bumpers } : {}) });
       console.log("updated:");
       show(t);
     } else if (sub === "delete") {
@@ -1454,7 +1536,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!a || !b) throw new Error(usage);
       const clipIds = p.slice(3);
       const r = await api.layerTemplates.applyToClips({ templateId: a, projectId: b, ...(clipIds.length ? { clipIds } : {}), mode: addMode ? "add" : "replace", rerender });
-      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
       if (r.layersSkipped) console.log(`${r.layersSkipped} template layer(s) had no room on their clip and were left out`);
       for (const s of r.skipped) console.log(`skipped clip ${s.clipId}: ${s.reason}`);
     } else throw new Error(usage);
@@ -1472,6 +1554,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     console.log(`${scan.frames} frames across ${scan.scenes} shots in ${Date.now() - t0} ms (${scan.slides} slide frames skipped)`);
     console.log(`text-heavy frames: ${scan.textProfile.textHeavy}/${scan.textProfile.frames}${scan.textProfile.presentation ? " → presentation: on-screen text is kept unless the project says \"always\"" : ""}`);
     if (scan.moving.length) console.log(`dropped ${scan.moving.length} region(s) whose text drifts (scene text): ${scan.moving.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
+    if (scan.ui.length) console.log(`dropped ${scan.ui.length} region(s) of game or app interface (scores, player lists, menus): ${scan.ui.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
     if (scan.faceDropped.length) console.log(`dropped ${scan.faceDropped.length} region(s) that kept landing on faces: ${scan.faceDropped.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
     table(scan.overlays.map((o) => ({ kind: o.kind, x: `${o.x1}-${o.x2}`, y: `${o.y1}-${o.y2}`, coverage: o.coverage })));
     if (flag("store") !== undefined || args.includes("--store")) {
@@ -1679,7 +1762,7 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
     process.exit(cmd ? 2 : 0);
   }
   const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });

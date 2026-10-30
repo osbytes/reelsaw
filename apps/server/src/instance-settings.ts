@@ -76,7 +76,7 @@ export const RUNTIME_SETTINGS = {
   TRANSCRIPT_CORRECTION: def("pipeline", z.boolean(), "After transcription, fix misheard names with the language model. On by default; off closes the ceiling so no project runs it (projects opt out via refineEntities)."),
   DISFLUENCY_REMOVAL: def("pipeline", z.boolean(), "Detect fillers, repetitions and false starts after transcription. Off by default; turn on so projects may opt in via refineDisfluency."),
   DISFLUENCY_LLM: def("pipeline", z.boolean(), "Model pass on top of rule-based disfluency detection. Off by default. Ignored when disfluency removal is off. Turn on so projects may opt in via disfluencyLlm."),
-  LLM_CALL_TIMEOUT_SECONDS: def("pipeline", z.number().int().min(0).max(86_400), "Longest one model call may take (all its HTTP attempts together) before its step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one. A slow CPU-only model may need more."),
+  LLM_CALL_TIMEOUT_SECONDS: def("pipeline", z.number().int().min(0).max(86_400), "Longest one model call may take (all its HTTP attempts together) before its step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one, and for a self-hosted transcription at least twice the chunk's audio length. Time spent waiting for a provider slot does not count. A slow CPU-only model may need more."),
   STAGE_IDLE_TIMEOUT_MINUTES: def("pipeline", z.number().int().min(0).max(1440), "A stage made of checkpointed steps (finding moments) is stopped when no step has finished for this long; Retry continues where it stopped. 0 = auto: 1.5 times the model call timeout."),
   REFINE_SCENES: def("pipeline", z.boolean(),"Scan the video for on-screen text (burned-in captions, watermarks, slides) during refine. On by default; off closes the ceiling (projects opt out via refineScenes). Shot cuts are always detected."),
 
@@ -87,6 +87,7 @@ export const RUNTIME_SETTINGS = {
   EVENT_RETENTION_DAYS: def("retention", int0, days("Prune project events older than this; each project keeps its run skeleton.")),
   LLM_USAGE_RETENTION_DAYS: def("retention", int0, days("Prune model and transcription usage rows older than this.")),
   ADMIN_EVENT_RETENTION_DAYS: def("retention", int0, days("Prune the admin event log after this many days.")),
+  DECISION_RETENTION_DAYS: def("retention", int0, days("Prune users' recorded decisions (accepts, rejects, edits Reelsaw learns from) older than this. They outlive deleted projects until then.")),
   STEP_RETENTION_DAYS: def("retention", int0, days("Drop the saved checkpoints (finding-moments windows) of a finished project this many days after it last changed; a Retry sooner than that reuses them.")),
 
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),

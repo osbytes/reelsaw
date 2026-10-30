@@ -65,6 +65,7 @@ export const RETENTION_FIELDS: Field[] = [
   { key: "EVENT_RETENTION_DAYS", label: "Keep project events", kind: "int", unit: "days", zero: "forever" },
   { key: "LLM_USAGE_RETENTION_DAYS", label: "Keep usage rows", kind: "int", unit: "days", zero: "forever" },
   { key: "ADMIN_EVENT_RETENTION_DAYS", label: "Keep the admin log", kind: "int", unit: "days", zero: "forever" },
+  { key: "DECISION_RETENTION_DAYS", label: "Keep users' decisions", kind: "int", unit: "days", zero: "forever" },
 ];
 
 export const PIPELINE_FIELDS: Field[] = [

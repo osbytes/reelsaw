@@ -37,7 +37,7 @@ the score popover shows the rubric, and the Activity log mirrors `reelsaw events
 | Captions from two lines drawn on top of each other | Re-render | Old render (pre-ordered caption timing): re-render. |
 | A project or clip setting has no effect | Is the matching gate on? `TRANSCRIPT_BIAS=false` ignores vocabulary hints (`.env` only). Refine toggles (`refineEntities`, `refineDisfluency`, …) also need the instance Pipeline setting / `.env` on (`TRANSCRIPT_CORRECTION`, `DISFLUENCY_REMOVAL`, `DISFLUENCY_LLM`, `REFINE_SCENES`); see "Settings and precedence" in the README | Instance/env refine gates are ceilings. Check Settings → System → Pipeline or `reelsaw settings`, and `docker compose exec app env \| grep -E 'TRANSCRIPT_|DISFLUENCY_|REFINE_|FACE_|VAD|ALIGNER|TEXT_DETECTION'`, then re-run refine. |
 | Boot exits with code 78 | First stderr lines | Fail-fast config/self-check: message names the step and the fix. |
-| Boot fails at `data dir` with `EACCES … mkdir '/data/…'` | Volume mount ownership | A root-owned volume (common on Railway) hid the image's `node`-owned `/data`. Current images fix this in the entrypoint (`chown` then `gosu node`). On an older image: upgrade, or set `DATA_DIR=/tmp/reelsaw` temporarily (ephemeral; OK with `STORAGE_DRIVER=s3`). |
+| Boot fails at `data dir` with `EACCES … mkdir '/data/…'` | Volume mount ownership | A root-owned volume (common on Railway) hid the image's `node`-owned `/data`. Current images fix this in the entrypoint (`chown`, then drop to `node` with `setpriv`). On an older image: upgrade, or set `DATA_DIR=/tmp/reelsaw` temporarily (ephemeral; OK with `STORAGE_DRIVER=s3`). |
 | `tsx` / `stripe:setup` fails: `@reelsaw/shared` has no export named `billingPath` (or similar) | Stale `packages/shared/dist` | `dist` is gitignored; rebuild with `pnpm --filter @reelsaw/shared build`. `pnpm stripe:setup` does that first. |
 
 Reading runs: the `runs` block of `reelsaw status` lists one line per run (`#3 re-render … done 0:41 clips 1 [render 0:41]`):
@@ -80,12 +80,17 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw retry <projectId>` | resume a failed or stuck project from its furthest completed stage (same as the Retry button, projects.retry and retry_project) |
 | `reelsaw reanalyze <projectId> [--set key=value]…` | pick clips again from the existing transcript, optionally with new selection settings; clips made or edited by hand stay (same as projects.reanalyze and reanalyze_project) |
 | `reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]` | re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project) |
-| `reelsaw delete-project <projectId>` | delete a project, restorable like a clip (same as projects.delete and delete_project) |
+| `reelsaw delete-project <projectId> [--forget-decisions]` | delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged |
 | `reelsaw export <projectId> [clipId…] --out <file.zip>` | write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and export_project (every picked clip must belong to the project, at least one rendered) |
 | `reelsaw create-clip <projectId> <startSec> <endSec> [--mode exact\|ai]` | add a clip from a time range of the source: exact keeps the bounds, ai picks the best moment inside them (same as clips.create and create_clip) |
 | `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender\|--no-rerender]` | edit one clip; a change burned into the video re-renders it unless told not to (same as clips.update and update_clip) |
 | `reelsaw purge [--dry-run]` | remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now |
-| `reelsaw purge-project <projectId>` | delete one already-deleted project forever (frees storage; minutes stay counted) |
+| `reelsaw purge-project <projectId> [--forget-decisions]` | delete one already-deleted project forever (frees storage; minutes stay counted); its decisions stay in the decision log unless --forget-decisions |
+| `reelsaw decisions <email> [--kind k] [--project id]` | the account's decision log: what it accepted, rejected, cut and edited (Settings → Learning / list_decisions) |
+| `reelsaw decisions export <email> [--out f.jsonl] [--since iso]` | the decision log as JSON lines, for evals (export_decisions; harvest-decisions.ts, the decisions suite) |
+| `reelsaw decisions forget <email> [--project id]` | delete the account's decisions, or one project's (forget_decisions) |
+| `reelsaw decisions learning <email> on\|off` | record the account's decisions or stop (Settings → Learning / set_learning) |
+| `reelsaw decisions backfill [--dry-run]` | write decisions still held in transcripts from before the log existed |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -115,7 +120,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]` | a clip's own choice (inherit the project's, none or an item); both act as the project's owner; --rerender re-renders only the affected clips |
 | `reelsaw clip-layers <projectId> <clipId> [--set '<json array>' \| --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop\|--no-loop] \| --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] \| --add-sound <assetId> --from <sec> [--to <sec>] [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck\|--no-duck] [--loop\|--no-loop] \| --remove <layerId> \| --clear] [--rerender]` | everything laid over or played under a clip, one list (source seconds, x/y/w/size as fractions of the 9:16 frame); a sound of 8 s or less, is a one-shot at full level, anything else music (ducked, faded, looped); with no change flag it lists them |
 | `reelsaw apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]` | make one clip's framing (its section at --at, else its first framed one: mode plus nudge / subject / crop) the project's default for every clip, clearing the others' own sections and re-rendering the finished ones (same as the editor's "Use for all clips" and apply_framing) |
-| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> --layers '<json array>' \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative); `save` builds one from a clip's layers, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
+| `reelsaw templates list \| show <id> \| save <projectId> <clipId> <name…> \| rename <id> <name…> \| set <id> [--layers '<json array>'] [--intro keep\|none\|<id>] [--outro …] [--intro-sec n] [--outro-sec n] \| delete <id> \| restore <id> \| purge <id> \| apply <templateId> <projectId> [clipId…] [--add] [--rerender]` | layer templates: layers whose timing fits any clip length (head / tail / fill / relative), plus an optional intro / outro (`keep` = clips keep their own); `save` builds one from a clip's layers, intro and outro, `apply` writes them onto the clips of a project (all of them without clip ids; --add keeps the clip's own layers, default replaces; the intro / outro it sets replaces the clip's either way); --rerender re-renders the finished ones. Same procedures as the Templates page and the MCP tools |
 | `reelsaw overlays <projectId> [--store]` | scan the source for burned-in captions / watermarks; --store saves them (renders then hide them) |
 | `reelsaw usage [--days 30]` | per account: projects, source minutes, clips, model calls / tokens / reported cost, minutes transcribed, stored bytes (same numbers as Users → Usage) |
 | `reelsaw limits <email> [--watermark always\|never\|follow]` | an account's quotas: instance value, plan, override, in force, in use now; --watermark sets the per-user override (same as Users → Limits) |
@@ -260,8 +265,11 @@ windows and died in the same place, and the user saw "This operation was aborted
   restart or a timeout continues where it stopped: the debug lines `step reused` show what was skipped. The project page and
   `reelsaw status` show "13 of 43 parts, about 1 h left" (`projects.stage_detail`; `get_project` has it as `stageDetail`).
 - **Two limits, both runtime settings.** `LLM_CALL_TIMEOUT_SECONDS` bounds one model call, every HTTP attempt of it together
-  (0 = auto: 120 s hosted, 600 s self-hosted). `STAGE_IDLE_TIMEOUT_MINUTES` stops a stage in which no part finished for that
-  long (0 = auto: 1.5 x the call limit). Neither is the total time: a stage may take hours as long as parts keep finishing.
+  (0 = auto: 120 s hosted, 600 s self-hosted, at least twice the chunk's audio for a self-hosted transcription).
+  `STAGE_IDLE_TIMEOUT_MINUTES` stops a stage in which no part finished for that long (0 = auto: 1.5 x the call limit).
+  Neither is the total time: a stage may take hours as long as parts keep finishing. Neither counts time a call waits
+  for a provider slot (`PROVIDER_CONCURRENCY`): a project queued behind other projects on one local model is waiting,
+  not slow (`ai/slot-wait.ts` tells the step's limit when a wait starts and ends).
   A CPU-only 14B model needs about 2-3 min per part; raise the call limit if a single call really takes longer.
 - **Timeouts read as sentences:** "Finding moments timed out: 13 of 43 parts done in 30 min on qwen2.5:14b (~2.3 min per part).
   Retry continues where it stopped; a smaller or GPU-backed model is faster." That text is the project's error and the
@@ -461,7 +469,10 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   `select name, priority, data->>'userId', state from pgboss.job where state in ('created','retry','active') order by priority desc, created_on`.
 - **One model server, many jobs: `PROVIDER_CONCURRENCY`.** `ANALYZE_CONCURRENCY` / `TRANSCRIBE_CONCURRENCY` are per
   job; the provider gate (`ai/gate.ts`) caps calls per provider across all jobs and processes (default 2 for a
-  self-hosted Ollama / Speaches, unlimited for cloud). Each process has an in-memory semaphore, and the cross-process
+  self-hosted Ollama or compatible server, 1 for `openai` pointed at a local server such as Speaches, unlimited for
+  cloud). A CPU whisper uses every core per call, so two at once only halve each other: on a 4-core box two projects
+  transcribing together timed out every 10-minute chunk. When Ollama and Speaches share one CPU box, `compat=1` keeps
+  them from fighting as well. Each process has an in-memory semaphore, and the cross-process
   limit is N Postgres session advisory locks per provider (`pg_locks` rows with `locktype = 'advisory'`) held on a
   dedicated connection for the length of the call, so each process holds at most N extra database connections
   per gated provider. A process that dies drops its slot with its connection. Calls waiting for a slot log
@@ -508,11 +519,24 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 - **Burned-in text**: PP-OCRv4 detector (~35 ms/frame) over ~160 frames; overlays are text that stays put across
   shots. With no detected shot changes only the top 15% / bottom 40% are trusted (a shirt print was flagged
   otherwise). `reelsaw overlays <projectId> [--store]` re-scans an existing project.
+- **Game and app interfaces stay put too.** A Roblox gameplay video had its menu bar, player list and side
+  buttons blurred as "captions" (report, 2026-10-27): a HUD passes every burned-in test (same place in every
+  shot, no drift, clear of faces). `splitInterface` drops narrow off-centre text halfway down a side, and when
+  there are two or more of those, the narrow boxes hugging a side edge in the corners as well. Subtitles are
+  centred or wide, and logos and lower thirds sit in the top or bottom band, so they stay (eval
+  `overlays/aggregate-roblox-2640-2840`).
 - **Blur regions must cover the longest line, not the typical one.** Centred subtitles vary in width, so a
   frequency grid only finds the band's core; ends of long lines and second lines leaked past the blur (39/133
   sampled frames). Regions now grow to the boxes seen in them (`growOverlays`, core-anchored so they don't
   chain into nearby logos), and each render re-detects inside its own clip. Measured by masking frames and
   re-running the detector (eval `overlays/mask-residual`): 0 frames with caption text left.
+- **Caption bands in close-ups touch faces.** A motivation edit cut the speaker as a tight close-up with its
+  subtitles over the chin (report, 2026-10-29): the clip's grown band reached up to 0.54 of the frame, touched the
+  face in more than 10% of frames, and the face check dropped the whole band, so nothing was blurred.
+  `dropFaceOverlaps` now trims a band's edge back to where the faces end (90th percentile of the chins) and drops
+  only what still touches a face or is left under 4% of the frame tall. Each render also tightens a timed band into
+  pieces per stretch of text (`tightenOverlays`, at most 12 per region), so a stray box widens only its own stretch,
+  and every blur has a soft edge and fades in and out over 0.25 s around its window (`sourceVideo`).
 - **ffmpeg `boxblur`** caps chroma radius at a quarter of the region size (yuv420p): pass luma/chroma radii
   separately. ffmpeg errors now lead with the failing lines instead of the banner.
 - **Overlay skipped.** `clip.overlay_skipped` (payload `clipId`, `overlayId`, `reason`, sometimes `error`) means a
@@ -617,6 +641,6 @@ Next:
 
 ## 8. Evals and regression cases
 
-Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
+Every fixed bug should leave a case behind: `pnpm eval` runs all suites (<!-- generated:suite-names -->`selection`, `framing`, `asr-loops`, `scenes`, `pauses`, `alignment`, `speakers`, `overlays`, `cuts`, `transcription`, `disfluency`, `decisions`, `selection-model`<!-- /generated -->) against committed fixtures and baselines and exits non-zero on a
 regression. How to run, add a case (reproduce → export → label → run → fix → `--update`) and where to
 pull more data from: [EVALS.md](EVALS.md).
