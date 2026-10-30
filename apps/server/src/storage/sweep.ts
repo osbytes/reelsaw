@@ -91,7 +91,7 @@ export function parseClipFile(rel: string): { clipId: string; gen: number; name:
  * not busy and whose copy was last used `idleMs` ago or longer (mtime; `ensureLocal` bumps it on a hit).
  * Omitted (the local store, or SCRATCH_CACHE_HOURS=0) the plan only removes what nothing points at.
  */
-export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; db: DbView; now: number; cache?: { idleMs: number } }): Removal[] {
+export function planSweep(input: { projects: ScratchProject[]; tmp: TmpFile[]; db: DbView; now: number; cache?: { idleMs: number } | undefined }): Removal[] {
   const { db, now, cache } = input;
   const out: Removal[] = [];
   const settled = (mtimeMs: number) => now - mtimeMs >= SWEEP_GRACE_MS;

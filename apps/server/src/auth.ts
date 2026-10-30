@@ -56,11 +56,13 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
     resetPasswordTokenExpiresIn: EMAIL_VERIFY_EXPIRES_IN_SEC,
     revokeSessionsOnPasswordReset: true,
     // do not await: Better Auth only calls this when the account exists, so waiting on SMTP would leak that by timing
-    sendResetPassword: email.enabled
-      ? async ({ user, url }: { user: { email: string }; url: string }) => {
-          void email.send({ to: user.email, ...templates.resetPassword(url) });
+    ...(email.enabled
+      ? {
+          sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
+            void email.send({ to: user.email, ...templates.resetPassword(url) });
+          },
         }
-      : undefined,
+      : {}),
     onPasswordReset: async ({ user }: { user: { id: string } }) => {
       log.info({ userId: user.id }, "password reset");
     },
@@ -154,7 +156,7 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
               if (err instanceof SignupRefused) throw new APIError("UNPROCESSABLE_ENTITY", { message: err.message });
               throw err;
             }
-            const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
+            const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.user);
             const first = n === 0;
             if (first) firstCandidates.add(user.email);
             return { data: { ...user, ...guard, role: "user", approvedAt: first || mode() === "open" ? new Date() : null } };

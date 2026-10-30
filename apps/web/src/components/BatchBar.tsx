@@ -25,7 +25,7 @@ interface BatchClip {
  * The selection's actions, one compact row at the bottom of the clips list. Re-render and Export stay
  * on the row; copy, intro/outro, template, retry and delete live in ⋯. Sticky inside the clips ScrollArea.
  */
-export function BatchBar({ projectId, selected, introId, outroId, onClear, onChanged }: { projectId: string; selected: BatchClip[]; introId?: string | null; outroId?: string | null; onClear: () => void; onChanged: () => void }) {
+export function BatchBar({ projectId, selected, introId, outroId, onClear, onChanged }: { projectId: string; selected: BatchClip[]; introId?: string | null | undefined; outroId?: string | null | undefined; onClear: () => void; onChanged: () => void }) {
   const trpc = useTRPC();
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());

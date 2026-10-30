@@ -28,7 +28,7 @@ async function lockedUser(u: UnitOfWork, id: string) {
 }
 
 async function otherAdmins(u: UnitOfWork, exceptId: string) {
-  const [{ n }] = await u.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(and(eq(schema.user.role, "admin"), ne(schema.user.id, exceptId), eq(schema.user.banned, false)));
+  const [{ n } = { n: 0 }] = await u.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(and(eq(schema.user.role, "admin"), ne(schema.user.id, exceptId), eq(schema.user.banned, false)));
   return n;
 }
 

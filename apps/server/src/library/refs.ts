@@ -25,8 +25,8 @@ export interface AssetRefRow {
   role: "intro" | "outro" | "layer";
 }
 
-type ClipIn = { id: string; bumpers?: { intro?: string | null; outro?: string | null } | null; layers?: unknown; overlays?: unknown; audio?: unknown };
-type ProjectIn = { id: string; settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null };
+type ClipIn = { id: string; bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined } | null; layers?: unknown; overlays?: unknown; audio?: unknown };
+type ProjectIn = { id: string; settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null };
 
 /** Pure: the rows one clip should have. The same asset twice in a role collapses to one row. */
 export function refsForClip(projectId: string, clip: ClipIn): AssetRefRow[] {

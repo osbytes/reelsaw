@@ -37,7 +37,7 @@ export interface LogLevelSettings {
   /** re-read the stored override (every process does this on a timer) */
   refresh(): Promise<LogLevelState>;
   /** set an override for `forMs` (default 15 min, max 24 h); `null` clears it */
-  set(spec: string | null, actor: string, forMs?: number, waitAcksMs?: number): Promise<LogLevelState & { acks?: number }>;
+  set(spec: string | null, actor: string, forMs?: number, waitAcksMs?: number): Promise<LogLevelState & { acks?: number | undefined }>;
   stop(): void;
 }
 

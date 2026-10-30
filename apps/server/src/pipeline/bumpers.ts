@@ -30,7 +30,7 @@ export const bumperKind = (ext: string): "video" | "image" | "audio" | null =>
   (BUMPER_VIDEO_EXTS as readonly string[]).includes(ext) ? "video" : (BUMPER_IMAGE_EXTS as readonly string[]).includes(ext) ? "image" : (BUMPER_AUDIO_EXTS as readonly string[]).includes(ext) ? "audio" : null;
 /** GIF and WebP can hold an animation; the probe decides whether they are a video or a still. */
 export const ANIMATABLE_EXTS = [".gif", ".webp"] as const;
-type KindProbe = Pick<ProbeInfo, "durationSec"> & { frames?: number };
+type KindProbe = Pick<ProbeInfo, "durationSec" | "frames">;
 /** More than one frame, or a length beyond a still's, makes a GIF / WebP an animation. */
 export const isAnimated = (probe: KindProbe) => (probe.frames ?? 0) > 1 || probe.durationSec > 0.1;
 /**
@@ -58,7 +58,7 @@ export const NORM_VERSION = "v1";
 export const normVariant = (w: number, h: number) => `${NORM_VERSION}.${w}x${h}`;
 
 /** A sentence for the user, or null when the probed file is an acceptable bumper. */
-export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height"> & { hasAudio?: boolean; frames?: number }): string | null {
+export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: string; sizeBytes: number }, probe: Pick<ProbeInfo, "durationSec" | "width" | "height" | "frames"> & { hasAudio?: boolean | undefined }): string | null {
   const label = slot === "intro" ? "Intros" : slot === "outro" ? "Outros" : "Intros and outros";
   const kind = assetKind(file.ext, probe);
   if (!kind) return ASSET_FORMATS_SENTENCE;
@@ -90,8 +90,8 @@ export function bumperProblem(slot: "intro" | "outro" | undefined, file: { ext: 
  * otherwise the project's, otherwise none. `fromClip` lists the slots the clip decided itself.
  */
 export function resolveClipBumpers(
-  project: { introAssetId?: string | null; outroAssetId?: string | null; introSec?: number; outroSec?: number },
-  clip: { bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null },
+  project: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined },
+  clip: { bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null },
 ): { introId: string | null; outroId: string | null; introSec?: number; outroSec?: number; fromClip: Array<"intro" | "outro"> } {
   const own = clip.bumpers ?? {};
   const fromClip: Array<"intro" | "outro"> = [];
@@ -147,7 +147,7 @@ export function normaliseArgs(input: string, output: string, asset: { durationSe
 }
 
 export interface NormaliseDeps {
-  ffmpeg: (args: string[], opts?: { signal?: AbortSignal }) => Promise<unknown>;
+  ffmpeg: (args: string[], opts?: { signal?: AbortSignal | undefined }) => Promise<unknown>;
   /** `-c:v …` of the encoder in use (media.videoEncodeArgs()); a hardware encoder that fails is retried with libx264 */
   encodeArgs?: string[];
   log?: Logger;
@@ -243,7 +243,7 @@ export async function ensureNormalised(deps: NormaliseDeps, asset: BumperAssetFi
  * normalised files; produces [v] and [a]. Audio is sequential, never mixed: the body's last 0.2 s fade
  * out when an outro follows, and its audio is forced to the bumpers' format and the video's length.
  */
-export function bumperConcat(o: { introInput?: number; outroInput?: number; bodyVideo: string; bodyAudio: string; bodySec: number }): string {
+export function bumperConcat(o: { introInput?: number | undefined; outroInput?: number | undefined; bodyVideo: string; bodyAudio: string; bodySec: number }): string {
   const fade = o.outroInput !== undefined && o.bodySec > OUTRO_FADE_SEC * 2 ? `afade=t=out:st=${(o.bodySec - OUTRO_FADE_SEC).toFixed(3)}:d=${OUTRO_FADE_SEC},` : "";
   const body = o.bodySec.toFixed(3);
   const slots = [

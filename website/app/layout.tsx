@@ -76,6 +76,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // ThemeSync puts it back when a later commit rebuilds <html> without that attribute.
     <html lang="en" className={`${hanken.variable} ${jetbrains.variable}`} suppressHydrationWarning>
       <head>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: our own constant, run before paint so the theme does not flash */}
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       <body className="min-h-dvh">

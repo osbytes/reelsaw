@@ -209,7 +209,7 @@ function tokens(text: string, language: string | undefined): string[] {
  * audio before it draws karaoke captions, so only the cue edges have to be right here.
  * Cues that overlap (rolling captions) start their words after the previous cue's last word.
  */
-export function cuesToTranscript(cues: Cue[], opts: { language?: string } = {}): { words: Word[]; segments: TranscriptSegment[] } {
+export function cuesToTranscript(cues: Cue[], opts: { language?: string | undefined } = {}): { words: Word[]; segments: TranscriptSegment[] } {
   const words: Word[] = [];
   const segments: TranscriptSegment[] = [];
   let lastEnd = 0;

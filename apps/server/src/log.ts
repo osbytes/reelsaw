@@ -32,9 +32,9 @@ export interface LogConfig {
   LOG_LEVEL?: string;
   LOG_FORMAT?: "json" | "pretty" | "auto";
   /** also write JSON lines here, rotated daily (7 kept), so logs survive container re-creation */
-  LOG_FILE?: string;
+  LOG_FILE?: string | undefined;
   /** the process's worker id (config WORKER_ID); names its file under LOG_FILE, default `hostname:pid` */
-  WORKER_ID?: string;
+  WORKER_ID?: string | undefined;
 }
 
 export interface LogLevels {

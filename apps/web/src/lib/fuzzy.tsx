@@ -40,7 +40,7 @@ export function createFuzzy<T>(items: T[], keys: Array<string | { name: string; 
 }
 
 /** Bold the characters Fuse matched in one key of a result. */
-export function Highlight({ text, matches, k }: { text: string; matches?: readonly FuseResultMatch[]; k: string }) {
+export function Highlight({ text, matches, k }: { text: string; matches?: readonly FuseResultMatch[] | undefined; k: string }) {
   const m = matches?.find((x) => x.key === k && x.value === text);
   if (!m?.indices.length) return <>{text}</>;
   const parts: ReactNode[] = [];

@@ -4,11 +4,11 @@ import { handleStaleChunk, isStaleChunkError, refreshForNewVersion, staleChunkRe
 import { captureException } from "../lib/telemetry";
 
 export class ErrorBoundary extends Component<{ children: ReactNode; quiet?: boolean }, { error: Error | null }> {
-  state = { error: null as Error | null };
+  override state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
-  componentDidCatch(error: Error) {
+  override componentDidCatch(error: Error) {
     if (isStaleChunkError(error)) {
       handleStaleChunk();
       return;
@@ -16,7 +16,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; quiet?: bool
     reportClientError("render", error, { send: true });
     captureException(error, { where: "render" });
   }
-  render() {
+  override render() {
     if (!this.state.error) return this.props.children;
     if (isStaleChunkError(this.state.error)) {
       if (staleChunkReloadInFlight()) return null;

@@ -101,7 +101,7 @@ export const defaultStyle: Style = styleSchema.parse({});
 const LEGACY_CAPTION_Y: Record<CaptionPosition, number> = { top: 0.3, middle: 0.5, bottom: 0.74 };
 
 /** Project defaults (incl. legacy captionPosition) + per-clip override → the style a clip renders with. */
-export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosition?: CaptionPosition }, override?: StyleOverride | null): Style {
+export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosition?: CaptionPosition | undefined }, override?: StyleOverride | null): Style {
   const legacyY = settings.captionY === undefined && settings.captionPosition ? LEGACY_CAPTION_Y[settings.captionPosition] : undefined;
   const base: Record<string, unknown> = {};
   for (const k of Object.keys(styleSchema.shape) as Array<keyof Style>) {
@@ -155,10 +155,10 @@ export const layoutSectionSchema = z.object({
 export type LayoutSection = z.infer<typeof layoutSectionSchema>;
 /** One pane's adjustment: pane 0 is the only pane or the top of a split, pane 1 the bottom of a split. A crop replaces the offset and the subject. */
 export interface PaneAdjust {
-  offsetX?: number;
-  offsetY?: number;
-  subjectX?: number;
-  crop?: ContentRegion;
+  offsetX?: number | undefined;
+  offsetY?: number | undefined;
+  subjectX?: number | undefined;
+  crop?: ContentRegion | undefined;
 }
 export function paneOf(s: SectionAdjustFields, pane: 0 | 1): PaneAdjust {
   return pane === 0 ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX, crop: s.crop } : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2, crop: s.crop2 };
@@ -209,7 +209,7 @@ export function adjustOf(s: SectionAdjustFields): SectionAdjustFields | undefine
  * choice, has no section mode and shows the whole frame) with the `reframeAdjust` nudge or crop on top, as one section
  * over `[start, end]`. Only `auto` with no adjustment is a plain automatic section.
  */
-export function projectDefaultSection(settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null }, start: number, end: number): LayoutSection {
+export function projectDefaultSection(settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null | undefined }, start: number, end: number): LayoutSection {
   const reframe = settings.reframe ?? "auto";
   const mode: SectionMode = reframe === "none" ? "fit" : reframe;
   return { start, end, mode, ...(settings.reframeAdjust ? adjustOf(settings.reframeAdjust) : {}) };
@@ -533,7 +533,7 @@ export const audioLayerDefaultsFor = (asset: { durationSec: number }) => (asset.
  * Giphy stores GIFs as mp4 and often attaches a silent AAC track, so "has audio" is not a
  * reliable split — anything under SFX_MAX_SEC sits small and loops, including a dummy track.
  */
-export function isStickerAsset(a: { kind: string; mime?: string | null; hasAudio?: boolean; durationSec?: number | null }) {
+export function isStickerAsset(a: { kind: string; mime?: string | null | undefined; hasAudio?: boolean | undefined; durationSec?: number | null | undefined }) {
   if (a.kind === "image" || a.mime === "image/gif" || a.mime === "image/webp") return true;
   if (a.kind !== "video") return false;
   return (a.durationSec ?? 0) < SFX_MAX_SEC;
@@ -577,7 +577,7 @@ export const TEXT_OVERLAY_DEFAULTS = { size: 0.045, color: "#FFFFFF" } as const;
 export const ASSET_OVERLAY_DEFAULT_W = 0.3;
 
 /** Placement and loop when an asset is dropped on a clip. Stickers sit small near the top and repeat; b-roll fills the frame and plays once. */
-export function assetLayerDefaultsFor(a: { kind: string; mime?: string | null; hasAudio?: boolean; durationSec?: number | null }) {
+export function assetLayerDefaultsFor(a: { kind: string; mime?: string | null | undefined; hasAudio?: boolean | undefined; durationSec?: number | null | undefined }) {
   const sticker = isStickerAsset(a);
   const animated = a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp";
   return {
@@ -788,7 +788,7 @@ export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.par
  */
 export function resolveFraming(
   clip: { layoutOverride?: string | null; layoutSections?: LayoutSection[] | null },
-  settings: Pick<ProjectSettings, "reframe"> & { reframeAdjust?: SectionAdjustFields | null },
+  settings: Pick<ProjectSettings, "reframe"> & { reframeAdjust?: SectionAdjustFields | null | undefined },
 ): { mode: ReframeMode; adjust: SectionAdjustFields | undefined; sections: LayoutSection[]; from: "clip" | "project" | "default" } {
   const override = reframeModeSchema.safeParse(clip.layoutOverride);
   const mode: ReframeMode = override.success ? override.data : settings.reframe;
@@ -1110,9 +1110,9 @@ export interface SourceOverlay {
   /** fraction of sampled frames showing text here */
   coverage: number;
   /** render-time only: clip-relative [start, end] windows when this text is on screen (absent = always) */
-  windows?: Array<[number, number]>;
+  windows?: Array<[number, number]> | undefined;
   /** render-time only: share of the clip this text is on screen */
-  share?: number;
+  share?: number | undefined;
 }
 
 /**

@@ -8,6 +8,8 @@
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @reelsaw/shared build && pnpm -r typecheck",
+    "lint": "biome lint",
+    "lint:fix": "biome lint --write",
     "db:generate": "pnpm --filter @reelsaw/server db:generate",
     "start": "pnpm --filter @reelsaw/server start",
     "mock-ai": "node scripts/mock-ai.mjs",
@@ -20,6 +22,7 @@
     "release:version": "changeset version && pnpm install --lockfile-only"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
     "lefthook": "2.2.2",

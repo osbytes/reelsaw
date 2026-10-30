@@ -321,7 +321,7 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
     const p = await findProject(u.db, actor, c.projectId, { deleted: true });
     if (p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
     if (!c.deletedAt) return { ok: true, changed: false, clipId, status: c.status };
-    const [{ next }] = await u.db.select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` }).from(schema.clips).where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
+    const [{ next } = { next: 0 }] = await u.db.select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` }).from(schema.clips).where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(c.projectId, "clip.restored", { clipId, index: next, title: c.title });
     if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
@@ -423,7 +423,7 @@ const BUMPER_KEYS = new Set<string>(["introAssetId", "outroAssetId", "introSec",
  * toggles on the next refine. Writes only the keys given (atomic JSON merge), validated against the whole settings
  * object. Per-clip style overrides are kept.
  */
-export async function updateProject(svc: Services, actor: Actor, projectId: string, input: { title?: string; settings?: ProjectSettingsPatch; clear?: ClearableSetting[] }) {
+export async function updateProject(svc: Services, actor: Actor, projectId: string, input: { title?: string | undefined; settings?: ProjectSettingsPatch | undefined; clear?: ClearableSetting[] | undefined }) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
@@ -471,7 +471,7 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
 /** What `applyProjectFraming` takes from one section of a clip: its mode and what the user adjusted on it. */
 export interface FramingTemplate {
   reframe: SectionMode;
-  adjust?: SectionAdjustFields;
+  adjust?: SectionAdjustFields | undefined;
 }
 
 /**
@@ -491,7 +491,7 @@ export function framingOfClip(clip: { startSec: number; layoutSections: LayoutSe
  * legacy override are cleared (unless `keepOverrides`), and the finished clips are re-rendered. The same for every
  * clip the project creates from now on. One transaction: clips locked in id order, then the project row.
  */
-export async function applyProjectFraming(svc: Services, actor: Actor, projectId: string, input: FramingTemplate & { keepOverrides?: boolean; rerender?: boolean }) {
+export async function applyProjectFraming(svc: Services, actor: Actor, projectId: string, input: FramingTemplate & { keepOverrides?: boolean | undefined; rerender?: boolean }) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const adjust = input.adjust ? adjustOf(input.adjust) : undefined;
@@ -738,7 +738,7 @@ export const refineInput = {
 };
 
 /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
-export async function refineProject(svc: Services, actor: Actor, projectId: string, input: { steps?: ReadonlyArray<(typeof REFINE_STEPS)[number]>; vocabulary?: string }) {
+export async function refineProject(svc: Services, actor: Actor, projectId: string, input: { steps?: ReadonlyArray<(typeof REFINE_STEPS)[number]> | undefined; vocabulary?: string | undefined }) {
   const steps = input.steps?.length ? [...new Set(input.steps)] : [...REFINE_STEPS];
   await svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });

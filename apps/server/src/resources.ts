@@ -104,7 +104,7 @@ export interface ResourceGovernor {
    * because of the bytes on disk it throws `ResourceExhaustedError` (waiting does not free space),
    * short only because of other jobs' leases it waits for them like for CPU and memory.
    */
-  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void; ids?: { jobId?: string; projectId?: string } }): Promise<DiskLease>;
+  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void; ids?: { jobId?: string | undefined; projectId?: string } }): Promise<DiskLease>;
   /**
    * How a disk shortfall is answered: free at least `needBytes` of scratch (storage/sweep.ts
    * `reclaimScratch`). Set once the store and database are up; absent, a shortfall fails at once.
@@ -188,7 +188,7 @@ export interface DiskLeaseRequest {
   /** free MB on the volume as this process measured it (never -1: an unmeasurable disk is not leased) */
   freeMB: number;
   kind: string;
-  jobId?: string;
+  jobId?: string | undefined;
   projectId?: string;
 }
 export type DiskLeaseResult = { ok: true; release: () => Promise<void> } | { ok: false; leasedMB: number; jobs: number };
@@ -216,7 +216,7 @@ export function diskShortReason(diskFreeMB: number, minFreeMB: number, extraMB: 
 }
 
 /** How many renders may run now: pure, for tests. */
-export function renderLimit(p: { cpus: number; memAvailableMB: number; running: number; minFreeMemMB: number; fixed?: number }): number {
+export function renderLimit(p: { cpus: number; memAvailableMB: number; running: number; minFreeMemMB: number; fixed?: number | undefined }): number {
   if (p.fixed) return p.fixed;
   const byCpu = Math.min(MAX_AUTO_RENDERS, Math.max(1, Math.floor(p.cpus / CPUS_PER_RENDER)));
   // memory already counts the renders running; room for how many more?

@@ -64,14 +64,14 @@ export function describeInterval(m: SummaryMetric): string {
 
 /** Where a fixture came from, so a surprising label can be traced back to the decision that made it. */
 export interface FixtureSource {
-  url?: string;
+  url?: string | undefined;
   projectId?: string;
   userId?: string;
   /** ISO date of the review decision (accept/reject) or hand label */
   decidedAt?: string;
   /** decision-log cases: the video id and the sha256 of the bytes the decision was made on */
-  videoId?: string;
-  sha256?: string;
+  videoId?: string | undefined;
+  sha256?: string | undefined;
 }
 
 export interface Suite {

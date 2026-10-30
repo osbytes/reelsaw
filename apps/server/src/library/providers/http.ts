@@ -26,7 +26,7 @@ export interface ProviderHttp {
   unavailableUntil(provider: string): number;
 }
 
-export function createProviderHttp(deps: { fetch?: typeof fetch; version: string; log: Logger; now?: () => number }): ProviderHttp {
+export function createProviderHttp(deps: { fetch?: typeof fetch | undefined; version: string; log: Logger; now?: () => number }): ProviderHttp {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const parked = new Map<string, number>();

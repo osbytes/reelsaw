@@ -41,7 +41,7 @@ export interface LlmUsage {
   ms: number;
   ok: boolean;
   /** USD the provider reported (AI Gateway), else undefined */
-  costUsd?: number;
+  costUsd?: number | undefined;
 }
 export interface LlmTracer {
   sinks: TraceSink[];
@@ -55,8 +55,8 @@ export interface LlmTracer {
 interface TraceConfig {
   LLM_TRACE: string;
   LLM_TRACE_MAX_CHARS: number;
-  LANGFUSE_PUBLIC_KEY?: string;
-  LANGFUSE_SECRET_KEY?: string;
+  LANGFUSE_PUBLIC_KEY?: string | undefined;
+  LANGFUSE_SECRET_KEY?: string | undefined;
   LANGFUSE_BASE_URL: string;
 }
 
@@ -89,7 +89,7 @@ export async function createLlmTracer(config: TraceConfig, log: Logger): Promise
     const key = c.jobId ?? `${c.projectId ?? "none"}:${c.stage ?? "none"}`;
     let t = traces.get(key);
     if (!t) {
-      t = langfuse!.trace({ name: c.stage ?? "llm", sessionId: c.projectId, metadata: { projectId: c.projectId, clipId: c.clipId, jobId: c.jobId }, tags: ["reelsaw", ...(c.stage ? [c.stage] : [])] });
+      t = langfuse!.trace({ name: c.stage ?? "llm", ...(c.projectId ? { sessionId: c.projectId } : {}), metadata: { projectId: c.projectId, clipId: c.clipId, jobId: c.jobId }, tags: ["reelsaw", ...(c.stage ? [c.stage] : [])] });
       traces.set(key, t);
       if (traces.size > 500) traces.delete(traces.keys().next().value!);
     }

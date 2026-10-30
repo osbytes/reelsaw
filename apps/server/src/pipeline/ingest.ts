@@ -8,7 +8,7 @@ import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { announcedDuration } from "../projects/peek.js";
-import { StageContext, exists, sourceScratchMB } from "./common.js";
+import { type StageContext, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
 

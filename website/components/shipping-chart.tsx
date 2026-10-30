@@ -192,6 +192,7 @@ function Cell({
     ? `${utcLabel(day.date)}: ${commitsWord(day.commits)}${shipped ? `, shipped ${day.releases.map((r) => r.version).join(", ")}` : ""}`
     : utcLabel(day.date);
   return (
+    // biome-ignore lint/a11y/useFocusableInteractive: the button inside the cell takes focus (ARIA grid pattern)
     <div role="gridcell" className="relative" style={{ gridColumn: col, gridRow: row }}>
       <button
         ref={register}

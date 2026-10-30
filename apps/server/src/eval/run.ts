@@ -31,7 +31,7 @@ import { suites } from "./suites/index.js";
 const BOOL_FLAGS = new Set(["offline", "update", "verbose", "list", "no-cache"]);
 const argv = process.argv.slice(2);
 const valuesOf = (name: string) => argv.flatMap((a, i) => (a === `--${name}` && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? [argv[i + 1]!] : []));
-const valueOf = (name: string) => valuesOf(name)[0];
+const flagValue = (name: string) => valuesOf(name)[0];
 const has = (name: string) => argv.includes(`--${name}`);
 const positional = argv.filter((a, i) => !a.startsWith("--") && !(i > 0 && argv[i - 1]!.startsWith("--") && !BOOL_FLAGS.has(argv[i - 1]!.slice(2))));
 
@@ -80,7 +80,7 @@ async function main() {
   }
   const offline = has("offline");
   const update = has("update");
-  const acceptReason = valueOf("accept-regressions")?.trim() || undefined;
+  const acceptReason = flagValue("accept-regressions")?.trim() || undefined;
   if (has("accept-regressions") && !acceptReason) throw new Error('--accept-regressions needs a reason: --accept-regressions "why these regressions are fine"');
   if (acceptReason && !update) throw new Error("--accept-regressions only makes sense with --update");
   const noCache = has("no-cache");
@@ -88,7 +88,7 @@ async function main() {
   const unknown = positional.filter((p) => !suites.some((s) => s.name === p));
   if (unknown.length) throw new Error(`unknown suite(s): ${unknown.join(", ")}; known: ${suites.map((s) => s.name).join(", ")}`);
 
-  const profiles = parseProfiles({ matrix: valueOf("matrix"), profiles: valueOf("profiles"), set: valuesOf("set") });
+  const profiles = parseProfiles({ matrix: flagValue("matrix"), profiles: flagValue("profiles"), set: valuesOf("set") });
   const matrix = profiles.length > 0;
   if (matrix && update) throw new Error("--update records the default .env configuration; it cannot be combined with --matrix / --set");
   if (!matrix) profiles.push({ name: "default", env: {} });
@@ -112,7 +112,7 @@ async function main() {
       cacheDir,
       offline,
       verbose: has("verbose"),
-      opt: (name) => valueOf(name),
+      opt: (name) => flagValue(name),
       profile: profile.name,
       config: getConfig,
       ai: { ...ai, languageModel: async (id) => meteredModel(meter, await ai.languageModel(id)) },
@@ -208,7 +208,7 @@ async function main() {
   const json = JSON.stringify({ at: new Date().toISOString(), offline, noCache, profiles, report }, null, 2);
   await fs.writeFile(path.join(repDir, `${stamp}.json`), json);
   await fs.writeFile(path.join(repDir, `${stamp}.md`), markdown(report, profiles, matrix));
-  const jsonOut = valueOf("json");
+  const jsonOut = flagValue("json");
   if (jsonOut) await fs.writeFile(path.resolve(jsonOut), json);
   console.log(`\nreport: ${path.relative(process.cwd(), path.join(repDir, `${stamp}.md`))}`);
   if (failed) {

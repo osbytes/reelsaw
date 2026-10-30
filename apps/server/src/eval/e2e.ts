@@ -31,7 +31,7 @@ import { firstStageSeconds, runsOf } from "../pipeline/runs.js";
 
 const argv = process.argv.slice(2);
 const BOOL = new Set(["keep", "verbose", "no-recreate", "gpu"]);
-const valueOf = (name: string) => {
+const flagValue = (name: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[i + 1] : undefined;
 };
@@ -53,19 +53,19 @@ const dotenv = (() => {
   return out;
 })();
 
-const COMPOSE_PROJECT = valueOf("project") ?? "reelsaw-bench";
-const BASE = valueOf("base") ?? "http://localhost:3200";
-const DB_URL = valueOf("db") ?? `postgres://reelsaw:${dotenv.POSTGRES_PASSWORD ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
-const TIMEOUT_MIN = Number(valueOf("timeout-min") ?? 90);
+const COMPOSE_PROJECT = flagValue("project") ?? "reelsaw-bench";
+const BASE = flagValue("base") ?? "http://localhost:3200";
+const DB_URL = flagValue("db") ?? `postgres://reelsaw:${dotenv.POSTGRES_PASSWORD ?? "reelsaw"}@127.0.0.1:5442/reelsaw`;
+const TIMEOUT_MIN = Number(flagValue("timeout-min") ?? 90);
 const STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
 
 interface LlmLine {
-  stage?: string;
-  call?: string;
+  stage?: string | undefined;
+  call?: string | undefined;
   model: string;
-  provider?: string;
+  provider?: string | undefined;
   ms: number;
-  usage?: { input: number; output: number };
+  usage?: { input: number; output: number } | undefined;
   failed: boolean;
 }
 
@@ -465,21 +465,21 @@ async function rescan(dir: string) {
 }
 
 async function main() {
-  if (valueOf("rescan")) return rescan(path.resolve(valueOf("rescan")!));
-  const source = valueOf("source");
+  if (flagValue("rescan")) return rescan(path.resolve(flagValue("rescan")!));
+  const source = flagValue("source");
   if (!source) throw new Error("--source <video url> is required");
-  const profiles = parseProfiles({ matrix: valueOf("matrix"), profiles: valueOf("profiles"), set: argv.flatMap((a, i) => (a === "--set" && argv[i + 1] ? [argv[i + 1]!] : [])) });
+  const profiles = parseProfiles({ matrix: flagValue("matrix"), profiles: flagValue("profiles"), set: argv.flatMap((a, i) => (a === "--set" && argv[i + 1] ? [argv[i + 1]!] : [])) });
   if (!profiles.length) profiles.push({ name: "default", env: {} });
-  const repeat = Number(valueOf("repeat") ?? 1);
-  const maxClips = valueOf("max-clips") ? Number(valueOf("max-clips")) : undefined;
+  const repeat = Number(flagValue("repeat") ?? 1);
+  const maxClips = flagValue("max-clips") ? Number(flagValue("max-clips")) : undefined;
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-  const outDir = path.resolve(valueOf("out") ?? path.join(repoRoot, "eval", "bench", "results", `e2e-${stamp}`));
+  const outDir = path.resolve(flagValue("out") ?? path.join(repoRoot, "eval", "bench", "results", `e2e-${stamp}`));
   await fs.mkdir(outDir, { recursive: true });
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "reelsaw-bench-"));
 
-  const steps = (valueOf("steps") ?? "").split(",").map((s) => s.trim()).filter((s): s is "refine" | "analyze" => s === "refine" || s === "analyze");
-  if (valueOf("steps") && !steps.length) throw new Error(`--steps takes refine and/or analyze, got "${valueOf("steps")}"`);
-  const baseName = valueOf("base-profile") ?? profiles[0]!.name;
+  const steps = (flagValue("steps") ?? "").split(",").map((s) => s.trim()).filter((s): s is "refine" | "analyze" => s === "refine" || s === "analyze");
+  if (flagValue("steps") && !steps.length) throw new Error(`--steps takes refine and/or analyze, got "${flagValue("steps")}"`);
+  const baseName = flagValue("base-profile") ?? profiles[0]!.name;
   const base = profiles.find((p) => p.name === baseName);
   if (steps.length && !base) throw new Error(`--base-profile ${baseName} is not among the selected profiles`);
 

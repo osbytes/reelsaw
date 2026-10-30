@@ -53,7 +53,7 @@ export function track(event: string, properties?: Record<string, string | number
 }
 
 export function captureException(err: unknown, tags?: Record<string, string>) {
-  sb?.captureException(err, { tags });
+  sb?.captureException(err, tags ? { tags } : undefined);
 }
 
 /**
@@ -63,8 +63,8 @@ export function captureException(err: unknown, tags?: Record<string, string>) {
  */
 export async function sendIssueFeedback(opts: {
   message: string;
-  name?: string;
-  email?: string;
+  name?: string | undefined;
+  email?: string | undefined;
   tags?: Record<string, string>;
   /** PostHog-only properties: ids, counts, route — not the description */
   properties?: Record<string, string | number | boolean | null | undefined>;
@@ -74,19 +74,19 @@ export async function sendIssueFeedback(opts: {
   if (sb?.sendFeedback) {
     await sb.sendFeedback({
       message: opts.message,
-      name: opts.name,
-      email: opts.email,
+      ...(opts.name ? { name: opts.name } : {}),
+      ...(opts.email ? { email: opts.email } : {}),
       source: "report-dialog",
-      tags: opts.tags,
+      ...(opts.tags ? { tags: opts.tags } : {}),
     });
     sentry = true;
   } else if (sb?.captureFeedback) {
     sb.captureFeedback({
       message: opts.message,
-      name: opts.name,
-      email: opts.email,
+      ...(opts.name ? { name: opts.name } : {}),
+      ...(opts.email ? { email: opts.email } : {}),
       source: "report-dialog",
-      tags: opts.tags,
+      ...(opts.tags ? { tags: opts.tags } : {}),
     });
     sentry = true;
   }

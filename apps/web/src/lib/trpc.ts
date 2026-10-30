@@ -20,7 +20,8 @@ export function makeTrpcClient() {
         false: httpBatchLink({
           url: "/api/trpc",
           fetch: async (url, opts) => {
-            const res = await fetch(url, { ...opts, credentials: "include" });
+            // tRPC types `signal` as `AbortSignal | undefined`, which RequestInit does not allow with exactOptionalPropertyTypes
+            const res = await fetch(url, { ...(opts as RequestInit | undefined), credentials: "include" });
             noteServerBuild(res.headers.get("x-reelsaw-build"));
             return res;
           },

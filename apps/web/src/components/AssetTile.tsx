@@ -17,22 +17,22 @@ export interface TileModel {
   key: string;
   kind: "video" | "image" | "audio";
   name: string;
-  mime?: string | null;
-  durationSec?: number | null;
-  width?: number | null;
-  height?: number | null;
-  hasAudio?: boolean;
-  thumbUrl?: string;
+  mime?: string | null | undefined;
+  durationSec?: number | null | undefined;
+  width?: number | null | undefined;
+  height?: number | null | undefined;
+  hasAudio?: boolean | undefined;
+  thumbUrl?: string | undefined;
   /** what plays in place (video / audio) */
-  previewUrl?: string;
+  previewUrl?: string | undefined;
   /** "Yours", "Catalog" or the provider's label */
   source: string;
   /** license id (CC0, ISC, Pexels…) for the meta line */
-  license?: string;
+  license?: string | undefined;
   /** the library row behind it (one of this account's uploads) */
   row?: LibraryAsset;
   /** "2 clips" / "1 project" for a library item that is in use */
-  usage?: string;
+  usage?: string | undefined;
 }
 
 /** only one preview plays at a time across tiles */
@@ -55,10 +55,10 @@ export function AssetTile({
   highlighted?: boolean;
   leaving?: boolean;
   mode: "library" | "picker";
-  onOpen?: () => void;
-  onSelect?: () => void;
+  onOpen?: (() => void) | undefined;
+  onSelect?: (() => void) | undefined;
   onPick?: () => void;
-  pickLabel?: string;
+  pickLabel?: string | undefined;
 }) {
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);

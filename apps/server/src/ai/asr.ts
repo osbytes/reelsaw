@@ -28,7 +28,7 @@ export const ASR_PRUNE_LIST_LIMIT = 5000;
 
 export interface AsrResult {
   text: string;
-  language?: string;
+  language?: string | undefined;
   segments: Array<{ text: string; startSecond: number; endSecond: number }>;
 }
 
@@ -46,7 +46,7 @@ export interface Asr {
   /** The cache key `transcribe` would use for these inputs. */
   keyFor(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject> }): string;
   /** Transcribe `audio` with `modelId` (default TRANSCRIPTION_MODEL) and its word-timestamp options. */
-  transcribe(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject>; signal?: AbortSignal; maxRetries?: number; functionId?: string; telemetry?: boolean }): Promise<AsrResult & { cached: boolean }>;
+  transcribe(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject>; signal?: AbortSignal | undefined; maxRetries?: number; functionId?: string; telemetry?: boolean }): Promise<AsrResult & { cached: boolean }>;
   stats(): { hits: number; misses: number };
   prune(maxAgeDays: number): Promise<number>;
   /** Called after every provider call (usage accounting). Set once the database is up. */
@@ -100,7 +100,7 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
             model,
             audio,
             providerOptions,
-            abortSignal: opts.signal,
+            ...(opts.signal ? { abortSignal: opts.signal } : {}),
             maxRetries: opts.maxRetries ?? 2,
             ...(opts.functionId ? { telemetry: { isEnabled: !!opts.telemetry, functionId: opts.functionId, recordOutputs: false } } : {}),
           });

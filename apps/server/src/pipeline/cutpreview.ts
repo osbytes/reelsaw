@@ -24,7 +24,7 @@ export interface CutPreviewPlan {
   cut: { start: number; end: number };
   source: CutSource;
   /** the search or the last render refused this cut: why */
-  refused?: string;
+  refused?: string | undefined;
 }
 
 const XF = 0.02;
@@ -123,7 +123,7 @@ export async function cutPreviewAudio(
   userId: string,
   projectId: string,
   flagId: string,
-  opts: { pad: number; cut?: { start: number; end: number }; signal?: AbortSignal },
+  opts: { pad: number; cut?: { start: number; end: number } | undefined; signal?: AbortSignal },
 ): Promise<Buffer | null> {
   const ctx = await load(svc, userId, projectId, flagId);
   if (!ctx) return null;

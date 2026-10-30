@@ -14,7 +14,7 @@ export interface CropPaneOption {
   /** what the pane shows now without a fixed crop (the automatic window), for the box's starting place */
   auto: ContentRegion;
   /** the fixed crop stored on the section, if any */
-  current?: ContentRegion;
+  current?: ContentRegion | undefined;
 }
 
 type Fields = { left: string; top: string; width: string; height: string };

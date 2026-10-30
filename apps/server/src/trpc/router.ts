@@ -469,7 +469,7 @@ function toLibraryItem(r: typeof schema.assets.$inferSelect, usage: UsageCounts,
  * `total` of all live ones) and the removals of the last 30 days (`deleted`, at most 200). Catalog / provider files are
  * instance-shared and listed by search, not here.
  */
-async function libraryPage(svc: Services, userId: string, opts: { limit?: number; cursor?: string }) {
+async function libraryPage(svc: Services, userId: string, opts: { limit?: number; cursor?: string | undefined }) {
   const db = svc.database.db;
   const A = schema.assets;
   const limit = opts.limit ?? LIST_LIMIT_DEFAULT;
@@ -763,7 +763,7 @@ const restRouter = router({
             after = sql`(${approved} > ${Number(c[0])} or (${approved} = ${Number(c[0])} and (${U.createdAt}, ${U.id}) < (${String(c[1])}::timestamp, ${String(c[2])})))`;
           }
           const pageSize = ws.length ? SEARCH_USERS : limit;
-          const [fetched, [{ total }]] = await db.transaction(async (tx) => {
+          const [fetched, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
             await setSearchThreshold(tx);
             return Promise.all([
               tx
@@ -819,11 +819,11 @@ const restRouter = router({
           };
         }),
       flaggedCount: adminProcedure.query(async ({ ctx }) => {
-        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
+        const [{ n } = { n: 0 }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
         return n;
       }),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
-        const [{ n }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
+        const [{ n } = { n: 0 }] = await ctx.svc.database.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(sql`${schema.user.approvedAt} is null and not ${schema.user.banned}`);
         return n;
       }),
       approve: adminProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => approveUser(ctx.svc, ctx.user.id, input.id)),

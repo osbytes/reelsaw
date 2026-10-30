@@ -46,7 +46,7 @@ export function NewProjectPage() {
   const me = useMe();
   const uploadCtrl = useRef<AbortController | null>(null);
   const create = useMutation({
-    mutationFn: async (input: { title?: string; sourceUrl?: string; file?: File; settings: ProjectSettings }) => {
+    mutationFn: async (input: { title?: string | undefined; sourceUrl?: string | undefined; file?: File; settings: ProjectSettings }) => {
       uploadCtrl.current = new AbortController();
       const uploadId = input.file ? await postUpload(input.file, setUploadPct, uploadCtrl.current.signal) : undefined;
       return client.projects.create.mutate({ title: input.title, sourceUrl: input.sourceUrl, uploadId, settings: input.settings });

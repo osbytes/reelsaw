@@ -125,7 +125,7 @@ interface Job {
   state: "uploading" | "creating" | "done" | "failed";
   projectId?: string;
   error?: string;
-  quota?: QuotaRefusal;
+  quota?: QuotaRefusal | undefined;
 }
 
 const Ctx = createContext<{ startProjects: (files: File[]) => void; openWithFile: (f: File) => void }>({ startProjects: () => {}, openWithFile: () => {} });

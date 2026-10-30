@@ -121,7 +121,7 @@ interface Props {
   overlays: SourceOverlay[];
   clip: EditorClip;
   /** live render progress for this clip, 0..1 */
-  renderProgress?: number;
+  renderProgress?: number | undefined;
   onExit: () => void;
 }
 
@@ -742,8 +742,8 @@ export function ClipEditor(props: Props) {
   const setIn = (t: number) => setRange([Math.min(t, range[1] - 1), range[1]]);
   const setOut = (t: number) => setRange([range[0], Math.max(t, range[0] + 1)]);
   const splitAt = (t: number) => {
-    if (t <= range[0] + 0.5 || t >= range[1] - 0.5) return toast("Move the playhead inside the clip to split");
-    if (sections.some((s) => Math.abs(s.start - t) < 0.5 && s.start > range[0])) return toast("Too close to an existing transition");
+    if (t <= range[0] + 0.5 || t >= range[1] - 0.5) return void toast("Move the playhead inside the clip to split");
+    if (sections.some((s) => Math.abs(s.start - t) < 0.5 && s.start > range[0])) return void toast("Too close to an existing transition");
     const i = sections.findIndex((s) => t > s.start && t < s.end);
     if (i < 0) return;
     const s = sections[i]!;
@@ -821,10 +821,9 @@ export function ClipEditor(props: Props) {
       layout: lay,
       cx: c1.x,
       cy: c1.y,
-      cx2: c2?.x,
-      cy2: c2?.y,
-      size: det?.size,
-      size2: det?.size2,
+      ...(c2 ? { cx2: c2.x, cy2: c2.y } : {}),
+      ...(det?.size !== undefined ? { size: det.size } : {}),
+      ...(det?.size2 !== undefined ? { size2: det.size2 } : {}),
       // a content region is an automatic choice; a section forced to Stack keeps the whole frame on top,
       // unless the speaker is a webcam tile in a band: the tile and its band are the speaker's own bounds and apply to a forced stack too.
       // The user's own top crop wins over both.
@@ -924,7 +923,7 @@ export function ClipEditor(props: Props) {
   };
   const openCrop = (i: number, key: CropKey = "crop") => {
     const panes = cropPanesFor(i);
-    if (!panes.length) return toast("This section shows the source as it is; pick a framing first");
+    if (!panes.length) return void toast("This section shows the source as it is; pick a framing first");
     setCropDialog({ section: i, key: panes.some((p) => p.key === key) ? key : panes[0]!.key });
   };
   const applyCrop = (i: number, key: CropKey, region: ContentRegion | null) => {
@@ -970,14 +969,14 @@ export function ClipEditor(props: Props) {
     return [start, Number(Math.min(range[1], start + len).toFixed(2))];
   };
   const pushLayer = (l: ClipLayer, note: string) => {
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
     setLayers([...layers, l]);
     setSelectedLayer(l.id);
     if (current < l.start || current > l.end) seek(l.start);
     if (tab !== "layers" && tab !== "transcript") setTab("layers");
     toast(note);
   };
-  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null; hasAudio?: boolean };
+  type NewLayerAsset = Pick<LayerAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null | undefined; hasAudio?: boolean | undefined };
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const d = assetLayerDefaultsFor(asset);
     const [start, end] = layerWindow(t, Math.min(d.windowSec, range[1] - t));
@@ -1003,7 +1002,7 @@ export function ClipEditor(props: Props) {
     const i = layers.findIndex((l) => l.id === id);
     const l = layers[i];
     if (!l) return;
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A clip can have at most ${MAX_CLIP_LAYERS} layers`);
     const copy: ClipLayer = l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
     setLayers([...layers.slice(0, i + 1), copy, ...layers.slice(i + 1)]);
     setSelectedLayer(copy.id);
@@ -1366,7 +1365,7 @@ export function ClipEditor(props: Props) {
           <button
             className="rounded-[8px] bg-acc px-2.5 py-1 font-semibold text-acc-ink"
             onClick={() => {
-              if (txSel.end - txSel.start < 3) return toast("Clips need at least 3s");
+              if (txSel.end - txSel.start < 3) return void toast("Clips need at least 3s");
               window.getSelection()?.removeAllRanges();
               setRange([txSel.start - 0.1, txSel.end + 0.2]);
               seek(txSel.start);

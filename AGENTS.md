@@ -24,6 +24,7 @@ Everyday commands:
 ```bash
 pnpm --filter @reelsaw/web build                      # web bundle (served by the app)
 (cd apps/server && npx tsc --noEmit -p .)             # typecheck server
+pnpm lint                                             # Biome lint (biome.json); pnpm lint:fix for the safe fixes
 (cd apps/web && npx tsc --noEmit -p .)                # typecheck web
 docker compose --profile local-ai up -d --build app   # deploy locally (http://localhost:3100)
 docker builder prune -f --keep-storage 3GB; docker image prune -f   # keep Docker's disk in check

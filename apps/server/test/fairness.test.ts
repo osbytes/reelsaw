@@ -10,7 +10,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import type pg from "pg";
 import { asUserRequest, createUnitOfWork } from "../src/uow.js";
 import { createQueue, type QueueName } from "../src/queue/boss.js";
 import { QuotaError } from "../src/quota.js";

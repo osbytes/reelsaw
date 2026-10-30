@@ -21,8 +21,8 @@ export type QuotaAction =
 export interface QuotaRefusal {
   key: string;
   /** Upgrade when a next plan exists; request more capacity on the top plan; free space for storage. */
-  primary?: QuotaAction;
-  secondary?: QuotaAction;
+  primary?: QuotaAction | undefined;
+  secondary?: QuotaAction | undefined;
 }
 
 export function formatBytes(n: number): string {

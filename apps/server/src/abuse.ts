@@ -108,7 +108,7 @@ export async function signupGuard(db: Db, s: Pick<RuntimeSettings, "MAX_SIGNUPS_
     throw new SignupRefused(ACCOUNT_EXISTS_MESSAGE);
   }
   if (s.MAX_SIGNUPS_PER_IP_PER_DAY > 0 && input.ip) {
-    const [{ n }] = await db
+    const [{ n } = { n: 0 }] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.user)
       .where(and(eq(schema.user.signupIp, input.ip), gte(schema.user.createdAt, new Date(Date.now() - 86_400_000))));

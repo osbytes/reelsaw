@@ -41,7 +41,7 @@ export interface ActiveJob {
   state: string;
   projectId: string | null;
   clipId: string | null;
-  title?: string;
+  title?: string | undefined;
   attempt: number;
   startedAt: string | null;
   createdAt: string;

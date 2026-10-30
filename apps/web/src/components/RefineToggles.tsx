@@ -62,9 +62,9 @@ export function RefineDefaultsFields({
   onChange,
   builtIn,
 }: {
-  value: Partial<Record<RefineKey, boolean>>;
+  value: { [K in RefineKey]?: boolean | undefined };
   onChange: (key: RefineKey, v: boolean | undefined) => void;
-  builtIn?: Partial<Record<RefineKey, boolean>>;
+  builtIn?: Partial<Record<RefineKey, boolean>> | undefined;
 }) {
   const me = useMe();
   const gates = me.data?.refineGates;

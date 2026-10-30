@@ -226,7 +226,7 @@ async function creatorFixtures(ctx: EvalContext) {
   const root = ctx.fixtures("selection");
   const only = ctx.opt("split");
   if (only && only !== "dev" && only !== "heldout") throw new Error(`--split must be dev or heldout, got ${only}`);
-  const out: Array<{ name: string; dir: string; p: CreatorPicks; t: TranscriptFixture & { windows: Array<[number, number]> }; recorded?: CandidatesFile }> = [];
+  const out: Array<{ name: string; dir: string; p: CreatorPicks; t: TranscriptFixture & { windows: Array<[number, number]> }; recorded?: CandidatesFile | undefined }> = [];
   for (const name of (await fs.readdir(root)).sort()) {
     const dir = path.join(root, name);
     if (!existsSync(path.join(dir, "picks.json"))) continue;

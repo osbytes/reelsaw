@@ -56,10 +56,10 @@ interface Item {
   label: ReactNode;
   hint?: ReactNode;
   icon?: ReactNode;
-  thumb?: string | null;
+  thumb?: string | null | undefined;
   /** a 9:16 thumbnail (library items) rather than a 16:9 one */
   tall?: boolean;
-  danger?: boolean;
+  danger?: boolean | undefined;
   /** → / Tab / the ⋯ button open this item's action list */
   actions?: Target;
   run: () => void;

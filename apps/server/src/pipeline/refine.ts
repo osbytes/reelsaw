@@ -7,7 +7,7 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { DISFLUENCY_PROMPT_VERSION, detectDisfluencies, type DisfluencyCheckpoint, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";
@@ -114,7 +114,7 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
+  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile | undefined; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
   /** the step job's projects.stage_seq: a superseded step merges nothing and hands nothing to analyze */
   seq?: number,
 ) {

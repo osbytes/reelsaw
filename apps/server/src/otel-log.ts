@@ -4,7 +4,7 @@
  * The line is already pino's redacted JSON. Strings are then passed through the same value
  * scrubber issue reports use. Importing this module does not load pino.
  */
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+import { logs, type SeverityNumber } from "@opentelemetry/api-logs";
 import { otelLogFromLine } from "./otel-config.js";
 import { scrubOutboundText } from "./report/redact.js";
 

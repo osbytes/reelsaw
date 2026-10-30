@@ -72,12 +72,12 @@ interface CutPlan {
   refused?: string;
 }
 interface PlanState {
-  plan?: CutPlan;
-  loading?: "plan" | "exact";
-  error?: string;
+  plan?: CutPlan | undefined;
+  loading?: "plan" | "exact" | undefined;
+  error?: string | undefined;
 }
 
-type Decision = { status: "accepted" | "rejected"; replacement?: string };
+type Decision = { status: "accepted" | "rejected"; replacement?: string | undefined };
 const EPS = 0.02;
 
 /**
@@ -981,10 +981,10 @@ function FlagWord({
   onDelete?: () => void;
   deleting?: boolean;
   onCopyLink?: () => void;
-  loop?: { on: boolean; paused: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState; loadPlan: () => void; findExact: () => void } };
+  loop?: { on: boolean; paused: boolean; sec: number; toggle: () => void; setSec: (n: number) => void; ab?: { variant: Variant; setVariant: (v: Variant) => void; plan?: PlanState | undefined; loadPlan: () => void; findExact: () => void } | undefined } | undefined;
   word: Word;
   flag: TranscriptFlag;
-  decision?: Decision;
+  decision?: Decision | undefined;
   /** what the last render did with this cut (disfluencies only) */
   rendered?: CutState | null;
   open: boolean;
@@ -1343,7 +1343,7 @@ function Refusal({ reason }: { reason: string }) {
 }
 
 /** The one label of a clip's bracket: hover for a summary card, click to focus the clip. */
-function ClipMarker({ clip, projectId, active, onFocus, onPlay }: { clip: TranscriptClip; projectId: string; active: boolean; onFocus?: (id: string) => void; onPlay?: (id: string) => void }) {
+function ClipMarker({ clip, projectId, active, onFocus, onPlay }: { clip: TranscriptClip; projectId: string; active: boolean; onFocus?: ((id: string) => void) | undefined; onPlay?: ((id: string) => void) | undefined }) {
   const [open, setOpen] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   const show = () => {

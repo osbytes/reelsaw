@@ -89,7 +89,7 @@ export function ProjectPage() {
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
-  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string; detail?: StageDetail } | null>(null);
+  const [progress, setProgress] = useState<{ stage: string; value: number; message?: string | undefined; detail?: StageDetail | undefined } | null>(null);
   const [clipProgress, setClipProgress] = useState<Record<string, number>>({});
   const [activeClip, setActiveClip] = useState<string | null>(null);
   const [srcTime, setSrcTime] = useState(0);
@@ -302,7 +302,7 @@ export function ProjectPage() {
       .writeText(linkWith(params))
       .then(() => toast("Link copied"))
       .catch(() => toast.error("Couldn’t copy the link"));
-  
+
   // Space plays / pauses the source video anywhere on the page except while typing
   useShortcut(
     "space",

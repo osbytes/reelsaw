@@ -18,7 +18,7 @@ export interface LayerBlock {
   end: number;
   name: string;
   kind: "video" | "image" | "text" | "audio";
-  thumbnailUrl?: string;
+  thumbnailUrl?: string | undefined;
 }
 /** what the lane's + adds: one layer of a kind, or a whole template of them */
 export type LayerAddKind = "asset" | "text" | "audio" | "template";
@@ -768,9 +768,9 @@ const item = "menu-item";
 function TimelineMenu(p: {
   at: { t: number; lane: string; section: number; layer: string | null } | null;
   layer: LayerBlock | null;
-  onLayerAdd?: (t: number, kind: LayerAddKind) => void;
-  onLayerTemplate?: () => void;
-  onLayerRemove?: (id: string) => void;
+  onLayerAdd?: ((t: number, kind: LayerAddKind) => void) | undefined;
+  onLayerTemplate?: (() => void) | undefined;
+  onLayerRemove?: ((id: string) => void) | undefined;
   sections: EditorSection[];
   detected: DetectedSegment[];
   range: [number, number];
@@ -780,8 +780,8 @@ function TimelineMenu(p: {
   onSetMode: (i: number, m: SectionMode) => void;
   onMerge: (i: number, side: "left" | "right") => void;
   onResetLayout: () => void;
-  onResetOffset?: (i: number) => void;
-  onSetCrop?: (i: number) => void;
+  onResetOffset?: ((i: number) => void) | undefined;
+  onSetCrop?: ((i: number) => void) | undefined;
   onSetIn: (t: number) => void;
   onSetOut: (t: number) => void;
   onSeek: (t: number) => void;

@@ -115,7 +115,7 @@ function cliCommands(): Array<{ name: string; usage: string; description: string
   if (start < 0) throw new Error("cli.ts: the header comment has no 'Commands' section");
   const cmds: Array<{ name: string; usage: string; description: string }> = [];
   for (const l of lines.slice(start + 1)) {
-    const first = /^ \*   (\S.*)$/.exec(l);
+    const first = /^ \* {3}(\S.*)$/.exec(l);
     const more = /^ \*\s{4,}(\S.*)$/.exec(l);
     if (first) {
       // the description is separated from the arguments by a wide gap; arguments may be aligned with 2+ spaces

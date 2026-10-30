@@ -32,7 +32,7 @@ export interface ExportInput {
   clips: Clip[];
   language: string | null;
   /** set when the zip holds only the clips the user picked, not every rendered clip */
-  subset?: { requested: number; total: number };
+  subset?: { requested: number; total: number } | undefined;
 }
 
 export interface ClipExport {
@@ -124,7 +124,7 @@ export function youtubeVideoId(url: string | null | undefined): string | null {
     if (host === "youtube.com" || host === "music.youtube.com") {
       if (u.pathname === "/watch") return u.searchParams.get("v");
       const m = /^\/(?:shorts|live|embed|v)\/([\w-]{6,})/.exec(u.pathname);
-      if (m) return m[1];
+      if (m) return m[1] ?? null;
     }
   } catch {
     /* not a url */

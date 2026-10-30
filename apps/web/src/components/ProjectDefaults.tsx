@@ -187,7 +187,7 @@ export function ProjectDefaultsSection() {
 }
 
 /** Settings keeps only a summary; the library itself lives on /library. */
-function BumperDefaultsRow({ introId, outroId }: { introId?: string; outroId?: string }) {
+function BumperDefaultsRow({ introId, outroId }: { introId?: string | undefined; outroId?: string | undefined }) {
   const lib = useBumperLibrary();
   const name = (id?: string): ReactNode =>
     id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "deleted")) : "none";

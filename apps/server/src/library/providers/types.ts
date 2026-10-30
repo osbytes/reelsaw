@@ -6,7 +6,7 @@ import type { ProviderHttp } from "./http.js";
 export interface ItemLicense {
   id: string;
   name: string;
-  url?: string;
+  url?: string | undefined;
 }
 
 /** One search hit, as the Browse panel, the MCP tool and the CLI show it. */
@@ -14,30 +14,30 @@ export interface ProviderItem {
   provider: string;
   externalId: string;
   kind: AssetKind;
-  mime?: string;
+  mime?: string | undefined;
   name: string;
   /** an image, or a playable video / audio file, for the panel to show; never imported from */
   previewUrl: string;
-  thumbUrl?: string;
-  durationSec?: number;
-  width?: number;
-  height?: number;
+  thumbUrl?: string | undefined;
+  durationSec?: number | undefined;
+  width?: number | undefined;
+  height?: number | undefined;
   license: ItemLicense;
-  attribution?: string;
+  attribution?: string | undefined;
   /** the item's page at the source */
-  url?: string;
+  url?: string | undefined;
 }
 
 export interface SearchOptions {
-  kind?: AssetKind;
-  cursor?: string;
+  kind?: AssetKind | undefined;
+  cursor?: string | undefined;
   limit: number;
   /** Freesound: cc0 (default) or by (CC0 and CC-BY) */
-  license?: "cc0" | "by";
+  license?: "cc0" | "by" | undefined;
 }
 export interface SearchResult {
   items: ProviderItem[];
-  nextCursor?: string;
+  nextCursor?: string | undefined;
 }
 
 /** What an import needs: the file to download and the row to create from it. */
@@ -65,7 +65,7 @@ export interface Provider {
   /** shown as such in the panel */
   experimental?: boolean;
   search(q: string, opts: SearchOptions): Promise<SearchResult>;
-  resolve(externalId: string, opts?: { color?: string }): Promise<Resolved>;
+  resolve(externalId: string, opts?: { color?: string | undefined }): Promise<Resolved>;
 }
 
 export interface ProviderDeps {

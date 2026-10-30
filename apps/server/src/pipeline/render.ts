@@ -7,7 +7,7 @@ import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
-import { StageContext } from "./common.js";
+import type { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";
@@ -50,7 +50,7 @@ export const FIT_CHAIN = (w: number, h: number) =>
 /** Extra framing inputs: face size per speaker and burned-in text bands to keep out of speaker crops. */
 export interface FrameGeometry {
   size?: number;
-  size2?: number;
+  size2?: number | undefined;
   avoid?: Array<{ y1: number; y2: number }>;
   /** "stack": the region of the frame shown on top (absent or the whole frame = the classic stack) */
   content?: ContentRegion;
@@ -779,7 +779,7 @@ interface LoadedBumper {
  * that snapshotted the id keep working); a missing, foreign or unreadable one is skipped with a
  * plain-language event so the clip renders without it instead of failing.
  */
-async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, secs: { intro?: number; outro?: number }, clipId: string, log: Logger) {
+async function loadBumpers(ctx: StageContext, userId: string, ids: { intro: string | null; outro: string | null }, secs: { intro?: number | undefined; outro?: number | undefined }, clipId: string, log: Logger) {
   const { svc, projectId, db } = ctx;
   const out: { intro?: LoadedBumper; outro?: LoadedBumper; skipped: string[] } = { skipped: [] };
   for (const slot of ["intro", "outro"] as const) {

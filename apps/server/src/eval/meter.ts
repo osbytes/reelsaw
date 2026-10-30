@@ -17,9 +17,9 @@ export interface MeteredCall {
   inputTokens?: number;
   outputTokens?: number;
   /** USD, when the provider reports it (AI Gateway does in providerMetadata.gateway.cost) */
-  costUsd?: number;
+  costUsd?: number | undefined;
   /** seconds of audio transcribed (stt) */
-  audioSec?: number;
+  audioSec?: number | undefined;
   /** output could not be parsed into the requested schema (counted by the caller) */
   error?: string;
 }

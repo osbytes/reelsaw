@@ -10,5 +10,5 @@ export function useMe(enabled = true) {
 /** Public instance facts: sign-up mode, version, whether heavy jobs are paused. */
 export function useSystemStatus(refetchInterval?: number) {
   const trpc = useTRPC();
-  return useQuery({ ...trpc.system.status.queryOptions(), staleTime: 10_000, refetchInterval });
+  return useQuery({ ...trpc.system.status.queryOptions(), staleTime: 10_000, ...(refetchInterval !== undefined ? { refetchInterval } : {}) });
 }

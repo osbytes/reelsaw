@@ -55,7 +55,7 @@ export interface ProviderSettings {
   state(): ProviderState[];
   refresh(): Promise<void>;
   /** Store a key and/or base URL (null clears that field; a row with nothing left is deleted). */
-  set(provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }, actor: { id: string; email: string }): Promise<void>;
+  set(provider: string, patch: { apiKey?: string | null | undefined; baseUrl?: string | null | undefined }, actor: { id: string; email: string }): Promise<void>;
   stop(): void;
 }
 

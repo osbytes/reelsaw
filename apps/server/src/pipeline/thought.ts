@@ -23,7 +23,7 @@ export interface ThoughtLimits {
   /** Pause that ends a sentence when nothing else does. */
   pauseSec?: number;
   /** Never move outside these times (a user's selection). */
-  bounds?: [number, number];
+  bounds?: [number, number] | undefined;
 }
 
 export type EndSignal = "punctuation" | "pause" | "capital" | "transcript-end";
@@ -51,7 +51,7 @@ export const isConnector = (text: string) => CONNECTOR_WORDS.has(norm(text));
 
 /** Starts with a capital letter, but "I", "I'm" are capitals everywhere. */
 function startsSentence(text: string) {
-  const t = text.replace(/^["'“‘(\[]+/, "");
+  const t = text.replace(/^["'“‘([]+/, "");
   return /^\p{Lu}/u.test(t) && !/^I(['’]|$)/.test(t);
 }
 

@@ -15,7 +15,7 @@ import { schema } from "../db/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { ProjectGoneError, StageTimeoutError, StaleJobError, type StageContext } from "./common.js";
 import { snapCandidate } from "./analyze.js";
-import { callSignal, isAbortError } from "./steps.js";
+import { abortOpt, callSignal, isAbortError } from "./steps.js";
 import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, extractJson, mapChunk, normalizeCandidate, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
 import type { Logger } from "../log.js";
 import { mapLimit } from "../lib/batch.js";
@@ -53,7 +53,7 @@ Write:
 
 Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":["..."]}`;
   try {
-    const { output } = await generateText({ model: o.model, prompt, abortSignal: callSignal(o.signal, o.timeoutMs), maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
+    const { output } = await generateText({ model: o.model, prompt, ...abortOpt(callSignal(o.signal, o.timeoutMs)), maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
     return output;
   } catch (err) {
     if (!NoObjectGeneratedError.isInstance(err)) throw err;

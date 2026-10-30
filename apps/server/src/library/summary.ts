@@ -24,9 +24,9 @@ export interface BumperCoverage {
   outro: SlotCoverage | null;
 }
 
-type ProjectIn = { settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null };
+type ProjectIn = { settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null };
 type ClipIn = {
-  bumpers?: { intro?: string | null; outro?: string | null } | null;
+  bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined } | null;
   /** layers (or the older overlays + audio) also hold library assets (see `assetRefs`) */
   layers?: unknown;
   overlays?: unknown;
@@ -65,7 +65,7 @@ export function bumperCoverage(project: ProjectIn, clips: ClipIn[]): BumperCover
  * once); a project with no clips counts when its settings name the asset. Pure: no database.
  */
 export function countBumperUsage(
-  projects: { settings?: { introAssetId?: string | null; outroAssetId?: string | null } | null; clips: ClipIn[] }[],
+  projects: { settings?: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null; clips: ClipIn[] }[],
 ): Map<string, { projects: number; clips: number }> {
   const out = new Map<string, { projects: number; clips: number }>();
   const bump = (id: string, key: "projects" | "clips") => {

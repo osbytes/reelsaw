@@ -309,7 +309,7 @@ function flatBand(L: Float32Array, w: number, h: number, t: { x1: number; y1: nu
 
 export interface ClipTile {
   tile: ContentRegion;
-  band?: BandSide;
+  band?: BandSide | undefined;
   /** share of face frames that showed the tile */
   share: number;
 }

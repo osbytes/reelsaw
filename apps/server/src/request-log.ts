@@ -87,7 +87,7 @@ export function trpcLogLevel(code: string): Level {
   }
 }
 
-export function logTrpcError(log: Logger, e: { path?: string; type?: string; code: string; requestId?: string; userId?: string; err: Error }) {
+export function logTrpcError(log: Logger, e: { path?: string | undefined; type?: string; code: string; requestId?: string | undefined; userId?: string | undefined; err: Error }) {
   const level = trpcLogLevel(e.code);
   const fields = { procedure: e.path, type: e.type, code: e.code, requestId: e.requestId, userId: e.userId, ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }) };
   log[level](fields, "trpc error");

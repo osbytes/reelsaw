@@ -209,16 +209,16 @@ function candidateAt(al: Alignment, videoId: string, first: number, span: number
   };
 }
 
-const inRange = (t: number, opts: { from?: number; to?: number }) => (opts.from === undefined || t >= opts.from) && (opts.to === undefined || t < opts.to);
+const inRange = (t: number, opts: { from?: number | undefined; to?: number | undefined }) => (opts.from === undefined || t >= opts.from) && (opts.to === undefined || t < opts.to);
 
 /** ASR words that the human track has no counterpart for, grouped into runs (pure insertions only: substitutions are mis-hearings, not disfluencies). */
-export function insertions(al: Alignment, videoId: string, opts: { window?: number; from?: number; to?: number } = {}): Candidate[] {
+export function insertions(al: Alignment, videoId: string, opts: { window?: number; from?: number | undefined; to?: number | undefined } = {}): Candidate[] {
   const win = opts.window ?? 30;
   const autoWordMatched = new Set<number>();
   for (const [, a] of al.pairs) autoWordMatched.add(al.autoTokens[a]!.word);
   const out: Candidate[] = [];
   for (let k = 0; k < al.pairs.length; k++) {
-    const prev = k === 0 ? [-1, -1] : al.pairs[k - 1]!;
+    const prev: [number, number] = k === 0 ? [-1, -1] : al.pairs[k - 1]!;
     const cur = al.pairs[k]!;
     if (cur[1] - prev[1] - 1 <= 0 || cur[0] - prev[0] - 1 > 0) continue; // nothing dropped, or a substitution
     // whole ASR words strictly inside the gap
@@ -240,7 +240,7 @@ export function insertions(al: Alignment, videoId: string, opts: { window?: numb
  * repeat such as "very, very", or a discourse marker such as "like" / "so"). These are `keep`
  * candidates; reading decides (a clean-verbatim editor sometimes keeps a filler).
  */
-export function kept(al: Alignment, videoId: string, opts: { window?: number; from?: number; to?: number } = {}): Candidate[] {
+export function kept(al: Alignment, videoId: string, opts: { window?: number; from?: number | undefined; to?: number | undefined } = {}): Candidate[] {
   const win = opts.window ?? 30;
   const manualOf = new Map<number, number>(); // auto word → manual token
   for (const [m, a] of al.pairs) if (!manualOf.has(al.autoTokens[a]!.word)) manualOf.set(al.autoTokens[a]!.word, m);

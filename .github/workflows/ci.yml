@@ -30,6 +30,8 @@ jobs:
           [ -n "$sh_yaml" ] && [ "$sh_yaml" = "$ps_yaml" ] || { echo "compose templates differ"; diff <(echo "$sh_yaml") <(echo "$ps_yaml"); exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      # Biome lint (biome.json); warnings show as annotations, errors fail the job
+      - run: pnpm exec biome ci
       # .env.example, docs/CONFIG.md and the CLI/suite tables are generated from the code (pnpm docs:gen)
       - run: pnpm docs:check
       - run: pnpm --filter @reelsaw/web build

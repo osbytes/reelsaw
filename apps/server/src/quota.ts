@@ -84,7 +84,7 @@ export async function watermarkFor(db: Db, instance: InstanceLimits, user: { id:
 }
 
 export class QuotaError extends TRPCError {
-  readonly quota?: QuotaRefusal;
+  readonly quota?: QuotaRefusal | undefined;
   constructor(message: string, quota?: QuotaRefusal) {
     super({ code: "TOO_MANY_REQUESTS", message });
     this.quota = quota;
@@ -173,12 +173,12 @@ export async function checkProjectQuota(db: Db, instance: InstanceLimits, userId
   if (l.MAX_STORAGE_MB > 0) checkStorage(d, await storedBytes(db, userId));
   if (l.MAX_PROJECTS_PER_USER > 0) {
     // a deleted project frees its slot at once (it is only kept for undo)
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
+    const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
     if (n >= l.MAX_PROJECTS_PER_USER) refuse(d, "MAX_PROJECTS_PER_USER", `You have ${n} projects, the most this account may keep (${l.MAX_PROJECTS_PER_USER}). Delete one to start another.`);
   }
   if (l.MAX_NEW_PROJECTS_PER_HOUR > 0) {
     const since = new Date(Date.now() - 3_600_000);
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.sourceUsage).where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, since)));
+    const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.sourceUsage).where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, since)));
     if (n >= l.MAX_NEW_PROJECTS_PER_HOUR) refuse(d, "MAX_NEW_PROJECTS_PER_HOUR", `${n} projects started in the last hour, the most allowed (${l.MAX_NEW_PROJECTS_PER_HOUR}). Try again in a while.`);
   }
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
@@ -202,7 +202,7 @@ export async function checkRestoreQuota(db: Db, instance: InstanceLimits, userId
   if (o.lock) await takeTxLock(db, txLock.quota(userId));
   const d = await limitsDetail(db, instance, userId, o.ent);
   if (d.limits.MAX_PROJECTS_PER_USER <= 0) return;
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
+  const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
   if (n >= d.limits.MAX_PROJECTS_PER_USER)
     refuse(d, "MAX_PROJECTS_PER_USER", `You have ${n} projects, the most this account may keep (${d.limits.MAX_PROJECTS_PER_USER}). Delete one to restore another.`);
 }
@@ -360,7 +360,7 @@ const minutesToday = (db: Db, userId: string, exceptProjectId?: string) => minut
 
 /** Minutes of source video the account added since `start` (by project creation time; a project counts once its length is known). Survives delete and purge. */
 export async function minutesSince(db: Db, userId: string, start: Date, exceptProjectId?: string) {
-  const [{ m }] = await db
+  const [{ m } = { m: 0 }] = await db
     .select({ m: sql<number>`coalesce(sum(${schema.sourceUsage.durationSec}), 0) / 60.0` })
     .from(schema.sourceUsage)
     .where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, start), exceptProjectId ? sql`${schema.sourceUsage.projectId} <> ${exceptProjectId}` : undefined));
@@ -369,8 +369,8 @@ export async function minutesSince(db: Db, userId: string, start: Date, exceptPr
 
 /** What each limit counts right now, for the admin Limits dialog and the Billing page: kept projects, minutes since 00:00 UTC and since the period started, projects in the last hour, jobs in flight, renders and re-runs asked for in the last hour, MB stored. */
 export async function limitUsage(db: Db, userId: string, grants: Grants | null = null): Promise<Record<LimitKey, number>> {
-  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
-  const [{ hour }] = await db
+  const [{ total } = { total: 0 }] = await db.select({ total: sql<number>`count(*)::int` }).from(schema.projects).where(and(eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
+  const [{ hour } = { hour: 0 }] = await db
     .select({ hour: sql<number>`count(*)::int` })
     .from(schema.sourceUsage)
     .where(and(eq(schema.sourceUsage.userId, userId), gte(schema.sourceUsage.createdAt, new Date(Date.now() - 3_600_000))));

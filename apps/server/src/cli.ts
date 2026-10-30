@@ -1261,7 +1261,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async "log-level"(svc) {
     const { parseLogLevels, formatLogLevels } = await import("./log.js");
     const env = parseLogLevels(process.env.LOG_LEVEL || "info");
-    const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number }) => {
+    const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number | undefined }) => {
       if (st.acks !== undefined) console.log(st.acks > 0 ? `applied by ${st.acks} process(es)` : "no running process answered within 2 s (they will pick it up within ~5 s, or none is running)");
       const effective = st.override ? mergeLogLevels(env, st.override.spec) : env;
       console.log(`effective   ${formatLogLevels(effective)}`);

@@ -28,7 +28,7 @@ export interface ProgressNotice {
   clipId?: string;
   stage: string;
   progress: number;
-  message?: string;
+  message?: string | undefined;
   /** checkpointed stages: units done of total, seconds left (projects.stage_detail) */
   detail?: { done: number; total: number; etaSec: number | null; unitMs: number | null };
 }
@@ -75,7 +75,7 @@ export interface EventBus {
    * The log without progress ticks (those are live-only), newest `limit` rows in ascending order.
    * `after` / `before` / `upTo` bound the id range; `hasMore` says older rows exist below the first one returned.
    */
-  history(projectId: string, opts: { limit: number; after?: number; before?: number; upTo?: number }): Promise<{ events: ProjectEvent[]; hasMore: boolean }>;
+  history(projectId: string, opts: { limit: number; after?: number | undefined; before?: number | undefined; upTo?: number }): Promise<{ events: ProjectEvent[]; hasMore: boolean }>;
   /** Highest event id of the project (0 if none) and how many non-progress events it has. */
   stats(projectId: string): Promise<{ headId: number; total: number }>;
   /** Live notices for one project. Ends when `signal` aborts. Requires start(). */

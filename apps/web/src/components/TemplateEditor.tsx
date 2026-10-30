@@ -593,7 +593,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     const i = layers.findIndex((l) => l.id === id);
     const l = layers[i];
     if (!l) return;
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
     const copy: TemplateLayer = l.kind === "audio" ? { ...l, id: newLayerId() } : { ...l, id: newLayerId(), x: Math.min(0.95, l.x + 0.04), y: Math.min(0.95, l.y + 0.04) };
     setLayers((list) => [...list.slice(0, i + 1), copy, ...list.slice(i + 1)]);
     setSelectedLayer(copy.id);
@@ -643,7 +643,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     return [start, r2(Math.min(len, start + dur))];
   };
   const pushLayer = (l: ClipLayer, note: string, timing?: LayerTiming) => {
-    if (layers.length >= MAX_CLIP_LAYERS) return toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
+    if (layers.length >= MAX_CLIP_LAYERS) return void toast(`A template can have at most ${MAX_CLIP_LAYERS} layers`);
     const base = templateFromLayers([l], { startSec: 0, endSec: len })[0]!;
     const tl: TemplateLayer = timing ? { ...base, timing } : base;
     setLayers((list) => [...list, tl]);
@@ -652,7 +652,7 @@ export function TemplateEditor({ template, onExit }: Props) {
     if (t < l.start || t > l.end) seek(l.start);
     toast(`${note} · ${timingText(tl.timing).toLowerCase()}`);
   };
-  type NewLayerAsset = Pick<LibraryAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null; hasAudio?: boolean };
+  type NewLayerAsset = Pick<LibraryAsset, "id" | "name" | "kind" | "durationSec"> & { mime?: string | null | undefined; hasAudio?: boolean | undefined };
   const addAssetLayer = (asset: NewLayerAsset, t: number) => {
     const d = assetLayerDefaultsFor(asset);
     const [start, end] = layerWindow(t, Math.min(d.windowSec, len - t));

@@ -48,18 +48,18 @@ export function asTrpc(err: unknown): never {
 }
 
 export interface SearchInput {
-  provider?: string;
+  provider?: string | undefined;
   q: string;
-  kind?: AssetKind;
-  cursor?: string;
+  kind?: AssetKind | undefined;
+  cursor?: string | undefined;
   limit?: number;
-  license?: "cc0" | "by";
+  license?: "cc0" | "by" | undefined;
 }
 /** `provider` omitted = the Reelsaw catalog. */
 export async function catalogSearch(svc: Services, input: SearchInput): Promise<CatalogSearchResult & { provider: string }> {
   const provider = input.provider ?? "reelsaw";
   try {
-    return { provider, ...(await libraryProviders(svc).registry.search(provider, input.q, { kind: input.kind, cursor: input.cursor, limit: input.limit, license: input.license })) };
+    return { provider, ...(await libraryProviders(svc).registry.search(provider, input.q, { kind: input.kind, cursor: input.cursor, ...(input.limit !== undefined ? { limit: input.limit } : {}), license: input.license })) };
   } catch (err) {
     return asTrpc(err);
   }
@@ -68,8 +68,8 @@ export async function catalogSearch(svc: Services, input: SearchInput): Promise<
 export interface ImportInput {
   provider: string;
   externalId: string;
-  color?: string;
-  tags?: string[];
+  color?: string | undefined;
+  tags?: string[] | undefined;
 }
 export interface ImportedAsset {
   id: string;
