@@ -87,7 +87,7 @@ describe("fair share between users", () => {
 
   it("serves a user with nothing in flight before another user's backlog", async () => {
     // the heavy user's five are their own requests (no limit yet); the light user's one is a pipeline hand-off
-    for (const p of projects.heavy!.slice(0, 5)) await asUserRequest(users[0]!, () => enqueue(0, p));
+    for (const p of projects.heavy!.slice(0, 5)) await asUserRequest(users[0]!, "web", () => enqueue(0, p));
     await enqueue(0, projects.light![0]!);
     const order = await jobs();
     assert.equal(order.length, 6);
@@ -110,7 +110,7 @@ describe("fair share between users", () => {
 
   it("refuses a user's own request past MAX_LIVE_JOBS_PER_USER with a sentence", async () => {
     await assert.rejects(
-      asUserRequest(users[0]!, () => enqueue(5, projects.heavy![5]!)),
+      asUserRequest(users[0]!, "web", () => enqueue(5, projects.heavy![5]!)),
       (err: unknown) =>
         err instanceof QuotaError && /You have 5 requests queued or running, the most this account may have at once \(5\)/.test((err as Error).message),
     );
@@ -120,7 +120,7 @@ describe("fair share between users", () => {
   it("never refuses a pipeline hand-off, and does not count hand-offs against the next request", async () => {
     await enqueue(5, projects.heavy![5]!); // no requesting user: a worker or the reconciler
     // the light user has one hand-off in flight and a limit of 1: their own request is still admitted (deduped by singletonKey)
-    await asUserRequest(users[1]!, () => enqueue(1, projects.light![0]!));
+    await asUserRequest(users[1]!, "web", () => enqueue(1, projects.light![0]!));
     const all = await jobs();
     assert.equal(all.length, 7);
     assert.equal(all.find((j) => j.project === projects.heavy![5])!.by, null, "a hand-off is not tagged as the user's request");
