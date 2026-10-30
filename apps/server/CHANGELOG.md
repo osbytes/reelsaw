@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.29.0
+
+### Minor Changes
+
+- [#208](https://github.com/osbytes/reelsaw/pull/208) [`35cf69d`](https://github.com/osbytes/reelsaw/commit/35cf69d9c2c70800c5c8508b1e092c406166a7b1) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Error reporting and product analytics see more and leak less. Every `error` or `fatal` log line that carries an error now goes to Sentry, tagged with the line's ids, so nothing needs a separate capture call: that adds 5xx responses from file routes, uploads and the MCP endpoint, unexpected MCP tool errors, jobs the reconciler gave up on, failed emails and failed billing syncs. A job attempt that will be retried, and connection errors that recover on their own, are now warnings. The worker heartbeat, the reconciler and the daily billing reconcile check in as Sentry cron monitors. The browser no longer reports the 4xx refusals it already shows, keeps no IP address, and can keep a fully masked replay before an error (`SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE`, off by default). Release images upload source maps to Sentry when the release workflow has a token, and still ship none. PostHog events no longer carry a project's title or an error message. New events: `project.cancelled`, clip done and failed, requested jobs, quota refusals, clip downloads and exports, MCP tool calls, approvals and email verification, each tagged with its surface (web, api, mcp, cli). Traces drop the per-click browser spans and parentless client spans, and server spans are named by route.
+
 ## 0.28.2
 
 ### Patch Changes
