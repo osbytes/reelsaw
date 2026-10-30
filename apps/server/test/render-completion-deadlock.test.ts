@@ -8,7 +8,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import type pg from "pg";
 import { and, eq } from "drizzle-orm";
 import { createUnitOfWork, isRetryableTxError } from "../src/uow.js";
 import { finalizeProjectIfDone, lockProjectClips, startRun } from "../src/pipeline/lifecycle.js";

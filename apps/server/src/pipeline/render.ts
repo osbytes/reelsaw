@@ -7,7 +7,7 @@ import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
-import { StageContext } from "./common.js";
+import type { StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";

@@ -6,11 +6,14 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 
 - Read [docs/PRINCIPLES.md](docs/PRINCIPLES.md): the consistency, concurrency and UI rules every
   change follows. Agent instructions live in `AGENTS.md` (the only agent file; see the process principles).
-- Everyday commands (typecheck, build, deploy, evals, tests) are listed in `AGENTS.md`.
+- Everyday commands (typecheck, lint, build, deploy, evals, tests) are listed in `AGENTS.md`.
+- Files are UTF-8 with LF line endings (`.gitattributes` normalises them on commit, `.editorconfig`
+  tells your editor). Lint is Biome (`biome.json`, `pnpm lint`): errors fail CI, warnings are known
+  debt to fix as you touch the code. Formatting is not enforced yet.
 - Found a vulnerability? Report it privately, see [SECURITY.md](SECURITY.md); not in an issue.
 - `pnpm install` sets up the Git hooks in `lefthook.yml` (via `scripts/hook.mjs`, so they run on
-  Windows Git as well as macOS and Linux): a gitleaks scan of staged changes before each commit,
-  the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push.
+  Windows Git as well as macOS and Linux): a gitleaks scan and a Biome lint of staged changes before
+  each commit, the DCO sign-off below, and a zizmor lint of the workflows and `dependabot.yml` before a push.
   The scans need `gitleaks` and `zizmor` on your PATH and are skipped with a note without them. CI
   runs the same checks (`security` workflow) either way.
 - Pipeline behaviour (selection, cuts, framing, transcription) changes only with an eval run

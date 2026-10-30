@@ -302,7 +302,7 @@ export function ProjectPage() {
       .writeText(linkWith(params))
       .then(() => toast("Link copied"))
       .catch(() => toast.error("Couldn’t copy the link"));
-  
+
   // Space plays / pauses the source video anywhere on the page except while typing
   useShortcut(
     "space",

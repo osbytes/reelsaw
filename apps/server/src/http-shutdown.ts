@@ -5,7 +5,7 @@
  * line (the browser's EventSource reconnects to the next instance), drops idle keep-alive sockets
  * and waits a bounded time for requests still running.
  */
-import { Server, ServerResponse } from "node:http";
+import { Server, type ServerResponse } from "node:http";
 
 export interface HttpCloser {
   /** Stop accepting, end open SSE responses, close idle sockets; resolves `true` once closed, `false` at the cap. */

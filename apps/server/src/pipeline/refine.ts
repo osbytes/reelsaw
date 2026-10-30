@@ -7,7 +7,7 @@ import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { QUEUES } from "../queue/boss.js";
-import { ProjectGoneError, StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
+import { ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, currentStage, lockCurrentStage, modelsUsed, stageElapsed } from "./common.js";
 import { correctTranscript, applyFlags } from "./entities.js";
 import { DISFLUENCY_PROMPT_VERSION, detectDisfluencies, type DisfluencyCheckpoint, type DisfluencyTraceEntry } from "./disfluency.js";
 import { toSentences } from "./transcript.js";

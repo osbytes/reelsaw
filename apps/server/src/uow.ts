@@ -10,7 +10,7 @@
  * row first (`for("update")`) inside the unit so concurrent writers serialize instead of losing
  * each other's changes.
  */
-import pg from "pg";
+import type pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
