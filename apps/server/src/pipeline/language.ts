@@ -13,7 +13,27 @@ const SUPPORTED: Record<LanguageStage, readonly string[]> = {
   ctcAlign: ["en"],
 };
 
-const NAMES: Record<string, string> = { english: "en", german: "de", french: "fr", spanish: "es", italian: "it", portuguese: "pt", dutch: "nl", russian: "ru", japanese: "ja", chinese: "zh", korean: "ko", arabic: "ar", hindi: "hi", turkish: "tr", polish: "pl", ukrainian: "uk", swedish: "sv", indonesian: "id", vietnamese: "vi" };
+const NAMES: Record<string, string> = {
+  english: "en",
+  german: "de",
+  french: "fr",
+  spanish: "es",
+  italian: "it",
+  portuguese: "pt",
+  dutch: "nl",
+  russian: "ru",
+  japanese: "ja",
+  chinese: "zh",
+  korean: "ko",
+  arabic: "ar",
+  hindi: "hi",
+  turkish: "tr",
+  polish: "pl",
+  ukrainian: "uk",
+  swedish: "sv",
+  indonesian: "id",
+  vietnamese: "vi",
+};
 
 /** "en", "en-US", "English" → "en"; empty/unknown → undefined. */
 export function languageCode(lang: string | null | undefined): string | undefined {

@@ -9,16 +9,7 @@ export const CHANGELOG_URL = `${SITE_URL}/releases`;
 
 // ---------- Project lifecycle ----------
 
-export const PROJECT_STATUSES = [
-  "queued",
-  "ingesting",
-  "transcribing",
-  "refining",
-  "analyzing",
-  "rendering",
-  "done",
-  "failed",
-] as const;
+export const PROJECT_STATUSES = ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering", "done", "failed"] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 /**
@@ -54,10 +45,16 @@ export type ClipStatus = (typeof CLIP_STATUSES)[number];
  * center – static center crop
  * none   – keep the original aspect ratio
  */
-export const reframeModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center", "none"]).describe("Framing: auto (detect per section), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)");
+export const reframeModeSchema = z
+  .enum(["auto", "face", "split", "stack", "fit", "center", "none"])
+  .describe(
+    "Framing: auto (detect per section), face (follow the speaker), split (two speakers stacked), stack (full frame over a face crop), fit (whole frame on blur), center (static crop), none (original aspect)",
+  );
 export type ReframeMode = z.infer<typeof reframeModeSchema>;
 
-export const captionStyleSchema = z.enum(["karaoke", "box", "plain", "none"]).describe("Caption look: karaoke (active word highlighted), box, plain, or none (no captions)");
+export const captionStyleSchema = z
+  .enum(["karaoke", "box", "plain", "none"])
+  .describe("Caption look: karaoke (active word highlighted), box, plain, or none (no captions)");
 /** Legacy coarse position; new projects store captionX/captionY instead. */
 export const captionPositionSchema = z.enum(["bottom", "middle", "top"]);
 export type CaptionPosition = z.infer<typeof captionPositionSchema>;
@@ -78,7 +75,10 @@ export const styleSchema = z.object({
   captionX: frac("Caption centre, horizontal").default(0.5),
   captionY: frac("Caption centre, vertical (default 0.72)").default(0.72),
   /** Split and stack sections: captions sit on the line between the two panes instead of on the lower speaker. */
-  captionSeam: z.boolean().describe("In split and stack sections, put captions on the line between the two panes instead of at captionY (default true)").default(true),
+  captionSeam: z
+    .boolean()
+    .describe("In split and stack sections, put captions on the line between the two panes instead of at captionY (default true)")
+    .default(true),
   /** Karaoke active-word colour. */
   highlightColor: hexColor.describe("Karaoke active-word colour, #RRGGBB (default #FFD700)").default("#FFD700"),
   /** Max words on screen at once (1 = one-word-at-a-time "Hormozi" style). */
@@ -114,7 +114,9 @@ export function resolveStyle(settings: Partial<ProjectSettings> & { captionPosit
 }
 
 /** Framing modes a user can pick for a section of a clip. "auto" = let face detection decide. */
-export const sectionModeSchema = z.enum(["auto", "face", "split", "stack", "fit", "center"]).describe("Framing for this section (same modes as the project's reframe, without none)");
+export const sectionModeSchema = z
+  .enum(["auto", "face", "split", "stack", "fit", "center"])
+  .describe("Framing for this section (same modes as the project's reframe, without none)");
 export type SectionMode = z.infer<typeof sectionModeSchema>;
 
 /** A part of the source frame as fractions of its width and height (`ContentRegion`): at least 5% wide and tall. */
@@ -130,17 +132,38 @@ export const contentRegionSchema = z
 /** The per-pane fields of a section (offsets, subjects and fixed crops) plus the stack's top crop: what the user adjusted on top of the mode. */
 const sectionAdjustShape = {
   /** A fixed crop for the first pane: exactly this part of the source, instead of following a face. Fitted at its own aspect over a blurred copy when its shape differs from the pane's. */
-  crop: contentRegionSchema.optional().describe("Show exactly this part of the source in the (top / only) pane, as fractions of the source size; replaces the automatic crop, the offset and the subject. A shape unlike the pane's is fitted over a blurred copy"),
+  crop: contentRegionSchema
+    .optional()
+    .describe(
+      "Show exactly this part of the source in the (top / only) pane, as fractions of the source size; replaces the automatic crop, the offset and the subject. A shape unlike the pane's is fitted over a blurred copy",
+    ),
   crop2: contentRegionSchema.optional().describe("Split only: a fixed crop for the bottom pane"),
-  contentCrop: contentRegionSchema.optional().describe("Stack only: the part of the frame shown on top instead of the whole frame or the detected content region"),
+  contentCrop: contentRegionSchema
+    .optional()
+    .describe("Stack only: the part of the frame shown on top instead of the whole frame or the detected content region"),
   /** Manual re-centring of the first pane (the only pane, or the top of a split): shifts the crop by this fraction of the source width, relative to the tracked face. */
-  offsetX: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop sideways by this fraction of the source width (-0.5 to 0.5), relative to the face it follows"),
-  offsetY: z.number().min(-0.5).max(0.5).optional().describe("Shift the (top) crop up or down by this fraction of the source height; only matters where the crop is shorter than the frame (split, stack)"),
+  offsetX: z
+    .number()
+    .min(-0.5)
+    .max(0.5)
+    .optional()
+    .describe("Shift the (top) crop sideways by this fraction of the source width (-0.5 to 0.5), relative to the face it follows"),
+  offsetY: z
+    .number()
+    .min(-0.5)
+    .max(0.5)
+    .optional()
+    .describe("Shift the (top) crop up or down by this fraction of the source height; only matters where the crop is shorter than the frame (split, stack)"),
   /** Second pane of a split (the bottom speaker). */
   offsetX2: z.number().min(-0.5).max(0.5).optional().describe("Split only: shift the bottom crop sideways (-0.5 to 0.5)"),
   offsetY2: z.number().min(-0.5).max(0.5).optional().describe("Split only: shift the bottom crop up or down (-0.5 to 0.5)"),
   /** Follow the person at this x instead of the detector's pick: the render re-assigns the pane's track to the face nearest it (no face there = a fixed crop at that x). */
-  subjectX: z.number().min(0).max(1).optional().describe("Follow the person at this x (0-1 of the source width) in the top/only pane; the offset still applies on top"),
+  subjectX: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe("Follow the person at this x (0-1 of the source width) in the top/only pane; the offset still applies on top"),
   subjectX2: z.number().min(0).max(1).optional().describe("Split only: follow the person at this x in the bottom pane"),
 };
 export const sectionAdjustSchema = z.object(sectionAdjustShape);
@@ -161,7 +184,9 @@ export interface PaneAdjust {
   crop?: ContentRegion | undefined;
 }
 export function paneOf(s: SectionAdjustFields, pane: 0 | 1): PaneAdjust {
-  return pane === 0 ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX, crop: s.crop } : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2, crop: s.crop2 };
+  return pane === 0
+    ? { offsetX: s.offsetX, offsetY: s.offsetY, subjectX: s.subjectX, crop: s.crop }
+    : { offsetX: s.offsetX2, offsetY: s.offsetY2, subjectX: s.subjectX2, crop: s.crop2 };
 }
 /** Write one pane's adjustment back onto a section (undefined fields are removed). */
 export function withPane<T extends SectionAdjustFields>(s: T, pane: 0 | 1, a: PaneAdjust): T {
@@ -209,7 +234,11 @@ export function adjustOf(s: SectionAdjustFields): SectionAdjustFields | undefine
  * choice, has no section mode and shows the whole frame) with the `reframeAdjust` nudge or crop on top, as one section
  * over `[start, end]`. Only `auto` with no adjustment is a plain automatic section.
  */
-export function projectDefaultSection(settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null | undefined }, start: number, end: number): LayoutSection {
+export function projectDefaultSection(
+  settings: { reframe?: ReframeMode; reframeAdjust?: SectionAdjustFields | null | undefined },
+  start: number,
+  end: number,
+): LayoutSection {
   const reframe = settings.reframe ?? "auto";
   const mode: SectionMode = reframe === "none" ? "fit" : reframe;
   return { start, end, mode, ...(settings.reframeAdjust ? adjustOf(settings.reframeAdjust) : {}) };
@@ -219,29 +248,30 @@ export function projectDefaultSection(settings: { reframe?: ReframeMode; reframe
  * An image or short video from the library laid over part of the clip (a logo, a sticker, b-roll).
  * Times are absolute source seconds like sections; position and size are fractions of the 9:16 output.
  */
-const clipOverlayBase = z
-  .object({
-    id: z.string().min(1).max(40).describe("Stable id for this overlay (any short string; keep it when editing)"),
-    /** absent = asset (rows stored before text overlays existed) */
-    kind: z.enum(["asset", "text"]).optional().describe("asset (default): a library image or video; text: a line of text"),
-    assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (search_assets with source library), an image or a video"),
-    text: z.string().trim().min(1).max(120).optional().describe("text: the line to show (1-120 chars)"),
-    start: z.number().min(0).describe("Shown from this second of the source video"),
-    end: z.number().min(0).describe("Hidden after this second of the source video"),
-    x: z.number().min(0).max(1).describe("Centre, fraction of the output width (0-1)"),
-    y: z.number().min(0).max(1).describe("Centre, fraction of the output height (0-1)"),
-    w: z.number().min(0.05).max(1).optional().describe("asset: width, fraction of the output width (0.05-1); the height follows the file. Default 0.3"),
-    size: z.number().min(0.02).max(0.12).optional().describe("text: font size as a fraction of the output height (0.02-0.12), default 0.045"),
-    color: z
-      .string()
-      .regex(/^#[0-9a-fA-F]{6}$/)
-      .optional()
-      .describe("text: colour as #RRGGBB, default white"),
-    box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
-    font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
-    opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
-  });
-export const clipOverlaySchema = clipOverlayBase.refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), { message: "an asset overlay needs assetId, a text overlay needs text" });
+const clipOverlayBase = z.object({
+  id: z.string().min(1).max(40).describe("Stable id for this overlay (any short string; keep it when editing)"),
+  /** absent = asset (rows stored before text overlays existed) */
+  kind: z.enum(["asset", "text"]).optional().describe("asset (default): a library image or video; text: a line of text"),
+  assetId: z.string().min(1).max(100).optional().describe("asset: library asset id (search_assets with source library), an image or a video"),
+  text: z.string().trim().min(1).max(120).optional().describe("text: the line to show (1-120 chars)"),
+  start: z.number().min(0).describe("Shown from this second of the source video"),
+  end: z.number().min(0).describe("Hidden after this second of the source video"),
+  x: z.number().min(0).max(1).describe("Centre, fraction of the output width (0-1)"),
+  y: z.number().min(0).max(1).describe("Centre, fraction of the output height (0-1)"),
+  w: z.number().min(0.05).max(1).optional().describe("asset: width, fraction of the output width (0.05-1); the height follows the file. Default 0.3"),
+  size: z.number().min(0.02).max(0.12).optional().describe("text: font size as a fraction of the output height (0.02-0.12), default 0.045"),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .describe("text: colour as #RRGGBB, default white"),
+  box: z.boolean().optional().describe("text: dark plate behind the text (default: outlined text, no plate)"),
+  font: z.string().min(1).max(60).optional().describe("text: font family from TEXT_FONTS (default DejaVu Sans, the caption font)"),
+  opacity: z.number().min(0.1).max(1).optional().describe("0.1-1, default 1"),
+});
+export const clipOverlaySchema = clipOverlayBase.refine((o) => (o.kind === "text" ? !!o.text : !!o.assetId), {
+  message: "an asset overlay needs assetId, a text overlay needs text",
+});
 export type ClipOverlay = z.infer<typeof clipOverlaySchema>;
 export const MAX_CLIP_OVERLAYS = 20;
 
@@ -251,7 +281,11 @@ export const MAX_CLIP_OVERLAYS = 20;
  */
 export const clipAudioSchema = z.object({
   id: z.string().min(1).max(40).describe("Stable id for this track (any short string; keep it when editing)"),
-  assetId: z.string().min(1).max(100).describe("Library audio asset id (search_assets with source library, kind audio); the same asset can be used more than once"),
+  assetId: z
+    .string()
+    .min(1)
+    .max(100)
+    .describe("Library audio asset id (search_assets with source library, kind audio); the same asset can be used more than once"),
   start: z.number().min(0).describe("Music starts at this second of the source video"),
   end: z.number().min(0).describe("Music stops after this second of the source video"),
   offset: z.number().min(0).optional().describe("Seconds into the track to start from (default 0)"),
@@ -283,13 +317,11 @@ export const SFX_AUDIO_DEFAULTS = { volume: 1, duck: false, fade: 0, loop: false
  * `loop` repeats a video or animated image inside its window (default: on for GIF / animated WebP,
  * off for videos; the renderer decides from the asset when it is left out).
  */
-export const assetLayerSchema = clipOverlayBase
-  .omit({ kind: true, text: true, size: true, color: true, box: true, font: true })
-  .extend({
-    kind: z.literal("asset"),
-    assetId: z.string().min(1).max(100).describe("Library asset id (search_assets with source library): an image, an animation or a video"),
-    loop: z.boolean().optional().describe("Repeat a video / animation while its window is open (default: on for GIF and animated WebP, off for videos)"),
-  });
+export const assetLayerSchema = clipOverlayBase.omit({ kind: true, text: true, size: true, color: true, box: true, font: true }).extend({
+  kind: z.literal("asset"),
+  assetId: z.string().min(1).max(100).describe("Library asset id (search_assets with source library): an image, an animation or a video"),
+  loop: z.boolean().optional().describe("Repeat a video / animation while its window is open (default: on for GIF and animated WebP, off for videos)"),
+});
 /** A line of text drawn with the caption font and plate. */
 export const textLayerSchema = clipOverlayBase
   .omit({ kind: true, assetId: true, w: true })
@@ -375,8 +407,16 @@ export const newLayerId = (): string => `ly-${Math.random().toString(36).slice(2
  */
 export const layerTimingSchema = z
   .discriminatedUnion("mode", [
-    z.object({ mode: z.literal("head"), start: z.number().min(0).describe("Seconds after the clip starts"), end: z.number().min(0).describe("Seconds after the clip starts (above start)") }),
-    z.object({ mode: z.literal("tail"), start: z.number().min(0).describe("Seconds before the clip ends (above end)"), end: z.number().min(0).describe("Seconds before the clip ends (0 = the very end)") }),
+    z.object({
+      mode: z.literal("head"),
+      start: z.number().min(0).describe("Seconds after the clip starts"),
+      end: z.number().min(0).describe("Seconds after the clip starts (above start)"),
+    }),
+    z.object({
+      mode: z.literal("tail"),
+      start: z.number().min(0).describe("Seconds before the clip ends (above end)"),
+      end: z.number().min(0).describe("Seconds before the clip ends (0 = the very end)"),
+    }),
     z.object({ mode: z.literal("fill") }),
     z.object({
       mode: z.literal("relative"),
@@ -386,10 +426,17 @@ export const layerTimingSchema = z
       maxSec: z.number().min(0).max(600).optional().describe("Never longer than this many seconds"),
     }),
   ])
-  .refine((t) => t.mode === "fill" || (t.mode === "tail" ? t.start > t.end : t.end > t.start), { message: "the window must have a length: head and relative need end above start, tail needs start above end" });
+  .refine((t) => t.mode === "fill" || (t.mode === "tail" ? t.start > t.end : t.end > t.start), {
+    message: "the window must have a length: head and relative need end above start, tail needs start above end",
+  });
 export type LayerTiming = z.infer<typeof layerTimingSchema>;
 export const LAYER_TIMING_MODES = ["head", "tail", "fill", "relative"] as const;
-export const LAYER_TIMING_LABEL: Record<LayerTiming["mode"], string> = { head: "From the start", tail: "Before the end", fill: "Whole clip", relative: "Proportional" };
+export const LAYER_TIMING_LABEL: Record<LayerTiming["mode"], string> = {
+  head: "From the start",
+  tail: "Before the end",
+  fill: "Whole clip",
+  relative: "Proportional",
+};
 
 const timingField = { timing: layerTimingSchema.describe("Where the layer sits on a clip of any length") };
 /** A clip layer without its absolute `start` / `end`, placed by `timing` instead. */
@@ -399,7 +446,10 @@ export const templateAudioLayerSchema = audioLayerSchema.omit({ start: true, end
 export const templateLayerSchema = z.discriminatedUnion("kind", [templateAssetLayerSchema, templateTextLayerSchema, templateAudioLayerSchema]);
 export type TemplateLayer = z.infer<typeof templateLayerSchema>;
 export const layerTemplateNameSchema = z.string().trim().min(1).max(120).describe("Template name (1-120 chars)");
-export const layerTemplateLayersSchema = z.array(templateLayerSchema).max(MAX_CLIP_LAYERS).describe(`The template's layers, each with a timing (max ${MAX_CLIP_LAYERS})`);
+export const layerTemplateLayersSchema = z
+  .array(templateLayerSchema)
+  .max(MAX_CLIP_LAYERS)
+  .describe(`The template's layers, each with a timing (max ${MAX_CLIP_LAYERS})`);
 /** Clip lengths the template editor previews at; the default is the middle of the usual short. */
 export const TEMPLATE_PREVIEW_SECONDS = [15, 30, 45, 60, 90] as const;
 export const DEFAULT_TEMPLATE_PREVIEW_SEC = 30;
@@ -450,7 +500,11 @@ export function templateWindow(timing: LayerTiming, len: number, kind: ClipLayer
  * The template materialised on one clip: every layer that fits gets a fresh id and absolute source seconds; the
  * rest are left out (returned in `skipped` with their template ids). Position, size and sound settings are copied.
  */
-export function resolveTemplateLayers(layers: TemplateLayer[], clip: { startSec: number; endSec: number }, idOf: (l: TemplateLayer) => string = () => newLayerId()): { layers: ClipLayer[]; skipped: string[] } {
+export function resolveTemplateLayers(
+  layers: TemplateLayer[],
+  clip: { startSec: number; endSec: number },
+  idOf: (l: TemplateLayer) => string = () => newLayerId(),
+): { layers: ClipLayer[]; skipped: string[] } {
   const len = clip.endSec - clip.startSec;
   const out: ClipLayer[] = [];
   const skipped: string[] = [];
@@ -480,7 +534,12 @@ export function templateFromLayers(layers: ClipLayer[], clip: { startSec: number
     const b = Math.min(len, end - clip.startSec);
     const atStart = a <= eps;
     const atEnd = len - b <= eps;
-    const timing: LayerTiming = atStart && atEnd ? { mode: "fill" } : atStart || (!atEnd && (a + b) / 2 < len / 2) ? { mode: "head", start: r2(a), end: r2(b) } : { mode: "tail", start: r2(len - a), end: r2(len - b) };
+    const timing: LayerTiming =
+      atStart && atEnd
+        ? { mode: "fill" }
+        : atStart || (!atEnd && (a + b) / 2 < len / 2)
+          ? { mode: "head", start: r2(a), end: r2(b) }
+          : { mode: "tail", start: r2(len - a), end: r2(len - b) };
     return { ...rest, timing };
   });
 }
@@ -496,7 +555,9 @@ export function timingText(t: LayerTiming): string {
     case "tail":
       return t.end === 0 ? `Last ${s(t.start)} s` : `${s(t.start)}–${s(t.end)} s before the end`;
     case "relative": {
-      const hold = [t.minSec !== undefined ? `at least ${s(t.minSec)} s` : "", t.maxSec !== undefined ? `at most ${s(t.maxSec)} s` : ""].filter(Boolean).join(", ");
+      const hold = [t.minSec !== undefined ? `at least ${s(t.minSec)} s` : "", t.maxSec !== undefined ? `at most ${s(t.maxSec)} s` : ""]
+        .filter(Boolean)
+        .join(", ");
       return `${Math.round(t.start * 100)}–${Math.round(t.end * 100)}% of the clip${hold ? ` (${hold})` : ""}`;
     }
   }
@@ -577,7 +638,12 @@ export const TEXT_OVERLAY_DEFAULTS = { size: 0.045, color: "#FFFFFF" } as const;
 export const ASSET_OVERLAY_DEFAULT_W = 0.3;
 
 /** Placement and loop when an asset is dropped on a clip. Stickers sit small near the top and repeat; b-roll fills the frame and plays once. */
-export function assetLayerDefaultsFor(a: { kind: string; mime?: string | null | undefined; hasAudio?: boolean | undefined; durationSec?: number | null | undefined }) {
+export function assetLayerDefaultsFor(a: {
+  kind: string;
+  mime?: string | null | undefined;
+  hasAudio?: boolean | undefined;
+  durationSec?: number | null | undefined;
+}) {
   const sticker = isStickerAsset(a);
   const animated = a.kind === "video" || a.mime === "image/gif" || a.mime === "image/webp";
   return {
@@ -633,7 +699,12 @@ export const bumperSecondsSchema = z.number().min(1).max(10).describe("Seconds a
 /** How long an image intro/outro is shown unless its card or a use says otherwise. */
 export const DEFAULT_IMAGE_BUMPER_SEC = 3;
 /** `introSec` / `outroSec` override how long an image shown in that slot lasts (videos keep their own length). */
-export const clipBumpersSchema = z.object({ intro: z.string().min(1).max(100).nullable().optional(), introSec: bumperSecondsSchema.optional(), outro: z.string().min(1).max(100).nullable().optional(), outroSec: bumperSecondsSchema.optional() });
+export const clipBumpersSchema = z.object({
+  intro: z.string().min(1).max(100).nullable().optional(),
+  introSec: bumperSecondsSchema.optional(),
+  outro: z.string().min(1).max(100).nullable().optional(),
+  outroSec: bumperSecondsSchema.optional(),
+});
 export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
 
 /**
@@ -642,7 +713,13 @@ export type ClipBumpers = z.infer<typeof clipBumpersSchema>;
  * asset id. Applying the template writes these slots onto `clips.bumpers`, like it writes layers.
  */
 const templateSlotSchema = (slot: "intro" | "outro") =>
-  z.string().min(1).max(100).nullable().optional().describe(`Library video or image id (list_bumpers) for the ${slot}; null = no ${slot}; left out = clips keep their own`);
+  z
+    .string()
+    .min(1)
+    .max(100)
+    .nullable()
+    .optional()
+    .describe(`Library video or image id (list_bumpers) for the ${slot}; null = no ${slot}; left out = clips keep their own`);
 export const templateBumpersSchema = z
   .object({
     intro: templateSlotSchema("intro"),
@@ -665,7 +742,11 @@ export function templateBumperSlots(t: TemplateBumpers | null | undefined): Arra
  * has not chosen itself (a clip created while the user already picked one). Null when nothing is left (follow the
  * project for both).
  */
-export function mergeTemplateBumpers(own: ClipBumpers | null | undefined, t: TemplateBumpers | null | undefined, opts: { onlyUnset?: boolean } = {}): ClipBumpers | null {
+export function mergeTemplateBumpers(
+  own: ClipBumpers | null | undefined,
+  t: TemplateBumpers | null | undefined,
+  opts: { onlyUnset?: boolean } = {},
+): ClipBumpers | null {
   const next: ClipBumpers = { ...(own ?? {}) };
   for (const s of templateBumperSlots(t)) {
     if (opts.onlyUnset && own?.[s] !== undefined) continue;
@@ -717,7 +798,8 @@ export interface ClipScores {
 }
 export const RUBRIC_WEIGHTS = { hook: 0.35, flow: 0.2, value: 0.3, shareability: 0.15 } as const;
 export function rubricTotal(s: Pick<ClipScores, "hook" | "flow" | "value" | "shareability" | "relevance">): number {
-  const base = 10 * (RUBRIC_WEIGHTS.hook * s.hook + RUBRIC_WEIGHTS.flow * s.flow + RUBRIC_WEIGHTS.value * s.value + RUBRIC_WEIGHTS.shareability * s.shareability);
+  const base =
+    10 * (RUBRIC_WEIGHTS.hook * s.hook + RUBRIC_WEIGHTS.flow * s.flow + RUBRIC_WEIGHTS.value * s.value + RUBRIC_WEIGHTS.shareability * s.shareability);
   const rel = s.relevance === undefined ? 1 : 0.5 + s.relevance / 20;
   return Math.round(Math.max(0, Math.min(100, base * rel)));
 }
@@ -734,7 +816,10 @@ export const projectSettingsSchema = styleSchema.extend({
    * Text already in the video: hide = blur detected captions/logos, except in presentations (slide
    * decks, screen shares) where on-screen text is the content; always = blur even then; keep = never.
    */
-  sourceText: z.enum(["hide", "keep", "always"]).describe("Text already in the video: hide (blur captions/logos except in slide decks, default), always (blur even then), keep").default("hide"),
+  sourceText: z
+    .enum(["hide", "keep", "always"])
+    .describe("Text already in the video: hide (blur captions/logos except in slide decks, default), always (blur even then), keep")
+    .default("hide"),
   /** Framing default for every clip. "auto" detects per section; per-section overrides live on the clip. */
   reframe: reframeModeSchema.default("auto"),
   /**
@@ -742,7 +827,12 @@ export const projectSettingsSchema = styleSchema.extend({
    * (`apply_framing` sets both from one clip, for a recording whose layout never changes, such as a slide deck with a
    * webcam tile). A clip's own sections replace it for their time range.
    */
-  reframeAdjust: sectionAdjustSchema.nullable().optional().describe("Applied with reframe to clips without their own sections: offsetX/Y, offsetX2/Y2, subjectX/X2, crop, crop2, contentCrop as on a clip's section; null = none. apply_framing sets it from one clip"),
+  reframeAdjust: sectionAdjustSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Applied with reframe to clips without their own sections: offsetX/Y, offsetX2/Y2, subjectX/X2, crop, crop2, contentCrop as on a clip's section; null = none. apply_framing sets it from one clip",
+    ),
   /** @deprecated use captionY */
   captionPosition: captionPositionSchema.optional().describe("Deprecated: use captionY"),
   language: z.string().max(10).optional().describe("Spoken language code (e.g. en); unset = detected"),
@@ -759,8 +849,16 @@ export const projectSettingsSchema = styleSchema.extend({
   refineEntities: z.boolean().describe("Fix misheard names after transcription (LLM). On by default; off skips that refine step.").default(true),
   refineDisfluency: z.boolean().describe("Find fillers, repetitions and false starts. Off by default; on runs that refine step.").default(false),
   /** Only used when refineDisfluency is on; rules still run when this is off. */
-  disfluencyLlm: z.boolean().describe("Model pass on top of rule-based disfluency detection. Off by default (rules only when disfluency is on).").default(false),
-  refineScenes: z.boolean().describe("Scan the video for on-screen text (burned-in captions, watermarks, slides). On by default; off skips that refine step. Shot cuts are always detected.").default(true),
+  disfluencyLlm: z
+    .boolean()
+    .describe("Model pass on top of rule-based disfluency detection. Off by default (rules only when disfluency is on).")
+    .default(false),
+  refineScenes: z
+    .boolean()
+    .describe(
+      "Scan the video for on-screen text (burned-in captions, watermarks, slides). On by default; off skips that refine step. Shot cuts are always detected.",
+    )
+    .default(true),
   /**
    * Intro / outro video (bumper_assets ids) attached to every clip. Snapshotted from the user's
    * defaults when the project is created. Unset = none; null is reserved for "none, although my
@@ -776,7 +874,12 @@ export const projectSettingsSchema = styleSchema.extend({
    * from the user's defaults when the project is created. Existing clips are untouched: apply_layer_template does those.
    * Unset or null = none.
    */
-  layerTemplateId: z.string().max(100).nullable().optional().describe("Layer template id (list_layer_templates) applied to each new clip of this project; null = none. Existing clips: apply_layer_template"),
+  layerTemplateId: z
+    .string()
+    .max(100)
+    .nullable()
+    .optional()
+    .describe("Layer template id (list_layer_templates) applied to each new clip of this project; null = none. Existing clips: apply_layer_template"),
 });
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export const defaultProjectSettings: ProjectSettings = projectSettingsSchema.parse({});
@@ -794,7 +897,12 @@ export function resolveFraming(
   const mode: ReframeMode = override.success ? override.data : settings.reframe;
   const sections = clip.layoutSections ?? [];
   const projectSets = settings.reframe !== "auto" || !!settings.reframeAdjust;
-  return { mode, adjust: override.success ? undefined : (settings.reframeAdjust ?? undefined), sections, from: override.success || sections.length ? "clip" : projectSets ? "project" : "default" };
+  return {
+    mode,
+    adjust: override.success ? undefined : (settings.reframeAdjust ?? undefined),
+    sections,
+    from: override.success || sections.length ? "clip" : projectSets ? "project" : "default",
+  };
 }
 
 /**
@@ -900,9 +1008,7 @@ export type TranscriptFlag = z.infer<typeof transcriptFlagSchema>;
 
 export const clipCandidateSchema = z.object({
   title: z.string().describe("Short, punchy title for the clip (max 80 chars)"),
-  hook: z
-    .string()
-    .describe("A 3-8 word on-screen hook line that makes someone stop scrolling"),
+  hook: z.string().describe("A 3-8 word on-screen hook line that makes someone stop scrolling"),
   startSec: z.number().describe("Clip start time in seconds, aligned to the start of a sentence"),
   endSec: z.number().describe("Clip end time in seconds, aligned to the end of a sentence"),
   score: z.number().min(0).max(100).describe("Virality score 0-100"),
@@ -982,9 +1088,7 @@ export function formatTime(sec: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const r = Math.floor(s % 60);
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`
-    : `${m}:${String(r).padStart(2, "0")}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
 }
 
 // ---------- captions (shared by the ASS renderer and the browser preview) ----------
@@ -1121,7 +1225,13 @@ export interface SourceOverlay {
  * cannot centre a face near the edge) and, when `avoid` bands are given, keeps burned-in captions out
  * of the crop. Returns source pixels; x is chosen per point by the caller (`cropX`).
  */
-export function speakerCrop(srcW: number, srcH: number, aspect: number, face: { cy: number; size: number }, avoid: Array<{ y1: number; y2: number }> = []): { w: number; h: number; y: number } {
+export function speakerCrop(
+  srcW: number,
+  srcH: number,
+  aspect: number,
+  face: { cy: number; size: number },
+  avoid: Array<{ y1: number; y2: number }> = [],
+): { w: number; h: number; y: number } {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   // ~3.2 face-heights tall: head and shoulders, the usual podcast-clip framing
   let h = clamp((face.size || 0.3) * 3.2, 0.42, 1) * srcH;
@@ -1324,7 +1434,9 @@ export const reportClientSchema = z
     userAgent: z.string().max(500),
     viewport: z.string().max(40),
     theme: z.string().max(20),
-    errors: z.array(z.object({ at: z.string().max(40), kind: z.string().max(40), message: z.string().max(4000), stack: z.string().max(8000).optional() })).max(100),
+    errors: z
+      .array(z.object({ at: z.string().max(40), kind: z.string().max(40), message: z.string().max(4000), stack: z.string().max(8000).optional() }))
+      .max(100),
   })
   .partial();
 
@@ -1346,12 +1458,79 @@ export type ReportRequest = z.infer<typeof reportRequestSchema>;
  * extension, never a wrong cut. Lower-case, apostrophes normalised to "'".
  */
 export const CONNECTOR_WORDS: ReadonlySet<string> = new Set([
-  "and", "but", "or", "so", "nor", "yet", "that", "which", "who", "whose", "where", "because", "if", "when", "while", "as", "than", "then", "although", "though", "unless", "until", "since",
-  "to", "of", "the", "a", "an", "with", "from", "by",
-  "my", "your", "our", "their", "his", "her", "its",
-  "is", "are", "was", "were", "be", "been", "am", "do", "does", "did", "not",
-  "i'm", "i've", "i'll", "i'd", "you're", "you've", "you'll", "you'd", "we're", "we've", "we'll", "they're", "they've", "they'll",
-  "he's", "she's", "it's", "that's", "there's", "what's", "let's", "don't", "can't", "won't",
+  "and",
+  "but",
+  "or",
+  "so",
+  "nor",
+  "yet",
+  "that",
+  "which",
+  "who",
+  "whose",
+  "where",
+  "because",
+  "if",
+  "when",
+  "while",
+  "as",
+  "than",
+  "then",
+  "although",
+  "though",
+  "unless",
+  "until",
+  "since",
+  "to",
+  "of",
+  "the",
+  "a",
+  "an",
+  "with",
+  "from",
+  "by",
+  "my",
+  "your",
+  "our",
+  "their",
+  "his",
+  "her",
+  "its",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "am",
+  "do",
+  "does",
+  "did",
+  "not",
+  "i'm",
+  "i've",
+  "i'll",
+  "i'd",
+  "you're",
+  "you've",
+  "you'll",
+  "you'd",
+  "we're",
+  "we've",
+  "we'll",
+  "they're",
+  "they've",
+  "they'll",
+  "he's",
+  "she's",
+  "it's",
+  "that's",
+  "there's",
+  "what's",
+  "let's",
+  "don't",
+  "can't",
+  "won't",
 ]);
 
 export * from "./tokens.js";

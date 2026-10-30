@@ -112,31 +112,62 @@ export function ClipCard({
       .catch(() => void toast.error("Couldn’t copy"));
   const meta = clipMeta(clip, { modeLabel: MODE_LABEL, projectHasIntro: !!projectIntroId, projectHasOutro: !!projectOutroId });
   const fail = clip.status === "failed" ? summarizeError(clip.error ?? "Render failed", { admin: isAdmin }) : null;
-  const detail: { text: string; cls: string; title?: string | undefined } | null =
-    fail
-      ? { text: fail.summary, cls: "bg-err-soft", title: isAdmin ? (clip.error ?? undefined) : undefined }
-      : clip.status === "pending"
-        ? { text: "Waiting for a render slot.", cls: "bg-warn-soft" }
-        : clip.status === "preparing"
-          ? { text: clip.origin === "manual-ai" ? "AI is finding the best moment in your selection." : "AI is writing the title, hook and caption.", cls: "bg-acc-soft" }
-          : null;
-  const statusLabel = clip.status === "rendering" ? `Rendering ${pct}%` : clip.status === "failed" ? "Render failed" : clip.status === "pending" ? "Queued" : undefined;
+  const detail: { text: string; cls: string; title?: string | undefined } | null = fail
+    ? { text: fail.summary, cls: "bg-err-soft", title: isAdmin ? (clip.error ?? undefined) : undefined }
+    : clip.status === "pending"
+      ? { text: "Waiting for a render slot.", cls: "bg-warn-soft" }
+      : clip.status === "preparing"
+        ? {
+            text: clip.origin === "manual-ai" ? "AI is finding the best moment in your selection." : "AI is writing the title, hook and caption.",
+            cls: "bg-acc-soft",
+          }
+        : null;
+  const statusLabel =
+    clip.status === "rendering" ? `Rendering ${pct}%` : clip.status === "failed" ? "Render failed" : clip.status === "pending" ? "Queued" : undefined;
   const statusKey = clip.status === "pending" ? "queued" : clip.status;
-  const ghost = "inline-flex h-8 w-[5.25rem] items-center justify-center rounded-[8px] text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
+  const ghost =
+    "inline-flex h-8 w-[5.25rem] items-center justify-center rounded-[8px] text-xs font-semibold no-underline disabled:cursor-not-allowed disabled:text-ink3 disabled:hover:bg-transparent";
 
   return (
-    <article data-clip={clip.id} className={`group relative scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}>
+    <article
+      data-clip={clip.id}
+      className={`group relative scroll-m-3 flex flex-col gap-2.5 rounded-[14px] border bg-panel p-3.5 ${clip.status === "failed" ? "border-err" : active || selected ? "border-acc" : "border-line"}`}
+    >
       <div className="flex gap-3">
         {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
         {onToggleSelect && (
-          <span className={`absolute left-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}>
-            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select clip ${clip.index + 1}`} className="h-4 w-4 accent-[var(--acc)]" />
+          <span
+            className={`absolute left-[18px] top-[18px] z-10 grid h-6 w-6 place-items-center rounded-[7px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting || selected ? "opacity-100" : "opacity-0"}`}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              aria-label={`Select clip ${clip.index + 1}`}
+              className="h-4 w-4 accent-[var(--acc)]"
+            />
           </span>
         )}
-        <button onClick={onPlay} disabled={!clip.videoUrl} aria-label="Play preview" className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default" style={{ aspectRatio: "9 / 16" }}>
+        <button
+          onClick={onPlay}
+          disabled={!clip.videoUrl}
+          aria-label="Play preview"
+          className="film relative w-[64px] shrink-0 overflow-hidden rounded-[8px] disabled:cursor-default"
+          style={{ aspectRatio: "9 / 16" }}
+        >
           {clip.thumbnailUrl && <img src={clip.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
           <span className="absolute inset-0 grid place-items-center font-mono text-[11px] text-white [text-shadow:0_1px_2px_rgba(0,0,0,.6)]">
-            {clip.status === "failed" ? "!" : clip.status === "preparing" ? <Loader2 className="h-4 w-4 animate-spin" /> : working ? `${pct}%` : clip.status === "pending" ? "◷" : <span className="grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-film-ink">▶</span>}
+            {clip.status === "failed" ? (
+              "!"
+            ) : clip.status === "preparing" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : working ? (
+              `${pct}%`
+            ) : clip.status === "pending" ? (
+              "◷"
+            ) : (
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-white/90 text-[9px] text-film-ink">▶</span>
+            )}
           </span>
           {clip.status === "rendering" && (
             <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
@@ -171,7 +202,11 @@ export function ClipCard({
             <span>{Math.round(clip.endSec - clip.startSec)}s</span>
             <StatusText status={statusKey as never} label={statusLabel} />
           </div>
-          {clip.origin && clip.origin !== "ai" && <span className="w-max rounded-full bg-sunk px-2 py-px text-[11px] font-semibold text-ink2">{clip.origin === "manual" ? "Your range" : "AI pick in your range"}</span>}
+          {clip.origin && clip.origin !== "ai" && (
+            <span className="w-max rounded-full bg-sunk px-2 py-px text-[11px] font-semibold text-ink2">
+              {clip.origin === "manual" ? "Your range" : "AI pick in your range"}
+            </span>
+          )}
           {clip.hook && <p className="text-[13px] text-ink2">“{clip.hook}”</p>}
         </div>
       </div>
@@ -202,7 +237,9 @@ export function ClipCard({
             <span className="text-xs text-ink2">No breakdown stored for this clip.</span>
           )}
           {clip.reasoning && <p className="mt-0.5 text-xs leading-snug text-ink2">{clip.reasoning}</p>}
-          {clip.scores?.rank ? <p className="text-[11px] text-ink3">Ranked #{clip.scores.rank} in head-to-head comparisons. A rubric score, not a view prediction.</p> : null}
+          {clip.scores?.rank ? (
+            <p className="text-[11px] text-ink3">Ranked #{clip.scores.rank} in head-to-head comparisons. A rubric score, not a view prediction.</p>
+          ) : null}
         </div>
       )}
 
@@ -217,7 +254,11 @@ export function ClipCard({
             ↻ Retry
           </button>
         )}
-        <Link to={`/p/${projectId}/clips/${clip.id}`} aria-disabled={clip.status === "preparing"} className={`${ghost} text-acc-text hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}>
+        <Link
+          to={`/p/${projectId}/clips/${clip.id}`}
+          aria-disabled={clip.status === "preparing"}
+          className={`${ghost} text-acc-text hover:bg-acc-soft ${clip.status === "preparing" ? "pointer-events-none opacity-50" : ""}`}
+        >
           Edit
         </Link>
         {done && clip.videoUrl ? (
@@ -296,8 +337,24 @@ export function ClipCard({
           </button>
         </div>
       </Modal>
-      <ClipBumpersDialog open={bumpersOpen} onOpenChange={setBumpersOpen} clipId={clip.id} projectId={projectId} bumpers={clip.bumpers} rendered={clip.status === "done" || clip.status === "failed"} projectIntroId={projectIntroId} projectOutroId={projectOutroId} />
-      <ApplyTemplateToClipsDialog open={templateOpen} onOpenChange={setTemplateOpen} projectId={projectId} clipIds={[clip.id]} withLayers={clip.layers?.length ?? 0} rerenderable={clip.status === "done" || clip.status === "failed" ? 1 : 0} />
+      <ClipBumpersDialog
+        open={bumpersOpen}
+        onOpenChange={setBumpersOpen}
+        clipId={clip.id}
+        projectId={projectId}
+        bumpers={clip.bumpers}
+        rendered={clip.status === "done" || clip.status === "failed"}
+        projectIntroId={projectIntroId}
+        projectOutroId={projectOutroId}
+      />
+      <ApplyTemplateToClipsDialog
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+        projectId={projectId}
+        clipIds={[clip.id]}
+        withLayers={clip.layers?.length ?? 0}
+        rerenderable={clip.status === "done" || clip.status === "failed" ? 1 : 0}
+      />
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

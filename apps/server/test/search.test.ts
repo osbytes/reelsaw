@@ -20,10 +20,16 @@ describe("search", () => {
   const ids = { budget: randomUUID(), savings: randomUUID(), misc: randomUUID(), theirs: randomUUID() };
 
   async function project(id: string, userId: string, title: string, updatedAt: string) {
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, updated_at) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}', $4)`, [id, userId, title, updatedAt]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings, updated_at) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}', $4)`,
+      [id, userId, title, updatedAt],
+    );
   }
   async function clip(projectId: string, index: number, title: string, hook = "", caption = "") {
-    await pool.query(`insert into clips (id, project_id, index, title, hook, caption, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, $3, $4, $5, $6, 0, 10, 80, 'why', '[]', 'done')`, [randomUUID(), projectId, index, title, hook, caption]);
+    await pool.query(
+      `insert into clips (id, project_id, index, title, hook, caption, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, $3, $4, $5, $6, 0, 10, 80, 'why', '[]', 'done')`,
+      [randomUUID(), projectId, index, title, hook, caption],
+    );
   }
   const search = (q: string, as = user.userId) => searchLibrary(orm, as, { q, limit: 15 });
 
@@ -49,7 +55,10 @@ describe("search", () => {
 
   it("finds a project through a typo", async () => {
     const r = await search("budgt");
-    assert.ok(r.projects.some((p) => p.title.startsWith("Budgeting")), JSON.stringify(r.projects.map((p) => p.title)));
+    assert.ok(
+      r.projects.some((p) => p.title.startsWith("Budgeting")),
+      JSON.stringify(r.projects.map((p) => p.title)),
+    );
     const s = await search("savngs");
     assert.ok(s.projects.some((p) => p.title.startsWith("Savings")));
   });
@@ -70,7 +79,10 @@ describe("search", () => {
 
   it("ANDs the words of a query", async () => {
     const both = await search("track dollar");
-    assert.deepEqual(both.clips.map((c) => c.title), ["Track every dollar"]);
+    assert.deepEqual(
+      both.clips.map((c) => c.title),
+      ["Track every dollar"],
+    );
     const none = await search("track chef");
     assert.equal(none.clips.length, 0);
   });
@@ -85,11 +97,20 @@ describe("search", () => {
 
   it("treats % and _ as plain characters", async () => {
     const pct = await search("100%");
-    assert.deepEqual(pct.clips.map((c) => c.title), ["100% sure it works"]);
+    assert.deepEqual(
+      pct.clips.map((c) => c.title),
+      ["100% sure it works"],
+    );
     const under = await search("5_000");
-    assert.deepEqual(under.clips.map((c) => c.title), ["100% sure it works"]);
+    assert.deepEqual(
+      under.clips.map((c) => c.title),
+      ["100% sure it works"],
+    );
     const wild = await search("%");
-    assert.deepEqual(wild.clips.map((c) => c.title), ["100% sure it works"]);
+    assert.deepEqual(
+      wild.clips.map((c) => c.title),
+      ["100% sure it works"],
+    );
   });
 });
 
@@ -108,7 +129,11 @@ describe("users search", () => {
     orm.transaction(async (tx) => {
       await setSearchThreshold(tx);
       const ws = words(q);
-      const rows = await tx.select({ id: schema.user.id, name: schema.user.name, email: schema.user.email }).from(schema.user).where(and(userMatch(ws), inArray(schema.user.id, made))).orderBy(desc(userScore(ws)!));
+      const rows = await tx
+        .select({ id: schema.user.id, name: schema.user.name, email: schema.user.email })
+        .from(schema.user)
+        .where(and(userMatch(ws), inArray(schema.user.id, made)))
+        .orderBy(desc(userScore(ws)!));
       return rows.map((r) => r.name);
     });
 

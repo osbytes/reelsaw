@@ -53,7 +53,14 @@ export function bumperCoverage(project: ProjectIn, clips: ClipIn[]): BumperCover
     if (!sorted.length) return null;
     const [assetId, withCount] = sorted[0]!;
     const used = sorted.reduce((n, [, c]) => n + c, 0);
-    return { assetId, withCount, total: clips.length, assets: sorted.map(([id, count]) => ({ assetId: id, count })), others: sorted.slice(1).map(([id, count]) => ({ assetId: id, count })), noneCount: clips.length - used };
+    return {
+      assetId,
+      withCount,
+      total: clips.length,
+      assets: sorted.map(([id, count]) => ({ assetId: id, count })),
+      others: sorted.slice(1).map(([id, count]) => ({ assetId: id, count })),
+      noneCount: clips.length - used,
+    };
   };
   return { intro: slot(counts.intro), outro: slot(counts.outro) };
 }
@@ -94,7 +101,11 @@ export function countBumperUsage(
 }
 
 /** One plain sentence, e.g. "outro copia-qr on 3/9 clips (6 none, 1 other)". Takes a SlotSummary (service.ts) or a coverage. */
-export function describeCoverage(slot: "intro" | "outro", name: string, c: { withCount: number; total: number; noneCount: number; otherCount: number }): string {
+export function describeCoverage(
+  slot: "intro" | "outro",
+  name: string,
+  c: { withCount: number; total: number; noneCount: number; otherCount: number },
+): string {
   const rest = [c.noneCount ? `${c.noneCount} none` : "", c.otherCount ? `${c.otherCount} other` : ""].filter(Boolean);
   return `${slot} ${name} on ${c.withCount}/${c.total} clips${rest.length ? ` (${rest.join(", ")})` : ""}`;
 }

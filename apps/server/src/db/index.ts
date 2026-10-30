@@ -40,7 +40,9 @@ function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
   pool.on("error", (err) => log.error({ err }, "pg pool error"));
   // queued ahead of the first query the pool hands out on this connection
   pool.on("connect", (client) => {
-    client.query(`set idle_in_transaction_session_timeout = ${IDLE_IN_TRANSACTION_MS}`).catch((err) => log.warn({ err }, "could not set idle_in_transaction_session_timeout"));
+    client
+      .query(`set idle_in_transaction_session_timeout = ${IDLE_IN_TRANSACTION_MS}`)
+      .catch((err) => log.warn({ err }, "could not set idle_in_transaction_session_timeout"));
   });
   return pool;
 }

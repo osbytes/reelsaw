@@ -36,7 +36,10 @@ describe("dropFaceOverlaps", () => {
 
   it("leaves a band clear of faces alone", () => {
     const low = { ...band, y1: 0.7 };
-    const { kept, trimmed } = dropFaceOverlaps([low], Array.from({ length: 20 }, (_, i) => closeUp(i / 4)));
+    const { kept, trimmed } = dropFaceOverlaps(
+      [low],
+      Array.from({ length: 20 }, (_, i) => closeUp(i / 4)),
+    );
     assert.deepEqual(kept, [low]);
     assert.equal(trimmed.length, 0);
   });
@@ -45,7 +48,10 @@ describe("dropFaceOverlaps", () => {
 describe("tightenOverlays", () => {
   const frame = (t: number, boxes: ClipTextFrame["boxes"]): ClipTextFrame => ({ t, boxes, all: boxes, slide: false, textHeavy: false });
   const short = { x1: 0.4, y1: 0.8, x2: 0.6, y2: 0.86 };
-  const twoLines = [{ x1: 0.2, y1: 0.68, x2: 0.8, y2: 0.75 }, { x1: 0.15, y1: 0.78, x2: 0.85, y2: 0.86 }];
+  const twoLines = [
+    { x1: 0.2, y1: 0.68, x2: 0.8, y2: 0.75 },
+    { x1: 0.15, y1: 0.78, x2: 0.85, y2: 0.86 },
+  ];
 
   it("blurs a one-word line only over that line, and the two-line caption over both", () => {
     const frames = [...Array.from({ length: 10 }, (_, i) => frame(i / 2, [short])), ...Array.from({ length: 10 }, (_, i) => frame(5 + i / 2, twoLines))];
@@ -64,8 +70,14 @@ describe("tightenOverlays", () => {
     const handle = { x1: 0.45, y1: 0.77, x2: 0.55, y2: 0.79 };
     const frames = Array.from({ length: 20 }, (_, i) => frame(i / 2, [label, handle, i % 4 < 2 ? short : twoLines[1]!]));
     const pieces = tightenOverlays([band], frames, 10, { cores: [{ x1: 0.105, y1: 0.616, x2: 0.875, y2: 0.904 }] });
-    assert.ok(pieces.every((p) => p.y1 > 0.6), JSON.stringify(pieces.map((p) => [p.y1, p.y2])));
-    assert.ok(pieces.every((p) => p.y1 <= 0.77), "the handle is still covered");
+    assert.ok(
+      pieces.every((p) => p.y1 > 0.6),
+      JSON.stringify(pieces.map((p) => [p.y1, p.y2])),
+    );
+    assert.ok(
+      pieces.every((p) => p.y1 <= 0.77),
+      "the handle is still covered",
+    );
   });
 
   it("caps the number of pieces per region", () => {
@@ -125,7 +137,13 @@ describe("captions on the seam", () => {
       { text: "before", start: 1, end: 1.5 },
       { text: "during", start: 12, end: 12.5 },
     ];
-    const ass = buildAss(words, { width: 1080, height: 1920, font: "Inter", style: { ...defaultStyle, captions: "plain" }, seams: [{ start: 10, end: 20, y: 0.5 }] });
+    const ass = buildAss(words, {
+      width: 1080,
+      height: 1920,
+      font: "Inter",
+      style: { ...defaultStyle, captions: "plain" },
+      seams: [{ start: 10, end: 20, y: 0.5 }],
+    });
     assert.match(ass, /\\pos\(540,1382\)\}before/);
     assert.match(ass, /\\pos\(540,960\)\}during/);
   });

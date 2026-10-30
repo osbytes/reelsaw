@@ -156,9 +156,7 @@ export function ArticleHeader({ crumbs, eyebrow, h1, intro, checked }: { crumbs:
         ))}
       </div>
       {checked && (
-        <p className="text-xs text-ink3">
-          Pricing checked {checked} on each vendor's public page. Vendors change plans without notice; verify before you buy.
-        </p>
+        <p className="text-xs text-ink3">Pricing checked {checked} on each vendor's public page. Vendors change plans without notice; verify before you buy.</p>
       )}
     </header>
   );

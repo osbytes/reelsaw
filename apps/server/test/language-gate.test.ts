@@ -59,7 +59,8 @@ describe("supports", () => {
 
 describe("SENTENCE_END", () => {
   it("matches full-width and other-script terminators", () => {
-    for (const s of ["東京に行きました。", "本当ですか？", "すごい！", "यह सही है।", "هل هذا صحيح؟", "他说：「好。」", "ok."]) assert.ok(SENTENCE_END.test(s), s);
+    for (const s of ["東京に行きました。", "本当ですか？", "すごい！", "यह सही है।", "هل هذا صحيح؟", "他说：「好。」", "ok."])
+      assert.ok(SENTENCE_END.test(s), s);
   });
   it("does not match an unfinished sentence", () => {
     for (const s of ["東京に行き", "and then", "wait,"]) assert.equal(SENTENCE_END.test(s), false, s);

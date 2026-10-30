@@ -12,4 +12,18 @@ import { selectionSuite, selectionModelSuite } from "./selection.js";
 import { disfluencySuite } from "./disfluency.js";
 import { asrLoopsSuite } from "./asr-loops.js";
 import { decisionsSuite } from "./decisions.js";
-export const suites: Suite[] = [selectionSuite, framingSuite, asrLoopsSuite, scenesSuite, pausesSuite, alignmentSuite, speakersSuite, overlaysSuite, cutsSuite, transcriptionSuite, disfluencySuite, decisionsSuite, selectionModelSuite];
+export const suites: Suite[] = [
+  selectionSuite,
+  framingSuite,
+  asrLoopsSuite,
+  scenesSuite,
+  pausesSuite,
+  alignmentSuite,
+  speakersSuite,
+  overlaysSuite,
+  cutsSuite,
+  transcriptionSuite,
+  disfluencySuite,
+  decisionsSuite,
+  selectionModelSuite,
+];

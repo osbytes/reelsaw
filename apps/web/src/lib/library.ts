@@ -7,7 +7,6 @@ export const KIND_FILTERS: Array<{ id: LibraryKind; label: string }> = [
   { id: "audio", label: "Audio" },
 ];
 
-
 const FORMATS: Record<string, string> = {
   "image/gif": "GIF",
   "image/svg+xml": "SVG",

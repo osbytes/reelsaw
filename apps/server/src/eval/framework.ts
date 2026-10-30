@@ -119,7 +119,10 @@ export function hashOf(value: unknown): string {
   const h = crypto.createHash("sha256");
   const feed = (v: unknown) => {
     if (v instanceof Uint8Array) h.update(v);
-    else h.update(JSON.stringify(v, (_k, x) => (x instanceof Uint8Array || Buffer.isBuffer(x) ? `bytes:${crypto.createHash("sha256").update(x).digest("hex")}` : x)));
+    else
+      h.update(
+        JSON.stringify(v, (_k, x) => (x instanceof Uint8Array || Buffer.isBuffer(x) ? `bytes:${crypto.createHash("sha256").update(x).digest("hex")}` : x)),
+      );
   };
   if (Array.isArray(value)) value.forEach(feed);
   else feed(value);
@@ -169,7 +172,9 @@ export function findEvalRoot(): string {
       d = up;
     }
   }
-  throw new Error("cannot find eval/fixtures; run from the repo or set EVAL_DIR (in the container: docker compose cp eval app:/data/eval && EVAL_DIR=/data/eval)");
+  throw new Error(
+    "cannot find eval/fixtures; run from the repo or set EVAL_DIR (in the container: docker compose cp eval app:/data/eval && EVAL_DIR=/data/eval)",
+  );
 }
 
 // ---------- media ----------
@@ -213,7 +218,29 @@ export async function materialize(ctx: EvalContext, source: MediaSource): Promis
   const dur = (source.end - source.start).toFixed(3);
   const tmp = `${out}.part.mp4`;
   if (source.localPath && existsSync(source.localPath)) {
-    await exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(source.start), "-i", source.localPath, "-t", dur, "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "160k", tmp]);
+    await exec(cfg.FFMPEG_PATH, [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      String(source.start),
+      "-i",
+      source.localPath,
+      "-t",
+      dur,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "16",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      tmp,
+    ]);
   } else {
     if (ctx.offline) throw new Error(`media ${source.id} not cached and --offline is set`);
     try {
@@ -221,14 +248,32 @@ export async function materialize(ctx: EvalContext, source: MediaSource): Promis
     } catch {
       throw new Error(`media ${source.id} not cached and yt-dlp is not available (set YTDLP_PATH, or run in the app container)`);
     }
-    await exec(cfg.YTDLP_PATH, ["-q", "--no-warnings", "-f", "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080]/b", "--download-sections", `*${source.start}-${source.end}`, "--force-keyframes-at-cuts", "--merge-output-format", "mp4", "-o", tmp, source.url]);
+    await exec(cfg.YTDLP_PATH, [
+      "-q",
+      "--no-warnings",
+      "-f",
+      "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080]/b",
+      "--download-sections",
+      `*${source.start}-${source.end}`,
+      "--force-keyframes-at-cuts",
+      "--merge-output-format",
+      "mp4",
+      "-o",
+      tmp,
+      source.url,
+    ]);
   }
   await fs.rename(tmp, out);
-  const sha = crypto.createHash("sha256").update(await fs.readFile(out)).digest("hex");
+  const sha = crypto
+    .createHash("sha256")
+    .update(await fs.readFile(out))
+    .digest("hex");
   if (source.sha256 && source.sha256 !== sha) {
     if (source.strictSha && process.env.EVAL_STRICT_MEDIA === "1") {
       await fs.rm(out, { force: true });
-      throw new MediaDriftError(`media ${source.id} differs from the fixture's recorded sha256 (${sha.slice(0, 12)} vs ${source.sha256.slice(0, 12)}); sub-second labels are only valid for the original encode. Re-materialise where the fixture was made, or re-label and update the sha256`);
+      throw new MediaDriftError(
+        `media ${source.id} differs from the fixture's recorded sha256 (${sha.slice(0, 12)} vs ${source.sha256.slice(0, 12)}); sub-second labels are only valid for the original encode. Re-materialise where the fixture was made, or re-label and update the sha256`,
+      );
     }
     ctx.log.warn({ media: source.id }, "materialised media differs from the fixture's recorded sha256 (encoder/version drift); results may shift slightly");
   }
@@ -293,5 +338,7 @@ export function iou(a: [number, number, number, number], b: [number, number, num
 /** True for "the model/server isn't there" errors (including billing/quota refusals), which make a case skipped rather than failed. */
 export function isUnavailable(err: unknown): boolean {
   const m = String((err as Error)?.message ?? err);
-  return /Cannot connect to API|ECONNREFUSED|ENOTFOUND|fetch failed|EAI_AGAIN|socket hang up|model .* not found|requires a valid credit card|insufficient[_ ]quota|insufficient credits|needs [A-Z_]+ (or [A-Z_]+ )?to be set/i.test(m);
+  return /Cannot connect to API|ECONNREFUSED|ENOTFOUND|fetch failed|EAI_AGAIN|socket hang up|model .* not found|requires a valid credit card|insufficient[_ ]quota|insufficient credits|needs [A-Z_]+ (or [A-Z_]+ )?to be set/i.test(
+    m,
+  );
 }

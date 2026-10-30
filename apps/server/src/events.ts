@@ -38,7 +38,14 @@ export const PROGRESS_NOTICE_MAX = 500;
 
 /** JSON for pg_notify, at most PROGRESS_NOTICE_MAX bytes: the message is cut (then dropped) to fit. */
 export function encodeProgressNotice(n: Omit<ProgressNotice, "kind">): string {
-  const base: ProgressNotice = { kind: "progress", projectId: n.projectId, ...(n.clipId ? { clipId: n.clipId } : {}), stage: n.stage, progress: Math.round(n.progress * 10_000) / 10_000, ...(n.detail ? { detail: n.detail } : {}) };
+  const base: ProgressNotice = {
+    kind: "progress",
+    projectId: n.projectId,
+    ...(n.clipId ? { clipId: n.clipId } : {}),
+    stage: n.stage,
+    progress: Math.round(n.progress * 10_000) / 10_000,
+    ...(n.detail ? { detail: n.detail } : {}),
+  };
   let message = n.message ?? "";
   for (;;) {
     const json = JSON.stringify(message ? { ...base, message } : base);
@@ -61,7 +68,19 @@ export function decodeNotice(payload: string): Notice | null {
 
 /** A progress notice as the event-shaped message the stream sends. id 0 = not stored; never used as a resume point. */
 export function progressEvent(n: ProgressNotice, now = new Date()): ProjectEvent {
-  return { id: 0, projectId: n.projectId, type: "stage.progress", payload: { stage: n.stage, progress: n.progress, ...(n.message ? { message: n.message } : {}), ...(n.detail ? { detail: n.detail } : {}), ...(n.clipId ? { clipId: n.clipId } : {}) }, createdAt: now.toISOString() };
+  return {
+    id: 0,
+    projectId: n.projectId,
+    type: "stage.progress",
+    payload: {
+      stage: n.stage,
+      progress: n.progress,
+      ...(n.message ? { message: n.message } : {}),
+      ...(n.detail ? { detail: n.detail } : {}),
+      ...(n.clipId ? { clipId: n.clipId } : {}),
+    },
+    createdAt: now.toISOString(),
+  };
 }
 
 /**
@@ -75,7 +94,10 @@ export interface EventBus {
    * The log without progress ticks (those are live-only), newest `limit` rows in ascending order.
    * `after` / `before` / `upTo` bound the id range; `hasMore` says older rows exist below the first one returned.
    */
-  history(projectId: string, opts: { limit: number; after?: number | undefined; before?: number | undefined; upTo?: number }): Promise<{ events: ProjectEvent[]; hasMore: boolean }>;
+  history(
+    projectId: string,
+    opts: { limit: number; after?: number | undefined; before?: number | undefined; upTo?: number },
+  ): Promise<{ events: ProjectEvent[]; hasMore: boolean }>;
   /** Highest event id of the project (0 if none) and how many non-progress events it has. */
   stats(projectId: string): Promise<{ headId: number; total: number }>;
   /** Live notices for one project. Ends when `signal` aborts. Requires start(). */
@@ -194,16 +216,36 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
       const rows = await db
         .select()
         .from(t)
-        .where(and(eq(t.projectId, projectId), ne(t.type, "stage.progress"), after !== undefined ? gt(t.id, after) : undefined, before !== undefined ? lt(t.id, before) : undefined, upTo !== undefined ? lte(t.id, upTo) : undefined))
+        .where(
+          and(
+            eq(t.projectId, projectId),
+            ne(t.type, "stage.progress"),
+            after !== undefined ? gt(t.id, after) : undefined,
+            before !== undefined ? lt(t.id, before) : undefined,
+            upTo !== undefined ? lte(t.id, upTo) : undefined,
+          ),
+        )
         .orderBy(desc(t.id))
         .limit(limit + 1);
       const hasMore = rows.length > limit;
-      return { events: rows.slice(0, limit).reverse().map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() })), hasMore };
+      return {
+        events: rows
+          .slice(0, limit)
+          .reverse()
+          .map((r) => ({ id: r.id, projectId: r.projectId, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() })),
+        hasMore,
+      };
     },
     async stats(projectId) {
       const t = schema.projectEvents;
-      const [head] = await db.select({ v: max(t.id) }).from(t).where(eq(t.projectId, projectId));
-      const [total] = await db.select({ v: count() }).from(t).where(and(eq(t.projectId, projectId), ne(t.type, "stage.progress")));
+      const [head] = await db
+        .select({ v: max(t.id) })
+        .from(t)
+        .where(eq(t.projectId, projectId));
+      const [total] = await db
+        .select({ v: count() })
+        .from(t)
+        .where(and(eq(t.projectId, projectId), ne(t.type, "stage.progress")));
       return { headId: Number(head?.v ?? 0), total: Number(total?.v ?? 0) };
     },
     async *notices(projectId, signal) {

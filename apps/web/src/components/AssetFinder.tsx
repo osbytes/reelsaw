@@ -68,7 +68,12 @@ function useSeen(ref: React.RefObject<Element | null>) {
 
 function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" aria-pressed={on} onClick={onClick} className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink2 hover:text-ink"}`}>
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${on ? "border-acc bg-acc-soft text-acc-text" : "border-line bg-panel text-ink2 hover:text-ink"}`}
+    >
       {children}
     </button>
   );
@@ -93,14 +98,17 @@ function useFilters(mode: "library" | "picker"): [Filters, (patch: Partial<Filte
     (patch) => {
       const next = new URLSearchParams(loc.search);
       next.delete("source");
-      for (const [key, v] of Object.entries(patch)) (v ? next.set(key, v) : next.delete(key));
+      for (const [key, v] of Object.entries(patch)) v ? next.set(key, v) : next.delete(key);
       const search = next.toString();
       nav({ pathname: loc.pathname, search: search ? `?${search}` : "", hash: loc.hash }, { replace: true });
     },
   ];
 }
 
-const gridClass = (mode: "library" | "picker") => (mode === "picker" ? "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 md:grid-cols-4" : "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5");
+const gridClass = (mode: "library" | "picker") =>
+  mode === "picker"
+    ? "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 md:grid-cols-4"
+    : "grid grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5";
 
 const rowKey = (provider: string, externalId: string) => `${provider}:${externalId}`;
 
@@ -128,9 +136,19 @@ interface SourceState {
   fetching: boolean;
   notice: boolean;
 }
-const sameState = (a: SourceState | undefined, b: SourceState) => !!a && a.pending === b.pending && a.count === b.count && a.hasNext === b.hasNext && a.fetching === b.fetching && a.notice === b.notice;
+const sameState = (a: SourceState | undefined, b: SourceState) =>
+  !!a && a.pending === b.pending && a.count === b.count && a.hasNext === b.hasNext && a.fetching === b.fetching && a.notice === b.notice;
 
-export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library", onPick, actions: actionsProp, onUpload, className = "", pickLabel }: AssetFinderProps) {
+export function AssetFinder({
+  kinds: kindsProp,
+  kind: kindProp,
+  mode = "library",
+  onPick,
+  actions: actionsProp,
+  onUpload,
+  className = "",
+  pickLabel,
+}: AssetFinderProps) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -184,7 +202,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const providerServes = (p: Provider) => !allowed || allowed.some((k) => (p.kinds as readonly string[]).includes(k));
   const remoteProviders = (providers.data ?? []).filter((p) => p.id !== "reelsaw" && providerServes(p));
   const kindOk = (k: string) => !allowed || (allowed as readonly string[]).includes(k);
-  const providerLabel = (id: string) => (id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1)));
+  const providerLabel = (id: string) =>
+    id === "reelsaw" ? "Catalog" : (providers.data?.find((p) => p.id === id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1));
 
   // #asset=<id> scrolls its tile into view once the list is there
   useEffect(() => {
@@ -207,7 +226,17 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
       setPending((s) => (s.delete(key), new Set(s)));
     }
   };
-  const asPicked = (a: { id: string; name: string; kind: string; durationSec: number; mime?: string | null; width?: number; height?: number; hasAudio?: boolean; thumbnailUrl?: string }): PickedAsset => ({
+  const asPicked = (a: {
+    id: string;
+    name: string;
+    kind: string;
+    durationSec: number;
+    mime?: string | null;
+    width?: number;
+    height?: number;
+    hasAudio?: boolean;
+    thumbnailUrl?: string;
+  }): PickedAsset => ({
     id: a.id,
     name: a.name,
     kind: a.kind as LibraryKind,
@@ -233,7 +262,14 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
   const select = (a: LibraryAsset) => nav({ pathname: loc.pathname, search: loc.search, hash: selected === a.id ? "" : `#asset=${a.id}` }, { replace: true });
   const viewing = list.data?.assets.find((a) => a.id === viewingId) ?? null;
 
-  const usageText = (r: LibraryAsset) => (r.usedByClips > 0 ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}` : r.usedBy > 0 ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}` : r.usedByTemplates > 0 ? `${r.usedByTemplates} template${r.usedByTemplates === 1 ? "" : "s"}` : undefined);
+  const usageText = (r: LibraryAsset) =>
+    r.usedByClips > 0
+      ? `${r.usedByClips} clip${r.usedByClips === 1 ? "" : "s"}`
+      : r.usedBy > 0
+        ? `${r.usedBy} project${r.usedBy === 1 ? "" : "s"}`
+        : r.usedByTemplates > 0
+          ? `${r.usedByTemplates} template${r.usedByTemplates === 1 ? "" : "s"}`
+          : undefined;
   const libTile = (r: LibraryAsset): TileModel => ({
     key: `lib:${r.id}`,
     kind: r.kind,
@@ -312,9 +348,21 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           <div className="relative min-w-0 flex-1 basis-full sm:basis-auto">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" aria-hidden />
-            <input className="input h-[38px] w-full pl-9 pr-9" type="search" value={q} placeholder="Search uploads, the catalog and providers…" aria-label="Search uploads, the catalog and providers" onChange={(e) => setFilters({ q: e.target.value })} />
+            <input
+              className="input h-[38px] w-full pl-9 pr-9"
+              type="search"
+              value={q}
+              placeholder="Search uploads, the catalog and providers…"
+              aria-label="Search uploads, the catalog and providers"
+              onChange={(e) => setFilters({ q: e.target.value })}
+            />
             {q && (
-              <button type="button" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink" aria-label="Clear search" onClick={() => setFilters({ q: "" })}>
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-ink3 hover:bg-sunk hover:text-ink"
+                aria-label="Clear search"
+                onClick={() => setFilters({ q: "" })}
+              >
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -352,10 +400,25 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
           {rows.map(libraryTile)}
           <SourceTiles key="catalog" sid="catalog" q={dq} kind={searchKind} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
           {activeProviders.map((p) => (
-            <SourceTiles key={p.id} sid={p.id} provider={p.id} q={dq} kind={searchKind} license={p.id === "freesound" ? "cc0" : undefined} kindOk={kindOk} node={remoteNode} register={register} unregister={unregister} />
+            <SourceTiles
+              key={p.id}
+              sid={p.id}
+              provider={p.id}
+              q={dq}
+              kind={searchKind}
+              license={p.id === "freesound" ? "cc0" : undefined}
+              kindOk={kindOk}
+              node={remoteNode}
+              register={register}
+              unregister={unregister}
+            />
           ))}
         </ul>
-        {nothing && <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">{q.trim() ? `No items match “${q.trim()}”` : kind ? "No items of this kind" : "Nothing here yet. Upload a file."}</p>}
+        {nothing && (
+          <p className="rounded-[14px] border border-line bg-panel px-4 py-8 text-center text-sm text-ink3">
+            {q.trim() ? `No items match “${q.trim()}”` : kind ? "No items of this kind" : "Nothing here yet. Upload a file."}
+          </p>
+        )}
         {nextId && (
           <div className="flex justify-center py-1">
             <button type="button" className="btn-ghost" disabled={fetchingMore} onClick={() => fetchers.current[nextId]?.()}>
@@ -366,7 +429,8 @@ export function AssetFinder({ kinds: kindsProp, kind: kindProp, mode = "library"
         )}
         {mode === "library" && !list.isPending && all.length > 0 && (
           <p className="text-xs tabular-nums text-ink3">
-            Showing {rows.length.toLocaleString()} of {(list.data?.total ?? all.length).toLocaleString()} of your files{list.data?.nextCursor ? " (the newest 500 are loaded; search narrows them)" : ""}. Catalog and provider results load more on request
+            Showing {rows.length.toLocaleString()} of {(list.data?.total ?? all.length).toLocaleString()} of your files
+            {list.data?.nextCursor ? " (the newest 500 are loaded; search narrows them)" : ""}. Catalog and provider results load more on request
           </p>
         )}
         {attribution && <p className="text-xs text-ink3">{attribution}</p>}
@@ -453,7 +517,11 @@ function SourceTiles({
   const notice = !!unavailable || search.isError;
   const { fetchNextPage } = search;
   useEffect(() => {
-    register(sid, { pending: waiting, count: nodes.length, hasNext: !!search.hasNextPage, fetching: search.isFetchingNextPage, notice }, () => void fetchNextPage());
+    register(
+      sid,
+      { pending: waiting, count: nodes.length, hasNext: !!search.hasNextPage, fetching: search.isFetchingNextPage, notice },
+      () => void fetchNextPage(),
+    );
   }, [register, sid, waiting, nodes.length, search.hasNextPage, search.isFetchingNextPage, notice, fetchNextPage]);
   useEffect(() => () => unregister(sid), [unregister, sid]);
   return (
@@ -475,7 +543,21 @@ function SourceTiles({
 }
 
 /** The finder over the editor (or any page), in the repo's modal: menus portaled out of it are not dismissals (docs/UI.md). */
-export function AssetFinderDialog({ open, onOpenChange, kinds, kind, onPick, title = "Add to clip" }: { open: boolean; onOpenChange: (o: boolean) => void; kinds?: LibraryKind[]; kind?: LibraryKind; onPick: (asset: PickedAsset) => void | Promise<void>; title?: string }) {
+export function AssetFinderDialog({
+  open,
+  onOpenChange,
+  kinds,
+  kind,
+  onPick,
+  title = "Add to clip",
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  kinds?: LibraryKind[];
+  kind?: LibraryKind;
+  onPick: (asset: PickedAsset) => void | Promise<void>;
+  title?: string;
+}) {
   return (
     <Modal open={open} onOpenChange={onOpenChange} title={title} width={960}>
       {open && (

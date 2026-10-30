@@ -81,7 +81,29 @@ try {
   await mkdir(path.dirname(mp4Out), { recursive: true });
   const ffmpeg = spawn(
     "ffmpeg",
-    ["-y", "-hide_banner", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", String(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4Out],
+    [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "image2pipe",
+      "-framerate",
+      String(fps),
+      "-i",
+      "-",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "slow",
+      "-crf",
+      String(crf),
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      mp4Out,
+    ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
   const done = new Promise((resolve, reject) => {

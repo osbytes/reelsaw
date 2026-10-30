@@ -22,7 +22,8 @@ import type { ClipBumpers } from "@reelsaw/shared";
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-const ACCEPT = ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
+const ACCEPT =
+  ".mp4,.mov,.webm,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.m4a,.aac,.wav,.ogg,.flac,video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp,image/gif,image/svg+xml,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/flac";
 const isImageFile = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name);
 const isAudioFile = (f: File) => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(f.name);
 const clampSec = (n: number) => Math.min(10, Math.max(1, Math.round(n * 10) / 10));
@@ -34,13 +35,19 @@ export type LibraryAsset = inferRouterOutputs<AppRouter>["library"]["list"]["ite
 export function useBumperLibrary() {
   const trpc = useTRPC();
   // the newest 500 uploads (the server pages; `total` says how many there are in all)
-  return useQuery(trpc.library.list.queryOptions({ limit: 500 }, { select: (d) => ({ assets: d.items, deleted: d.deleted, total: d.total, nextCursor: d.nextCursor }) }));
+  return useQuery(
+    trpc.library.list.queryOptions({ limit: 500 }, { select: (d) => ({ assets: d.items, deleted: d.deleted, total: d.total, nextCursor: d.nextCursor }) }),
+  );
 }
 
-export const lengthText = (a: Pick<LibraryAsset, "durationSec">) => (a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`);
+export const lengthText = (a: Pick<LibraryAsset, "durationSec">) =>
+  a.durationSec >= 60 ? clockText(a.durationSec) : `${a.durationSec.toFixed(a.durationSec % 1 ? 1 : 0)} s`;
 export const sizeText = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 /** "video · 4 s · 1080×1920", "audio · 2:31" (images are drawn separately: their length is a control). */
-export const metaText = (a: LibraryAsset) => (a.kind === "audio" ? `audio · ${lengthText(a)}` : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`);
+export const metaText = (a: LibraryAsset) =>
+  a.kind === "audio"
+    ? `audio · ${lengthText(a)}`
+    : `${a.kind}${a.kind === "video" ? ` · ${lengthText(a)}` : ""} · ${a.width}×${a.height}${a.kind === "video" && !a.hasAudio ? " · silent" : ""}`;
 
 export interface UploadJob {
   key: string;
@@ -108,7 +115,8 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       const { ok, failed } = finished.current;
       finished.current = { ok: 0, failed: 0 };
       if (failed) toast.error(`Added ${ok} to your library · ${failed} failed`, { id: "bumper-batch" });
-      else if (ok === 0) toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
+      else if (ok === 0)
+        toast.dismiss("bumper-batch"); // only duplicates: their own toasts said it
       else toast.success(ok === 1 ? "Added to your library" : `Added ${ok} to your library`, { id: "bumper-batch" });
     }
   };
@@ -121,7 +129,13 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
       const image = isImageFile(file);
       const max = image ? MAX_IMAGE_BYTES : isAudioFile(file) ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
       if (file.size > max) {
-        fresh.push({ key, name: file.name, pct: 0, state: "failed", error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.` });
+        fresh.push({
+          key,
+          name: file.name,
+          pct: 0,
+          state: "failed",
+          error: `This file is ${Math.ceil(file.size / 1024 / 1024)} MB. ${image ? "Images" : "Videos"} can be at most ${max / 1024 / 1024} MB.`,
+        });
         continue;
       }
       fresh.push({ key, name: file.name, pct: 0, state: "queued" });
@@ -131,10 +145,14 @@ export function useBumperActions({ onDuplicate }: { onDuplicate?: (id: string) =
     // each worker takes its first file synchronously, so this starts at most two and never an idle one
     while (running.current < 2 && queue.current.length > 0) void work();
   };
-  const dismiss = (key?: string) => setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
+  const dismiss = (key?: string) =>
+    setJobs((js) => js.filter((j) => (key ? j.key !== key : j.state === "queued" || j.state === "uploading" || j.state === "saving")));
 
   const setDefault = (slot: "intro" | "outro", a: LibraryAsset, current: string | undefined) => {
-    setDefaultM.mutate({ slot, assetId: current === a.id ? null : a.id }, { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail });
+    setDefaultM.mutate(
+      { slot, assetId: current === a.id ? null : a.id },
+      { onSuccess: () => (refresh(), toast(current === a.id ? `No default ${slot}` : `New projects start with this ${slot}`)), onError: fail },
+    );
   };
   const restore = (a: Pick<LibraryAsset, "id" | "name">) =>
     restoreM.mutateAsync({ id: a.id }).then(
@@ -189,7 +207,17 @@ export const playOnly = (el: HTMLAudioElement) => {
 };
 
 /** A pencil that opens a small popover with the name field; Enter or Save renames. */
-function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pick<LibraryAsset, "name">; busy: boolean; onRename: (name: string) => void; className?: string }) {
+function RenamePopover({
+  asset: a,
+  busy,
+  onRename,
+  className = "",
+}: {
+  asset: Pick<LibraryAsset, "name">;
+  busy: boolean;
+  onRename: (name: string) => void;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(a.name);
   const save = () => {
@@ -200,15 +228,35 @@ function RenamePopover({ asset: a, busy, onRename, className = "" }: { asset: Pi
   return (
     <Popover.Root open={open} onOpenChange={(o) => (o && setV(a.name), setOpen(o))}>
       <Popover.Trigger asChild>
-        <button type="button" className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`} aria-label={`Rename ${a.name}`} title="Rename">
+        <button
+          type="button"
+          className={`grid h-5 w-5 shrink-0 place-items-center rounded-[4px] text-ink3 hover:bg-sunk hover:text-ink ${className}`}
+          aria-label={`Rename ${a.name}`}
+          title="Rename"
+        >
           <Pencil className="h-3 w-3" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(300px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
+        >
           <label className="flex flex-col gap-1 text-ink2">
             Name
-            <input className="input h-8 px-2 py-0 text-xs" type="text" maxLength={120} value={v} disabled={busy} autoFocus aria-label="New name" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+            <input
+              className="input h-8 px-2 py-0 text-xs"
+              type="text"
+              maxLength={120}
+              value={v}
+              disabled={busy}
+              autoFocus
+              aria-label="New name"
+              onChange={(e) => setV(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
@@ -253,9 +301,25 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
           {jobs.map((j) => (
             <li key={j.key} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                {j.state === "done" ? <span className="font-mono text-ok">●</span> : j.state === "failed" ? <span className="font-mono text-err">▲</span> : <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />}
+                {j.state === "done" ? (
+                  <span className="font-mono text-ok">●</span>
+                ) : j.state === "failed" ? (
+                  <span className="font-mono text-err">▲</span>
+                ) : (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />
+                )}
                 <span className="min-w-0 flex-1 truncate">{j.name}</span>
-                <span className="shrink-0 font-mono text-ink3">{j.state === "queued" ? "waiting" : j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "saving" ? "adding" : j.state === "done" ? (j.note ?? "added") : "failed"}</span>
+                <span className="shrink-0 font-mono text-ink3">
+                  {j.state === "queued"
+                    ? "waiting"
+                    : j.state === "uploading"
+                      ? `${Math.round(j.pct * 100)}%`
+                      : j.state === "saving"
+                        ? "adding"
+                        : j.state === "done"
+                          ? (j.note ?? "added")
+                          : "failed"}
+                </span>
                 {(j.state === "done" || j.state === "failed") && (
                   <button type="button" className="text-ink3 hover:text-ink" aria-label={`Dismiss ${j.name}`} onClick={() => onDismiss(j.key)}>
                     <X className="h-3.5 w-3.5" />
@@ -284,7 +348,17 @@ export function UploadJobs({ jobs, onDismiss }: { jobs: UploadJob[]; onDismiss: 
 }
 
 /** Seconds field for an image; empty means the library item's own length. */
-function SecField({ value, onChange, placeholder, label }: { value: number | undefined; onChange: (v: number | undefined) => void; placeholder: number; label: string }) {
+function SecField({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  placeholder: number;
+  label: string;
+}) {
   return (
     <label className="flex shrink-0 items-center gap-1 text-xs text-ink2">
       <input
@@ -343,15 +417,39 @@ export function SlotRow({
     return (
       <>
         <span className="text-xs text-ink2 max-sm:col-span-full max-sm:-mb-1">{label}</span>
-        <BumperCombobox className="min-w-0" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
-        <div className="flex w-[5rem] justify-end">{image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}</div>
+        <BumperCombobox
+          className="min-w-0"
+          slot={slot}
+          label={`${label} choice`}
+          value={choice}
+          onChange={(c) => onChange(c, undefined)}
+          fixed={fixed}
+          assets={assets}
+          known={known}
+          defaultId={defaultId}
+          loading={loading}
+        />
+        <div className="flex w-[5rem] justify-end">
+          {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
+        </div>
       </>
     );
   return (
     <>
       <span className="text-xs text-ink2">{label}</span>
       <div className="flex min-w-0 items-center gap-2">
-        <BumperCombobox className="min-w-0 flex-1" slot={slot} label={`${label} choice`} value={choice} onChange={(c) => onChange(c, undefined)} fixed={fixed} assets={assets} known={known} defaultId={defaultId} loading={loading} />
+        <BumperCombobox
+          className="min-w-0 flex-1"
+          slot={slot}
+          label={`${label} choice`}
+          value={choice}
+          onChange={(c) => onChange(c, undefined)}
+          fixed={fixed}
+          assets={assets}
+          known={known}
+          defaultId={defaultId}
+          loading={loading}
+        />
         {image && <SecField value={sec} onChange={(v) => onChange(choice, v)} placeholder={image.durationSec} label={`Seconds the ${slot} is shown`} />}
       </div>
     </>
@@ -395,9 +493,35 @@ function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name
 }
 
 /** Intro / outro / delete, in the same order on the card and in the viewer. */
-function AssetActions({ asset: a, introId, outroId, busy, onUse, onDelete, withLabels = false }: { asset: LibraryAsset; introId?: string | undefined; outroId?: string | undefined; busy: boolean; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; withLabels?: boolean }) {
+function AssetActions({
+  asset: a,
+  introId,
+  outroId,
+  busy,
+  onUse,
+  onDelete,
+  withLabels = false,
+}: {
+  asset: LibraryAsset;
+  introId?: string | undefined;
+  outroId?: string | undefined;
+  busy: boolean;
+  onUse: (slot: "intro" | "outro") => void;
+  onDelete: () => void;
+  withLabels?: boolean;
+}) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
-    <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy || a.kind === "audio"} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
+    <button
+      type="button"
+      className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`}
+      disabled={busy || a.kind === "audio"}
+      aria-pressed={on}
+      aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`}
+      title={
+        a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`
+      }
+      onClick={() => onUse(slot)}
+    >
       {on ? "● " : ""}
       {withLabels ? (on ? `Not ${slot}` : `Use as ${slot}`) : slot === "intro" ? "Intro" : "Outro"}
     </button>
@@ -406,7 +530,14 @@ function AssetActions({ asset: a, introId, outroId, busy, onUse, onDelete, withL
     <div className="grid grid-cols-3 gap-1">
       {slotBtn("intro", introId === a.id)}
       {slotBtn("outro", outroId === a.id)}
-      <button type="button" className="btn-ghost justify-center px-1 py-1 text-xs" disabled={busy} aria-label={`Delete ${a.name}`} title="Delete" onClick={onDelete}>
+      <button
+        type="button"
+        className="btn-ghost justify-center px-1 py-1 text-xs"
+        disabled={busy}
+        aria-label={`Delete ${a.name}`}
+        title="Delete"
+        onClick={onDelete}
+      >
         <Trash2 className="h-3.5 w-3.5" />
         {withLabels && "Delete"}
       </button>
@@ -426,16 +557,39 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
   return (
     <Popover.Root open={open} onOpenChange={(o) => (o && setV(String(a.durationSec)), setOpen(o))}>
       <Popover.Trigger asChild>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink" aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`} title="Change how long it is shown">
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] text-ink2 underline decoration-dotted underline-offset-2 hover:text-ink"
+          aria-label={`Shown for ${lengthText(a)}. Change how long ${a.name} is shown`}
+          title="Change how long it is shown"
+        >
           {lengthText(a)}
           <Pencil className="h-3 w-3" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(220px,calc(100vw-24px))] flex-col gap-2 rounded-[12px] border border-line bg-panel p-3 text-xs text-ink shadow-pop"
+        >
           <label className="flex items-center gap-1.5 text-ink2">
             Shown for
-            <input className="input h-7 w-16 px-1.5 py-0 text-xs" type="number" min={1} max={10} step={0.5} value={v} disabled={busy} autoFocus aria-label={`Seconds ${a.name} is shown`} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />s
+            <input
+              className="input h-7 w-16 px-1.5 py-0 text-xs"
+              type="number"
+              min={1}
+              max={10}
+              step={0.5}
+              value={v}
+              disabled={busy}
+              autoFocus
+              aria-label={`Seconds ${a.name} is shown`}
+              onChange={(e) => setV(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
+            s
           </label>
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(false)}>
@@ -455,19 +609,35 @@ export function LengthPopover({ asset: a, busy, onSeconds }: { asset: LibraryAss
 export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: LibraryAsset; isIntro: boolean; isOutro: boolean; applied: boolean }) {
   const defaults = [isIntro && "intro", isOutro && "outro"].filter(Boolean).join(" + ");
   const fix = applied ? ", re-render to apply" : "";
-  const used = [a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "", a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "", a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  const used = [
+    a.usedBy ? `${a.usedBy} project${a.usedBy === 1 ? "" : "s"}` : "",
+    a.usedByClips ? `${a.usedByClips} clip${a.usedByClips === 1 ? "" : "s"}` : "",
+    a.usedByTemplates ? `${a.usedByTemplates} template${a.usedByTemplates === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
       {defaults && <span className="shrink-0 font-semibold text-acc-text">● Default {defaults}</span>}
       {a.usedBy || a.usedByClips || a.usedByTemplates ? (
         <Popover.Root>
           <Popover.Trigger asChild>
-            <button type="button" className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline" title="Where it’s used" aria-label={`Where ${a.name} is used`}>
+            <button
+              type="button"
+              className="min-w-0 truncate text-left font-semibold text-acc-text hover:underline"
+              title="Where it’s used"
+              aria-label={`Where ${a.name} is used`}
+            >
               {defaults ? `· used by ${used}${fix}` : `Used by ${used}${fix}`}
             </button>
           </Popover.Trigger>
           <Popover.Portal>
-            <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+            <Popover.Content
+              align="start"
+              sideOffset={6}
+              collisionPadding={12}
+              className="z-[80] w-[min(380px,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+            >
               <b className="text-[13px]">Where “{a.name}” is used</b>
               <UsageList id={a.id} className="mt-2 max-h-[min(280px,50dvh)]" />
             </Popover.Content>
@@ -481,12 +651,35 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onDelete, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string | undefined; outroId?: string | undefined; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({
+  asset: a,
+  introId,
+  outroId,
+  busy,
+  onClose,
+  onUse,
+  onDelete,
+  onRename,
+  onTags,
+}: {
+  onTags: (tags: string[]) => void;
+  asset: LibraryAsset | null;
+  introId?: string | undefined;
+  outroId?: string | undefined;
+  busy: boolean;
+  onClose: () => void;
+  onUse: (slot: "intro" | "outro") => void;
+  onDelete: () => void;
+  onRename: (name: string) => void;
+}) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/70" />
-        <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4">
+        <Dialog.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 z-[71] flex max-h-[calc(100dvh-24px)] w-[min(460px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-[18px] border border-line bg-panel p-3 text-ink shadow-pop outline-none sm:p-4"
+        >
           {a && (
             <>
               <div className="flex items-center gap-2">
@@ -499,12 +692,29 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               {a.kind === "audio" ? (
                 <div className="flex flex-col items-center gap-4 rounded-[12px] bg-sunk px-4 py-8">
                   <AudioLines className="h-12 w-12 text-ink3" aria-hidden />
-                  <audio key={a.id} src={`/media/assets/${a.id}`} controls autoPlay preload="metadata" className="w-full" aria-label={`Play ${a.name}`} onPlay={(e) => playOnly(e.currentTarget)} />
+                  <audio
+                    key={a.id}
+                    src={`/media/assets/${a.id}`}
+                    controls
+                    autoPlay
+                    preload="metadata"
+                    className="w-full"
+                    aria-label={`Play ${a.name}`}
+                    onPlay={(e) => playOnly(e.currentTarget)}
+                  />
                 </div>
               ) : (
                 <div className="flex h-[min(62dvh,640px)] min-h-[160px] items-center justify-center overflow-hidden rounded-[12px] bg-black">
                   {a.kind === "video" ? (
-                    <video key={a.id} src={`/media/assets/${a.id}`} poster={a.thumbnailUrl} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                    <video
+                      key={a.id}
+                      src={`/media/assets/${a.id}`}
+                      poster={a.thumbnailUrl}
+                      controls
+                      autoPlay
+                      playsInline
+                      className="max-h-full max-w-full object-contain"
+                    />
                   ) : (
                     <img key={a.id} src={`/media/assets/${a.id}`} alt={a.name} className="max-h-full max-w-full object-contain" />
                   )}
@@ -512,7 +722,9 @@ export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse
               )}
               <p className="truncate font-mono text-xs text-ink3">
                 {formatTag(a.mime) ? `${formatTag(a.mime)} · ` : ""}
-                {a.kind === "audio" ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}` : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
+                {a.kind === "audio"
+                  ? `audio · ${lengthText(a)} · ${sizeText(a.sizeBytes)}`
+                  : `${a.kind} · ${lengthText(a)} · ${a.width}×${a.height} · ${sizeText(a.sizeBytes)}`}
                 {a.kind === "video" && !a.hasAudio ? " · silent" : ""}
               </p>
               <TagEditor asset={a} busy={busy} onTags={onTags} />
@@ -572,7 +784,9 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
             <Link to={`/templates/${t.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink">
               {t.name}
             </Link>
-            <span className="shrink-0 text-ink3">{[...t.slots, ...(t.layers ? [t.layers > 1 ? `layer ×${t.layers}` : "layer"] : [])].join(" + ")} · template</span>
+            <span className="shrink-0 text-ink3">
+              {[...t.slots, ...(t.layers ? [t.layers > 1 ? `layer ×${t.layers}` : "layer"] : [])].join(" + ")} · template
+            </span>
           </div>
         ))}
         {projects.map((p) => (
@@ -589,7 +803,10 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
                   <span className="font-mono text-ink3">#{c.index + 1}</span> {c.title || "Untitled clip"}
                 </Link>
                 <span className="shrink-0 text-ink3">
-                  {c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s)).join(" + ")} · {c.via === "clip" ? "on the clip" : "from project"}
+                  {c.slots
+                    .map((s) => (s === "overlay" && c.overlays > 1 ? `overlay ×${c.overlays}` : s === "music" && c.music > 1 ? `music ×${c.music}` : s))
+                    .join(" + ")}{" "}
+                  · {c.via === "clip" ? "on the clip" : "from project"}
                 </span>
               </div>
             ))}
@@ -601,7 +818,15 @@ export function UsageList({ id, className = "" }: { id: string; className?: stri
 }
 
 /** Confirm before deleting a library item (library page and command palette); lists what still uses it. */
-export function DeleteAssetDialog({ asset, onClose, onConfirm }: { asset: Pick<LibraryAsset, "id" | "name" | "usedBy" | "usedByTemplates"> | null; onClose: () => void; onConfirm: () => void }) {
+export function DeleteAssetDialog({
+  asset,
+  onClose,
+  onConfirm,
+}: {
+  asset: Pick<LibraryAsset, "id" | "name" | "usedBy" | "usedByTemplates"> | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
   const { hint } = useRestoreWindow("asset", !!asset);
   const used = asset ? asset.usedBy > 0 || asset.usedByTemplates > 0 : false;
   return (
@@ -638,7 +863,12 @@ export interface SlotChoices {
   outroSec?: number;
 }
 const toChoice = (v: string | null | undefined): SlotChoice => (v === undefined ? "inherit" : v === null ? "none" : v);
-export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({ intro: toChoice(b?.intro), outro: toChoice(b?.outro), ...(b?.introSec ? { introSec: b.introSec } : {}), ...(b?.outroSec ? { outroSec: b.outroSec } : {}) });
+export const choicesFrom = (b: ClipBumpers | null | undefined): SlotChoices => ({
+  intro: toChoice(b?.intro),
+  outro: toChoice(b?.outro),
+  ...(b?.introSec ? { introSec: b.introSec } : {}),
+  ...(b?.outroSec ? { outroSec: b.outroSec } : {}),
+});
 const isAssetChoice = (c: SlotChoice) => c !== "inherit" && c !== "none" && c !== "keep" && c !== "default";
 /** The value stored on the clip: slots that inherit are left out, seconds only travel with a picked asset. */
 export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
@@ -650,13 +880,36 @@ export const clipBumpersFrom = (c: SlotChoices): ClipBumpers => ({
 /** The asset a slot ends up using on a clip: its own choice, else the project's. */
 export const effectiveAsset = (own: string | null | undefined, project: string | null | undefined) => (own === undefined ? project || null : own);
 /** Seconds a slot lasts on a clip: its own, else the project's, else the asset's own length. */
-export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string | null | undefined, projectSec: number | undefined, assetSec: number | undefined) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
+export const effectiveSeconds = (
+  clipSec: number | undefined,
+  ownChoice: string | null | undefined,
+  projectSec: number | undefined,
+  assetSec: number | undefined,
+) => (ownChoice !== undefined && ownChoice !== null ? (clipSec ?? assetSec) : (projectSec ?? assetSec));
 
 /**
  * Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset.
  * `template`: a layer template's slots instead (Clip's own / None / each asset; there is no project to follow).
  */
-export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false, template = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined; className?: string; keep?: boolean; reserveSec?: boolean; template?: boolean }) {
+export function BumperSelects({
+  value,
+  onChange,
+  projectIntroId,
+  projectOutroId,
+  className = "",
+  keep = false,
+  reserveSec = false,
+  template = false,
+}: {
+  value: SlotChoices;
+  onChange: (v: SlotChoices) => void;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+  className?: string;
+  keep?: boolean;
+  reserveSec?: boolean;
+  template?: boolean;
+}) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   // music is for the audio lane, never a slot
@@ -690,7 +943,9 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
     />
   );
   return (
-    <div className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}>
+    <div
+      className={`grid ${reserveSec ? "grid-cols-[4.5rem_minmax(0,22rem)_5rem] max-sm:grid-cols-[minmax(0,1fr)_5rem]" : "grid-cols-[4.5rem_minmax(0,1fr)]"} items-center gap-x-3 gap-y-2 ${className}`}
+    >
       {row("intro", "Intro", projectIntroId, defaults?.introAssetId)}
       {row("outro", "Outro", projectOutroId, defaults?.outroAssetId)}
     </div>
@@ -698,7 +953,25 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
 }
 
 /** "Intro / outro…" from a clip card's ⋯ menu: this clip's own choice without opening the editor. */
-export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId }: { open: boolean; onOpenChange: (o: boolean) => void; clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined }) {
+export function ClipBumpersDialog({
+  open,
+  onOpenChange,
+  clipId,
+  projectId,
+  bumpers,
+  rendered,
+  projectIntroId,
+  projectOutroId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  clipId: string;
+  projectId: string;
+  bumpers: ClipBumpers | null | undefined;
+  rendered: boolean;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
@@ -732,7 +1005,12 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
         <button className="btn-ghost px-2.5 py-1 text-xs" disabled={!dirty || update.isPending} onClick={() => save(false)}>
           Save
         </button>
-        <button className="btn-ink px-2.5 py-1 text-xs" disabled={!dirty || update.isPending || !rendered} title={rendered ? undefined : "This clip isn't rendered yet"} onClick={() => save(true)}>
+        <button
+          className="btn-ink px-2.5 py-1 text-xs"
+          disabled={!dirty || update.isPending || !rendered}
+          title={rendered ? undefined : "This clip isn't rendered yet"}
+          onClick={() => save(true)}
+        >
           Save & re-render
         </button>
       </div>
@@ -741,7 +1019,27 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
 }
 
 /** Applies an intro and/or outro to every selected clip (the selection bar's ⋯ menu). Slots left on "Leave as it is" are untouched. Pass `open` to drive it from that menu; otherwise it renders its own button. */
-export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className, open: openProp, onOpenChange }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function BulkBumpersPopover({
+  projectId,
+  clipIds,
+  rerenderable,
+  projectIntroId,
+  projectOutroId,
+  onDone,
+  className,
+  open: openProp,
+  onOpenChange,
+}: {
+  projectId: string;
+  clipIds: string[];
+  rerenderable: number;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
+  onDone: () => void;
+  className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [inner, setInner] = useState(false);
@@ -788,7 +1086,13 @@ export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIn
         <Popover.Anchor className="pointer-events-none absolute right-8 bottom-0 h-px w-px" />
       )}
       <Popover.Portal>
-        <Popover.Content side="top" align="end" sideOffset={8} collisionPadding={12} className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop">
+        <Popover.Content
+          side="top"
+          align="end"
+          sideOffset={8}
+          collisionPadding={12}
+          className="z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-3 rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+        >
           <b className="text-[13px]">
             Intro and outro for {clipIds.length} clip{clipIds.length === 1 ? "" : "s"}
           </b>
@@ -797,7 +1101,12 @@ export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIn
             <button className="btn-ghost px-2.5 py-1 text-xs" disabled={nothing || many.isPending} onClick={() => apply(false)}>
               Apply
             </button>
-            <button className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs" disabled={nothing || many.isPending || !rerenderable} title={rerenderable ? undefined : "None of the selected clips is rendered yet"} onClick={() => apply(true)}>
+            <button
+              className="btn-ink min-w-[9rem] px-2.5 py-1 text-xs"
+              disabled={nothing || many.isPending || !rerenderable}
+              title={rerenderable ? undefined : "None of the selected clips is rendered yet"}
+              onClick={() => apply(true)}
+            >
               {many.isPending ? "Applying…" : `Apply & re-render ${rerenderable}`}
             </button>
           </div>
@@ -839,7 +1148,8 @@ export function ProjectBumpersModal({
   const save = useMutation(trpc.projects.setBumpers.mutationOptions());
   const assets = library.data?.assets ?? [];
   const known = [...assets, ...(library.data?.deleted ?? [])];
-  const known1 = (id: string | null | undefined, slotDefault: string | undefined): Choice => (id === null ? "none" : id ? (id === slotDefault ? "default" : id) : slotDefault ? "none" : "default");
+  const known1 = (id: string | null | undefined, slotDefault: string | undefined): Choice =>
+    id === null ? "none" : id ? (id === slotDefault ? "default" : id) : slotDefault ? "none" : "default";
   const initial = { intro: known1(introId, defaults?.introAssetId), outro: known1(outroId, defaults?.outroAssetId) };
   const [pick, setPick] = useState<{ intro?: Choice; outro?: Choice; introSec?: number | null; outroSec?: number | null }>({});
   const intro = pick.intro ?? initial.intro;
@@ -871,7 +1181,14 @@ export function ProjectBumpersModal({
   );
   const apply = (rerender: boolean) =>
     save.mutate(
-      { id: projectId, intro, outro, ...(iSec && intro !== "none" ? { introSec: clampSec(iSec) } : {}), ...(oSec && outro !== "none" ? { outroSec: clampSec(oSec) } : {}), rerender },
+      {
+        id: projectId,
+        intro,
+        outro,
+        ...(iSec && intro !== "none" ? { introSec: clampSec(iSec) } : {}),
+        ...(oSec && outro !== "none" ? { outroSec: clampSec(oSec) } : {}),
+        rerender,
+      },
       {
         onSuccess: (r) => {
           void qc.invalidateQueries({ queryKey: trpc.projects.get.queryKey({ id: projectId }) });
@@ -889,7 +1206,9 @@ export function ProjectBumpersModal({
         {row("intro", "Intro", intro, iSec, defaults?.introAssetId)}
         {row("outro", "Outro", outro, oSec, defaults?.outroAssetId)}
       </div>
-      <p className="min-h-8 text-xs text-ink3">{dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}</p>
+      <p className="min-h-8 text-xs text-ink3">
+        {dirty ? `Re-render ${clipCount} clip${clipCount === 1 ? "" : "s"} now, or save and re-render later.` : "Manage the library on the Library page."}
+      </p>
       <div className="flex flex-wrap justify-end gap-2">
         <button className="btn-ghost" onClick={() => onOpenChange(false)}>
           Cancel

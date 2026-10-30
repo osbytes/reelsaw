@@ -41,9 +41,12 @@ const WORDS_PER_SEC = 3.3; // measured on the bench database
 
 // deterministic, so two runs produce the same data
 let seed = 42;
-const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-const pick = <T,>(a: readonly T[]) => a[Math.floor(rnd() * a.length)]!;
-const VOCAB = "so and the we you they really think about people because actually just going want make know right when what how why from video clip story money design build ship learn team company product market customer problem solution weekend morning decision hard simple honest fast slow".split(" ");
+const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+const pick = <T>(a: readonly T[]) => a[Math.floor(rnd() * a.length)]!;
+const VOCAB =
+  "so and the we you they really think about people because actually just going want make know right when what how why from video clip story money design build ship learn team company product market customer problem solution weekend morning decision hard simple honest fast slow".split(
+    " ",
+  );
 const sentence = (n = 6 + Math.floor(rnd() * 10)) => Array.from({ length: n }, () => pick(VOCAB)).join(" ");
 const title = () => sentence(3 + Math.floor(rnd() * 5)).replace(/^./, (c) => c.toUpperCase());
 
@@ -100,7 +103,11 @@ for (let p0 = 0; p0 < PROJECTS; p0 += 50) {
     });
     // words: {text,start,end}, the transcriber's shape and size (rawWords duplicates it, as in real rows)
     const nw = Math.round(dur * WORDS_PER_SEC);
-    const words = Array.from({ length: nw }, (_, k) => ({ text: pick(VOCAB), start: Number((k / WORDS_PER_SEC).toFixed(2)), end: Number(((k + 0.8) / WORDS_PER_SEC).toFixed(2)) }));
+    const words = Array.from({ length: nw }, (_, k) => ({
+      text: pick(VOCAB),
+      start: Number((k / WORDS_PER_SEC).toFixed(2)),
+      end: Number(((k + 0.8) / WORDS_PER_SEC).toFixed(2)),
+    }));
     const segments = Array.from({ length: Math.ceil(dur / 6) }, (_, k) => ({ text: sentence(18), start: k * 6, end: k * 6 + 6 }));
     nWords += nw;
     transcripts.push({ projectId: id, language: "en", text: sentence(Math.min(nw, 2000)), words, rawWords: words, flags: [], deletedFlags: [], segments });
@@ -131,7 +138,9 @@ for (let p0 = 0; p0 < PROJECTS; p0 += 50) {
       events.push({
         projectId: id,
         type: progress ? "stage.progress" : "clip.done",
-        payload: progress ? { stage: "render", progress: (e % 100) / 100, message: "Rendering" } : { clipId: `seed-c${i}-${e % Math.max(1, CLIPS)}`, index: e % Math.max(1, CLIPS) },
+        payload: progress
+          ? { stage: "render", progress: (e % 100) / 100, message: "Rendering" }
+          : { clipId: `seed-c${i}-${e % Math.max(1, CLIPS)}`, index: e % Math.max(1, CLIPS) },
         createdAt: new Date(created.getTime() + e * 1500),
       });
     }

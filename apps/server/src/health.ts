@@ -45,7 +45,8 @@ export async function settle(run: () => Promise<string | null>, onError: (err: u
 export const healthy = (checks: HealthChecks): boolean => Object.values(checks).every((v) => v === "ok");
 
 /** Is a heartbeat row seen at `lastSeenAt` fresh enough to call this process a live worker? */
-export const heartbeatFresh = (lastSeenAt: Date | undefined, now = new Date()): boolean => !!lastSeenAt && now.getTime() - lastSeenAt.getTime() <= WORKER_STALE_MS;
+export const heartbeatFresh = (lastSeenAt: Date | undefined, now = new Date()): boolean =>
+  !!lastSeenAt && now.getTime() - lastSeenAt.getTime() <= WORKER_STALE_MS;
 
 export async function runHealthChecks(svc: Services): Promise<{ ok: boolean; checks: HealthChecks }> {
   const log = svc.log.child({ module: "health" });
@@ -59,7 +60,10 @@ export async function runHealthChecks(svc: Services): Promise<{ ok: boolean; che
     settle(async () => (svc.queue.started() ? null : "job queue is not started"), failed("queue")),
     svc.config.RUN_WORKERS
       ? settle(async () => {
-          const [row] = await svc.database.db.select({ lastSeenAt: schema.workerInstances.lastSeenAt }).from(schema.workerInstances).where(eq(schema.workerInstances.id, workerIdOf(svc.config)));
+          const [row] = await svc.database.db
+            .select({ lastSeenAt: schema.workerInstances.lastSeenAt })
+            .from(schema.workerInstances)
+            .where(eq(schema.workerInstances.id, workerIdOf(svc.config)));
           return heartbeatFresh(row?.lastSeenAt) ? null : "worker heartbeat is stale";
         }, failed("workers"))
       : Promise.resolve(undefined),

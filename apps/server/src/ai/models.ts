@@ -116,10 +116,18 @@ export function createModelSettings(
     lastStored = key;
     const override: ModelOverride = {};
     for (const k of MODEL_KINDS) if (stored[k] && !ignored[k]) override[k] = stored[k];
-    const next: ModelsState = { current: resolveModels(env, override, envAlignSet), env, override, updatedAt: row?.updatedAt?.toISOString() ?? null, updatedBy: row?.updatedBy ?? null, ignored: { ...ignored } };
+    const next: ModelsState = {
+      current: resolveModels(env, override, envAlignSet),
+      env,
+      override,
+      updatedAt: row?.updatedAt?.toISOString() ?? null,
+      updatedBy: row?.updatedBy ?? null,
+      ignored: { ...ignored },
+    };
     if (changed) {
       if (JSON.stringify(next.current) !== JSON.stringify(st.current)) log.info({ models: next.current, override }, "models changed");
-      for (const k of MODEL_KINDS) if (ignored[k]) log.warn({ kind: k, model: stored[k], reason: ignored[k] }, "stored model override ignored; using the environment");
+      for (const k of MODEL_KINDS)
+        if (ignored[k]) log.warn({ kind: k, model: stored[k], reason: ignored[k] }, "stored model override ignored; using the environment");
     }
     st = next;
     return st;
@@ -162,7 +170,13 @@ export function createModelSettings(
         } else {
           await tx.delete(schema.instanceSettings).where(eq(schema.instanceSettings.key, KEY));
         }
-        await tx.insert(schema.adminEvents).values({ type: "models.changed", actorId: actor.id, userId: actor.id, email: actor.email, payload: { from, to: resolveModels(env, next, envAlignSet), override: next } });
+        await tx.insert(schema.adminEvents).values({
+          type: "models.changed",
+          actorId: actor.id,
+          userId: actor.id,
+          email: actor.email,
+          payload: { from, to: resolveModels(env, next, envAlignSet), override: next },
+        });
       });
       lastStored = "";
       return load();

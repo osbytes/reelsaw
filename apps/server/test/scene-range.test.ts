@@ -22,11 +22,34 @@ describe("detectScenes with a range", { skip: haveFfmpeg ? false : "ffmpeg not o
   // 3 s of red, then 3 s of blue: one cut at 3.0 s
   const made = spawnSync(
     ffmpeg,
-    ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=10:d=3", "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=10:d=3", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", "-c:v", "libx264", "-pix_fmt", "yuv420p", file],
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=red:s=320x240:r=10:d=3",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=blue:s=320x240:r=10:d=3",
+      "-filter_complex",
+      "[0:v][1:v]concat=n=2:v=1:a=0",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      file,
+    ],
     { stdio: "inherit" },
   );
   assert.equal(made.status, 0, "ffmpeg could not make the fixture");
-  const media = createMediaTools({ FFMPEG_PATH: ffmpeg, FFPROBE_PATH: "ffprobe", YTDLP_PATH: "yt-dlp", FFMPEG_ENCODER: "auto" } as Config, createLogger({ LOG_LEVEL: "error", LOG_FORMAT: "json" }));
+  const media = createMediaTools(
+    { FFMPEG_PATH: ffmpeg, FFPROBE_PATH: "ffprobe", YTDLP_PATH: "yt-dlp", FFMPEG_ENCODER: "auto" } as Config,
+    createLogger({ LOG_LEVEL: "error", LOG_FORMAT: "json" }),
+  );
   const near = (xs: number[], want: number) => xs.some((x) => Math.abs(x - want) <= 0.15);
 
   it("finds the cut on the whole file", async () => {

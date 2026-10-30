@@ -24,7 +24,14 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
     }
     if (t.posthog) {
       ph = (await import("posthog-js")).default;
-      ph.init(t.posthog.key, { api_host: t.posthog.host, capture_pageview: false, capture_pageleave: true, autocapture: false, disable_session_recording: true, persistence: "localStorage+cookie" });
+      ph.init(t.posthog.key, {
+        api_host: t.posthog.host,
+        capture_pageview: false,
+        capture_pageleave: true,
+        autocapture: false,
+        disable_session_recording: true,
+        persistence: "localStorage+cookie",
+      });
       if (lastPath) ph.capture("$pageview", { $current_url: window.location.href });
     }
   })().catch((err) => console.warn("telemetry init failed", err));

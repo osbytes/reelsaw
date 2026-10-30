@@ -159,7 +159,11 @@ export function forceAlign(emit: Float32Array, T: number, C: number, words: stri
     w.end = w.end === undefined ? end : Math.max(w.end, end);
     w.score = (w.score ?? 0) + prob[k]!;
   }
-  return out.map((w) => (w.start === undefined ? w : { ...w, start: Number(w.start.toFixed(3)), end: Number(w.end!.toFixed(3)), score: Number((w.score! / Math.max(1, [...w.text].length)).toFixed(3)) }));
+  return out.map((w) =>
+    w.start === undefined
+      ? w
+      : { ...w, start: Number(w.start.toFixed(3)), end: Number(w.end!.toFixed(3)), score: Number((w.score! / Math.max(1, [...w.text].length)).toFixed(3)) },
+  );
 }
 
 /**
@@ -168,7 +172,12 @@ export function forceAlign(emit: Float32Array, T: number, C: number, words: stri
  * timing when the alignment is confident; otherwise it keeps its original timing, clamped between its
  * re-timed neighbours so order is preserved. `pcm` is 16 kHz mono for the clip; times clip-relative.
  */
-export async function alignWordTimes<W extends { text: string; start: number; end: number }>(aligner: Aligner, pcm: Float32Array, words: W[], opts: { maxWindow?: number; minScore?: number; language?: string | null | undefined } = {}): Promise<{ words: W[]; aligned: number; medianShiftMs: number; unsupported?: boolean }> {
+export async function alignWordTimes<W extends { text: string; start: number; end: number }>(
+  aligner: Aligner,
+  pcm: Float32Array,
+  words: W[],
+  opts: { maxWindow?: number; minScore?: number; language?: string | null | undefined } = {},
+): Promise<{ words: W[]; aligned: number; medianShiftMs: number; unsupported?: boolean }> {
   // the acoustic model and its A-Z vocabulary are English: other languages keep their transcript timing
   if (!supports("ctcAlign", opts.language)) return { words: words.map((w) => ({ ...w })), aligned: 0, medianShiftMs: 0, unsupported: true };
   const maxWindow = opts.maxWindow ?? 20;
@@ -194,7 +203,10 @@ export async function alignWordTimes<W extends { text: string; start: number; en
     const t1 = Math.min(duration, words[b - 1]!.end + 0.4);
     if (t1 - t0 < 0.3) continue;
     const slice = pcm.subarray(Math.floor(t0 * ALIGN_SR), Math.floor(t1 * ALIGN_SR));
-    const spans = await aligner.align(slice, words.slice(a, b).map((w) => w.text));
+    const spans = await aligner.align(
+      slice,
+      words.slice(a, b).map((w) => w.text),
+    );
     spans.forEach((sp, k) => {
       if (sp.start === undefined || sp.end === undefined || (sp.score ?? -99) < minScore) return;
       const w = out[a + k]!;

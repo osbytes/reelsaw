@@ -14,7 +14,12 @@ function mcpInit(headers: Record<string, string>) {
   return fetch(`${BASE}/api/mcp`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } }),
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+    }),
   });
 }
 
@@ -35,13 +40,28 @@ describe("mcp", () => {
       [mine, owner.userId, "Mine"],
       [theirs, other.userId, "Theirs"],
     ] as const) {
-      await pool.query(`insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}')`, [id, uid, title]);
-      await pool.query(`insert into transcripts (project_id, language, text, words, raw_words, segments, flags) values ($1, 'en', 'hello world', $2, $2, $3, '[]')`, [
-        id,
-        JSON.stringify([{ text: "hello", start: 0, end: 0.5 }, { text: "world", start: 0.5, end: 1 }]),
-        JSON.stringify([{ start: 0, end: 1, text: "hello world" }, { start: 60, end: 61, text: "bye" }]),
-      ]);
-      await pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, 0, 'Clip', 'Hook', 0, 1, 80, 'why', '[]', 'done')`, [randomUUID(), id]);
+      await pool.query(
+        `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}')`,
+        [id, uid, title],
+      );
+      await pool.query(
+        `insert into transcripts (project_id, language, text, words, raw_words, segments, flags) values ($1, 'en', 'hello world', $2, $2, $3, '[]')`,
+        [
+          id,
+          JSON.stringify([
+            { text: "hello", start: 0, end: 0.5 },
+            { text: "world", start: 0.5, end: 1 },
+          ]),
+          JSON.stringify([
+            { start: 0, end: 1, text: "hello world" },
+            { start: 60, end: 61, text: "bye" },
+          ]),
+        ],
+      );
+      await pool.query(
+        `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status) values ($1, $2, 0, 'Clip', 'Hook', 0, 1, 80, 'why', '[]', 'done')`,
+        [randomUUID(), id],
+      );
     }
     client = new Client({ name: "test", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", BASE), { requestInit: { headers: { authorization: `Bearer ${apiKey.key}` } } }));
@@ -60,16 +80,63 @@ describe("mcp", () => {
 
   it("lists the tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    for (const n of ["list_projects", "get_project", "create_project", "wait_for_project", "get_transcript", "search_clips", "get_clip", "update_clip", "create_clip", "rerender_clip", "rerender_clips", "export_project", "delete_project", "purge_project", "search_assets", "set_default_bumper", "set_project_bumpers", "set_clip_bumpers", "restore_project", "restore_clip", "update_project", "delete_clip", "add_asset", "update_asset", "delete_asset", "restore_asset", "asset_usage", "list_layer_templates", "save_layer_template", "update_layer_template", "delete_layer_template", "refine_project", "restore_layer_template", "apply_layer_template", "list_deleted", "purge_clip", "purge_asset", "purge_layer_template"]) assert.ok(names.includes(n), n);
+    for (const n of [
+      "list_projects",
+      "get_project",
+      "create_project",
+      "wait_for_project",
+      "get_transcript",
+      "search_clips",
+      "get_clip",
+      "update_clip",
+      "create_clip",
+      "rerender_clip",
+      "rerender_clips",
+      "export_project",
+      "delete_project",
+      "purge_project",
+      "search_assets",
+      "set_default_bumper",
+      "set_project_bumpers",
+      "set_clip_bumpers",
+      "restore_project",
+      "restore_clip",
+      "update_project",
+      "delete_clip",
+      "add_asset",
+      "update_asset",
+      "delete_asset",
+      "restore_asset",
+      "asset_usage",
+      "list_layer_templates",
+      "save_layer_template",
+      "update_layer_template",
+      "delete_layer_template",
+      "refine_project",
+      "restore_layer_template",
+      "apply_layer_template",
+      "list_deleted",
+      "purge_clip",
+      "purge_asset",
+      "purge_layer_template",
+    ])
+      assert.ok(names.includes(n), n);
   });
 
   it("sees only the caller's projects", async () => {
     const r = await client.callTool({ name: "list_projects", arguments: {} });
-    const page = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as { projects: Array<{ id: string; title: string; clips: string }>; total: number; nextCursor: string | null };
+    const page = JSON.parse((r.content as Array<{ text: string }>)[0]!.text) as {
+      projects: Array<{ id: string; title: string; clips: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
     const rows = page.projects;
     assert.equal(page.total, 1);
     assert.equal(page.nextCursor, null);
-    assert.deepEqual(rows.map((p) => p.id), [mine]);
+    assert.deepEqual(
+      rows.map((p) => p.id),
+      [mine],
+    );
     assert.equal(rows[0]!.clips, "1/1 rendered");
     const denied = await client.callTool({ name: "get_project", arguments: { id: theirs } });
     assert.equal(denied.isError, true);
@@ -94,7 +161,10 @@ describe("mcp", () => {
     assert.deepEqual(JSON.parse((r.content as Array<{ text: string }>)[0]!.text), { provider: "library", items: [] });
     const noClips = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: mine, clipIds: [], rerender: false } });
     assert.equal(noClips.isError, true);
-    const foreign = await client.callTool({ name: "set_clip_bumpers", arguments: { projectId: theirs, clipIds: [randomUUID()], intro: "none", rerender: false } });
+    const foreign = await client.callTool({
+      name: "set_clip_bumpers",
+      arguments: { projectId: theirs, clipIds: [randomUUID()], intro: "none", rerender: false },
+    });
     assert.equal(foreign.isError, true);
     assert.match((foreign.content as Array<{ text: string }>)[0]!.text, /NOT_FOUND/);
     const got = await client.callTool({ name: "get_project", arguments: { id: mine } });
@@ -110,7 +180,11 @@ describe("mcp", () => {
   };
 
   it("update_project saves title and settings without re-running anything", async () => {
-    const r = await call<{ changed: string[]; needsReanalyze: boolean; needsRerender: boolean; hint?: string }>("update_project", { id: mine, title: "Renamed", settings: { focus: "money", captionSize: 1.2 } });
+    const r = await call<{ changed: string[]; needsReanalyze: boolean; needsRerender: boolean; hint?: string }>("update_project", {
+      id: mine,
+      title: "Renamed",
+      settings: { focus: "money", captionSize: 1.2 },
+    });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual(r.data.changed.sort(), ["captionSize", "focus", "title"]);
     assert.equal(r.data.needsReanalyze, true);
@@ -140,7 +214,10 @@ describe("mcp", () => {
     assert.equal(del.data.changed, true);
     const after = (await call<{ clips: unknown[]; replacedClips: Array<{ id: string }> }>("get_project", { id: mine })).data;
     assert.equal(after.clips.length, 0);
-    assert.deepEqual(after.replacedClips.map((c) => c.id), [id]);
+    assert.deepEqual(
+      after.replacedClips.map((c) => c.id),
+      [id],
+    );
     const gone = await call("get_clip", { id });
     assert.equal(gone.isError, true);
     assert.match(gone.text, /restore_clip/);
@@ -154,7 +231,10 @@ describe("mcp", () => {
 
   it("update_asset renames only the caller's library items", async () => {
     const asset = randomUUID();
-    await pool.query(`insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Old', 3, 1080, 1920, false, 'bumpers/x.png', 10)`, [asset, owner.userId]);
+    await pool.query(
+      `insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Old', 3, 1080, 1920, false, 'bumpers/x.png', 10)`,
+      [asset, owner.userId],
+    );
     const r = await call<{ name: string; previousName: string }>("update_asset", { assetId: asset, name: "  New name " });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual([r.data.previousName, r.data.name], ["Old", "New name"]);
@@ -165,7 +245,10 @@ describe("mcp", () => {
 
   it("update_asset replaces tags; asset_usage reads asset_refs", async () => {
     const asset = randomUUID();
-    await pool.query(`insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Logo', 3, 1080, 1920, false, 'assets/x/source.png', 10)`, [asset, owner.userId]);
+    await pool.query(
+      `insert into assets (id, user_id, kind, name, duration_sec, width, height, has_audio, source_key, size_bytes) values ($1, $2, 'image', 'Logo', 3, 1080, 1920, false, 'assets/x/source.png', 10)`,
+      [asset, owner.userId],
+    );
     const r = await call<{ tags: string[] }>("update_asset", { assetId: asset, tags: ["Brand", "brand", "blue"] });
     assert.equal(r.isError, false, r.text);
     assert.deepEqual(r.data.tags, ["brand", "blue"]);
@@ -179,7 +262,10 @@ describe("mcp", () => {
     const t = await fetch(`${BASE}/api/trpc/projects.list`, { headers: h });
     assert.equal(t.status, 200);
     const body = (await t.json()) as { result: { data: { items: Array<{ id: string }> } } };
-    assert.deepEqual(body.result.data.items.map((p) => p.id), [mine]);
+    assert.deepEqual(
+      body.result.data.items.map((p) => p.id),
+      [mine],
+    );
     // the project has no stored source: auth passes (not 401), the file is missing (404)
     assert.equal((await fetch(`${BASE}/media/source/${mine}`, { headers: h })).status, 404);
     assert.equal((await fetch(`${BASE}/media/source/${theirs}`, { headers: h })).status, 404);
@@ -187,7 +273,11 @@ describe("mcp", () => {
   });
 
   it("stops working once revoked", async () => {
-    const res = await fetch(`${BASE}/api/auth/api-key/delete`, { method: "POST", headers: { "content-type": "application/json", origin: BASE, cookie: owner.cookie }, body: JSON.stringify({ keyId: apiKey.id }) });
+    const res = await fetch(`${BASE}/api/auth/api-key/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, cookie: owner.cookie },
+      body: JSON.stringify({ keyId: apiKey.id }),
+    });
     assert.equal(res.status, 200, res.statusText);
     assert.equal((await mcpInit({ authorization: `Bearer ${apiKey.key}` })).status, 401);
   });

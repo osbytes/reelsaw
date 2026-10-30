@@ -23,7 +23,10 @@ export function parseProfiles(opts: { matrix?: string | undefined; profiles?: st
   if (opts.matrix) {
     const parsed = JSON.parse(readFileSync(path.resolve(opts.matrix), "utf8")) as MatrixFile;
     if (!parsed.profiles || typeof parsed.profiles !== "object") throw new Error(`${opts.matrix}: expected { "profiles": { "<name>": { "ENV": "value" } } }`);
-    const only = opts.profiles?.split(",").map((s) => s.trim()).filter(Boolean);
+    const only = opts.profiles
+      ?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     const missing = only?.filter((n) => !parsed.profiles[n]) ?? [];
     if (missing.length) throw new Error(`unknown profile(s) ${missing.join(", ")}; the matrix defines: ${Object.keys(parsed.profiles).join(", ")}`);
     for (const [name, env] of Object.entries(parsed.profiles)) {
@@ -39,7 +42,12 @@ export function parseProfiles(opts: { matrix?: string | undefined; profiles?: st
       if (i <= 0) throw new Error(`--set expects KEY=VALUE, got "${kv}"`);
       env[kv.slice(0, i)] = kv.slice(i + 1);
     }
-    out.push({ name: Object.values(env).join("+").replace(/[^A-Za-z0-9._:+/-]+/g, "_"), env });
+    out.push({
+      name: Object.values(env)
+        .join("+")
+        .replace(/[^A-Za-z0-9._:+/-]+/g, "_"),
+      env,
+    });
   }
   return out;
 }

@@ -309,7 +309,10 @@ export const readSweepState = async (svc: Services) => getState<SweepState & Rec
  * (`budgeted`) stop after SWEEP_BUDGET_MS and continue from the saved cursor next time; a manual
  * run or a dry run covers everything and leaves the cursor alone.
  */
-export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budgeted?: boolean } = {}): Promise<{ removals: Removal[]; bytes: number; scanned: number; complete: boolean }> {
+export async function sweepScratch(
+  svc: Services,
+  opts: { dryRun?: boolean; budgeted?: boolean } = {},
+): Promise<{ removals: Removal[]; bytes: number; scanned: number; complete: boolean }> {
   const log = svc.log.child({ module: "sweep" });
   const started = Date.now();
   const prior = opts.budgeted ? await readSweepState(svc) : {};
@@ -323,7 +326,14 @@ export async function sweepScratch(svc: Services, opts: { dryRun?: boolean; budg
   if (!opts.dryRun) {
     log.info({ directories: scan.scanned, files: done.length, bytes, complete: scan.complete, ms: Date.now() - started }, "scratch sweep finished");
     if (opts.budgeted) {
-      const state: SweepState = { cursor: scan.lastDir, lastRunAt: new Date().toISOString(), lastRunMs: Date.now() - started, lastScanned: scan.scanned, lastComplete: scan.complete, lastRemoved: done.length };
+      const state: SweepState = {
+        cursor: scan.lastDir,
+        lastRunAt: new Date().toISOString(),
+        lastRunMs: Date.now() - started,
+        lastScanned: scan.scanned,
+        lastComplete: scan.complete,
+        lastRemoved: done.length,
+      };
       await setState(svc.database.db, await sweepStateKey(svc), { ...state });
     }
   }
@@ -356,7 +366,11 @@ export const RECLAIM_BUDGET_MS = 60_000;
  * editing today goes last). Leftovers found on the way go too. Stops as soon as enough is freed, at
  * the end of the finished projects, or after RECLAIM_BUDGET_MS. Nothing to evict with the local store.
  */
-export async function reclaimScratch(svc: Services, needBytes: number, opts: { dryRun?: boolean; now?: number } = {}): Promise<{ removals: Removal[]; bytes: number; enough: boolean }> {
+export async function reclaimScratch(
+  svc: Services,
+  needBytes: number,
+  opts: { dryRun?: boolean; now?: number } = {},
+): Promise<{ removals: Removal[]; bytes: number; enough: boolean }> {
   const log = svc.log.child({ module: "sweep" });
   const now = opts.now ?? Date.now();
   const removals: Removal[] = [];
@@ -394,7 +408,10 @@ export async function reclaimScratch(svc: Services, needBytes: number, opts: { d
     },
   });
   const enough = bytes >= needBytes;
-  log.info({ needBytes, bytes, files: removals.length, enough, dryRun: !!opts.dryRun }, enough ? "reclaimed scratch for a job short of disk" : "could not reclaim enough scratch");
+  log.info(
+    { needBytes, bytes, files: removals.length, enough, dryRun: !!opts.dryRun },
+    enough ? "reclaimed scratch for a job short of disk" : "could not reclaim enough scratch",
+  );
   return { removals, bytes, enough };
 }
 
@@ -499,33 +516,43 @@ export async function purgeBumperAssets(svc: Services, opts: { dryRun?: boolean;
   return purged;
 
   async function purgeBatch(candidates: string[]) {
-  for (const id of candidates) {
-    if (opts.dryRun) {
-      purged.push(id);
-      continue;
-    }
-    const gone = await svc.tx(async (u) => {
-      const [a] = await u.db.select({ id: schema.assets.id, userId: schema.assets.userId, createdAt: schema.assets.createdAt, deletedAt: schema.assets.deletedAt, sourceKey: schema.assets.sourceKey }).from(schema.assets).where(eq(schema.assets.id, id)).for("update");
-      if (!a) return false;
-      // refs are written in the transaction that points at the asset (library/refs.ts), after taking the same row lock
-      const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${id}) as used`);
-      const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
-      if (!bumperPurgeable(a, used, now)) return false;
-      await u.db.delete(schema.assets).where(eq(schema.assets.id, id));
-      u.afterCommit(async () => {
-        try {
-          // rows made before the rename keep their files under bumpers/<id>, newer ones under assets/<id>
-          await dropAssetStorage(svc, a.sourceKey);
-        } catch (err) {
-          log.warn({ err, assetId: id }, "purged a library asset but could not remove its files");
-        }
+    for (const id of candidates) {
+      if (opts.dryRun) {
+        purged.push(id);
+        continue;
+      }
+      const gone = await svc.tx(async (u) => {
+        const [a] = await u.db
+          .select({
+            id: schema.assets.id,
+            userId: schema.assets.userId,
+            createdAt: schema.assets.createdAt,
+            deletedAt: schema.assets.deletedAt,
+            sourceKey: schema.assets.sourceKey,
+          })
+          .from(schema.assets)
+          .where(eq(schema.assets.id, id))
+          .for("update");
+        if (!a) return false;
+        // refs are written in the transaction that points at the asset (library/refs.ts), after taking the same row lock
+        const ref = await u.db.execute(sql`select exists (select 1 from asset_refs where asset_id = ${id}) as used`);
+        const used = !!(ref.rows[0] as { used: boolean } | undefined)?.used;
+        if (!bumperPurgeable(a, used, now)) return false;
+        await u.db.delete(schema.assets).where(eq(schema.assets.id, id));
+        u.afterCommit(async () => {
+          try {
+            // rows made before the rename keep their files under bumpers/<id>, newer ones under assets/<id>
+            await dropAssetStorage(svc, a.sourceKey);
+          } catch (err) {
+            log.warn({ err, assetId: id }, "purged a library asset but could not remove its files");
+          }
+        });
+        return true;
       });
-      return true;
-    });
-    if (gone) {
-      purged.push(id);
-      log.info({ assetId: id }, "purged a library asset removed over 30 days ago");
+      if (gone) {
+        purged.push(id);
+        log.info({ assetId: id }, "purged a library asset removed over 30 days ago");
+      }
     }
-  }
   }
 }

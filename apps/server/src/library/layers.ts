@@ -4,7 +4,18 @@
  * CLI all write through `cleanLayers`, so one rule decides what a stored layer looks like.
  */
 import { TRPCError } from "@trpc/server";
-import { ASSET_OVERLAY_DEFAULT_W, CLIP_AUDIO_DEFAULTS, MAX_CLIP_LAYERS, TEXT_FONTS, TEXT_OVERLAY_DEFAULTS, layersToLegacy, overlayKind, type ClipAudio, type ClipLayer, type ClipOverlay } from "@reelsaw/shared";
+import {
+  ASSET_OVERLAY_DEFAULT_W,
+  CLIP_AUDIO_DEFAULTS,
+  MAX_CLIP_LAYERS,
+  TEXT_FONTS,
+  TEXT_OVERLAY_DEFAULTS,
+  layersToLegacy,
+  overlayKind,
+  type ClipAudio,
+  type ClipLayer,
+  type ClipOverlay,
+} from "@reelsaw/shared";
 
 type ClipRange = { startSec: number; endSec: number };
 
@@ -21,8 +32,24 @@ export function cleanOverlays(list: ClipOverlay[] | null | undefined, clip: Clip
     if (end - start < 0.1) throw new TRPCError({ code: "BAD_REQUEST", message: `Overlay “${o.id}” lies outside the clip or lasts under 0.1 s` });
     const r3 = (n: number) => Number(n.toFixed(3));
     const kind = overlayKind(o);
-    const base = { id: o.id, kind, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), x: r3(o.x), y: r3(o.y), ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: r3(o.opacity) } : {}) };
-    if (kind === "text") out.push({ ...base, text: o.text!, size: r3(o.size ?? TEXT_OVERLAY_DEFAULTS.size), color: (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(), ...(o.box ? { box: true } : {}), ...(o.font && o.font !== TEXT_FONTS[0].family ? { font: o.font } : {}) });
+    const base = {
+      id: o.id,
+      kind,
+      start: Number(start.toFixed(2)),
+      end: Number(end.toFixed(2)),
+      x: r3(o.x),
+      y: r3(o.y),
+      ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: r3(o.opacity) } : {}),
+    };
+    if (kind === "text")
+      out.push({
+        ...base,
+        text: o.text!,
+        size: r3(o.size ?? TEXT_OVERLAY_DEFAULTS.size),
+        color: (o.color ?? TEXT_OVERLAY_DEFAULTS.color).toUpperCase(),
+        ...(o.box ? { box: true } : {}),
+        ...(o.font && o.font !== TEXT_FONTS[0].family ? { font: o.font } : {}),
+      });
     else out.push({ ...base, assetId: o.assetId!, w: r3(o.w ?? ASSET_OVERLAY_DEFAULT_W) });
   }
   return out.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));

@@ -28,64 +28,127 @@ export const DOCS: Record<string, [GroupId, string]> = {
   PORT: ["core", "Port the HTTP server listens on."],
   APP_URL: ["core", "Public URL people open in the browser; used for auth cookies, CORS, the OAuth issuer and links in emails."],
   DATABASE_URL: ["core", "Postgres connection string. Compose sets it; set it yourself when running from source."],
-  DB_POOL_MAX: ["core", "Connections in each process's Postgres pool (minimum 4). The app and every worker process hold their own, so keep (processes x this) under Postgres' `max_connections`. Raise it if the boot log warns that job concurrency exceeds the pool. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction."],
-  BETTER_AUTH_SECRET: ["core", "32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable."],
+  DB_POOL_MAX: [
+    "core",
+    "Connections in each process's Postgres pool (minimum 4). The app and every worker process hold their own, so keep (processes x this) under Postgres' `max_connections`. Raise it if the boot log warns that job concurrency exceeds the pool. Model-call slots use a separate small pool, and connections time out after 10 s to connect and 5 minutes idle inside a transaction.",
+  ],
+  BETTER_AUTH_SECRET: [
+    "core",
+    "32+ random characters (`openssl rand -base64 32`). Signs sessions and encrypts the provider keys admins enter in Settings; rotating it makes those keys unreadable.",
+  ],
   DATA_DIR: ["core", "Working directory for uploads, per-project scratch files, the local storage driver and caches."],
   WEB_DIST: ["core", "Directory of the built web app to serve. Unset: the bundled location."],
   RUN_HTTP: ["core", "Serve HTTP in this process. false for a worker-only container."],
   RUN_WORKERS: ["core", "Process pipeline jobs in this process. false for a web-only container. At least one of RUN_HTTP / RUN_WORKERS must be on."],
-  WORKER_ID: ["core", "Stable name for this process on Settings → System → Workers. Unset: `hostname:pid`. Set it to the pod or container name when scaling workers so each replica stays recognisable. Two live processes must not share an id (they would overwrite each other's heartbeat and disk leases): if a process with the same id beat in the last 30 s, the new one appends `-` and four hex characters and logs a warning, so a pinned id on `docker compose --scale worker=N` still works."],
+  WORKER_ID: [
+    "core",
+    "Stable name for this process on Settings → System → Workers. Unset: `hostname:pid`. Set it to the pod or container name when scaling workers so each replica stays recognisable. Two live processes must not share an id (they would overwrite each other's heartbeat and disk leases): if a process with the same id beat in the last 30 s, the new one appends `-` and four hex characters and logs a warning, so a pinned id on `docker compose --scale worker=N` still works.",
+  ],
   REELSAW_VERSION: ["core", "Release version baked into the image at build time (`dev` from source)."],
   REELSAW_COMMIT: ["core", "Git commit baked into the image at build time."],
   REELSAW_BUILT_AT: ["core", "Build timestamp baked into the image."],
   MAX_UPLOAD_MB: ["core", "Largest accepted file upload in MB."],
   MAX_SOURCE_FILE_MB: ["core", "Largest file yt-dlp may download for a link source, in MB (`--max-filesize`)."],
-  ALLOW_PRIVATE_SOURCE_URLS: ["core", "`true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). The guard checks the first address only: yt-dlp follows redirects itself, so a shared or hosted instance also needs an egress proxy or network policy (see SECURITY.md, \"URL sources and your network\")."],
+  ALLOW_PRIVATE_SOURCE_URLS: [
+    "core",
+    '`true` lets link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard). The guard checks the first address only: yt-dlp follows redirects itself, so a shared or hosted instance also needs an egress proxy or network policy (see SECURITY.md, "URL sources and your network").',
+  ],
 
-  SIGNUP_MODE: ["accounts", "`open`: anyone may sign up. `approval`: new accounts wait for an admin (a private box). `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. A public instance with email confirmation, captcha and quotas should stay `open`."],
+  SIGNUP_MODE: [
+    "accounts",
+    "`open`: anyone may sign up. `approval`: new accounts wait for an admin (a private box). `closed`: no sign-ups. The first account is always the admin. Unset: `open`, unless the deprecated ALLOW_SIGNUP says otherwise. A public instance with email confirmation, captcha and quotas should stay `open`.",
+  ],
   ALLOW_SIGNUP: ["accounts", "Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE."],
-  EMAIL_DRIVER: ["accounts", "Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off."],
+  EMAIL_DRIVER: [
+    "accounts",
+    "Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off.",
+  ],
   EMAIL_FROM: ["accounts", "Sender, e.g. `Reelsaw <no-reply@example.com>`. Required with an email driver."],
   SMTP_URL: ["accounts", "SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp."],
   RESEND_API_KEY: ["accounts", "Required with EMAIL_DRIVER=resend."],
-  REQUIRE_EMAIL_VERIFICATION: ["accounts", "With an email driver: users must click the verification link before they can sign in. The link works for 24 hours and is single-use; an expired one offers a new send."],
-  TRUST_PROXY: ["accounts", "Take the client address from the reverse proxy's header (see `TRUSTED_PROXY_HEADER`): the Docker deployment sits behind Caddy, so the default is on. `false` when the app is exposed directly, or the header is whatever the client sent. The address feeds the sign-up cap and the OAuth client-registration limit."],
-  TRUSTED_PROXY_HEADER: ["accounts", "Header that carries the client address when `TRUST_PROXY` is on: `x-forwarded-for` (default; Caddy, nginx, most load balancers), `cf-connecting-ip` (Cloudflare, with the origin closed to everything else) or `x-real-ip`. Only the selected header is read, so a client cannot choose its address by sending a different one."],
-  TRUSTED_PROXY_HOPS: ["accounts", "With `x-forwarded-for`: how many trusted proxies sit in front of the app, each appending the address it saw. The client is the entry that many places from the right, so entries a client prepends are ignored. 1 for Caddy alone, 2 for Cloudflare in front of Caddy."],
+  REQUIRE_EMAIL_VERIFICATION: [
+    "accounts",
+    "With an email driver: users must click the verification link before they can sign in. The link works for 24 hours and is single-use; an expired one offers a new send.",
+  ],
+  TRUST_PROXY: [
+    "accounts",
+    "Take the client address from the reverse proxy's header (see `TRUSTED_PROXY_HEADER`): the Docker deployment sits behind Caddy, so the default is on. `false` when the app is exposed directly, or the header is whatever the client sent. The address feeds the sign-up cap and the OAuth client-registration limit.",
+  ],
+  TRUSTED_PROXY_HEADER: [
+    "accounts",
+    "Header that carries the client address when `TRUST_PROXY` is on: `x-forwarded-for` (default; Caddy, nginx, most load balancers), `cf-connecting-ip` (Cloudflare, with the origin closed to everything else) or `x-real-ip`. Only the selected header is read, so a client cannot choose its address by sending a different one.",
+  ],
+  TRUSTED_PROXY_HOPS: [
+    "accounts",
+    "With `x-forwarded-for`: how many trusted proxies sit in front of the app, each appending the address it saw. The client is the entry that many places from the right, so entries a client prepends are ignored. 1 for Caddy alone, 2 for Cloudflare in front of Caddy.",
+  ],
   MAX_SIGNUPS_PER_IP_PER_DAY: ["accounts", "Accounts one network address may create per day (sign-up guard). 0 = unlimited."],
   BLOCK_DISPOSABLE_EMAILS: ["accounts", "Refuse sign-ups from known temporary-address domains."],
   MAX_REQUESTS_PER_MINUTE: ["limits", "Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited."],
   MAX_REQUESTS_PER_HOUR: ["limits", "Changes an account may make per hour. 0 = unlimited."],
   TERMS_URL: ["accounts", "Terms of service link shown on the sign-up form when set."],
   PRIVACY_URL: ["accounts", "Privacy policy link shown on the sign-up form when set."],
-  CAPTCHA_PROVIDER: ["accounts", "Bot protection on sign-up, sign-in and password reset: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below."],
+  CAPTCHA_PROVIDER: [
+    "accounts",
+    "Bot protection on sign-up, sign-in and password reset: `cloudflare-turnstile`, `google-recaptcha` or `hcaptcha`. Needs both keys below.",
+  ],
   CAPTCHA_SITE_KEY: ["accounts", "Public captcha key."],
   CAPTCHA_SECRET_KEY: ["accounts", "Secret captcha key."],
   MCP_OAUTH: ["accounts", "MCP over OAuth 2.1 so claude.ai and Claude Desktop connectors sign in with the browser. API keys always work."],
-  UPDATE_CHECK: ["core", "Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub."],
+  UPDATE_CHECK: [
+    "core",
+    "Ask GitHub for the latest release and tell admins in Settings → System, `reelsaw version` and the `check_for_update` tool when a newer one exists. Only the request leaves the machine (no ids, no usage). `false` never contacts GitHub.",
+  ],
   UPDATE_CHECK_URL: ["core", "Releases endpoint the check asks (GitHub's `releases/latest` of this repository); change it for a fork or a mirror."],
-  UPDATE_CHECK_HOURS: ["core", "Hours between update checks (1–168). \"Check now\" in Settings asks at most once a minute."],
+  UPDATE_CHECK_HOURS: ["core", 'Hours between update checks (1–168). "Check now" in Settings asks at most once a minute.'],
   HEALTH_DETAILS: ["accounts", "Include machine numbers in `GET /api/health` for anonymous callers (private networks only). Admins always get them."],
 
-  CATALOG_URL: ["core", "Reelsaw catalog manifest (sounds, icons, stickers for the Library's Browse panel), fetched hourly with ETag; the starter pack bundled in the image is used until a newer version arrives."],
+  CATALOG_URL: [
+    "core",
+    "Reelsaw catalog manifest (sounds, icons, stickers for the Library's Browse panel), fetched hourly with ETag; the starter pack bundled in the image is used until a newer version arrives.",
+  ],
   PEXELS_API_KEY: ["providers", "Pexels key (free): stock photos and portrait videos in Library → Browse. Empty = hidden."],
-  PIXABAY_API_KEY: ["providers", "Pixabay key (free): photos, illustrations, vectors and videos in Library → Browse. Results are cached 24 h; files are downloaded, never hotlinked. Empty = hidden."],
+  PIXABAY_API_KEY: [
+    "providers",
+    "Pixabay key (free): photos, illustrations, vectors and videos in Library → Browse. Results are cached 24 h; files are downloaded, never hotlinked. Empty = hidden.",
+  ],
   FREESOUND_API_KEY: ["providers", "Freesound key (free): CC0 (or CC-BY) sound effects in Library → Browse. Empty = hidden."],
-  GIPHY_API_KEY: ["providers", "Giphy key: GIFs and stickers in Library → Browse (shows \"Powered by GIPHY\"). Empty = hidden."],
+  GIPHY_API_KEY: ["providers", 'Giphy key: GIFs and stickers in Library → Browse (shows "Powered by GIPHY"). Empty = hidden.'],
   KLIPY_API_KEY: ["providers", "Klipy key: GIF search in Library → Browse (experimental). Empty = hidden."],
-  ICONIFY_API_URL: ["providers", "Iconify API for icon search (permissive sets only: lucide, tabler, mdi, ph, heroicons, ri, solar); point it at a self-hosted instance if you prefer. https only."],
+  ICONIFY_API_URL: [
+    "providers",
+    "Iconify API for icon search (permissive sets only: lucide, tabler, mdi, ph, heroicons, ri, solar); point it at a self-hosted instance if you prefer. https only.",
+  ],
   OPENVERSE_ENABLED: ["providers", "Show Openverse (CC0 and CC-BY images and audio, no key) in Library → Browse."],
 
-  REELSAW_EE: ["billing", "Load the enterprise edition (`apps/server/src/ee`, its own licence): billing through Stripe, plans that set each account's limits. Off, nothing in that folder runs. See docs/specs/ee.md."],
+  REELSAW_EE: [
+    "billing",
+    "Load the enterprise edition (`apps/server/src/ee`, its own licence): billing through Stripe, plans that set each account's limits. Off, nothing in that folder runs. See docs/specs/ee.md.",
+  ],
   STRIPE_SECRET_KEY: ["billing", "Stripe secret key (`sk_live_…` / `sk_test_…`). Required with REELSAW_EE."],
   STRIPE_WEBHOOK_SECRET: ["billing", "Signing secret of the webhook endpoint `POST /api/billing/webhook` (`whsec_…`). Required with REELSAW_EE."],
-  STRIPE_MANAGED_PAYMENTS: ["billing", "Enable Stripe Managed Payments (Stripe as merchant of record: it files sales tax and VAT) on every Checkout Session. The Stripe account must be approved for it first."],
-  STRIPE_API_BASE: ["billing", "Development only: an origin that stands in for api.stripe.com (stripe-mock, or `test/stripe-mock.ts`). Never set in production."],
+  STRIPE_MANAGED_PAYMENTS: [
+    "billing",
+    "Enable Stripe Managed Payments (Stripe as merchant of record: it files sales tax and VAT) on every Checkout Session. The Stripe account must be approved for it first.",
+  ],
+  STRIPE_API_BASE: [
+    "billing",
+    "Development only: an origin that stands in for api.stripe.com (stripe-mock, or `test/stripe-mock.ts`). Never set in production.",
+  ],
   BILLING_GRACE_DAYS: ["billing", "Days a past-due subscription keeps its plan after the first failed payment; then the account falls back to Free."],
 
-  AI_MODEL: ["models", "Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models."],
-  TRANSCRIPTION_MODEL: ["models", "Default speech-to-text model as `provider:model`. It must return word timestamps: `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, or a Speaches model through OPENAI_BASE_URL. `openai:gpt-4o-transcribe` returns none and does not work."],
-  TRANSCRIPT_ALIGN_MODEL: ["models", "Model that re-aligns cut boundaries on short windows. Unset: TRANSCRIPTION_MODEL. A bigger whisper here is cheap and pays off."],
+  AI_MODEL: [
+    "models",
+    "Default language model as `provider:model` (`openai:gpt-4o-mini`, `anthropic:claude-sonnet-4-5`, `google:gemini-2.5-flash`, `groq:llama-3.3-70b-versatile`, `gateway:anthropic/claude-sonnet-4-5`, `compat:<model>`). Admins can override it at runtime under Settings -> System -> Models.",
+  ],
+  TRANSCRIPTION_MODEL: [
+    "models",
+    "Default speech-to-text model as `provider:model`. It must return word timestamps: `openai:whisper-1`, `deepgram:nova-3`, `assemblyai:best`, `groq:whisper-large-v3-turbo`, `gateway:openai/whisper-1`, or a Speaches model through OPENAI_BASE_URL. `openai:gpt-4o-transcribe` returns none and does not work.",
+  ],
+  TRANSCRIPT_ALIGN_MODEL: [
+    "models",
+    "Model that re-aligns cut boundaries on short windows. Unset: TRANSCRIPTION_MODEL. A bigger whisper here is cheap and pays off.",
+  ],
 
   OPENAI_API_KEY: ["providers", "OpenAI key. With OPENAI_BASE_URL it is the key for that server (`local` for Speaches)."],
   OPENAI_BASE_URL: ["providers", "Point the OpenAI provider at a local OpenAI-compatible server (Speaches, LM Studio, vLLM), e.g. `http://speaches:8000/v1`."],
@@ -95,32 +158,74 @@ export const DOCS: Record<string, [GroupId, string]> = {
   GROQ_API_KEY: ["providers", "Groq key (language and transcription models)."],
   DEEPGRAM_API_KEY: ["providers", "Deepgram key (transcription)."],
   ASSEMBLYAI_API_KEY: ["providers", "AssemblyAI key (transcription)."],
-  AI_GATEWAY_API_KEY: ["providers", "Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports."],
+  AI_GATEWAY_API_KEY: [
+    "providers",
+    "Vercel AI Gateway: one key for every cloud vendor as `gateway:<vendor>/<model>`, list-price tokens, per-request cost in eval reports.",
+  ],
   VERCEL_OIDC_TOKEN: ["providers", "Alternative to AI_GATEWAY_API_KEY on Vercel-hosted deployments (injected by the platform)."],
-  OPENAI_COMPATIBLE_BASE_URL: ["providers", "Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`)."],
+  OPENAI_COMPATIBLE_BASE_URL: [
+    "providers",
+    "Generic OpenAI-compatible chat server, addressed as `compat:<model>` (Ollama: `http://host.docker.internal:11434/v1`).",
+  ],
   OPENAI_COMPATIBLE_API_KEY: ["providers", "Key for the compat server (`ollama` for Ollama)."],
   OPENAI_COMPATIBLE_NAME: ["providers", "Provider prefix used for the compat server, i.e. the `compat` in `compat:<model>`."],
-  OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS: ["providers", "Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient."],
+  OPENAI_COMPATIBLE_STRUCTURED_OUTPUTS: [
+    "providers",
+    "Ask the compat server for `response_format: json_schema`. Set false for servers that choke on it; parsing falls back to lenient.",
+  ],
 
   TRANSCRIBE_CHUNK_SECONDS: ["pipeline", "Audio is split into chunks of this length for transcription APIs with upload limits."],
   TRANSCRIBE_CONCURRENCY: ["pipeline", "Parallel chunk transcriptions. 0 = auto: 1 for a self-hosted OPENAI_BASE_URL, 3 for cloud vendors."],
-  PROVIDER_CONCURRENCY: ["pipeline", "Model calls in flight per provider across every app and worker process, e.g. `compat=2,openai=2` (`compat` = the compatible provider's name). Unset providers: 2 for a self-hosted compatible server, 1 for openai with OPENAI_BASE_URL (a local whisper uses every core per call), unlimited for cloud. Time a call waits here does not count against its time limit."],
+  PROVIDER_CONCURRENCY: [
+    "pipeline",
+    "Model calls in flight per provider across every app and worker process, e.g. `compat=2,openai=2` (`compat` = the compatible provider's name). Unset providers: 2 for a self-hosted compatible server, 1 for openai with OPENAI_BASE_URL (a local whisper uses every core per call), unlimited for cloud. Time a call waits here does not count against its time limit.",
+  ],
   ANALYZE_CONCURRENCY: ["pipeline", "Parallel LLM calls while finding and scoring moments. 0 = auto: 1 for a self-hosted model, 4 for cloud."],
-  LLM_CALL_TIMEOUT_SECONDS: ["pipeline", "Longest one model call may take (all its HTTP attempts together) before the step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one (Ollama, a compatible server), and for a self-hosted transcription at least twice the chunk's audio length. Time spent waiting for a provider slot (PROVIDER_CONCURRENCY) does not count. A slow CPU-only model may need more."],
-  STAGE_IDLE_TIMEOUT_MINUTES: ["pipeline", "A stage made of checkpointed steps (finding moments) is stopped when no step has finished for this long; Retry continues where it stopped. 0 = auto: 1.5 times the model call timeout."],
+  LLM_CALL_TIMEOUT_SECONDS: [
+    "pipeline",
+    "Longest one model call may take (all its HTTP attempts together) before the step is stopped and retried. 0 = auto: 120 s for a hosted model, 600 s for a self-hosted one (Ollama, a compatible server), and for a self-hosted transcription at least twice the chunk's audio length. Time spent waiting for a provider slot (PROVIDER_CONCURRENCY) does not count. A slow CPU-only model may need more.",
+  ],
+  STAGE_IDLE_TIMEOUT_MINUTES: [
+    "pipeline",
+    "A stage made of checkpointed steps (finding moments) is stopped when no step has finished for this long; Retry continues where it stopped. 0 = auto: 1.5 times the model call timeout.",
+  ],
   ANALYZE_SCORE_SAMPLES: ["pipeline", "Rubric samples per candidate (the median is kept). 0 = auto: 1 self-hosted, 3 cloud."],
   ANALYZE_PAIRWISE: ["pipeline", "Pairwise re-ranking of the top clips with position swapping. `auto` = on for cloud models only."],
   ANALYZE_PAIRWISE_PASSES: ["pipeline", "Sliding pairwise passes over the top 10 candidates. 3 passes = 48 judge calls, 1 = 18."],
-  ANALYZE_SCORE_RULE: ["pipeline", "How auto mode drops weak picks. `relative`: below max(ANALYZE_MIN_SCORE_FLOOR, median - ANALYZE_SCORE_MAD_K x MAD) of the run's scores, so it holds across judges. `absolute`: the old fixed cutoff of 45. The best clip is always kept."],
-  ANALYZE_MIN_SCORE_FLOOR: ["pipeline", "With the relative rule: never keep a clip whose rubric total is below this (25 means the judge called it unpostable)."],
+  ANALYZE_SCORE_RULE: [
+    "pipeline",
+    "How auto mode drops weak picks. `relative`: below max(ANALYZE_MIN_SCORE_FLOOR, median - ANALYZE_SCORE_MAD_K x MAD) of the run's scores, so it holds across judges. `absolute`: the old fixed cutoff of 45. The best clip is always kept.",
+  ],
+  ANALYZE_MIN_SCORE_FLOOR: [
+    "pipeline",
+    "With the relative rule: never keep a clip whose rubric total is below this (25 means the judge called it unpostable).",
+  ],
   ANALYZE_SCORE_MAD_K: ["pipeline", "With the relative rule: how many median absolute deviations below the median still count as a keeper."],
-  ANALYZE_JUDGE_MODEL: ["pipeline", "Model that scores and compares candidates, as `provider:model` (e.g. `anthropic:claude-sonnet-4-5`). Unset: the language model."],
-  TRANSCRIPT_BIAS: ["pipeline", "Feed entities from the video metadata (channel, title, description, tags) and the project's \"Names & terms\" to the transcriber as vocabulary hints. Set false and those per-project hints are silently ignored."],
-  TRANSCRIPT_CORRECTION: ["pipeline", "After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). On by default. Instance ceiling: off skips it for every project; when on, a project may opt out via `refineEntities`."],
+  ANALYZE_JUDGE_MODEL: [
+    "pipeline",
+    "Model that scores and compares candidates, as `provider:model` (e.g. `anthropic:claude-sonnet-4-5`). Unset: the language model.",
+  ],
+  TRANSCRIPT_BIAS: [
+    "pipeline",
+    'Feed entities from the video metadata (channel, title, description, tags) and the project\'s "Names & terms" to the transcriber as vocabulary hints. Set false and those per-project hints are silently ignored.',
+  ],
+  TRANSCRIPT_CORRECTION: [
+    "pipeline",
+    "After transcription, let the language model fix misheard entity names (constrained to fuzzy matches). On by default. Instance ceiling: off skips it for every project; when on, a project may opt out via `refineEntities`.",
+  ],
   TRANSCRIPT_AUTO_FIX_CONFIDENCE: ["pipeline", "Corrections at or above this model confidence are applied automatically; the rest wait for the user."],
-  DISFLUENCY_REMOVAL: ["pipeline", "Detect fillers, repetitions and false starts and cut them from captions. Off by default. Instance ceiling: projects opt in via `refineDisfluency` when this is on."],
-  DISFLUENCY_LLM: ["pipeline", "Add a model pass to the rule-based disfluency pass. Off by default. Instance ceiling: projects opt in via `disfluencyLlm` when this is on."],
-  REFINE_SCENES: ["pipeline", "Scan the whole video for on-screen text (burned-in captions, watermarks, slides) during refine, so captions avoid it and slides are shown whole. On by default. Instance ceiling: off skips it for every project; when on, a project may opt out via `refineScenes`. Shot cuts do not depend on it: every project detects them before clip selection."],
+  DISFLUENCY_REMOVAL: [
+    "pipeline",
+    "Detect fillers, repetitions and false starts and cut them from captions. Off by default. Instance ceiling: projects opt in via `refineDisfluency` when this is on.",
+  ],
+  DISFLUENCY_LLM: [
+    "pipeline",
+    "Add a model pass to the rule-based disfluency pass. Off by default. Instance ceiling: projects opt in via `disfluencyLlm` when this is on.",
+  ],
+  REFINE_SCENES: [
+    "pipeline",
+    "Scan the whole video for on-screen text (burned-in captions, watermarks, slides) during refine, so captions avoid it and slides are shown whole. On by default. Instance ceiling: off skips it for every project; when on, a project may opt out via `refineScenes`. Shot cuts do not depend on it: every project detects them before clip selection.",
+  ],
   RENDER_CONCURRENCY: ["pipeline", "Parallel renders per worker. `auto` follows CPUs and free memory (see the resource governor); a number pins it."],
   FACE_DETECTION: ["pipeline", "Face detection for automatic layout (follow crop, stacked webcam). false = fit only."],
   LAYOUT_MIN_FACE_RATIO: ["pipeline", "Share of sampled frames that must contain a face before a clip gets a face-following layout."],
@@ -133,8 +238,14 @@ export const DOCS: Record<string, [GroupId, string]> = {
   VAD_MODEL_PATH: ["local", "Silero VAD ONNX model."],
   ALIGNER: ["local", "wav2vec2 CTC forced alignment for exact word boundaries at filler cuts. false = whisper-only search."],
   ALIGN_MODEL_DIR: ["local", "wav2vec2 model directory."],
-  ONNX_EXECUTION_PROVIDER: ["local", "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`."],
-  ASR_CACHE_DAYS: ["local", "Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep."],
+  ONNX_EXECUTION_PROVIDER: [
+    "local",
+    "Where the face, text and alignment models run: `cpu`, `cuda` (Linux, needs the onnxruntime CUDA provider plus CUDA 12 and cuDNN 9 in the image, which the published image does not carry), `coreml` (macOS) or `dml` (Windows). A provider that cannot load falls back to cpu with a warning; Settings → System and `reelsaw machine` show where each model landed. Measured on Apple silicon, CoreML was slower than the CPU for all three models, so cpu stays the default. The VAD always runs on the CPU. Values: `cpu | cuda | coreml | dml`.",
+  ],
+  ASR_CACHE_DAYS: [
+    "local",
+    "Speech-to-text results cache under DATA_DIR/cache/asr (and under cache/asr/ in the bucket with STORAGE_DRIVER=s3, shared by every host); entries older than this are pruned at boot and by the hourly sweep.",
+  ],
 
   STORAGE_DRIVER: ["storage", "`local` (inside DATA_DIR) or `s3`."],
   STORAGE_LOCAL_DIR: ["storage", "Directory for the local driver. Unset: DATA_DIR/storage."],
@@ -152,63 +263,147 @@ export const DOCS: Record<string, [GroupId, string]> = {
   MAX_PROJECTS_PER_USER: ["limits", "Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page."],
   MAX_SOURCE_MINUTES_PER_DAY: ["limits", "Quota: minutes of source video per account per day. 0 = unlimited."],
   MAX_NEW_PROJECTS_PER_HOUR: ["limits", "Quota: new projects per account per hour. 0 = unlimited."],
-  MAX_LIVE_JOBS_PER_USER: ["limits", "Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused and do not count. 0 = unlimited."],
+  MAX_LIVE_JOBS_PER_USER: [
+    "limits",
+    "Quota: jobs a user's own requests may have queued or running at once (hosted: e.g. 12). Pipeline hand-offs are never refused and do not count. 0 = unlimited.",
+  ],
   MAX_RERENDERS_PER_HOUR: ["limits", "Quota: re-renders, hand-made clips and re-runs (re-analyze, refine) per account per hour. 0 = unlimited."],
-  MAX_STORAGE_MB: ["limits", "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. Deleted items count until they are deleted forever. 0 = unlimited."],
-  MAX_SOURCE_MINUTES_PER_MONTH: ["limits", "Quota: minutes of source video per account per period: the billing period when the account has a plan (ee), else the UTC calendar month. 0 = unlimited."],
-  WATERMARK_NON_ADMINS: ["limits", "Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits)."],
+  MAX_STORAGE_MB: [
+    "limits",
+    "Quota: sources + uploads + rendered clips + intros/outros kept per account, in MB; checked at upload and project creation. Deleted items count until they are deleted forever. 0 = unlimited.",
+  ],
+  MAX_SOURCE_MINUTES_PER_MONTH: [
+    "limits",
+    "Quota: minutes of source video per account per period: the billing period when the account has a plan (ee), else the UTC calendar month. 0 = unlimited.",
+  ],
+  WATERMARK_NON_ADMINS: [
+    "limits",
+    "Burn a small text watermark into the clips of accounts that are not admins. A paid plan removes it; admins can switch it per user on the Users page (Limits).",
+  ],
   WATERMARK_TEXT: ["limits", "The watermark text, shown under the logo."],
-  WATERMARK_LOGO_PATH: ["limits", "PNG composited above the watermark text (top-left under the platform top band, 18% of the frame width, 95% opacity). An unreadable file logs a warning and leaves the text watermark alone."],
-  SOURCE_RETENTION_DAYS: ["limits", "Delete stored sources older than this. Rows stay; Retry on the project fetches the source again, after which clips can be re-rendered (until then a render fails with a message saying so). 0 = keep."],
-  CLIP_RETENTION_DAYS: ["limits", "Delete rendered clips and thumbnails older than this, from the store and local disk. Rows stay; re-rendering a clip brings it back. 0 = keep."],
+  WATERMARK_LOGO_PATH: [
+    "limits",
+    "PNG composited above the watermark text (top-left under the platform top band, 18% of the frame width, 95% opacity). An unreadable file logs a warning and leaves the text watermark alone.",
+  ],
+  SOURCE_RETENTION_DAYS: [
+    "limits",
+    "Delete stored sources older than this. Rows stay; Retry on the project fetches the source again, after which clips can be re-rendered (until then a render fails with a message saying so). 0 = keep.",
+  ],
+  CLIP_RETENTION_DAYS: [
+    "limits",
+    "Delete rendered clips and thumbnails older than this, from the store and local disk. Rows stay; re-rendering a clip brings it back. 0 = keep.",
+  ],
   EVENT_RETENTION_DAYS: ["limits", "Prune project events after N days (each project keeps its created / run.started / done rows). 0 = keep."],
   LLM_USAGE_RETENTION_DAYS: ["limits", "Prune model-call usage rows after N days. 0 = keep."],
   ADMIN_EVENT_RETENTION_DAYS: ["limits", "Prune the admin event log after N days. 0 = keep."],
-  DECISION_RETENTION_DAYS: ["limits", "Prune the decision log (users' accepts, rejects and edits, kept after their project is deleted so Reelsaw can learn from them) after N days. 0 = keep."],
-  STEP_RETENTION_DAYS: ["limits", "Drop the saved checkpoints of a finished project (the finding-moments windows a Retry reuses) after N days without change. 0 = keep."],
-  DELETED_RETENTION_DAYS: ["limits", "Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever."],
-  SCRATCH_CACHE_HOURS: ["limits", "With `STORAGE_DRIVER=s3`, the copies of sources and rendered clips under `DATA_DIR/projects` are a cache of the bucket: the hourly sweep evicts the ones of finished projects idle this long (a job pulls them back when it needs them), and a job short of disk evicts the least recently used ones first before it gives up. 0 = keep them on the worker. Nothing to evict with the local store (scratch and store are one hardlinked file)."],
+  DECISION_RETENTION_DAYS: [
+    "limits",
+    "Prune the decision log (users' accepts, rejects and edits, kept after their project is deleted so Reelsaw can learn from them) after N days. 0 = keep.",
+  ],
+  STEP_RETENTION_DAYS: [
+    "limits",
+    "Drop the saved checkpoints of a finished project (the finding-moments windows a Retry reuses) after N days without change. 0 = keep.",
+  ],
+  DELETED_RETENTION_DAYS: [
+    "limits",
+    "Deleted projects and clips replaced by a re-analyze stay restorable this long (Deleted page), then their rows and files are purged. Storage still counts until then (or until the owner deletes them forever). 0 = keep forever.",
+  ],
+  SCRATCH_CACHE_HOURS: [
+    "limits",
+    "With `STORAGE_DRIVER=s3`, the copies of sources and rendered clips under `DATA_DIR/projects` are a cache of the bucket: the hourly sweep evicts the ones of finished projects idle this long (a job pulls them back when it needs them), and a job short of disk evicts the least recently used ones first before it gives up. 0 = keep them on the worker. Nothing to evict with the local store (scratch and store are one hardlinked file).",
+  ],
   EVENT_REPLAY_LIMIT: ["limits", "Events a project page replays when it connects (progress ticks never replay); older ones load on request."],
 
   MAX_CPU_PERCENT: ["resources", "Heavy steps wait while total CPU time is busier than this (measured, any OS)."],
   MIN_FREE_MEM_MB: ["resources", "Heavy steps wait while free memory is below this."],
-  MIN_FREE_DISK_MB: ["resources", "Floor that must stay free. A job that also needs scratch checks the floor plus that scratch against free space net of what jobs in flight have already leased on the volume, and leases its own in the same step, so two jobs cannot both pass on the same bytes; short of disk it first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`), then waits for other jobs' leases to come back, or, short of real bytes, moves to another worker that has the room or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows \"disk full\"); a single box fails the job instead."],
-  RESOURCE_WAIT_MAX_SECONDS: ["resources", "Longest a step waits for CPU, memory, or disk other jobs have leased but not written yet. A shortfall of real bytes does not wait: eviction, hand-off or failure."],
+  MIN_FREE_DISK_MB: [
+    "resources",
+    'Floor that must stay free. A job that also needs scratch checks the floor plus that scratch against free space net of what jobs in flight have already leased on the volume, and leases its own in the same step, so two jobs cannot both pass on the same bytes; short of disk it first evicts scratch copies the S3 store still has (`SCRATCH_CACHE_HOURS`), then waits for other jobs\' leases to come back, or, short of real bytes, moves to another worker that has the room or fails the run when none does. A worker below the floor with nothing left to evict stops taking media jobs while another worker has the room, until it is 1 GB above the floor again (Settings → System → Workers shows "disk full"); a single box fails the job instead.',
+  ],
+  RESOURCE_WAIT_MAX_SECONDS: [
+    "resources",
+    "Longest a step waits for CPU, memory, or disk other jobs have leased but not written yet. A shortfall of real bytes does not wait: eviction, hand-off or failure.",
+  ],
   STALL_MINUTES: ["resources", "A running job with no progress event for this long is reported (log and UI) as stalled."],
-  SHUTDOWN_GRACE_SECONDS: ["resources", "On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. Compose kills the container at `STOP_GRACE_PERIOD` (default 330s): when you raise this above 300, set STOP_GRACE_PERIOD to at least SHUTDOWN_GRACE_SECONDS + 30s in .env. The app warns at boot when it is above 300."],
+  SHUTDOWN_GRACE_SECONDS: [
+    "resources",
+    "On SIGTERM wait this long for running jobs to finish before exiting, so deploys stop interrupting renders. Compose kills the container at `STOP_GRACE_PERIOD` (default 330s): when you raise this above 300, set STOP_GRACE_PERIOD to at least SHUTDOWN_GRACE_SECONDS + 30s in .env. The app warns at boot when it is above 300.",
+  ],
 
-  LOG_LEVEL: ["observability", "A level (`trace`..`silent`) optionally followed by per-module overrides, e.g. `info,render=debug,http=warn`. Change it without a restart with `reelsaw log-level`."],
+  LOG_LEVEL: [
+    "observability",
+    "A level (`trace`..`silent`) optionally followed by per-module overrides, e.g. `info,render=debug,http=warn`. Change it without a restart with `reelsaw log-level`.",
+  ],
   LOG_FORMAT: ["observability", "`auto` (pretty on a terminal, JSON otherwise), `json` or `pretty`."],
-  LOG_FILE: ["observability", "Also write JSON lines here (daily files, 7 kept). Each process writes its own `<name>.<worker id>.<date>.log` next to this path, so scaled workers never prune each other. Survives container re-creation; `reelsaw logs` and issue reports read every such file."],
-  LLM_TRACE: ["observability", "Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse`; comma-separate for several."],
+  LOG_FILE: [
+    "observability",
+    "Also write JSON lines here (daily files, 7 kept). Each process writes its own `<name>.<worker id>.<date>.log` next to this path, so scaled workers never prune each other. Survives container re-creation; `reelsaw logs` and issue reports read every such file.",
+  ],
+  LLM_TRACE: [
+    "observability",
+    "Capture model calls: `none`, `logs` (one structured line per call: prompt, response, tokens, latency) or `langfuse`; comma-separate for several.",
+  ],
   LLM_TRACE_MAX_CHARS: ["observability", "Truncate captured prompts and responses to this many characters."],
   LANGFUSE_PUBLIC_KEY: ["observability", "Langfuse public key (checked at boot when LLM_TRACE includes langfuse)."],
   LANGFUSE_SECRET_KEY: ["observability", "Langfuse secret key."],
   LANGFUSE_BASE_URL: ["observability", "Langfuse host."],
-  OTEL_ENABLED: ["observability", "OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end."],
-  SENTRY_DSN: ["observability", "Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent."],
+  OTEL_ENABLED: [
+    "observability",
+    "OpenTelemetry traces, logs and metrics over OTLP/HTTP. Independent of SENTRY_DSN — set OTEL_EXPORTER_OTLP_ENDPOINT (and HEADERS) explicitly. Logs are the pino lines that pass their level, sent to `/v1/logs` (Sentry accepts these). Prompt, transcript and address fields stay in the local log only. Sentry does not accept OTLP metrics; those go through SENTRY_DSN when metrics are left on. See the OTEL_* variables at the end.",
+  ],
+  SENTRY_DSN: [
+    "observability",
+    "Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent.",
+  ],
   SENTRY_ENVIRONMENT: ["observability", "Sentry environment tag. Default: `production` under NODE_ENV=production, else `development`."],
-  POSTHOG_KEY: ["observability", "PostHog project key (public). Set, the server sends sign-ups, project created/done/failed, billing and abuse-flag events, and the web app sends page views and a few product events; people are identified by user id and role only (no email or name). Unset, nothing is sent."],
+  POSTHOG_KEY: [
+    "observability",
+    "PostHog project key (public). Set, the server sends sign-ups, project created/done/failed, billing and abuse-flag events, and the web app sends page views and a few product events; people are identified by user id and role only (no email or name). Unset, nothing is sent.",
+  ],
   POSTHOG_HOST: ["observability", "PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance)."],
 
   FFMPEG_PATH: ["tools", "ffmpeg binary."],
-  FFMPEG_ENCODER: ["tools", "H.264 encoder for clips, intros/outros and previews. `auto` probes `h264_nvenc` (NVIDIA, container started with docker-compose.gpu.yml) then `h264_videotoolbox` (macOS, outside Docker) at boot and keeps `libx264` otherwise; naming one makes boot fail if it cannot encode. A hardware encoder that fails mid-render is retried on libx264. Settings → System and `reelsaw machine` show the one in use and why. Values: `auto | libx264 | h264_nvenc | h264_videotoolbox`."],
+  FFMPEG_ENCODER: [
+    "tools",
+    "H.264 encoder for clips, intros/outros and previews. `auto` probes `h264_nvenc` (NVIDIA, container started with docker-compose.gpu.yml) then `h264_videotoolbox` (macOS, outside Docker) at boot and keeps `libx264` otherwise; naming one makes boot fail if it cannot encode. A hardware encoder that fails mid-render is retried on libx264. Settings → System and `reelsaw machine` show the one in use and why. Values: `auto | libx264 | h264_nvenc | h264_videotoolbox`.",
+  ],
   FFPROBE_PATH: ["tools", "ffprobe binary."],
   YTDLP_PATH: ["tools", "yt-dlp binary."],
-  YTDLP_PROXY: ["tools", "yt-dlp egress: one URL (`http`, `https`, `socks5`, `socks5h`), or a comma-separated pool `[id=]<url-or-direct>[;priority=N][;concurrency=N]`. `priority` is the operator ranking (higher is tried first) and never changes at runtime; a circuit breaker skips a candidate after consecutive faults, then the ranking applies again. `direct` uses this server's IP. `{session}` in a URL is replaced with a fresh id on every download so a residential gateway can pin that process to one IP and give the next download a different one (DataImpulse: `sessid.{session}` in the username; turn plan-wide sticky off). YouTube blocks many datacentre IPs. On a hosted or shared instance this is also where to enforce that downloads cannot reach private networks (SECURITY.md, \"URL sources and your network\"). `reelsaw ytdlp-proxies` shows the pool (never URLs). Example: `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,paid=http://user:pass@gate.example:7000;priority=1`."],
+  YTDLP_PROXY: [
+    "tools",
+    'yt-dlp egress: one URL (`http`, `https`, `socks5`, `socks5h`), or a comma-separated pool `[id=]<url-or-direct>[;priority=N][;concurrency=N]`. `priority` is the operator ranking (higher is tried first) and never changes at runtime; a circuit breaker skips a candidate after consecutive faults, then the ranking applies again. `direct` uses this server\'s IP. `{session}` in a URL is replaced with a fresh id on every download so a residential gateway can pin that process to one IP and give the next download a different one (DataImpulse: `sessid.{session}` in the username; turn plan-wide sticky off). YouTube blocks many datacentre IPs. On a hosted or shared instance this is also where to enforce that downloads cannot reach private networks (SECURITY.md, "URL sources and your network"). `reelsaw ytdlp-proxies` shows the pool (never URLs). Example: `pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1,paid=http://user:pass@gate.example:7000;priority=1`.',
+  ],
   YTDLP_COOKIES_FILE: ["tools", "Cookies file in Netscape format for yt-dlp."],
   CAPTION_FONT: ["tools", "Font family for burned-in captions; it must be installed where ffmpeg runs."],
 
   POSTGRES_PASSWORD: ["compose", "Database password used by both the db and app containers (compose only)."],
   REELSAW_IMAGE: ["compose", "Image the compose file runs (compose only)."],
-  WHISPER_MODEL: ["compose", "Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only."],
-  SPEACHES_IMAGE: ["compose", "Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` on Linux/macOS, `;` instead of `:` on Windows; the installer picks it). Compose only."],
+  WHISPER_MODEL: [
+    "compose",
+    "Speech model the Speaches container downloads. `Systran/faster-whisper-small` runs about real-time on a CPU; with a GPU use `Systran/faster-whisper-medium` (under 16 GB VRAM) or `Systran/faster-whisper-large-v3` (the installer picks). Compose only.",
+  ],
+  SPEACHES_IMAGE: [
+    "compose",
+    "Speaches image: `ghcr.io/speaches-ai/speaches:latest-cuda` with an NVIDIA GPU handed to the container by docker-compose.gpu.yml (`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` on Linux/macOS, `;` instead of `:` on Windows; the installer picks it). Compose only.",
+  ],
   RUN_WORKERS_IN_APP: ["compose", "Compose maps this to RUN_WORKERS of the app container. false when only dedicated `worker` containers should process jobs."],
   OTEL_SERVICE_NAME: ["compose", "OpenTelemetry service name (read by otel.ts)."],
-  OTEL_EXPORTER_OTLP_ENDPOINT: ["compose", "OTLP/HTTP collector base URL (the SDK appends `/v1/traces`). For Sentry, paste the OTLP base from Project Settings → Client Keys → OpenTelemetry (`…/integration/otlp`), not `…/v1/traces`."],
-  OTEL_EXPORTER_OTLP_HEADERS: ["compose", "Extra OTLP headers as `key=url-encoded-value` pairs. For Sentry: `x-sentry-auth=sentry%20sentry_key%3D<public-key>` (the public key from the DSN). Private collector example: `authorization=Bearer%20xxx`."],
-  OTEL_METRICS_ENABLED: ["compose", "Export metrics as well as traces. A collector receives OTLP `/v1/metrics`. Sentry does not: with a Sentry OTLP endpoint and `SENTRY_DSN` set, the server sends Node runtime gauges and the application metrics (README, Metrics: pipeline stages per second of video, yt-dlp proxies, model calls) as Sentry Application Metrics instead. Set to false for traces only."],
-  OTEL_TRACES_SAMPLE_RATE: ["compose", "Fraction of traces to record, from 0 to 1. Default 1 (record all). The browser uses the same rate and starts before the first API call, so a page load and the server work it starts share a trace. A trace the browser does not record is not recorded on the server either. Leave `OTEL_TRACES_SAMPLER` unset; that standard variable overrides this on the server only."],
+  OTEL_EXPORTER_OTLP_ENDPOINT: [
+    "compose",
+    "OTLP/HTTP collector base URL (the SDK appends `/v1/traces`). For Sentry, paste the OTLP base from Project Settings → Client Keys → OpenTelemetry (`…/integration/otlp`), not `…/v1/traces`.",
+  ],
+  OTEL_EXPORTER_OTLP_HEADERS: [
+    "compose",
+    "Extra OTLP headers as `key=url-encoded-value` pairs. For Sentry: `x-sentry-auth=sentry%20sentry_key%3D<public-key>` (the public key from the DSN). Private collector example: `authorization=Bearer%20xxx`.",
+  ],
+  OTEL_METRICS_ENABLED: [
+    "compose",
+    "Export metrics as well as traces. A collector receives OTLP `/v1/metrics`. Sentry does not: with a Sentry OTLP endpoint and `SENTRY_DSN` set, the server sends Node runtime gauges and the application metrics (README, Metrics: pipeline stages per second of video, yt-dlp proxies, model calls) as Sentry Application Metrics instead. Set to false for traces only.",
+  ],
+  OTEL_TRACES_SAMPLE_RATE: [
+    "compose",
+    "Fraction of traces to record, from 0 to 1. Default 1 (record all). The browser uses the same rate and starts before the first API call, so a page load and the server work it starts share a trace. A trace the browser does not record is not recorded on the server either. Leave `OTEL_TRACES_SAMPLER` unset; that standard variable overrides this on the server only.",
+  ],
   OTEL_METRIC_EXPORT_INTERVAL: ["compose", "Metric export interval in milliseconds."],
   OTEL_LOG_LEVEL: ["compose", "Diagnostic log level of the OpenTelemetry SDK itself."],
 };
@@ -235,7 +430,9 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
  * source; deploy = a hosted install from the release zip (hosting knobs are visible).
  */
 const PROVIDER_KEYS = Object.fromEntries(
-  ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "DEEPGRAM_API_KEY", "ASSEMBLYAI_API_KEY", "AI_GATEWAY_API_KEY"].map((k) => [k, ""]),
+  ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "DEEPGRAM_API_KEY", "ASSEMBLYAI_API_KEY", "AI_GATEWAY_API_KEY"].map(
+    (k) => [k, ""],
+  ),
 );
 export const ENV_ACTIVE: Record<"root" | "deploy", Record<string, string>> = {
   root: {
@@ -300,7 +497,18 @@ export const ENV_ACTIVE: Record<"root" | "deploy", Record<string, string>> = {
 /** variables left out of a given .env.example entirely (they only make sense in the other) */
 export const ENV_OMIT: Record<"root" | "deploy", string[]> = {
   root: ["REELSAW_IMAGE"],
-  deploy: ["DATABASE_URL", "REELSAW_VERSION", "REELSAW_COMMIT", "REELSAW_BUILT_AT", "NODE_ENV", "WEB_DIST", "DATA_DIR", "RUN_HTTP", "RUN_WORKERS", "ALLOW_SIGNUP"],
+  deploy: [
+    "DATABASE_URL",
+    "REELSAW_VERSION",
+    "REELSAW_COMMIT",
+    "REELSAW_BUILT_AT",
+    "NODE_ENV",
+    "WEB_DIST",
+    "DATA_DIR",
+    "RUN_HTTP",
+    "RUN_WORKERS",
+    "ALLOW_SIGNUP",
+  ],
 };
 /** the deprecated alias stays out of both example files */
 export const ENV_OMIT_ALL = ["ALLOW_SIGNUP"];

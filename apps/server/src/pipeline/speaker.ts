@@ -42,7 +42,7 @@ function downscale2x(rgb: Uint8Array): Uint8Array {
   for (let y = 0; y < FACE_INPUT_H; y++)
     for (let x = 0; x < FACE_INPUT_W; x++)
       for (let c = 0; c < 3; c++) {
-        const i = ((2 * y) * W + 2 * x) * 3 + c;
+        const i = (2 * y * W + 2 * x) * 3 + c;
         out[(y * FACE_INPUT_W + x) * 3 + c] = (rgb[i]! + rgb[i + 3]! + rgb[i + W * 3]! + rgb[i + W * 3 + 3]!) >> 2;
       }
   return out;
@@ -100,7 +100,30 @@ export async function activeSpeakers(
   const margin = opts.margin ?? 0.12;
   const window = opts.window ?? 1.5;
   const frameBytes = W * H * 3;
-  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", start.toFixed(3), "-t", duration.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${W}:${H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
+  const ff = spawn(
+    deps.ffmpegPath,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      ...ffmpegPipeThreads,
+      "-ss",
+      start.toFixed(3),
+      "-t",
+      duration.toFixed(3),
+      "-i",
+      source,
+      "-vf",
+      `fps=${fps},scale=${W}:${H}`,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1",
+    ],
+    { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] },
+  );
   const act: [number[], number[]] = [[], []];
   // a box belongs to a speaker when its centre is within a third of the seat separation (capped at
   // 0.12 for far-apart seats, so close-seated pairs get a tighter, non-overlapping tolerance)
@@ -122,7 +145,10 @@ export async function activeSpeakers(
       const matched: FaceBox[] = [];
       for (const who of [0, 1] as const) {
         // the box nearest this speaker's usual position (ignores posters and passers-by)
-        const b = boxes.map((bx) => ({ bx, d: Math.abs((bx.x1 + bx.x2) / 2 - speakers[who]) })).filter((x) => x.d < seatTol).sort((p, q) => p.d - q.d)[0]?.bx;
+        const b = boxes
+          .map((bx) => ({ bx, d: Math.abs((bx.x1 + bx.x2) / 2 - speakers[who]) }))
+          .filter((x) => x.d < seatTol)
+          .sort((p, q) => p.d - q.d)[0]?.bx;
         if (b) matched.push(b);
         act[who].push(b && prevGray ? mouthMotion(g, prevGray, b) : NaN);
       }
@@ -173,7 +199,11 @@ export async function activeSpeakers(
   const who: Array<0 | 1> = [];
   const corr: [number[], number[]] = [act[0].map((_, i) => corrAt(act[0], i)), act[1].map((_, i) => corrAt(act[1], i))];
   // start with whoever correlates better over the first seconds
-  const early = (k: 0 | 1) => corr[k].slice(0, fps * 3).filter(Number.isFinite).reduce((p, q) => p + q, 0);
+  const early = (k: 0 | 1) =>
+    corr[k]
+      .slice(0, fps * 3)
+      .filter(Number.isFinite)
+      .reduce((p, q) => p + q, 0);
   let cur: 0 | 1 = early(0) >= early(1) ? 0 : 1;
   let speechFrames = 0;
   let clear = 0;
@@ -231,7 +261,11 @@ export async function activeSpeakers(
   }
   runs[0]!.start = 0;
   runs[runs.length - 1]!.end = duration;
-  return { runs: runs.map((r) => ({ ...r, start: Number(r.start.toFixed(2)), end: Number(r.end.toFixed(2)) })), confidence: Number((speechFrames ? clear / speechFrames : 0).toFixed(2)), frames: n };
+  return {
+    runs: runs.map((r) => ({ ...r, start: Number(r.start.toFixed(2)), end: Number(r.end.toFixed(2)) })),
+    confidence: Number((speechFrames ? clear / speechFrames : 0).toFixed(2)),
+    frames: n,
+  };
 }
 
 /** speech probability lookup over a VAD probability array starting at `offset` seconds */

@@ -22,7 +22,12 @@ export interface OnnxOptions {
 }
 
 /** Open `modelPath` on the requested provider, or on the CPU when that provider is unavailable. */
-export async function createOnnxSession(ort: Ort, modelPath: string, base: InferenceSession.SessionOptions, opts: OnnxOptions = {}): Promise<{ session: InferenceSession; provider: OnnxProvider }> {
+export async function createOnnxSession(
+  ort: Ort,
+  modelPath: string,
+  base: InferenceSession.SessionOptions,
+  opts: OnnxOptions = {},
+): Promise<{ session: InferenceSession; provider: OnnxProvider }> {
   const requested = opts.provider ?? "cpu";
   if (requested !== "cpu") {
     try {

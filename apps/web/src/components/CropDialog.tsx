@@ -54,7 +54,10 @@ const HANDLES: Array<{ h: Handle; cls: string; cursor: string }> = [
   { h: "sw", cls: "-left-1.5 -bottom-1.5", cursor: "cursor-nesw-resize" },
   { h: "w", cls: "-left-1.5 top-1/2 -translate-y-1/2", cursor: "cursor-ew-resize" },
 ];
-type Drag = { kind: "move"; grab: { x: number; y: number }; orig: ContentRegion } | { kind: "size"; handle: Handle; orig: ContentRegion } | { kind: "draw"; from: { x: number; y: number } };
+type Drag =
+  | { kind: "move"; grab: { x: number; y: number }; orig: ContentRegion }
+  | { kind: "size"; handle: Handle; orig: ContentRegion }
+  | { kind: "draw"; from: { x: number; y: number } };
 
 /**
  * Fix a pane's crop on the source picture: a box to drag and resize over the whole frame (or draw
@@ -62,7 +65,25 @@ type Drag = { kind: "move"; grab: { x: number; y: number }; orig: ContentRegion 
  * A crop shaped like the pane fills it; any other shape is fitted at its own aspect over a blurred
  * copy, like a webcam tile. The box starts where the pane's automatic window is.
  */
-export function CropDialog({ open, onOpenChange, source, srcW, srcH, panes, initial, onApply }: { open: boolean; onOpenChange: (o: boolean) => void; source: HTMLVideoElement | HTMLImageElement | null; srcW: number; srcH: number; panes: CropPaneOption[]; initial: CropKey; onApply: (key: CropKey, region: ContentRegion | null) => void }) {
+export function CropDialog({
+  open,
+  onOpenChange,
+  source,
+  srcW,
+  srcH,
+  panes,
+  initial,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  source: HTMLVideoElement | HTMLImageElement | null;
+  srcW: number;
+  srcH: number;
+  panes: CropPaneOption[];
+  initial: CropKey;
+  onApply: (key: CropKey, region: ContentRegion | null) => void;
+}) {
   const [key, setKey] = useState<CropKey>(initial);
   const pane = panes.find((p) => p.key === key) ?? panes[0]!;
   const [fields, setFields] = useState<Fields>(() => fieldsOf(pane.current ?? pane.auto));
@@ -228,8 +249,13 @@ export function CropDialog({ open, onOpenChange, source, srcW, srcH, panes, init
           onOpenChange(false);
         }}
       >
-        <Dialog.Description className="text-sm leading-relaxed text-ink2">Drag the box over the picture, pull its corners, or draw a new one; the numbers are percentages of the source. The box starts where the pane looks now.</Dialog.Description>
-        {panes.length > 1 && <Segmented size="sm" ariaLabel="Which pane" value={key} options={panes.map((p) => ({ value: p.key, label: p.name }))} onChange={(k) => setKey(k)} />}
+        <Dialog.Description className="text-sm leading-relaxed text-ink2">
+          Drag the box over the picture, pull its corners, or draw a new one; the numbers are percentages of the source. The box starts where the pane looks
+          now.
+        </Dialog.Description>
+        {panes.length > 1 && (
+          <Segmented size="sm" ariaLabel="Which pane" value={key} options={panes.map((p) => ({ value: p.key, label: p.name }))} onChange={(k) => setKey(k)} />
+        )}
         <div
           ref={frameRef}
           className="relative w-full cursor-crosshair touch-none select-none overflow-hidden rounded-[10px] bg-black"
@@ -259,7 +285,13 @@ export function CropDialog({ open, onOpenChange, source, srcW, srcH, panes, init
           {field("Height", "height")}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-relaxed text-ink3">
-          <span>{!region ? "Enter four numbers." : fills ? `${px!.w}×${px!.h} px, the shape of the pane: it fills it.` : `${px!.w}×${px!.h} px, not the shape of the pane: shown at its own shape over a blurred copy.`}</span>
+          <span>
+            {!region
+              ? "Enter four numbers."
+              : fills
+                ? `${px!.w}×${px!.h} px, the shape of the pane: it fills it.`
+                : `${px!.w}×${px!.h} px, not the shape of the pane: shown at its own shape over a blurred copy.`}
+          </span>
           {region && !fills && (
             <button type="button" className="font-semibold text-acc-text" onClick={matchShape}>
               Match the pane's shape

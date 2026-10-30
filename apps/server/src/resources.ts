@@ -48,7 +48,11 @@ const execFileAsync = promisify(execFile);
  * `access` is injectable for tests.
  */
 export async function nvidiaDeviceNode(
-  access: (path: string) => Promise<boolean> = (p) => fs.access(p).then(() => true, () => false),
+  access: (path: string) => Promise<boolean> = (p) =>
+    fs.access(p).then(
+      () => true,
+      () => false,
+    ),
 ): Promise<"nvidia0" | "dxg" | null> {
   if (await access("/dev/nvidia0")) return "nvidia0";
   if (await access("/dev/dxg")) return "dxg";
@@ -67,7 +71,8 @@ export async function detectGpu(platform: NodeJS.Platform = process.platform, ar
         const [name, mem] = l.split(",").map((x) => x.trim());
         return mem ? `${name} (${mem} MB)` : name!;
       });
-    if (devices.length) return { vendor: "nvidia", devices, note: "NVENC for renders when FFMPEG_ENCODER allows it; CUDA for Speaches/Ollama in their own containers" };
+    if (devices.length)
+      return { vendor: "nvidia", devices, note: "NVENC for renders when FFMPEG_ENCODER allows it; CUDA for Speaches/Ollama in their own containers" };
   } catch {
     /* no nvidia-smi: not an NVIDIA machine, or the container was started without the GPU */
   }
@@ -85,7 +90,11 @@ export async function detectGpu(platform: NodeJS.Platform = process.platform, ar
     }
   }
   if (platform === "darwin" && arch === "arm64") {
-    return { vendor: "apple", devices: [os.cpus()[0]?.model ?? "Apple silicon"], note: "Metal is used by a native Ollama; ffmpeg can use VideoToolbox outside Docker (FFMPEG_ENCODER)" };
+    return {
+      vendor: "apple",
+      devices: [os.cpus()[0]?.model ?? "Apple silicon"],
+      note: "Metal is used by a native Ollama; ffmpeg can use VideoToolbox outside Docker (FFMPEG_ENCODER)",
+    };
   }
   return null;
 }
@@ -104,7 +113,13 @@ export interface ResourceGovernor {
    * because of the bytes on disk it throws `ResourceExhaustedError` (waiting does not free space),
    * short only because of other jobs' leases it waits for them like for CPU and memory.
    */
-  acquire(opts: { kind: string; needDiskMB?: number; signal?: AbortSignal; onWait?: (reason: string) => void; ids?: { jobId?: string | undefined; projectId?: string } }): Promise<DiskLease>;
+  acquire(opts: {
+    kind: string;
+    needDiskMB?: number;
+    signal?: AbortSignal;
+    onWait?: (reason: string) => void;
+    ids?: { jobId?: string | undefined; projectId?: string };
+  }): Promise<DiskLease>;
   /**
    * How a disk shortfall is answered: free at least `needBytes` of scratch (storage/sweep.ts
    * `reclaimScratch`). Set once the store and database are up; absent, a shortfall fails at once.
@@ -389,7 +404,10 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
         if (!reasons.length) {
           // everything fits on paper: claim the scratch now, in the same step as the check against the
           // leases already out, so a second job cannot pass on the bytes this one is about to write
-          const r = needDiskMB > 0 && s.diskFreeMB >= 0 ? await takeLease({ mb: needDiskMB, requiredMB: required, freeMB: s.diskFreeMB, kind, ...ids }) : ({ ok: true, release: async () => {} } as const);
+          const r =
+            needDiskMB > 0 && s.diskFreeMB >= 0
+              ? await takeLease({ mb: needDiskMB, requiredMB: required, freeMB: s.diskFreeMB, kind, ...ids })
+              : ({ ok: true, release: async () => {} } as const);
           if (r.ok) {
             if (waited) log.info({ kind, waitedSec: Math.round((Date.now() - started) / 1000) }, "resources available, proceeding");
             return leaseHandle(needDiskMB > 0 && s.diskFreeMB >= 0 ? needDiskMB : 0, r.release);
@@ -452,7 +470,8 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
             if (!released) (released = true), running--;
           };
         }
-        if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000) throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot (${running} running)`);
+        if (Date.now() - started > config.RESOURCE_WAIT_MAX_SECONDS * 1000)
+          throw new Error(`Gave up waiting ${config.RESOURCE_WAIT_MAX_SECONDS}s for a render slot (${running} running)`);
         const reason = `${running} render${running === 1 ? "" : "s"} running, room for ${lastLimit} (${s.cpus} CPUs, ${s.memAvailableMB} MB free)`;
         if (reason !== lastReason) {
           lastReason = reason;
@@ -466,11 +485,27 @@ export function createResourceGovernor(config: Config, dataDir: string, log: Log
       const s = await sample();
       if (s.diskFreeMB >= 0 && s.diskFreeMB < config.MIN_FREE_DISK_MB) {
         // a process that runs no workers writes no scratch: refusing to boot would lock out the admin UI that can free the disk
-        if (!config.RUN_WORKERS) log.warn({ diskFreeMB: s.diskFreeMB, minFreeMB: config.MIN_FREE_DISK_MB, dataDir }, "free disk is below MIN_FREE_DISK_MB; starting anyway because this process runs no workers (an admin can still reach the UI to free space)");
+        if (!config.RUN_WORKERS)
+          log.warn(
+            { diskFreeMB: s.diskFreeMB, minFreeMB: config.MIN_FREE_DISK_MB, dataDir },
+            "free disk is below MIN_FREE_DISK_MB; starting anyway because this process runs no workers (an admin can still reach the UI to free space)",
+          );
         else throw new Error(`only ${s.diskFreeMB} MB free in ${dataDir}; MIN_FREE_DISK_MB=${config.MIN_FREE_DISK_MB}`);
       }
       gpu = await detectGpu();
-      log.info({ platform: s.platform, cpus: s.cpus, cpuPercent: s.cpuPercent, memAvailableMB: s.memAvailableMB, memTotalMB: s.memTotalMB, diskFreeMB: s.diskFreeMB, gpu: gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device without tools"}` : "none", renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}` }, "resources");
+      log.info(
+        {
+          platform: s.platform,
+          cpus: s.cpus,
+          cpuPercent: s.cpuPercent,
+          memAvailableMB: s.memAvailableMB,
+          memTotalMB: s.memTotalMB,
+          diskFreeMB: s.diskFreeMB,
+          gpu: gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device without tools"}` : "none",
+          renders: fixed ? `fixed ${fixed}` : `auto, up to ${this.maxRenders()}`,
+        },
+        "resources",
+      );
     },
   };
 }

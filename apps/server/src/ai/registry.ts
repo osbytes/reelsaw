@@ -46,7 +46,9 @@ export function envCredentialSource(config: Config): CredentialSource {
   return {
     get(provider) {
       const compat = provider === config.OPENAI_COMPATIBLE_NAME;
-      const apiKey = compat ? config.OPENAI_COMPATIBLE_API_KEY : (providerKeyEnv[provider] ?? []).map((k) => (config as unknown as Record<string, string | undefined>)[k] ?? process.env[k]).find(Boolean);
+      const apiKey = compat
+        ? config.OPENAI_COMPATIBLE_API_KEY
+        : (providerKeyEnv[provider] ?? []).map((k) => (config as unknown as Record<string, string | undefined>)[k] ?? process.env[k]).find(Boolean);
       const baseUrl = provider === "openai" ? config.OPENAI_BASE_URL : compat ? config.OPENAI_COMPATIBLE_BASE_URL : undefined;
       return { ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) };
     },
@@ -96,7 +98,10 @@ export function underlyingProvider(id: string): string {
  * and validation. Other providers ignore the option.
  */
 const lenientJsonSchema: LanguageModelMiddleware = {
-  transformParams: async ({ params }) => ({ ...params, providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } } }),
+  transformParams: async ({ params }) => ({
+    ...params,
+    providerOptions: { ...params.providerOptions, openai: { strictJsonSchema: false, ...(params.providerOptions?.openai ?? {}) } },
+  }),
 };
 
 export function createAi(
@@ -117,15 +122,16 @@ export function createAi(
   // Provider packages are imported lazily: their default instances read env at import time. Instances
   // are built from the credentials in force and rebuilt when those change (an admin saved a key).
   async function build(): Promise<Registry> {
-    const [{ createOpenAI }, { createAnthropic }, { createGoogle }, { createGroq }, { createDeepgram }, { createAssemblyAI }, { createGateway }] = await Promise.all([
-      import("@ai-sdk/openai"),
-      import("@ai-sdk/anthropic"),
-      import("@ai-sdk/google"),
-      import("@ai-sdk/groq"),
-      import("@ai-sdk/deepgram"),
-      import("@ai-sdk/assemblyai"),
-      import("@ai-sdk/gateway"),
-    ]);
+    const [{ createOpenAI }, { createAnthropic }, { createGoogle }, { createGroq }, { createDeepgram }, { createAssemblyAI }, { createGateway }] =
+      await Promise.all([
+        import("@ai-sdk/openai"),
+        import("@ai-sdk/anthropic"),
+        import("@ai-sdk/google"),
+        import("@ai-sdk/groq"),
+        import("@ai-sdk/deepgram"),
+        import("@ai-sdk/assemblyai"),
+        import("@ai-sdk/gateway"),
+      ]);
     const c = (p: string) => credentials.get(p);
     const key = (p: string) => {
       const apiKey = c(p).apiKey;
@@ -184,11 +190,14 @@ export function createAi(
       const msg = (err as Error).message ?? String(err);
       const known = Object.keys(providerKeyEnv).concat(credentials.get(compat).baseUrl ? [compat] : []);
       if (/No such provider/i.test(msg)) {
-        if (provider === compat) throw new Error(`"${id}" needs a base URL for the ${compat} server (OPENAI_COMPATIBLE_BASE_URL, or enter it under Settings → Models)`);
+        if (provider === compat)
+          throw new Error(`"${id}" needs a base URL for the ${compat} server (OPENAI_COMPATIBLE_BASE_URL, or enter it under Settings → Models)`);
         throw new Error(`unknown provider "${provider}" in "${id}". Known providers: ${known.join(", ")}`);
       }
       if (kind === "transcription")
-        throw new Error(`provider "${provider}" has no transcription models ("${id}"). Use e.g. openai:whisper-1, deepgram:nova-3, assemblyai:best, groq:whisper-large-v3-turbo. (${msg})`);
+        throw new Error(
+          `provider "${provider}" has no transcription models ("${id}"). Use e.g. openai:whisper-1, deepgram:nova-3, assemblyai:best, groq:whisper-large-v3-turbo. (${msg})`,
+        );
       throw new Error(`cannot resolve ${kind} model "${id}": ${msg}`);
     }
   }
@@ -198,7 +207,8 @@ export function createAi(
     const keys = providerKeyEnv[provider];
     // a self-hosted OpenAI-compatible server needs no key
     if (provider === "openai" && credentials.get("openai").baseUrl) return;
-    if (keys && !credentials.get(provider).apiKey) throw new Error(`"${id}" needs an API key for ${provider}: enter one under Settings → Models, or set ${keys.join(" or ")}`);
+    if (keys && !credentials.get(provider).apiKey)
+      throw new Error(`"${id}" needs an API key for ${provider}: enter one under Settings → Models, or set ${keys.join(" or ")}`);
   }
 
   /**
@@ -235,15 +245,25 @@ export function createAi(
     if (reg?.ok) {
       // Speaches answers the POST only once the files are in its cache and reports no progress meanwhile, so
       // boot (and the HTTP port) waits here for minutes on a first install; a heartbeat says the wait is this
-      log.info({ model: modelId, server: shown, timeoutMin: 15 }, "transcription model not installed; downloading it via POST /models (first boot only; hundreds of MB to GBs, the app answers once it is done)");
+      log.info(
+        { model: modelId, server: shown, timeoutMin: 15 },
+        "transcription model not installed; downloading it via POST /models (first boot only; hundreds of MB to GBs, the app answers once it is done)",
+      );
       const started = Date.now();
       const elapsedSec = () => Math.round((Date.now() - started) / 1000);
-      const heartbeat = setInterval(() => log.info({ model: modelId, server: shown, elapsedSec: elapsedSec() }, "still downloading the transcription model; boot continues when it finishes"), 20_000);
+      const heartbeat = setInterval(
+        () =>
+          log.info({ model: modelId, server: shown, elapsedSec: elapsedSec() }, "still downloading the transcription model; boot continues when it finishes"),
+        20_000,
+      );
       try {
-        const dl = await fetch(`${base}/models/${encodeURIComponent(modelId)}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch((err) => {
-          throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: ${(err as Error).message}`);
-        });
-        if (!dl.ok && dl.status !== 409) throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
+        const dl = await fetch(`${base}/models/${encodeURIComponent(modelId)}`, { method: "POST", headers, signal: AbortSignal.timeout(15 * 60_000) }).catch(
+          (err) => {
+            throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: ${(err as Error).message}`);
+          },
+        );
+        if (!dl.ok && dl.status !== 409)
+          throw new Error(`download of ${modelId} from ${shown} failed after ${elapsedSec()}s: HTTP ${dl.status} ${await dl.text().catch(() => "")}`);
         log.info({ model: modelId, server: shown, elapsedSec: elapsedSec(), status: dl.status }, "transcription model downloaded");
       } finally {
         clearInterval(heartbeat);
@@ -257,7 +277,10 @@ export function createAi(
   async function verify(kind: "language" | "transcription", id: string) {
     await resolve(kind, id);
     requireKeys(id);
-    if (kind === "transcription" && !supportsWordTimestamps(id)) throw new Error(`"${id}" does not return word timestamps, which cuts and captions need. Use whisper-1 (also through the gateway), a Speaches faster-whisper model, deepgram:nova-3, assemblyai:best or groq:whisper-large-v3-turbo.`);
+    if (kind === "transcription" && !supportsWordTimestamps(id))
+      throw new Error(
+        `"${id}" does not return word timestamps, which cuts and captions need. Use whisper-1 (also through the gateway), a Speaches faster-whisper model, deepgram:nova-3, assemblyai:best or groq:whisper-large-v3-turbo.`,
+      );
     await checkSelfHosted(id);
   }
 

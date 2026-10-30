@@ -54,7 +54,14 @@ export interface EnqueueRefineOptions {
  * caller belongs to: the project flip commits only while it is current (StaleJobError otherwise); undefined takes any.
  * Returns false only for `onlyIfIdle` when the project was busy.
  */
-export async function enqueueRefine(svc: Services, projectId: string, seq: number | undefined, steps: readonly RefineStep[] = REFINE_STEPS, u?: UnitOfWork, o: EnqueueRefineOptions = {}): Promise<boolean> {
+export async function enqueueRefine(
+  svc: Services,
+  projectId: string,
+  seq: number | undefined,
+  steps: readonly RefineStep[] = REFINE_STEPS,
+  u?: UnitOfWork,
+  o: EnqueueRefineOptions = {},
+): Promise<boolean> {
   if (!u) return svc.tx((tx) => enqueueRefine(svc, projectId, seq, steps, tx, o));
   const db = u.db;
   const [t] = await db.select({ refine: schema.transcripts.refine }).from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
@@ -114,7 +121,16 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile | undefined; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
+  result: {
+    status: "done" | "failed";
+    error?: string;
+    flags?: TranscriptFlag[];
+    sceneCuts?: number[];
+    overlays?: SourceOverlay[];
+    textProfile?: TextProfile | undefined;
+    skipped?: string;
+    artifact?: { data: unknown; models: Record<string, string> };
+  },
   /** the step job's projects.stage_seq: a superseded step merges nothing and hands nothing to analyze */
   seq?: number,
 ) {
@@ -123,11 +139,20 @@ export async function mergeRefine(
     const tx = u.db;
     const [t] = await tx.select().from(schema.transcripts).where(eq(schema.transcripts.projectId, projectId)).for("update");
     if (!t) return;
-    if (!(await lockCurrentStage(tx, projectId, seq))) return svc.log.child({ module: "refine", projectId }).info({ step, seq }, "refine step superseded; result dropped"); // transcript, then project
+    if (!(await lockCurrentStage(tx, projectId, seq)))
+      return svc.log.child({ module: "refine", projectId }).info({ step, seq }, "refine step superseded; result dropped"); // transcript, then project
     if (result.status === "failed" && result.error !== undefined) {
       // a step that gave up: its stage.failed commits with the "failed" status it announces
       const durationSec = await stageElapsed(tx, projectId, "refine");
-      await u.emit(projectId, "stage.failed", { stage: "refine", step, error: result.error.slice(0, 500), attempt: 0, max: 0, final: true, ...(durationSec !== undefined ? { durationSec } : {}) });
+      await u.emit(projectId, "stage.failed", {
+        stage: "refine",
+        step,
+        error: result.error.slice(0, 500),
+        attempt: 0,
+        max: 0,
+        final: true,
+        ...(durationSec !== undefined ? { durationSec } : {}),
+      });
     }
     if (result.artifact) await u.artifact(projectId, "refine", step, result.artifact.data, result.artifact.models);
     const raw = t.rawWords ?? t.words;
@@ -137,7 +162,10 @@ export async function mergeRefine(
       // manual cuts are the user's, not the detector's: they survive a re-run
       const isManual = (f: (typeof flags)[number]) => f.subkind === "manual";
       const kept = flags.filter((f) => f.kind !== kind || isManual(f));
-      let incoming = carryDecisions(flags.filter((f) => f.kind === kind && !isManual(f)), result.flags);
+      let incoming = carryDecisions(
+        flags.filter((f) => f.kind === kind && !isManual(f)),
+        result.flags,
+      );
       // fixes the user deleted stay deleted when the detector finds them again
       incoming = incoming.filter((f) => !(t.deletedFlags ?? []).some((d) => d.kind === f.kind && d.wordIndex === f.wordIndex && d.span === f.span));
       // nothing the detector finds may overlap a fix the user made by hand
@@ -168,7 +196,13 @@ export async function mergeRefine(
       .where(eq(schema.transcripts.projectId, projectId));
     const finished = REFINE_STEPS.filter((s) => refine[s] === "done" || refine[s] === "failed").length;
     await u.emit(projectId, "stage.progress", { stage: "refine", progress: finished / REFINE_STEPS.length, message: `${step} ${result.status}`, step, refine });
-    if (result.skipped) await u.emit(projectId, "stage.progress", { stage: "refine", step, skipped: { status: "skipped", reason: result.skipped }, message: skipMessage(step, result.skipped, t.language) });
+    if (result.skipped)
+      await u.emit(projectId, "stage.progress", {
+        stage: "refine",
+        step,
+        skipped: { status: "skipped", reason: result.skipped },
+        message: skipMessage(step, result.skipped, t.language),
+      });
     if (finished === REFINE_STEPS.length) await finishIfComplete(svc, projectId, u);
   });
 }
@@ -226,26 +260,52 @@ export async function refineEntities(ctx: StageContext) {
     raw,
     t.entities,
     { title: project.title, uploader: project.sourceMeta?.uploader as string | undefined },
-    { signal: ctx.signal, timeoutMs: ctx.unitTimeoutMs(svc.models.get().language), telemetry: svc.otel.enabled, autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE, log: ctx.log },
+    {
+      signal: ctx.signal,
+      timeoutMs: ctx.unitTimeoutMs(svc.models.get().language),
+      telemetry: svc.otel.enabled,
+      autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
+      log: ctx.log,
+    },
   );
   ctx.log.debug(
     {
       entities: t.entities.length,
       applied: res.applied.map((a) => ({ heard: a.heard, entity: a.entity, at: Number(a.at.toFixed(1)) })),
-      pending: res.flags.filter((f) => f.status === "pending").map((f) => ({ heard: f.heard, suggested: f.suggested, confidence: f.confidence, at: Number(f.start.toFixed(1)) })),
+      pending: res.flags
+        .filter((f) => f.status === "pending")
+        .map((f) => ({ heard: f.heard, suggested: f.suggested, confidence: f.confidence, at: Number(f.start.toFixed(1)) })),
     },
     "entity corrections",
   );
   ctx.log.info({ step: "entities", auto: res.applied.length, pending: res.flags.length - res.applied.length, candidates: res.candidates }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "entities", { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } }, ctx.seq);
+  await mergeRefine(
+    svc,
+    ctx.projectId,
+    "entities",
+    { status: "done", flags: res.flags, artifact: { data: res.trace ?? null, models: modelsUsed(svc, "language") } },
+    ctx.seq,
+  );
 }
 
 /** "… [words] …": a rejected cut in its sentence, the way the verifier is shown it. */
 function cutSnippet(ws: ReadonlyArray<{ text: string }>, a: number, b: number): string {
-  return `…${ws.slice(Math.max(0, a - 6), a).map((w) => w.text).join(" ")} [${ws.slice(a, b).map((w) => w.text).join(" ")}] ${ws.slice(b, b + 5).map((w) => w.text).join(" ")}…`;
+  return `…${ws
+    .slice(Math.max(0, a - 6), a)
+    .map((w) => w.text)
+    .join(" ")} [${ws
+    .slice(a, b)
+    .map((w) => w.text)
+    .join(" ")}] ${ws
+    .slice(b, b + 5)
+    .map((w) => w.text)
+    .join(" ")}…`;
 }
 
-const rejectedContext = z.object({ words: z.array(z.object({ text: z.string() })), target: z.object({ index: z.number().int().min(0), span: z.number().int().min(1) }) });
+const rejectedContext = z.object({
+  words: z.array(z.object({ text: z.string() })),
+  target: z.object({ index: z.number().int().min(0), span: z.number().int().min(1) }),
+});
 
 /**
  * Cuts the user rejected in their other projects, as "… [words] …" snippets: the verifier sees them
@@ -265,7 +325,12 @@ async function rejectedCutExamples(svc: Services, projectId: string, max = 8): P
   if (out.length >= max) return out;
   const seen = new Set(out);
   // projects deleted with "forget what Reelsaw learned" teach nothing while they wait for the purge
-  const others = await db.query.projects.findMany({ where: and(eq(schema.projects.userId, p.userId), eq(schema.projects.forgetDecisionsOnPurge, false)), columns: { id: true }, orderBy: desc(schema.projects.updatedAt), limit: 20 });
+  const others = await db.query.projects.findMany({
+    where: and(eq(schema.projects.userId, p.userId), eq(schema.projects.forgetDecisionsOnPurge, false)),
+    columns: { id: true },
+    orderBy: desc(schema.projects.updatedAt),
+    limit: 20,
+  });
   for (const o of others) {
     if (o.id === projectId || out.length >= max) continue;
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, o.id), columns: { flags: true, rawWords: true, words: true } });
@@ -294,41 +359,98 @@ export async function refineDisfluency(ctx: StageContext) {
   const useLlm = opts.disfluencyLlm;
   const raw = t.rawWords ?? t.words;
   const reserved = new Set<number>();
-  for (const f of t.flags) if (f.kind === "entity" || f.kind === "loop" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
+  for (const f of t.flags)
+    if (f.kind === "entity" || f.kind === "loop" || f.subkind === "manual") for (let k = 0; k < f.span; k++) reserved.add(f.wordIndex + k);
   const trace: DisfluencyTraceEntry[] = [];
   const modelId = svc.models.get().language;
   const unitMs = ctx.unitTimeoutMs(modelId);
   const concurrency = 3;
-  const phases = { rewrite: { range: [0.1, 0.7] as [number, number], what: "Checking" }, verify: { range: [0.7, 0.95] as [number, number], what: "Verifying" } };
+  const phases = {
+    rewrite: { range: [0.1, 0.7] as [number, number], what: "Checking" },
+    verify: { range: [0.7, 0.95] as [number, number], what: "Verifying" },
+  };
   // every model window is a saved step: a timeout or a restart resumes from the windows already done, and a window
   // lost to a timeout fails the stage (it is never written as "done" with whatever flags were found so far)
   const checkpoint: DisfluencyCheckpoint = {
-    all: (items, phase, fn) => ctx.steps(items, { concurrency, range: phases[phase].range, message: (d, t) => `${phases[phase].what} for fillers and repeats (${d}/${t})` }, fn),
-    step: (name, key, fn, stepSchema, o) => ctx.step(name, { ...key, model: modelId, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, { schema: stepSchema, timeoutMs: unitMs * (o.calls ?? 1), model: modelId, signal: o.signal }),
+    all: (items, phase, fn) =>
+      ctx.steps(items, { concurrency, range: phases[phase].range, message: (d, t) => `${phases[phase].what} for fillers and repeats (${d}/${t})` }, fn),
+    step: (name, key, fn, stepSchema, o) =>
+      ctx.step(name, { ...key, model: modelId, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, {
+        schema: stepSchema,
+        timeoutMs: unitMs * (o.calls ?? 1),
+        model: modelId,
+        signal: o.signal,
+      }),
   };
-  const flags = await detectDisfluencies(useLlm ? await svc.ai.languageModel() : null, raw, {
-    signal: ctx.signal,
-    timeoutMs: unitMs,
-    concurrency,
-    checkpoint: useLlm ? checkpoint : undefined,
-    isFatal: (err) => err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError,
-    telemetry: svc.otel.enabled,
-    autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
-    reserved,
-    rejectedExamples: await rejectedCutExamples(svc, ctx.projectId).catch(() => []),
-  }, trace);
+  const flags = await detectDisfluencies(
+    useLlm ? await svc.ai.languageModel() : null,
+    raw,
+    {
+      signal: ctx.signal,
+      timeoutMs: unitMs,
+      concurrency,
+      checkpoint: useLlm ? checkpoint : undefined,
+      isFatal: (err) => err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError,
+      telemetry: svc.otel.enabled,
+      autoConfidence: svc.config.TRANSCRIPT_AUTO_FIX_CONFIDENCE,
+      reserved,
+      rejectedExamples: await rejectedCutExamples(svc, ctx.projectId).catch(() => []),
+    },
+    trace,
+  );
   const byOutcome: Record<string, number> = {};
   for (const e of trace) byOutcome[e.outcome] = (byOutcome[e.outcome] ?? 0) + 1;
-  ctx.log.debug({ candidates: trace.length, rules: trace.filter((e) => e.source === "rule").length, model: trace.filter((e) => e.source === "model").length, byOutcome, reservedWords: reserved.size, llm: useLlm }, "disfluency candidates");
+  ctx.log.debug(
+    {
+      candidates: trace.length,
+      rules: trace.filter((e) => e.source === "rule").length,
+      model: trace.filter((e) => e.source === "model").length,
+      byOutcome,
+      reservedWords: reserved.size,
+      llm: useLlm,
+    },
+    "disfluency candidates",
+  );
   // every cut accepted or rejected, and why (bounded; the stage artifact keeps the full list)
-  for (const e of trace.slice(0, 200)) ctx.log.trace({ wordIndex: e.wordIndex, text: e.text, subkind: e.subkind, source: e.source, why: e.why, prior: e.prior, verdict: e.verdict ?? null, outcome: e.outcome }, "disfluency decision");
-  ctx.log.info({ step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length }, "refine step done");
-  await mergeRefine(svc, ctx.projectId, "disfluency", { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } }, ctx.seq);
+  for (const e of trace.slice(0, 200))
+    ctx.log.trace(
+      {
+        wordIndex: e.wordIndex,
+        text: e.text,
+        subkind: e.subkind,
+        source: e.source,
+        why: e.why,
+        prior: e.prior,
+        verdict: e.verdict ?? null,
+        outcome: e.outcome,
+      },
+      "disfluency decision",
+    );
+  ctx.log.info(
+    { step: "disfluency", removed: flags.filter((f) => f.status === "auto").length, flagged: flags.filter((f) => f.status === "pending").length },
+    "refine step done",
+  );
+  await mergeRefine(
+    svc,
+    ctx.projectId,
+    "disfluency",
+    { status: "done", flags, artifact: { data: { candidates: trace }, models: useLlm ? modelsUsed(svc, "language") : { language: "none (rules only)" } } },
+    ctx.seq,
+  );
 }
 
 /** Bump when the text scan's behaviour changes: the saved text-scan step stops applying. */
 const TEXT_SCAN_VERSION = "text-scan-2";
-const overlayBox = z.object({ x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(), kind: z.enum(["caption", "watermark"]), coverage: z.number(), windows: z.array(z.tuple([z.number(), z.number()])).optional(), share: z.number().optional() });
+const overlayBox = z.object({
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+  kind: z.enum(["caption", "watermark"]),
+  coverage: z.number(),
+  windows: z.array(z.tuple([z.number(), z.number()])).optional(),
+  share: z.number().optional(),
+});
 const textScanSchema = z.object({
   overlays: z.array(overlayBox),
   textProfile: z.object({ frames: z.number(), textHeavy: z.number(), presentation: z.boolean() }),
@@ -363,20 +485,45 @@ export async function refineScenes(ctx: StageContext) {
         async (signal) => {
           const sourcePath = await ctx.ensureSource(project);
           const r = await detectOverlays({ detector, ffmpegPath: svc.config.FFMPEG_PATH, signal, faces: svc.faces }, sourcePath, durationSec, sceneCuts);
-          return { overlays: r.overlays, textProfile: r.textProfile, frames: r.frames, scenes: r.scenes, slides: r.slides, faceDropped: r.faceDropped.length, moving: r.moving.length, ui: r.ui.length };
+          return {
+            overlays: r.overlays,
+            textProfile: r.textProfile,
+            frames: r.frames,
+            scenes: r.scenes,
+            slides: r.slides,
+            faceDropped: r.faceDropped.length,
+            moving: r.moving.length,
+            ui: r.ui.length,
+          };
         },
         { schema: textScanSchema, timeoutMs: Math.max(30 * 60_000, Math.round(durationSec * 1000)), model: "text-detector" },
       );
       overlays = scan.overlays;
       textProfile = scan.textProfile;
-      ctx.log.info({ step: "scenes", frames: scan.frames, shots: scan.scenes, slides: scan.slides, faceDropped: scan.faceDropped, moving: scan.moving, ui: scan.ui, textProfile: scan.textProfile, overlays }, "on-screen text scan");
+      ctx.log.info(
+        {
+          step: "scenes",
+          frames: scan.frames,
+          shots: scan.scenes,
+          slides: scan.slides,
+          faceDropped: scan.faceDropped,
+          moving: scan.moving,
+          ui: scan.ui,
+          textProfile: scan.textProfile,
+          overlays,
+        },
+        "on-screen text scan",
+      );
     } catch (err) {
       // a stop or a timeout ends the attempt (the cuts are already saved and the scan restarts alone); anything else only costs the text scan
       if (ctx.signal.aborted || err instanceof StageTimeoutError || err instanceof StaleJobError) throw err;
       ctx.log.warn({ err }, "on-screen text scan failed, continuing without it");
     }
   }
-  ctx.log.debug({ cuts: sceneCuts.length, first: sceneCuts.slice(0, 12).map((c) => Number(c.toFixed(1))), skipped: !project.width ? "no video width" : undefined }, "scene cuts");
+  ctx.log.debug(
+    { cuts: sceneCuts.length, first: sceneCuts.slice(0, 12).map((c) => Number(c.toFixed(1))), skipped: !project.width ? "no video width" : undefined },
+    "scene cuts",
+  );
   ctx.log.info({ step: "scenes", cuts: sceneCuts.length, overlays: overlays.length }, "refine step done");
   await mergeRefine(svc, ctx.projectId, "scenes", { status: "done", sceneCuts, overlays, textProfile }, ctx.seq);
 }

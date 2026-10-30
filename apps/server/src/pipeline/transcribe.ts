@@ -8,7 +8,19 @@ import { QUEUES } from "../queue/boss.js";
 import { type StageContext, StaleJobError, exists, lockCurrentStage, modelsUsed } from "./common.js";
 import { toWords, toSentences, offsetSegments, type RawSegment } from "./transcript.js";
 import { extractEntities, biasProviderOptions, applyFlags } from "./entities.js";
-import { chunkStepKey, chunkStepName, chunkStepOutput, chunkStepSchema, collapseDecoderLoopsWithStats, compressionRatio, flagsFromCollapse, preferLessRepetitive, shouldRetryWithoutPrompt, withoutPrompt, type LoopRun } from "./asr-loops.js";
+import {
+  chunkStepKey,
+  chunkStepName,
+  chunkStepOutput,
+  chunkStepSchema,
+  collapseDecoderLoopsWithStats,
+  compressionRatio,
+  flagsFromCollapse,
+  preferLessRepetitive,
+  shouldRetryWithoutPrompt,
+  withoutPrompt,
+  type LoopRun,
+} from "./asr-loops.js";
 import { underlyingProvider } from "../ai/registry.js";
 import { enqueueRefine } from "./refine.js";
 
@@ -88,23 +100,55 @@ export async function transcribe(ctx: StageContext) {
 
   const selfHosted = provider === "openai" && !!svc.providers.get("openai").baseUrl;
   const concurrency = svc.config.TRANSCRIBE_CONCURRENCY || (selfHosted ? 1 : 3);
-  ctx.log.info({ model: transcriptionModel, provider, selfHosted, chunks: chunkFiles.length, alreadyDone: doneIdx.size, concurrency, chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS, audioSec: Math.round(acc), biasHints: entities.length }, "transcribe start");
+  ctx.log.info(
+    {
+      model: transcriptionModel,
+      provider,
+      selfHosted,
+      chunks: chunkFiles.length,
+      alreadyDone: doneIdx.size,
+      concurrency,
+      chunkSeconds: svc.config.TRANSCRIBE_CHUNK_SECONDS,
+      audioSec: Math.round(acc),
+      biasHints: entities.length,
+    },
+    "transcribe start",
+  );
 
   // One durable step per chunk (progress, time left, idle timeout and retry accounting come from the step layer, as in
   // analyze). The words stay in transcript_chunks: a step's saved output is only counts, and a chunk that already has a
   // row (a run from before steps, or a step lost with its row kept) is not transcribed again.
   const transcribeChunk = async (i: number, audio: Buffer, signal: AbortSignal) => {
     const t0 = Date.now();
-    const row = await ctx.db.query.transcriptChunks.findFirst({ where: and(eq(schema.transcriptChunks.projectId, projectId), eq(schema.transcriptChunks.index, i)) });
+    const row = await ctx.db.query.transcriptChunks.findFirst({
+      where: and(eq(schema.transcriptChunks.projectId, projectId), eq(schema.transcriptChunks.index, i)),
+    });
     if (row) return chunkStepOutput(i, row.text, row.segments.length, 0, true);
-    let result = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions, signal, maxRetries: 3, functionId: "transcribe.chunk", telemetry: svc.otel.enabled });
+    let result = await svc.asr.transcribe(audio, {
+      modelId: transcriptionModel,
+      providerOptions,
+      signal,
+      maxRetries: 3,
+      functionId: "transcribe.chunk",
+      telemetry: svc.otel.enabled,
+    });
     // whisper-1 has no temperature-fallback; a vocabulary `prompt` that leaked, or a 30 s
     // internal window that started looping, poisons the rest of this 10-minute file. Retry once
     // without the prompt (openai/whisper compression_ratio_threshold = 2.4).
     const prompted = typeof (providerOptions[provider] as { prompt?: unknown } | undefined)?.prompt === "string";
     if (shouldRetryWithoutPrompt(result.text, prompted)) {
-      ctx.log.warn({ chunk: i, compressionRatio: Number(compressionRatio(result.text).toFixed(2)), chars: result.text.length }, "chunk looks like a decoder loop; retrying without vocabulary prompt");
-      const retried = await svc.asr.transcribe(audio, { modelId: transcriptionModel, providerOptions: withoutPrompt(providerOptions, provider), signal, maxRetries: 3, functionId: "transcribe.chunk-retry", telemetry: svc.otel.enabled });
+      ctx.log.warn(
+        { chunk: i, compressionRatio: Number(compressionRatio(result.text).toFixed(2)), chars: result.text.length },
+        "chunk looks like a decoder loop; retrying without vocabulary prompt",
+      );
+      const retried = await svc.asr.transcribe(audio, {
+        modelId: transcriptionModel,
+        providerOptions: withoutPrompt(providerOptions, provider),
+        signal,
+        maxRetries: 3,
+        functionId: "transcribe.chunk-retry",
+        telemetry: svc.otel.enabled,
+      });
       const picked = preferLessRepetitive(result, retried);
       ctx.log.info(
         {
@@ -138,10 +182,18 @@ export async function transcribe(ctx: StageContext) {
     const audio = await fs.readFile(path.join(chunkDir, file));
     const cacheKey = svc.asr.keyFor(audio, { modelId: transcriptionModel, providerOptions });
     const timeoutMs = ctx.unitTimeoutMs(transcriptionModel, { audioSec: (offsets[i + 1] ?? acc) - offsets[i]! });
-    return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), { schema: chunkStepSchema, timeoutMs, model: transcriptionModel, signal });
+    return ctx.step(chunkStepName(i), chunkStepKey(cacheKey, transcriptionModel, i, offsets[i]!), (sig) => transcribeChunk(i, audio, sig), {
+      schema: chunkStepSchema,
+      timeoutMs,
+      model: transcriptionModel,
+      signal,
+    });
   });
 
-  const chunks = await ctx.db.query.transcriptChunks.findMany({ where: eq(schema.transcriptChunks.projectId, projectId), orderBy: asc(schema.transcriptChunks.index) });
+  const chunks = await ctx.db.query.transcriptChunks.findMany({
+    where: eq(schema.transcriptChunks.projectId, projectId),
+    orderBy: asc(schema.transcriptChunks.index),
+  });
   if (chunks.length !== chunkFiles.length) throw new Error(`Expected ${chunkFiles.length} transcript chunks, have ${chunks.length}`);
 
   // Collapse per chunk: decoder loops don't span API calls, and a cheer that happens to sit on a
@@ -169,26 +221,35 @@ export async function transcribe(ctx: StageContext) {
   if (!words.length) throw new Error("Transcription returned no words. Is the audio silent?");
   const sentences = toSentences(words);
 
-  await ctx.complete({ words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length, loops: flags.length, loopDropped: dropped }, async (u) => {
-  // which STT ran, so later expected-time estimates compare like with like (see pipeline/estimates.ts)
-  await u.artifact(projectId, "transcribe", "models", { chunks: chunkFiles.length, words: words.length }, { ...modelsUsed(svc, "transcription", "align"), transcription: transcriptionModel });
-  await u.db
-    .insert(schema.transcripts)
-    .values({
-      projectId,
-      language: chunks.find((c) => c.language)?.language ?? null,
-      text: words.map((w) => w.text).join(" "),
-      words,
-      rawWords,
-      flags,
-      entities,
-      refine: {},
-      segments: sentences,
-      sceneCuts: null,
-    })
-    .onConflictDoNothing();
-    await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
-  });
+  await ctx.complete(
+    { words: words.length, sentences: sentences.length, entities: entities.length, chunks: chunkFiles.length, loops: flags.length, loopDropped: dropped },
+    async (u) => {
+      // which STT ran, so later expected-time estimates compare like with like (see pipeline/estimates.ts)
+      await u.artifact(
+        projectId,
+        "transcribe",
+        "models",
+        { chunks: chunkFiles.length, words: words.length },
+        { ...modelsUsed(svc, "transcription", "align"), transcription: transcriptionModel },
+      );
+      await u.db
+        .insert(schema.transcripts)
+        .values({
+          projectId,
+          language: chunks.find((c) => c.language)?.language ?? null,
+          text: words.map((w) => w.text).join(" "),
+          words,
+          rawWords,
+          flags,
+          entities,
+          refine: {},
+          segments: sentences,
+          sceneCuts: null,
+        })
+        .onConflictDoNothing();
+      await enqueueRefine(svc, projectId, ctx.seq, undefined, u);
+    },
+  );
 }
 
 export { QUEUES };

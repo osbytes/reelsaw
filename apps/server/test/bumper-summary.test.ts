@@ -22,7 +22,17 @@ describe("bumperCoverage", () => {
   it("two different assets: the most common leads", () => {
     const clips = [...many(2), ...many(3, { intro: "b" }), clip({ intro: null })];
     const r = bumperCoverage({ settings: { introAssetId: "a" } }, clips);
-    assert.deepEqual(r.intro, { assetId: "b", withCount: 3, total: 6, assets: [{ assetId: "b", count: 3 }, { assetId: "a", count: 2 }], others: [{ assetId: "a", count: 2 }], noneCount: 1 });
+    assert.deepEqual(r.intro, {
+      assetId: "b",
+      withCount: 3,
+      total: 6,
+      assets: [
+        { assetId: "b", count: 3 },
+        { assetId: "a", count: 2 },
+      ],
+      others: [{ assetId: "a", count: 2 }],
+      noneCount: 1,
+    });
   });
   it("clip overrides with no project default", () => {
     const r = bumperCoverage({ settings: {} }, [clip({ intro: "x" }), clip(), clip({ intro: "x" })]);
@@ -36,9 +46,21 @@ describe("bumperCoverage", () => {
 
 describe("bumperCoverage with several assets", () => {
   it("lists every distinct asset, most used first", () => {
-    const clips = [clip({ intro: "a" }), clip({ intro: "b" }), clip({ intro: "b" }), clip({ intro: "c" }), clip({ intro: "b" }), clip({ intro: "a" }), clip({ intro: null })];
+    const clips = [
+      clip({ intro: "a" }),
+      clip({ intro: "b" }),
+      clip({ intro: "b" }),
+      clip({ intro: "c" }),
+      clip({ intro: "b" }),
+      clip({ intro: "a" }),
+      clip({ intro: null }),
+    ];
     const r = bumperCoverage({ settings: {} }, clips);
-    assert.deepEqual(r.intro!.assets, [{ assetId: "b", count: 3 }, { assetId: "a", count: 2 }, { assetId: "c", count: 1 }]);
+    assert.deepEqual(r.intro!.assets, [
+      { assetId: "b", count: 3 },
+      { assetId: "a", count: 2 },
+      { assetId: "c", count: 1 },
+    ]);
     assert.equal(r.intro!.assetId, "b");
     assert.equal(r.intro!.total, 7);
     assert.equal(r.intro!.noneCount, 1);
@@ -68,7 +90,23 @@ describe("countBumperUsage", () => {
   });
   it("overlays and music tracks count, the same track twice counts once, an old one-object audio row is read", () => {
     const m = countBumperUsage([
-      { settings: {}, clips: [{ bumpers: null, overlays: [{ id: "o1", assetId: "logo", start: 0, end: 4, x: 0.5, y: 0.5 }, { id: "o2", kind: "text", text: "t", start: 0, end: 4, x: 0.5, y: 0.5 }], audio: [{ id: "m1", assetId: "song", start: 0, end: 5 }, { id: "m2", assetId: "song", start: 5, end: 9 }] }, { bumpers: null, audio: { assetId: "song", start: 0, end: 5 } }] },
+      {
+        settings: {},
+        clips: [
+          {
+            bumpers: null,
+            overlays: [
+              { id: "o1", assetId: "logo", start: 0, end: 4, x: 0.5, y: 0.5 },
+              { id: "o2", kind: "text", text: "t", start: 0, end: 4, x: 0.5, y: 0.5 },
+            ],
+            audio: [
+              { id: "m1", assetId: "song", start: 0, end: 5 },
+              { id: "m2", assetId: "song", start: 5, end: 9 },
+            ],
+          },
+          { bumpers: null, audio: { assetId: "song", start: 0, end: 5 } },
+        ],
+      },
       { settings: { introAssetId: "logo" }, clips: [clip(), { bumpers: null, overlays: [{ id: "o1", assetId: "logo", start: 0, end: 4, x: 0.5, y: 0.5 }] }] },
     ]);
     assert.deepEqual(m.get("logo"), { projects: 2, clips: 3 });

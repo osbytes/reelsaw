@@ -55,27 +55,27 @@ export function ClipEditorPage() {
 
   return (
     <>
-    <LiveStatusPill status={stream} />
-    <ClipEditor
-      key={clip.id}
-      projectId={p.id}
-      projectTitle={p.title}
-      clipCount={p.clips.length}
-      sourceVideoUrl={p.sourceVideoUrl}
-      durationSec={p.durationSec ?? 0}
-      srcW={p.width ?? 1920}
-      srcH={p.height ?? 1080}
-      settings={p.settings}
-      words={t.words}
-      rawWords={t.rawWords ?? t.words}
-      segments={t.segments}
-      flags={t.flags ?? []}
-      sceneCuts={t.sceneCuts ?? []}
-      overlays={masksSourceText(p.settings.sourceText, t.textProfile) ? (t.overlays ?? []) : []}
-      clip={clip as EditorClip}
-      renderProgress={progress}
-      onExit={() => nav(`/p/${p.id}#card=${clip.id}`)}
-    />
+      <LiveStatusPill status={stream} />
+      <ClipEditor
+        key={clip.id}
+        projectId={p.id}
+        projectTitle={p.title}
+        clipCount={p.clips.length}
+        sourceVideoUrl={p.sourceVideoUrl}
+        durationSec={p.durationSec ?? 0}
+        srcW={p.width ?? 1920}
+        srcH={p.height ?? 1080}
+        settings={p.settings}
+        words={t.words}
+        rawWords={t.rawWords ?? t.words}
+        segments={t.segments}
+        flags={t.flags ?? []}
+        sceneCuts={t.sceneCuts ?? []}
+        overlays={masksSourceText(p.settings.sourceText, t.textProfile) ? (t.overlays ?? []) : []}
+        clip={clip as EditorClip}
+        renderProgress={progress}
+        onExit={() => nav(`/p/${p.id}#card=${clip.id}`)}
+      />
     </>
   );
 }

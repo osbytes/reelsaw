@@ -20,7 +20,8 @@ import { loadTextDetector } from "../src/vision/text.js";
 const env = { ...dotenv(), ...process.env };
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const media = path.join(repoRoot, "eval/.cache/media/budgeting-116-158.v2.mp4");
-const ready = !!env.FACE_MODEL_PATH && !!env.TEXT_MODEL_PATH && fs.existsSync(env.FACE_MODEL_PATH) && fs.existsSync(env.TEXT_MODEL_PATH) && fs.existsSync(media);
+const ready =
+  !!env.FACE_MODEL_PATH && !!env.TEXT_MODEL_PATH && fs.existsSync(env.FACE_MODEL_PATH) && fs.existsSync(env.TEXT_MODEL_PATH) && fs.existsSync(media);
 
 describe("sampling under concurrency", { skip: ready ? false : "needs the host models and the cached framing media" }, () => {
   it("two clips sampled at once equal the same clips sampled one after the other", async () => {
@@ -28,7 +29,10 @@ describe("sampling under concurrency", { skip: ready ? false : "needs the host m
     const text = await loadTextDetector(env.TEXT_MODEL_PATH!);
     try {
       // 0-6 s: the title card with the speaker at the right (text on the left); 14-20 s: speaker centred, no card
-      const ranges: Array<[number, number]> = [[0, 6], [14, 20]];
+      const ranges: Array<[number, number]> = [
+        [0, 6],
+        [14, 20],
+      ];
       const one = async ([from, to]: [number, number]) => {
         const faces = await sampleFaces(face, { ffmpegPath: "ffmpeg", source: media, startSec: from, durationSec: to - from, sampleFps: 4 });
         const frames = await sampleClipText({ detector: text, ffmpegPath: "ffmpeg" }, media, from, to - from, 2);

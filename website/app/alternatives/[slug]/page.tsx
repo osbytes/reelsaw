@@ -55,7 +55,10 @@ export default async function AlternativePage({ params }: Props) {
             What {c.name} costs
           </h2>
           <p className="text-[15px] leading-relaxed text-ink2">{c.pricing.summary}</p>
-          <DataTable caption={`${c.name} plans`} table={{ columns: ["Plan", "Price", "What it includes"], rows: c.pricing.plans.map((p) => [p.name, p.price, p.includes]) }} />
+          <DataTable
+            caption={`${c.name} plans`}
+            table={{ columns: ["Plan", "Price", "What it includes"], rows: c.pricing.plans.map((p) => [p.name, p.price, p.includes]) }}
+          />
           {c.pricing.note && <p className="text-xs leading-relaxed text-ink3">{c.pricing.note}</p>}
         </section>
 
@@ -74,7 +77,10 @@ export default async function AlternativePage({ params }: Props) {
           <h2 id="features" className="text-[24px] font-bold tracking-tight">
             {c.name} vs Reelsaw, feature by feature
           </h2>
-          <DataTable caption={`${c.name} and Reelsaw compared`} table={{ columns: ["", "Reelsaw", c.name], rows: FEATURES.map((f) => [f.label, f.reelsaw, c.them[f.key]]) }} />
+          <DataTable
+            caption={`${c.name} and Reelsaw compared`}
+            table={{ columns: ["", "Reelsaw", c.name], rows: FEATURES.map((f) => [f.label, f.reelsaw, c.them[f.key]]) }}
+          />
         </section>
 
         <section className="flex flex-col gap-4" aria-labelledby="better">

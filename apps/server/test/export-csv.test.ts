@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { csvCell } from "../src/export.js";
 
 test("csvCell: text a spreadsheet would run as a formula gets a leading apostrophe", () => {
-  for (const s of ["=HYPERLINK(\"http://evil\")", "+1+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd"]) {
+  for (const s of ['=HYPERLINK("http://evil")', "+1+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd"]) {
     assert.ok(csvCell(s).replace(/^"/, "").startsWith("'"), JSON.stringify(s));
   }
   assert.equal(csvCell("=1+1"), "'=1+1");

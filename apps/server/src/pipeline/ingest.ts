@@ -24,7 +24,10 @@ export async function ingest(ctx: StageContext) {
   await ctx.start("ingesting");
 
   const stored = project.sourceKey && (await svc.storage.exists(project.sourceKey));
-  const upload = !stored && project.sourceType === "upload" ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) }) : undefined;
+  const upload =
+    !stored && project.sourceType === "upload"
+      ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) })
+      : undefined;
   if (!stored && project.sourceType === "upload" && !upload) throw new Error("Uploaded source file is missing");
   await ctx.acquire("ingest", ingestScratchMB(stored ? project.sourceBytes : upload?.sizeBytes));
 
@@ -55,43 +58,48 @@ export async function ingest(ctx: StageContext) {
       let stderrTail = "";
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
       const t0 = performance.now();
-      const { stdout, proxyId } = await svc.media.ytdlp(
-        [
-          "--no-playlist",
-          "--no-warnings",
-          // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
-          "--progress",
-          "--newline",
-          "--print-json",
-          // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
-          "-f",
-          "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
-          "--merge-output-format",
-          "mp4",
-          "--max-filesize",
-          `${svc.settings.get().MAX_SOURCE_FILE_MB}M`,
-          "-o",
-          path.join(dir, "source.%(ext)s"),
-          "--",
-          project.sourceUrl!,
-        ],
-        {
-          signal: ctx.signal,
-          onStderr: (line) => {
-            stderrTail = (stderrTail + "\n" + line).slice(-4000);
+      const { stdout, proxyId } = await svc.media
+        .ytdlp(
+          [
+            "--no-playlist",
+            "--no-warnings",
+            // --print-json implies --quiet, which hides progress unless asked for; --newline makes each tick a stdout line
+            "--progress",
+            "--newline",
+            "--print-json",
+            // prefer H.264: decodes everywhere (browser preview, Safari) and renders 3-5x faster than AV1/VP9 on CPU
+            "-f",
+            "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+            "--merge-output-format",
+            "mp4",
+            "--max-filesize",
+            `${svc.settings.get().MAX_SOURCE_FILE_MB}M`,
+            "-o",
+            path.join(dir, "source.%(ext)s"),
+            "--",
+            project.sourceUrl!,
+          ],
+          {
+            signal: ctx.signal,
+            onStderr: (line) => {
+              stderrTail = (stderrTail + "\n" + line).slice(-4000);
+            },
+            onStdout: (line) => {
+              const tick = parseDownloadTick(line);
+              if (!tick) return;
+              downloaded = Math.max(downloaded, tick.fraction);
+              void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
+            },
           },
-          onStdout: (line) => {
-            const tick = parseDownloadTick(line);
-            if (!tick) return;
-            downloaded = Math.max(downloaded, tick.fraction);
-            void ctx.progress(downloaded * 0.6, tick.message).catch(() => {});
-          },
-        },
-      ).catch((err: Error) => {
-        throw new Error(describeDownloadFailure(err, stderrTail));
-      });
+        )
+        .catch((err: Error) => {
+          throw new Error(describeDownloadFailure(err, stderrTail));
+        });
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
-      const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
+      const jsonLine = stdout
+        .split("\n")
+        .reverse()
+        .find((l) => l.trim().startsWith("{"));
       if (jsonLine) {
         const info = JSON.parse(jsonLine) as Record<string, unknown>;
         meta = {
@@ -108,7 +116,12 @@ export async function ingest(ctx: StageContext) {
           ext: info.ext,
           description: typeof info.description === "string" ? info.description.slice(0, 4000) : undefined,
           tags: Array.isArray(info.tags) ? info.tags.slice(0, 40) : undefined,
-          chapters: Array.isArray(info.chapters) ? (info.chapters as Array<{ title?: string }>).map((c) => c.title).filter(Boolean).slice(0, 40) : undefined,
+          chapters: Array.isArray(info.chapters)
+            ? (info.chapters as Array<{ title?: string }>)
+                .map((c) => c.title)
+                .filter(Boolean)
+                .slice(0, 40)
+            : undefined,
         };
       }
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
@@ -127,7 +140,14 @@ export async function ingest(ctx: StageContext) {
     await svc.storage.putFile(sourceKey, sourcePath);
   }
   if (!sourcePath || !(await exists(sourcePath))) throw new Error("Source file missing after ingest");
-  ctx.log.debug({ sourceType: project.sourceType, reusedStoredSource: !!project.sourceKey && sourceKey === project.sourceKey, ytdlp: project.sourceType === "url" ? { title: meta.title, uploader: meta.uploader, duration: meta.duration, ext: meta.ext } : undefined }, "source fetched");
+  ctx.log.debug(
+    {
+      sourceType: project.sourceType,
+      reusedStoredSource: !!project.sourceKey && sourceKey === project.sourceKey,
+      ytdlp: project.sourceType === "url" ? { title: meta.title, uploader: meta.uploader, duration: meta.duration, ext: meta.ext } : undefined,
+    },
+    "source fetched",
+  );
 
   await ctx.progress(0.9, "Probing media");
   const probe = await svc.media.ffprobe(sourcePath);
@@ -136,7 +156,19 @@ export async function ingest(ctx: StageContext) {
   // the exact bytes the transcript's timestamps refer to; a stored source already hashed keeps its hash
   if (!(stored && typeof meta.sha256 === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
   await ctx.release(); // the source is on disk, where free-space checks count it: the lease has done its job
-  ctx.log.debug({ width: probe.width, height: probe.height, fps: probe.fps, hasAudio: probe.hasAudio, sourceBytes, sourceType: project.sourceType, sha256: meta.sha256, videoId: meta.videoId }, "source facts");
+  ctx.log.debug(
+    {
+      width: probe.width,
+      height: probe.height,
+      fps: probe.fps,
+      hasAudio: probe.hasAudio,
+      sourceBytes,
+      sourceType: project.sourceType,
+      sha256: meta.sha256,
+      videoId: meta.videoId,
+    },
+    "source facts",
+  );
   if (download) recordDownload(download.proxy, download.sec, probe.durationSec, sourceBytes);
 
   const generic = !project.title || project.title === "Untitled" || /^[\w.-]+\.[a-z]{2,}$/i.test(project.title); // "Untitled" or a bare hostname
@@ -152,7 +184,17 @@ export async function ingest(ctx: StageContext) {
     }
     await u.db
       .update(schema.projects)
-      .set({ sourceKey, sourceBytes, sourceExpiredAt: null, sourceMeta: meta, durationSec: probe.durationSec, width: probe.width ?? null, height: probe.height ?? null, title: sql`case when ${schema.projects.title} = ${project.title} then ${title} else ${schema.projects.title} end`, updatedAt: new Date() })
+      .set({
+        sourceKey,
+        sourceBytes,
+        sourceExpiredAt: null,
+        sourceMeta: meta,
+        durationSec: probe.durationSec,
+        width: probe.width ?? null,
+        height: probe.height ?? null,
+        title: sql`case when ${schema.projects.title} = ${project.title} then ${title} else ${schema.projects.title} end`,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.projects.id, projectId));
     await recordSourceDuration(u.db, projectId, probe.durationSec);
     await u.enqueue(QUEUES.transcribe, { projectId });
@@ -177,7 +219,8 @@ async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<
  */
 export function recordDownload(proxy: string, sec: number, videoSec: number, bytes: number) {
   const rtf = realtimeFactor(sec, videoSec);
-  if (rtf !== null) histogram("reelsaw.ytdlp.download.realtime_factor", rtf, "1", { proxy }, "Download wall seconds per second of video, by the proxy that served it");
+  if (rtf !== null)
+    histogram("reelsaw.ytdlp.download.realtime_factor", rtf, "1", { proxy }, "Download wall seconds per second of video, by the proxy that served it");
   if (sec > 0 && bytes > 0) histogram("reelsaw.ytdlp.download.throughput", bytes / sec, "By/s", { proxy }, "Downloaded source bytes per wall second, by proxy");
 }
 
@@ -206,13 +249,23 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
     return "Could not download: a network proxy blocked the connection. Try uploading the file instead (New project → Upload).";
   }
   if (/sign in to confirm|not a bot|HTTP Error 403|confirm your age|This video is private|Video unavailable/i.test(text)) {
-    const why = /private/i.test(text) ? "the video is private" : /unavailable/i.test(text) ? "the video is unavailable" : /age/i.test(text) ? "the video is age-restricted" : "the site blocked the download";
+    const why = /private/i.test(text)
+      ? "the video is private"
+      : /unavailable/i.test(text)
+        ? "the video is unavailable"
+        : /age/i.test(text)
+          ? "the video is age-restricted"
+          : "the site blocked the download";
     return `Could not download: ${why}. Try uploading the file instead (New project → Upload).`;
   }
   if (/Unsupported URL|No video formats|Requested format is not available/i.test(text)) {
     return "Could not download: no usable video was found for this link. Try another URL, or upload the file instead (New project → Upload).";
   }
-  const last = stderr.split("\n").map((l) => l.trim()).filter((l) => /^ERROR/i.test(l)).at(-1);
+  const last = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^ERROR/i.test(l))
+    .at(-1);
   if (!last) return scrubStoredDownloadError(err.message.slice(0, 300));
   // Drop the "please report this on github" trailer — keep a short ERROR line without ops advice.
   const cleaned = last

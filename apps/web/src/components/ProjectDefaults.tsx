@@ -11,9 +11,41 @@ import { RefineDefaultsFields } from "./RefineToggles";
 import { TemplateSelect } from "./TemplatePicker";
 
 type RefineForm = { refineEntities: "" | "yes" | "no"; refineDisfluency: "" | "yes" | "no"; disfluencyLlm: "" | "yes" | "no"; refineScenes: "" | "yes" | "no" };
-type Form = { language: string; vocabulary: string; instructions: string; focus: string; pauses: "off" | "natural" | "tight" | ""; sourceText: "hide" | "keep" | "always" | ""; minClipSeconds: string; maxClipSeconds: string; maxClips: string; highlightColor: string; wordsPerLine: string; uppercase: "" | "yes" | "no"; layerTemplateId: string } & RefineForm;
+type Form = {
+  language: string;
+  vocabulary: string;
+  instructions: string;
+  focus: string;
+  pauses: "off" | "natural" | "tight" | "";
+  sourceText: "hide" | "keep" | "always" | "";
+  minClipSeconds: string;
+  maxClipSeconds: string;
+  maxClips: string;
+  highlightColor: string;
+  wordsPerLine: string;
+  uppercase: "" | "yes" | "no";
+  layerTemplateId: string;
+} & RefineForm;
 
-const EMPTY: Form = { language: "", vocabulary: "", instructions: "", focus: "", pauses: "", sourceText: "", minClipSeconds: "", maxClipSeconds: "", maxClips: "", highlightColor: "", wordsPerLine: "", uppercase: "", layerTemplateId: "", refineEntities: "", refineDisfluency: "", disfluencyLlm: "", refineScenes: "" };
+const EMPTY: Form = {
+  language: "",
+  vocabulary: "",
+  instructions: "",
+  focus: "",
+  pauses: "",
+  sourceText: "",
+  minClipSeconds: "",
+  maxClipSeconds: "",
+  maxClips: "",
+  highlightColor: "",
+  wordsPerLine: "",
+  uppercase: "",
+  layerTemplateId: "",
+  refineEntities: "",
+  refineDisfluency: "",
+  disfluencyLlm: "",
+  refineScenes: "",
+};
 
 const yn = (v: boolean | undefined): "" | "yes" | "no" => (v === undefined ? "" : v ? "yes" : "no");
 const fromYn = (v: "" | "yes" | "no") => (v === "" ? undefined : v === "yes");
@@ -90,14 +122,17 @@ export function ProjectDefaultsSection() {
   });
   const b = me.data?.builtInDefaults;
   const pick = (k: keyof Form) => (v: string) => setF((p) => ({ ...p, [k]: v }));
-  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setF((p) => ({ ...p, [k]: e.target.value }));
   const dirty = me.data ? JSON.stringify(toSaved(f)) !== JSON.stringify(toSaved(fromSaved(me.data.projectDefaults))) : false;
 
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <div>
         <h2 className="text-[15px] font-bold">Project defaults</h2>
-        <p className="mt-1 text-[13px] text-ink2">Applied to every new project you start (and to agents creating projects with your key). Leave a field empty to keep the built-in default.</p>
+        <p className="mt-1 text-[13px] text-ink2">
+          Applied to every new project you start (and to agents creating projects with your key). Leave a field empty to keep the built-in default.
+        </p>
       </div>
       <form
         className="grid gap-3 sm:grid-cols-2"
@@ -112,7 +147,13 @@ export function ProjectDefaultsSection() {
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Instructions for the model
-          <textarea className="input min-h-[64px]" value={f.instructions} onChange={set("instructions")} placeholder="e.g. prefer practical tips over stories" maxLength={2000} />
+          <textarea
+            className="input min-h-[64px]"
+            value={f.instructions}
+            onChange={set("instructions")}
+            placeholder="e.g. prefer practical tips over stories"
+            maxLength={2000}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Language
@@ -124,19 +165,55 @@ export function ProjectDefaultsSection() {
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Pauses
-          <Select ariaLabel="Pauses" value={f.pauses} onValueChange={pick("pauses")} options={[{ value: "", label: `built-in (${b?.pauses ?? "natural"})` }, { value: "natural", label: "natural" }, { value: "tight", label: "tight" }, { value: "off", label: "keep as recorded" }]} />
+          <Select
+            ariaLabel="Pauses"
+            value={f.pauses}
+            onValueChange={pick("pauses")}
+            options={[
+              { value: "", label: `built-in (${b?.pauses ?? "natural"})` },
+              { value: "natural", label: "natural" },
+              { value: "tight", label: "tight" },
+              { value: "off", label: "keep as recorded" },
+            ]}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Text already in the video
-          <Select ariaLabel="Text already in the video" value={f.sourceText} onValueChange={pick("sourceText")} options={[{ value: "", label: `built-in (${b?.sourceText ?? "hide"})` }, { value: "hide", label: "hide, except in presentations" }, { value: "always", label: "always hide" }, { value: "keep", label: "keep" }]} />
+          <Select
+            ariaLabel="Text already in the video"
+            value={f.sourceText}
+            onValueChange={pick("sourceText")}
+            options={[
+              { value: "", label: `built-in (${b?.sourceText ?? "hide"})` },
+              { value: "hide", label: "hide, except in presentations" },
+              { value: "always", label: "always hide" },
+              { value: "keep", label: "keep" },
+            ]}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Shortest clip (s)
-          <input className="input" type="number" min={5} max={180} value={f.minClipSeconds} onChange={set("minClipSeconds")} placeholder={String(b?.minClipSeconds ?? 20)} />
+          <input
+            className="input"
+            type="number"
+            min={5}
+            max={180}
+            value={f.minClipSeconds}
+            onChange={set("minClipSeconds")}
+            placeholder={String(b?.minClipSeconds ?? 20)}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Longest clip (s)
-          <input className="input" type="number" min={10} max={300} value={f.maxClipSeconds} onChange={set("maxClipSeconds")} placeholder={String(b?.maxClipSeconds ?? 60)} />
+          <input
+            className="input"
+            type="number"
+            min={10}
+            max={300}
+            value={f.maxClipSeconds}
+            onChange={set("maxClipSeconds")}
+            placeholder={String(b?.maxClipSeconds ?? 60)}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Most clips per project
@@ -148,11 +225,28 @@ export function ProjectDefaultsSection() {
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Words per caption line
-          <input className="input" type="number" min={1} max={8} value={f.wordsPerLine} onChange={set("wordsPerLine")} placeholder={String(b?.wordsPerLine ?? 4)} />
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={8}
+            value={f.wordsPerLine}
+            onChange={set("wordsPerLine")}
+            placeholder={String(b?.wordsPerLine ?? 4)}
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink2">
           Uppercase captions
-          <Select ariaLabel="Uppercase captions" value={f.uppercase} onValueChange={pick("uppercase")} options={[{ value: "", label: `built-in (${b?.uppercase ? "yes" : "no"})` }, { value: "yes", label: "yes" }, { value: "no", label: "no" }]} />
+          <Select
+            ariaLabel="Uppercase captions"
+            value={f.uppercase}
+            onValueChange={pick("uppercase")}
+            options={[
+              { value: "", label: `built-in (${b?.uppercase ? "yes" : "no"})` },
+              { value: "yes", label: "yes" },
+              { value: "no", label: "no" },
+            ]}
+          />
         </label>
         <RefineDefaultsFields
           value={{
@@ -190,7 +284,9 @@ export function ProjectDefaultsSection() {
 function BumperDefaultsRow({ introId, outroId }: { introId?: string | undefined; outroId?: string | undefined }) {
   const lib = useBumperLibrary();
   const name = (id?: string): ReactNode =>
-    id ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "deleted")) : "none";
+    id
+      ? (lib.data?.assets.find((a) => a.id === id)?.name ?? (lib.isPending ? <Skeleton className="inline-block h-3.5 w-24 align-middle" /> : "deleted"))
+      : "none";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-4">
       <div className="min-w-0 flex-1">

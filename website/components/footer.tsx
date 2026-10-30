@@ -45,7 +45,9 @@ export function Footer() {
       <div className="container-page grid grid-cols-1 gap-10 py-14 sm:grid-cols-2 md:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
         <div className="flex flex-col gap-3">
           <Logo />
-          <p className="max-w-[34ch] text-sm leading-relaxed text-ink2">AI-powered long-form to short-form video clipper. Self-host, or use app.reelsaw.com. Pure TypeScript, any AI vendor, one-step Docker deploy.</p>
+          <p className="max-w-[34ch] text-sm leading-relaxed text-ink2">
+            AI-powered long-form to short-form video clipper. Self-host, or use app.reelsaw.com. Pure TypeScript, any AI vendor, one-step Docker deploy.
+          </p>
           <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost w-fit">
             <GitHubMark /> osbytes/reelsaw
           </a>
@@ -54,7 +56,12 @@ export function Footer() {
           <nav key={c.title} aria-label={c.title} className="flex flex-col gap-2.5">
             <h2 className="text-xs font-semibold tracking-[0.08em] text-ink3 uppercase">{c.title}</h2>
             {c.links.map((l) => (
-              <a key={l.href} href={l.href} {...(l.href.startsWith("/") ? {} : { target: "_blank", rel: "noreferrer" })} className="text-sm text-ink2 hover:text-ink">
+              <a
+                key={l.href}
+                href={l.href}
+                {...(l.href.startsWith("/") ? {} : { target: "_blank", rel: "noreferrer" })}
+                className="text-sm text-ink2 hover:text-ink"
+              >
                 {l.label}
               </a>
             ))}

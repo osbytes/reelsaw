@@ -102,7 +102,11 @@ describe("pickWorkerWithRoom (a job short of disk looks for another worker)", ()
     // 5 GB free but 2 GB promised to a download still running there: not room for a 4 GB job, room for a 3 GB one
     assert.equal(pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: 5120 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 4096), null);
     assert.deepEqual(pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: 5120 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 3072), { workerId: "w2" });
-    assert.deepEqual(pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: -1 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 4096), { workerId: "w2" }, "unmeasurable stays room");
+    assert.deepEqual(
+      pickWorkerWithRoom([{ ...w("w2", { diskFreeMB: -1 }), diskLeasedMB: 2048 }], now, "me", QUEUES.ingest, 4096),
+      { workerId: "w2" },
+      "unmeasurable stays room",
+    );
   });
 });
 

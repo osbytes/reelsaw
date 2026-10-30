@@ -28,13 +28,26 @@ describe("stage versions", { skip: notReady ?? false }, () => {
 
   const project = async (id: string) => (await h.pool.query(`select status, stage_seq, error from projects where id = $1`, [id])).rows[0];
   const clipCount = async (id: string) => (await h.pool.query(`select count(*)::int as n from clips where project_id = $1`, [id])).rows[0].n;
-  const jobData = async (id: string) => (await h.pool.query(`select name, data from pgboss.job where singleton_key = $1 and state in ('created','retry','active') order by created_on`, [id])).rows;
+  const jobData = async (id: string) =>
+    (await h.pool.query(`select name, data from pgboss.job where singleton_key = $1 and state in ('created','retry','active') order by created_on`, [id])).rows;
   const ctxFor = (id: string, seq: number | undefined) => StageContext.open(h.svc, id, "analyze", new AbortController().signal, {}, seq);
   // what analyze's hand-off writes: a clip and its render job
   const handoff = (id: string) => async (u: Parameters<Parameters<typeof h.tx>[0]>[0]) => {
     const clipId = `c-${randomUUID().slice(0, 8)}`;
     h.mine.add(clipId);
-    await u.db.insert(schema.clips).values({ id: clipId, projectId: id, index: 0, title: "t", hook: "h", startSec: 0, endSec: 10, score: 1, reasoning: "r", hashtags: [], status: "pending" });
+    await u.db.insert(schema.clips).values({
+      id: clipId,
+      projectId: id,
+      index: 0,
+      title: "t",
+      hook: "h",
+      startSec: 0,
+      endSec: 10,
+      score: 1,
+      reasoning: "r",
+      hashtags: [],
+      status: "pending",
+    });
     await u.enqueue(QUEUES.render, { projectId: id, clipId, gen: 0 });
   };
 
@@ -81,7 +94,10 @@ describe("stage versions", { skip: notReady ?? false }, () => {
     await h.tx((u) => retryProject(h.svc, u, id));
     assert.equal((await project(id)).stage_seq, 1);
     const jobs = await jobData(id);
-    assert.deepEqual(jobs.map((j) => [j.name, j.data.seq]), [[QUEUES.ingest, 1]]);
+    assert.deepEqual(
+      jobs.map((j) => [j.name, j.data.seq]),
+      [[QUEUES.ingest, 1]],
+    );
     await assert.rejects(old.start("ingesting"), StaleJobError, "the job from before the retry can't take the project back");
   });
 
@@ -92,7 +108,11 @@ describe("stage versions", { skip: notReady ?? false }, () => {
     await reanalyzeProject(h.svc, null, id);
     await reanalyzeProject(h.svc, null, id);
     const jobs = await jobData(id);
-    assert.deepEqual(jobs.map((j) => [j.name, j.data.seq]), [[QUEUES.analyze, 2]], "one live analyze job, for the newest version");
+    assert.deepEqual(
+      jobs.map((j) => [j.name, j.data.seq]),
+      [[QUEUES.analyze, 2]],
+      "one live analyze job, for the newest version",
+    );
     await assert.rejects(running.complete({}, handoff(id)), StaleJobError);
     const newest = await ctxFor(id, jobs[0]!.data.seq);
     await newest.complete({}, handoff(id));
@@ -113,7 +133,10 @@ describe("stage versions", { skip: notReady ?? false }, () => {
     await h.tx((u) => supersedeStages(u, id));
     await h.tx((u) => supersedeStages(u, id));
     await reconcile(h.svc);
-    assert.deepEqual((await jobData(id)).map((j) => [j.name, j.data.seq]), [[QUEUES.analyze, 2]]);
+    assert.deepEqual(
+      (await jobData(id)).map((j) => [j.name, j.data.seq]),
+      [[QUEUES.analyze, 2]],
+    );
   });
   it("the transcribe early exit (transcript already there) is fenced: a superseded job leaves the project alone", async () => {
     const id = await h.makeProject(userId, "transcribing");
@@ -135,7 +158,10 @@ describe("stage versions", { skip: notReady ?? false }, () => {
 
   it("retrying a project that failed in analyze with only a kept clip queues analyze, not render", async () => {
     const id = await h.makeProject(userId, "failed");
-    await h.pool.query(`insert into transcripts (project_id, text, words, segments, refine) values ($1, '', '[]', '[]', '{"entities":"done","disfluency":"done","scenes":"done"}')`, [id]);
+    await h.pool.query(
+      `insert into transcripts (project_id, text, words, segments, refine) values ($1, '', '[]', '[]', '{"entities":"done","disfluency":"done","scenes":"done"}')`,
+      [id],
+    );
     await h.pool.query(`update projects set stage = 'analyze', source_key = 'k' where id = $1`, [id]);
     const clipId = await h.makeClip(id, 0, "done");
     await h.pool.query(`update clips set origin = 'manual' where id = $1`, [clipId]);

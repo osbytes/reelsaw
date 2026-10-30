@@ -111,7 +111,12 @@ export async function listDeleted(svc: Services, userId: string) {
       .where(and(eq(P.userId, userId), isNotNull(P.deletedAt)))
       .orderBy(desc(P.deletedAt), desc(P.id))
       .limit(LIST_CAP),
-    counted(db.select({ n: sql<number>`count(*)::int` }).from(P).where(and(eq(P.userId, userId), isNotNull(P.deletedAt)))),
+    counted(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(P)
+        .where(and(eq(P.userId, userId), isNotNull(P.deletedAt))),
+    ),
     db
       .select({
         id: C.id,
@@ -273,7 +278,12 @@ export async function restoreDeleted(svc: Services, actor: Actor & { id: string 
  * Remove several already-deleted rows for good (the selection bar). Each kind uses its existing service;
  * a referenced library item is refused and the rest continue. tRPC `deleted.purge`; MCP loops the per-kind tools.
  */
-export async function purgeDeleted(svc: Services, actor: Actor & { id: string }, items: Array<{ kind: DeletedKind; id: string }>, o: { forgetDecisions?: boolean } = {}) {
+export async function purgeDeleted(
+  svc: Services,
+  actor: Actor & { id: string },
+  items: Array<{ kind: DeletedKind; id: string }>,
+  o: { forgetDecisions?: boolean } = {},
+) {
   const refs = uniqueRefs(items);
   if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
   const results: Array<{ kind: DeletedKind; id: string; ok: boolean; storedBytes: number; error?: string }> = [];

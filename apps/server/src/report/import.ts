@@ -25,11 +25,26 @@ import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import type { Services } from "../services.js";
 
-const NAME = /^(README\.md|report\.md|manifest\.json|config\.json|client\.json|project\.json|transcript\.json|clips\.json|artifacts\.json|events\.jsonl|logs\.jsonl|system\.json|queue\.json|usage\.json|errors\.jsonl|stuck\.json|projects\.json|media\/thumbnails\/[\w.-]{1,120}\.jpg|media\/clips\/[\w.-]{1,120}\.mp4|media\/source\.[a-z0-9]{1,5})$/; // source: any upload extension, only ever handed to storage + ffmpeg
+const NAME =
+  /^(README\.md|report\.md|manifest\.json|config\.json|client\.json|project\.json|transcript\.json|clips\.json|artifacts\.json|events\.jsonl|logs\.jsonl|system\.json|queue\.json|usage\.json|errors\.jsonl|stuck\.json|projects\.json|media\/thumbnails\/[\w.-]{1,120}\.jpg|media\/clips\/[\w.-]{1,120}\.mp4|media\/source\.[a-z0-9]{1,5})$/; // source: any upload extension, only ever handed to storage + ffmpeg
 const MAX_DATA_FILE = 512 * 1024 * 1024; // uncompressed, per non-media file
 const MAX_TOTAL = 64 * 1024 * 1024 * 1024;
 const MAX_RATIO = 400; // uncompressed / compressed, for non-media files over 16 MB (zip-bomb guard)
-export const VIDEO_HOSTS = ["youtube.com", "youtu.be", "vimeo.com", "x.com", "twitter.com", "tiktok.com", "instagram.com", "twitch.tv", "facebook.com", "fb.watch", "rumble.com", "dailymotion.com", "loom.com"];
+export const VIDEO_HOSTS = [
+  "youtube.com",
+  "youtu.be",
+  "vimeo.com",
+  "x.com",
+  "twitter.com",
+  "tiktok.com",
+  "instagram.com",
+  "twitch.tv",
+  "facebook.com",
+  "fb.watch",
+  "rumble.com",
+  "dailymotion.com",
+  "loom.com",
+];
 
 export class ImportError extends Error {}
 
@@ -91,7 +106,19 @@ const transcriptSchema = z
     sceneCuts: z.array(z.number()).nullable().default(null),
     overlays: z.array(z.record(z.string(), z.unknown())).nullable().default(null),
     textProfile: z.record(z.string(), z.unknown()).nullable().default(null),
-    chunks: z.array(z.object({ index: z.number().int(), offsetSec: z.number(), language: z.string().nullable(), text: z.string(), segments: z.array(z.record(z.string(), z.unknown())) }).passthrough()).default([]),
+    chunks: z
+      .array(
+        z
+          .object({
+            index: z.number().int(),
+            offsetSec: z.number(),
+            language: z.string().nullable(),
+            text: z.string(),
+            segments: z.array(z.record(z.string(), z.unknown())),
+          })
+          .passthrough(),
+      )
+      .default([]),
   })
   .passthrough();
 const clipSchema = z
@@ -108,15 +135,23 @@ const clipSchema = z
     hashtags: z.array(z.string()),
     status: z.string(),
     error: z.string().nullable().default(null),
-    style: z.unknown().refine((v) => v == null || styleOverrideSchema.safeParse(v).success, "clip style is not a valid style override").optional(),
+    style: z
+      .unknown()
+      .refine((v) => v == null || styleOverrideSchema.safeParse(v).success, "clip style is not a valid style override")
+      .optional(),
   })
   .passthrough();
 const eventSchema = z.object({ type: z.string(), payload: z.record(z.string(), z.unknown()), createdAt: z.string() }).passthrough();
-const artifactSchema = z.object({ stage: z.string(), kind: z.string(), models: z.record(z.string(), z.string()).default({}), data: z.unknown(), createdAt: z.string() }).passthrough();
+const artifactSchema = z
+  .object({ stage: z.string(), kind: z.string(), models: z.record(z.string(), z.string()).default({}), data: z.unknown(), createdAt: z.string() })
+  .passthrough();
 
 /** Instruction-like text in report content: warn, never rewrite. */
 const INJECTION: Array<[RegExp, string]> = [
-  [/\b(ignore|disregard|forget)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all)\b[^.\n]{0,20}\b(instructions?|prompts?|rules?)\b/i, "asks to ignore instructions"],
+  [
+    /\b(ignore|disregard|forget)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all)\b[^.\n]{0,20}\b(instructions?|prompts?|rules?)\b/i,
+    "asks to ignore instructions",
+  ],
   [/\b(you are now|act as|pretend to be)\b[^.\n]{0,40}\b(assistant|agent|ai|model|developer|admin)\b/i, "tries to change the reader's role"],
   [/\bsystem prompt\b/i, "mentions a system prompt"],
   [/\b(run|execute)\b[^.\n]{0,30}\b(this|the following|these)\b[^.\n]{0,15}\b(commands?|scripts?|code)\b/i, "asks to run commands"],
@@ -156,12 +191,19 @@ export interface ImportSummary {
 const sha = (file: string) =>
   new Promise<string>((resolve, reject) => {
     const h = createHash("sha256");
-    fs.createReadStream(file).on("data", (d) => h.update(d)).on("end", () => resolve(h.digest("hex"))).on("error", reject);
+    fs.createReadStream(file)
+      .on("data", (d) => h.update(d))
+      .on("end", () => resolve(h.digest("hex")))
+      .on("error", reject);
   });
 
 /** Open, check and extract the zip into `dir`; returns the verified manifest. */
 async function extract(zipPath: string, dir: string): Promise<z.infer<typeof manifestSchema>> {
-  const zip = await new Promise<yauzl.ZipFile>((res, rej) => yauzl.open(zipPath, { lazyEntries: true, strictFileNames: true, validateEntrySizes: true }, (e, z) => (e ? rej(new ImportError(`not a readable zip: ${e.message}`)) : res(z!))));
+  const zip = await new Promise<yauzl.ZipFile>((res, rej) =>
+    yauzl.open(zipPath, { lazyEntries: true, strictFileNames: true, validateEntrySizes: true }, (e, z) =>
+      e ? rej(new ImportError(`not a readable zip: ${e.message}`)) : res(z!),
+    ),
+  );
   let total = 0;
   const seen = new Set<string>();
   try {
@@ -171,7 +213,8 @@ async function extract(zipPath: string, dir: string): Promise<z.infer<typeof man
       zip.on("entry", (entry: yauzl.Entry) => {
         const name = entry.fileName;
         if (name.endsWith("/")) return zip.readEntry(); // directory entries
-        if (name.startsWith("/") || name.split("/").includes("..") || name.includes("\\")) return reject(new ImportError(`unsafe path in zip: ${JSON.stringify(name)}`));
+        if (name.startsWith("/") || name.split("/").includes("..") || name.includes("\\"))
+          return reject(new ImportError(`unsafe path in zip: ${JSON.stringify(name)}`));
         if (!NAME.test(name)) return reject(new ImportError(`unexpected file in zip: ${JSON.stringify(name)}`));
         if (seen.has(name)) return reject(new ImportError(`duplicate entry: ${name}`));
         seen.add(name);
@@ -179,13 +222,17 @@ async function extract(zipPath: string, dir: string): Promise<z.infer<typeof man
         total += entry.uncompressedSize;
         if (total > MAX_TOTAL) return reject(new ImportError("zip is larger than the import limit"));
         if (!media && entry.uncompressedSize > MAX_DATA_FILE) return reject(new ImportError(`${name} is too large (${entry.uncompressedSize} bytes)`));
-        if (!media && entry.uncompressedSize > 16 * 1024 * 1024 && entry.uncompressedSize / Math.max(1, entry.compressedSize) > MAX_RATIO) return reject(new ImportError(`${name} has a suspicious compression ratio`));
+        if (!media && entry.uncompressedSize > 16 * 1024 * 1024 && entry.uncompressedSize / Math.max(1, entry.compressedSize) > MAX_RATIO)
+          return reject(new ImportError(`${name} has a suspicious compression ratio`));
         zip.openReadStream(entry, (err, stream) => {
           if (err) return reject(new ImportError(`cannot read ${name}: ${err.message}`));
           const dest = path.join(dir, name);
           if (!dest.startsWith(dir + path.sep)) return reject(new ImportError(`unsafe path in zip: ${name}`));
           fs.mkdirSync(path.dirname(dest), { recursive: true });
-          pipeline(stream!, fs.createWriteStream(dest, { flags: "wx" })).then(() => zip.readEntry(), (e) => reject(new ImportError(`cannot extract ${name}: ${(e as Error).message}`)));
+          pipeline(stream!, fs.createWriteStream(dest, { flags: "wx" })).then(
+            () => zip.readEntry(),
+            (e) => reject(new ImportError(`cannot extract ${name}: ${(e as Error).message}`)),
+          );
         });
       });
       zip.readEntry();
@@ -195,7 +242,8 @@ async function extract(zipPath: string, dir: string): Promise<z.infer<typeof man
   }
   if (!seen.has("manifest.json")) throw new ImportError("manifest.json is missing: not a Reelsaw report");
   const raw = JSON.parse(await fsp.readFile(path.join(dir, "manifest.json"), "utf8")) as { format?: unknown };
-  if (typeof raw.format === "number" && raw.format > REPORT_FORMAT) throw new ImportError(`report format ${raw.format} is newer than this app understands (${REPORT_FORMAT}); update Reelsaw`);
+  if (typeof raw.format === "number" && raw.format > REPORT_FORMAT)
+    throw new ImportError(`report format ${raw.format} is newer than this app understands (${REPORT_FORMAT}); update Reelsaw`);
   const manifest = manifestSchema.parse(raw);
   const listed = new Map(manifest.files.map((f) => [f.path, f]));
   for (const name of seen) {
@@ -216,7 +264,12 @@ export function scanForInjection(fields: Array<[string, string | null | undefine
       const m = re.exec(text);
       if (!m) continue;
       const at = Math.max(0, m.index - 30);
-      out.push(`${field}: ${why}: “${text.slice(at, m.index + m[0].length + 30).replace(/\s+/g, " ").trim()}”`);
+      out.push(
+        `${field}: ${why}: “${text
+          .slice(at, m.index + m[0].length + 30)
+          .replace(/\s+/g, " ")
+          .trim()}”`,
+      );
     }
   }
   return out;
@@ -232,7 +285,8 @@ export function allowedSourceUrl(url: string | null, allowAny: boolean): { ok: t
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return { ok: false, why: `refusing to download a ${u.protocol} link` };
   const host = u.hostname.replace(/^www\.|^m\./, "");
-  if (!allowAny && !VIDEO_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return { ok: false, why: `${u.hostname} is not a known video host (use --allow-any-url)` };
+  if (!allowAny && !VIDEO_HOSTS.some((h) => host === h || host.endsWith(`.${h}`)))
+    return { ok: false, why: `${u.hostname} is not a known video host (use --allow-any-url)` };
   return { ok: true, url: u.toString() };
 }
 
@@ -276,13 +330,23 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       projectId: null,
       url: null,
       title: null,
-      original: { projectId: manifest.projectId, clipIds: manifest.clipIds, app: `${manifest.app.version} (${manifest.app.commit})`, createdAt: manifest.createdAt },
+      original: {
+        projectId: manifest.projectId,
+        clipIds: manifest.clipIds,
+        app: `${manifest.app.version} (${manifest.app.commit})`,
+        createdAt: manifest.createdAt,
+      },
       status: null,
       error: null,
       failedStage: null,
       clips: {},
       flags: {},
-      models: { AI_MODEL: svc.models.get().language, TRANSCRIPTION_MODEL: svc.models.get().transcription, TRANSCRIPT_ALIGN_MODEL: svc.models.get().align, env: { AI_MODEL: config.AI_MODEL, TRANSCRIPTION_MODEL: config.TRANSCRIPTION_MODEL, TRANSCRIPT_ALIGN_MODEL: config.TRANSCRIPT_ALIGN_MODEL } },
+      models: {
+        AI_MODEL: svc.models.get().language,
+        TRANSCRIPTION_MODEL: svc.models.get().transcription,
+        TRANSCRIPT_ALIGN_MODEL: svc.models.get().align,
+        env: { AI_MODEL: config.AI_MODEL, TRANSCRIPTION_MODEL: config.TRANSCRIPTION_MODEL, TRANSCRIPT_ALIGN_MODEL: config.TRANSCRIPT_ALIGN_MODEL },
+      },
       media: [],
       notes: manifest.notes,
       warnings: [],
@@ -307,7 +371,14 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       ["project title", project.title],
       ["source description", typeof project.sourceMeta?.description === "string" ? project.sourceMeta.description : null],
       ["transcript", transcript?.text ?? null],
-      ...clips.flatMap((c): Array<[string, string]> => [[`clip ${c.index + 1} title`, c.title], [`clip ${c.index + 1} hook`, c.hook], [`clip ${c.index + 1} reasoning`, c.reasoning], [`clip ${c.index + 1} caption`, c.caption]]),
+      ...clips.flatMap(
+        (c): Array<[string, string]> => [
+          [`clip ${c.index + 1} title`, c.title],
+          [`clip ${c.index + 1} hook`, c.hook],
+          [`clip ${c.index + 1} reasoning`, c.reasoning],
+          [`clip ${c.index + 1} caption`, c.caption],
+        ],
+      ),
     ]);
 
     // owner
@@ -342,7 +413,21 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       else {
         const out = path.join(dir, "download");
         await fsp.mkdir(out);
-        await svc.media.ytdlp(["--no-playlist", "--no-warnings", "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b", "--merge-output-format", "mp4", "-o", path.join(out, "source.%(ext)s"), "--", allowed.url], {});
+        await svc.media.ytdlp(
+          [
+            "--no-playlist",
+            "--no-warnings",
+            "-f",
+            "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+            "--merge-output-format",
+            "mp4",
+            "-o",
+            path.join(out, "source.%(ext)s"),
+            "--",
+            allowed.url,
+          ],
+          {},
+        );
         const f = (await fsp.readdir(out)).find((x) => x.startsWith("source."));
         if (f) sourcePath = path.join(out, f);
         else summary.notes.push("Source download produced no file.");
@@ -364,7 +449,16 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       if (mp4) await svc.storage.putFile(outputKey!, mp4);
       if (jpg) await svc.storage.putFile(thumbnailKey!, jpg);
       const rendered = !!mp4 && c.status === "done";
-      const { id: _old, projectId: _p, createdAt: _c, updatedAt: _u, renderGen: _g, outputKey: _o, thumbnailKey: _t, ...rest } = c as Record<string, unknown> & typeof c;
+      const {
+        id: _old,
+        projectId: _p,
+        createdAt: _c,
+        updatedAt: _u,
+        renderGen: _g,
+        outputKey: _o,
+        thumbnailKey: _t,
+        ...rest
+      } = c as Record<string, unknown> & typeof c;
       clipRows.push({
         ...withDates(remap(rest) as Record<string, unknown>, ["editedAt", "deletedAt"]),
         id,
@@ -377,19 +471,38 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
         error: rendered ? null : c.status === "failed" ? c.error : "Render not included in the report: re-render to reproduce",
       });
     }
-    summary.media.push(`${clipRows.filter((c) => c.outputKey).length}/${clips.length} clip renders, ${clipRows.filter((c) => c.thumbnailKey).length} thumbnails`);
+    summary.media.push(
+      `${clipRows.filter((c) => c.outputKey).length}/${clips.length} clip renders, ${clipRows.filter((c) => c.thumbnailKey).length} thumbnails`,
+    );
 
     const terminal = project.status === "done" || project.status === "failed";
     const day = manifest.createdAt.slice(0, 10);
     await svc.tx(async (u) => {
-      const { id: _id, ownerHash: _o, createdAt: _c, updatedAt: _u, sourceKey: _k, stageProgress: _sp, ...p } = project as Record<string, unknown> & typeof project;
+      const {
+        id: _id,
+        ownerHash: _o,
+        createdAt: _c,
+        updatedAt: _u,
+        sourceKey: _k,
+        stageProgress: _sp,
+        ...p
+      } = project as Record<string, unknown> & typeof project;
       await u.db.insert(schema.projects).values({
         ...withDates(p as Record<string, unknown>, ["runStartedAt", "stageStartedAt", "sourceExpiredAt", "deletedAt"]),
         id: projectId,
         userId: owner.id,
         title: `${project.title} (report ${day})`.slice(0, 500),
         sourceKey,
-        sourceMeta: { ...(project.sourceMeta ?? {}), report: { projectId: project.id, reportedClipIds: manifest.clipIds, clipIds: Object.fromEntries(clipIds), app: manifest.app, createdAt: manifest.createdAt } },
+        sourceMeta: {
+          ...(project.sourceMeta ?? {}),
+          report: {
+            projectId: project.id,
+            reportedClipIds: manifest.clipIds,
+            clipIds: Object.fromEntries(clipIds),
+            app: manifest.app,
+            createdAt: manifest.createdAt,
+          },
+        },
         status: (terminal ? project.status : "failed") as "done" | "failed",
         error: terminal ? project.error : `Imported mid-run (was ${project.status})`,
         settings: project.settings as never,
@@ -397,11 +510,28 @@ export async function importReport(svc: Services, zipPath: string, opts: ImportO
       if (transcript) {
         const { chunks, projectId: _tp, createdAt: _tc, ...t } = transcript as Record<string, unknown> & typeof transcript;
         await u.db.insert(schema.transcripts).values({ ...(remap(t) as Record<string, unknown>), projectId } as never);
-        if (chunks.length) await u.db.insert(schema.transcriptChunks).values(chunks.map((c) => ({ id: randomUUID(), projectId, index: c.index, offsetSec: c.offsetSec, language: c.language, text: c.text, segments: c.segments as never })));
+        if (chunks.length)
+          await u.db.insert(schema.transcriptChunks).values(
+            chunks.map((c) => ({
+              id: randomUUID(),
+              projectId,
+              index: c.index,
+              offsetSec: c.offsetSec,
+              language: c.language,
+              text: c.text,
+              segments: c.segments as never,
+            })),
+          );
       }
       if (clipRows.length) await u.db.insert(schema.clips).values(clipRows as never);
-      if (events.length) await u.db.insert(schema.projectEvents).values(events.map((e) => ({ projectId, type: e.type as never, payload: remap(e.payload), createdAt: new Date(e.createdAt) })));
-      if (artifacts.length) await u.db.insert(schema.stageArtifacts).values(artifacts.map((a) => ({ projectId, stage: a.stage, kind: a.kind, models: a.models, data: remap(a.data), createdAt: new Date(a.createdAt) })));
+      if (events.length)
+        await u.db
+          .insert(schema.projectEvents)
+          .values(events.map((e) => ({ projectId, type: e.type as never, payload: remap(e.payload), createdAt: new Date(e.createdAt) })));
+      if (artifacts.length)
+        await u.db
+          .insert(schema.stageArtifacts)
+          .values(artifacts.map((a) => ({ projectId, stage: a.stage, kind: a.kind, models: a.models, data: remap(a.data), createdAt: new Date(a.createdAt) })));
     });
 
     const reported = manifest.clipIds.map((id) => clipIds.get(id)).filter(Boolean) as string[];

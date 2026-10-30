@@ -21,7 +21,10 @@ export async function createEE(svc: Pick<Services, "config" | "database" | "tx" 
   const log = svc.log.child({ module: "billing" });
   const billing = createBilling(svc, log);
   await billing.check();
-  log.info({ plans: billing.paidPlans.map((p) => p.name), managedPayments: svc.config.STRIPE_MANAGED_PAYMENTS, graceDays: svc.config.BILLING_GRACE_DAYS }, "billing enabled");
+  log.info(
+    { plans: billing.paidPlans.map((p) => p.name), managedPayments: svc.config.STRIPE_MANAGED_PAYMENTS, graceDays: svc.config.BILLING_GRACE_DAYS },
+    "billing enabled",
+  );
   return {
     entitlements: billing.entitlements,
     billing,

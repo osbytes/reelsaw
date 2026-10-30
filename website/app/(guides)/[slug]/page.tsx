@@ -38,15 +38,25 @@ export default async function GuidePage({ params }: Props) {
     <>
       <Header />
       <main id="main" className="container-page flex max-w-[880px] flex-col gap-14 py-12 sm:py-16">
-        <ArticleHeader crumbs={[{ href: "/", label: SITE.name }, { href: `/${g.slug}`, label: navLabel }]} eyebrow="Guide" h1={g.h1} intro={g.intro} />
+        <ArticleHeader
+          crumbs={[
+            { href: "/", label: SITE.name },
+            { href: `/${g.slug}`, label: navLabel },
+          ]}
+          eyebrow="Guide"
+          h1={g.h1}
+          intro={g.intro}
+        />
         {g.sections.map((s) => (
           <section key={s.heading} className="flex flex-col gap-4" aria-label={s.heading}>
             <h2 className="text-[24px] font-bold tracking-tight">{s.heading}</h2>
-            {s.paragraphs && !s.table && s.paragraphs.map((p, i) => (
-              <p key={i} className="text-[15px] leading-relaxed text-ink2">
-                {p}
-              </p>
-            ))}
+            {s.paragraphs &&
+              !s.table &&
+              s.paragraphs.map((p, i) => (
+                <p key={i} className="text-[15px] leading-relaxed text-ink2">
+                  {p}
+                </p>
+              ))}
             {s.bullets && (
               <ul className="grid gap-2 text-[15px] leading-relaxed text-ink2">
                 {s.bullets.map((b) => (
@@ -58,11 +68,13 @@ export default async function GuidePage({ params }: Props) {
               </ul>
             )}
             {s.table && <DataTable caption={s.heading} table={s.table} />}
-            {s.paragraphs && s.table && s.paragraphs.map((p, i) => (
-              <p key={i} className="text-xs leading-relaxed text-ink3">
-                {p}
-              </p>
-            ))}
+            {s.paragraphs &&
+              s.table &&
+              s.paragraphs.map((p, i) => (
+                <p key={i} className="text-xs leading-relaxed text-ink3">
+                  {p}
+                </p>
+              ))}
           </section>
         ))}
         <TryIt />

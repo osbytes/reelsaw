@@ -89,7 +89,10 @@ export function createDiskGate(svc: Services, register: (queue: QueueName) => Pr
     // us. That is a self-deadlock (the job never returns, its heartbeat expires, the retry lands here and hangs again).
     // With wait: false the worker stops fetching and the running handler, this one included, finishes on its own.
     for (const q of DISK_QUEUES) await svc.queue.boss.offWork(q, { wait: false }).catch((err) => log.warn({ err, queue: q }, "could not pause a queue"));
-    log.warn({ reason, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB, paused: DISK_QUEUES, workerWithRoom: workerId }, "paused disk queues on this worker: not enough disk, nothing left to evict, another worker has room");
+    log.warn(
+      { reason, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB, paused: DISK_QUEUES, workerWithRoom: workerId },
+      "paused disk queues on this worker: not enough disk, nothing left to evict, another worker has room",
+    );
   }
 
   const roomElsewhere = (queue: QueueName, requiredMB: number) =>
@@ -103,7 +106,11 @@ export function createDiskGate(svc: Services, register: (queue: QueueName) => Pr
     paused = false;
     changedAt = new Date().toISOString();
     for (const q of DISK_QUEUES) await register(q);
-    if (why) log.warn({ reason: why, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB }, "resumed disk queues on this worker: no other worker can take the work, so jobs fail fast here instead of waiting");
+    if (why)
+      log.warn(
+        { reason: why, freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB },
+        "resumed disk queues on this worker: no other worker can take the work, so jobs fail fast here instead of waiting",
+      );
     else log.warn({ freeMB, minFreeMB: svc.config.MIN_FREE_DISK_MB }, "resumed disk queues on this worker: disk is back above the floor");
   }
 

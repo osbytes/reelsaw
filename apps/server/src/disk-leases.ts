@@ -68,13 +68,22 @@ export async function volumeId(dataDir: string): Promise<string> {
  * MB leased on `volume` right now and the jobs holding them: unexpired rows of workers that have heartbeated
  * within `staleMs` (LEASE_STALE_MS), plus this process's own whatever its heartbeat says. `db` may be a transaction.
  */
-export async function volumeLeases(db: Pick<Db, "select">, p: { volume: string; selfId: string; staleMs: number; now?: Date }): Promise<{ mb: number; jobs: number }> {
+export async function volumeLeases(
+  db: Pick<Db, "select">,
+  p: { volume: string; selfId: string; staleMs: number; now?: Date },
+): Promise<{ mb: number; jobs: number }> {
   const now = p.now ?? new Date();
   const [r] = await db
     .select({ mb: sql<number>`coalesce(sum(${schema.diskLeases.mb}), 0)::int`, jobs: sql<number>`count(*)::int` })
     .from(schema.diskLeases)
     .leftJoin(schema.workerInstances, eq(schema.workerInstances.id, schema.diskLeases.workerId))
-    .where(and(eq(schema.diskLeases.volume, p.volume), gt(schema.diskLeases.expiresAt, now), or(eq(schema.diskLeases.workerId, p.selfId), gt(schema.workerInstances.lastSeenAt, new Date(now.getTime() - p.staleMs)))));
+    .where(
+      and(
+        eq(schema.diskLeases.volume, p.volume),
+        gt(schema.diskLeases.expiresAt, now),
+        or(eq(schema.diskLeases.workerId, p.selfId), gt(schema.workerInstances.lastSeenAt, new Date(now.getTime() - p.staleMs))),
+      ),
+    );
   return { mb: r?.mb ?? 0, jobs: r?.jobs ?? 0 };
 }
 
@@ -88,7 +97,15 @@ export function createDiskLeaser(svc: Pick<Services, "database" | "log">, p: { v
       if (!leaseFits({ freeMB: req.freeMB, leasedMB: live.mb, requiredMB: req.requiredMB })) return { ok: false, leasedMB: live.mb, jobs: live.jobs };
       const [row] = await tx
         .insert(schema.diskLeases)
-        .values({ volume: p.volume, workerId: p.selfId, jobId: req.jobId ?? null, projectId: req.projectId ?? null, kind: req.kind, mb: req.mb, expiresAt: new Date(Date.now() + DISK_LEASE_TTL_MS) })
+        .values({
+          volume: p.volume,
+          workerId: p.selfId,
+          jobId: req.jobId ?? null,
+          projectId: req.projectId ?? null,
+          kind: req.kind,
+          mb: req.mb,
+          expiresAt: new Date(Date.now() + DISK_LEASE_TTL_MS),
+        })
         .returning({ id: schema.diskLeases.id });
       log.debug({ kind: req.kind, mb: req.mb, freeMB: req.freeMB, leasedMB: live.mb, jobId: req.jobId, projectId: req.projectId }, "leased disk");
       return {
@@ -102,7 +119,10 @@ export function createDiskLeaser(svc: Pick<Services, "database" | "log">, p: { v
 
 /** Rows no job can still hold: expired, or of a worker whose heartbeat row is gone. Hourly hygiene; the sum query already ignores them. */
 export async function pruneDiskLeases(svc: Pick<Services, "database" | "log">): Promise<number> {
-  const gone = svc.database.db.select({ id: schema.workerInstances.id }).from(schema.workerInstances).where(eq(schema.workerInstances.id, schema.diskLeases.workerId));
+  const gone = svc.database.db
+    .select({ id: schema.workerInstances.id })
+    .from(schema.workerInstances)
+    .where(eq(schema.workerInstances.id, schema.diskLeases.workerId));
   const rows = await svc.database.db
     .delete(schema.diskLeases)
     .where(or(lt(schema.diskLeases.expiresAt, new Date()), sql`not exists (${gone})`))

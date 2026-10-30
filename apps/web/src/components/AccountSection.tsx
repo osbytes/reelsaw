@@ -45,7 +45,10 @@ export function AccountSection() {
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[15px] font-bold">Account</h2>
-        <span className="font-mono text-xs text-ink3">{me.data?.email ?? ""}{me.data?.role === "admin" ? " · admin" : ""}</span>
+        <span className="font-mono text-xs text-ink3">
+          {me.data?.email ?? ""}
+          {me.data?.role === "admin" ? " · admin" : ""}
+        </span>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <form
@@ -72,8 +75,25 @@ export function AccountSection() {
         >
           <label className="text-xs text-ink2">Change password</label>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input className="input" type="password" placeholder="Current" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" aria-label="Current password" />
-            <input className="input" type="password" placeholder="New (8+ characters)" minLength={8} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-label="New password" />
+            <input
+              className="input"
+              type="password"
+              placeholder="Current"
+              value={cur}
+              onChange={(e) => setCur(e.target.value)}
+              autoComplete="current-password"
+              aria-label="Current password"
+            />
+            <input
+              className="input"
+              type="password"
+              placeholder="New (8+ characters)"
+              minLength={8}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              autoComplete="new-password"
+              aria-label="New password"
+            />
             <button className="btn-ghost min-w-[5.5rem]" type="submit" disabled={busy || !cur || next.length < 8}>
               {changePassword.isPending ? "…" : "Change"}
             </button>

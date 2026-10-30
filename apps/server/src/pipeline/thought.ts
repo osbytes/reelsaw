@@ -45,7 +45,11 @@ export interface ThoughtResult {
 }
 
 const TERMINAL = /[.!?…]["'’”)\]]*$/;
-const norm = (t: string) => t.toLowerCase().replace(/[’‘]/g, "'").replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, "");
+const norm = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, "");
 
 export const isConnector = (text: string) => CONNECTOR_WORDS.has(norm(text));
 
@@ -148,7 +152,13 @@ export function finishThought(words: Word[], start: number, end: number, limits:
         changes.push({ edge: "end", from, to: t, action: "pull-back", reason: signal });
       }
     }
-    if (!moved) changes.push({ edge: "end", from, action: "left", reason: `no sentence end within +${maxExtendSec}s or keeping ${Math.round(keepFraction * 100)}% of the clip` });
+    if (!moved)
+      changes.push({
+        edge: "end",
+        from,
+        action: "left",
+        reason: `no sentence end within +${maxExtendSec}s or keeping ${Math.round(keepFraction * 100)}% of the clip`,
+      });
   }
   return { start, end, changes };
 }

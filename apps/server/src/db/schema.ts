@@ -1,56 +1,77 @@
 import { sql } from "drizzle-orm";
-import {
-  pgTable,
-  text,
-  timestamp,
-  boolean,
-  integer,
-  real,
-  jsonb,
-  bigserial,
-  bigint,
-  numeric,
-  index,
-  uniqueIndex,
-  primaryKey,
-} from "drizzle-orm/pg-core";
-import type { ProjectSettings, UserProjectDefaults, ProjectStatus, RunReason, ClipStatus, Word, TranscriptSegment, ProjectEventType, ReframeMode, TranscriptFlag, RefineStatus, LayoutSection, DetectedSegment, StyleOverride, ClipScores, ClipOrigin, ClipDiagnostics, ClipBumpers, ClipOverlay, ClipAudio, ClipLayer, TemplateLayer, AssetProvenance, RenderedCaptions, SourceOverlay, TextProfile, DecisionKind, SourceRef } from "@reelsaw/shared";
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
+import type {
+  ProjectSettings,
+  UserProjectDefaults,
+  ProjectStatus,
+  RunReason,
+  ClipStatus,
+  Word,
+  TranscriptSegment,
+  ProjectEventType,
+  ReframeMode,
+  TranscriptFlag,
+  RefineStatus,
+  LayoutSection,
+  DetectedSegment,
+  StyleOverride,
+  ClipScores,
+  ClipOrigin,
+  ClipDiagnostics,
+  ClipBumpers,
+  ClipOverlay,
+  ClipAudio,
+  ClipLayer,
+  TemplateLayer,
+  AssetProvenance,
+  RenderedCaptions,
+  SourceOverlay,
+  TextProfile,
+  DecisionKind,
+  SourceRef,
+} from "@reelsaw/shared";
 
 export const USER_ROLES = ["user", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 // ---------- Better Auth core tables ----------
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
-  /** admin: sees system settings and manages users. The first account is admin. */
-  role: text("role").$type<UserRole>().default("user").notNull(),
-  /** null = waiting for an admin (SIGNUP_MODE=approval). */
-  approvedAt: timestamp("approved_at", { withTimezone: true }),
-  banned: boolean("banned").default(false).notNull(),
-  banReason: text("ban_reason"),
-  /** one key per real mailbox (abuse.ts `emailKey`); unique, so `a.b+x@gmail.com` cannot register twice */
-  emailKey: text("email_key"),
-  /** the address the sign-up came from (behind the proxy's headers); null when unknown */
-  signupIp: text("signup_ip"),
-  /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
-  flags: jsonb("flags").$type<string[]>().notNull().default([]),
-  /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
-  mustChangePassword: boolean("must_change_password").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
-},
-(t) => [
-  // admin Users search: ILIKE '%q%' and word similarity on name and email
-  index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
-  index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
-  uniqueIndex("user_email_key_idx").on(t.emailKey),
-  index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
-]);
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    /** admin: sees system settings and manages users. The first account is admin. */
+    role: text("role").$type<UserRole>().default("user").notNull(),
+    /** null = waiting for an admin (SIGNUP_MODE=approval). */
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    banned: boolean("banned").default(false).notNull(),
+    banReason: text("ban_reason"),
+    /** one key per real mailbox (abuse.ts `emailKey`); unique, so `a.b+x@gmail.com` cannot register twice */
+    emailKey: text("email_key"),
+    /** the address the sign-up came from (behind the proxy's headers); null when unknown */
+    signupIp: text("signup_ip"),
+    /** abuse flags computed hourly (abuse.ts); shown on the Users page, never acted on automatically */
+    flags: jsonb("flags").$type<string[]>().notNull().default([]),
+    /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
+    mustChangePassword: boolean("must_change_password").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    // admin Users search: ILIKE '%q%' and word similarity on name and email
+    index("user_name_trgm_idx").using("gin", t.name.op("gin_trgm_ops")),
+    index("user_email_trgm_idx").using("gin", t.email.op("gin_trgm_ops")),
+    uniqueIndex("user_email_key_idx").on(t.emailKey),
+    index("user_signup_ip_idx").on(t.signupIp, t.createdAt),
+  ],
+);
 
 /** Per-account request counter for the mutation rate limit (abuse.ts `checkRequestRate`): one row per user and minute, pruned hourly. */
 export const userRate = pgTable(
@@ -70,7 +91,10 @@ export const session = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     token: text("token").notNull().unique(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     userId: text("user_id")
@@ -97,7 +121,10 @@ export const account = pgTable(
     scope: text("scope"),
     password: text("password"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index("account_user_id_idx").on(t.userId)],
 );
@@ -110,7 +137,10 @@ export const verification = pgTable(
     value: text("value").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
@@ -351,7 +381,9 @@ export const assets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("assets_user_idx").on(t.userId), index("assets_hash_idx").on(t.userId, t.contentHash),
+  (t) => [
+    index("assets_user_idx").on(t.userId),
+    index("assets_hash_idx").on(t.userId, t.contentHash),
     // the hourly purge looks for removed assets across all users
     index("assets_deleted_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
     // one instance-shared row per catalog / provider item (and Iconify colour), however many accounts import it
@@ -628,9 +660,7 @@ export const projectEvents = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index("project_events_project_id_idx").on(t.projectId, t.id),
-  ],
+  (t) => [index("project_events_project_id_idx").on(t.projectId, t.id)],
 );
 
 export type Project = typeof projects.$inferSelect;
@@ -711,7 +741,17 @@ export const billingCustomers = pgTable("billing_customers", {
 });
 
 /** Stripe's subscription statuses plus `complimentary` (an admin granted the plan without Stripe). */
-export const BILLING_STATUSES = ["trialing", "active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused", "complimentary"] as const;
+export const BILLING_STATUSES = [
+  "trialing",
+  "active",
+  "past_due",
+  "unpaid",
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+  "complimentary",
+] as const;
 export type BillingStatus = (typeof BILLING_STATUSES)[number];
 export type BillingInterval = "month" | "year";
 
@@ -772,7 +812,10 @@ export const billingEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     error: text("error"),
   },
-  (t) => [index("billing_events_subscription_idx").on(t.subscriptionId, t.created), index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`)],
+  (t) => [
+    index("billing_events_subscription_idx").on(t.subscriptionId, t.created),
+    index("billing_events_pending_idx").on(t.receivedAt).where(sql`processed_at is null`),
+  ],
 );
 export type BillingEventRow = typeof billingEvents.$inferSelect;
 

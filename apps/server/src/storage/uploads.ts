@@ -95,7 +95,10 @@ export async function sweepAbandonedUploads(svc: Services, opts: { now?: number 
   for (const batch of chunk(old, 1000)) {
     const known = await svc.database.pool.query<{ id: string }>(`select id from uploads where id = any($1::text[])`, [batch.map((s) => fileUploadId(s.name))]);
     for (const name of orphanUploadFiles(batch, new Set(known.rows.map((r) => r.id)), now)) {
-      await fs.rm(path.join(svc.paths.uploads, name), { force: true }).then(() => files++, () => {});
+      await fs.rm(path.join(svc.paths.uploads, name), { force: true }).then(
+        () => files++,
+        () => {},
+      );
     }
   }
   if (rows || files) log.info({ rows, files }, "removed abandoned uploads");

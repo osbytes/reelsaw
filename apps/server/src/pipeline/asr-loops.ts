@@ -40,7 +40,11 @@ const MIN_RATIO_BYTES = 80;
 const MIN_UNIQUE_TOKENS = 40;
 const UNIQUE_FRAC_LOOP = 0.12;
 
-export const tokenKey = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
+export const tokenKey = (s: string) =>
+  s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}']+/gu, "");
 
 /** Uncompressed / zlib-compressed length. Higher = more repetitive. Same definition as openai/whisper. */
 export function compressionRatio(text: string): number {
@@ -226,7 +230,13 @@ export function flagsFromCollapse(raw: Word[], result: CollapseResult): Transcri
 export const CHUNK_STEP_VERSION = "chunk-1";
 
 /** What a saved chunk step holds: counts and timing only. The words stay in `transcript_chunks`, which the stage reads. */
-export const chunkStepSchema = z.object({ chunkIndex: z.number().int().min(0), segments: z.number().int().min(0), words: z.number().int().min(0), durationMs: z.number().int().min(0), fromRow: z.boolean() });
+export const chunkStepSchema = z.object({
+  chunkIndex: z.number().int().min(0),
+  segments: z.number().int().min(0),
+  words: z.number().int().min(0),
+  durationMs: z.number().int().min(0),
+  fromRow: z.boolean(),
+});
 export type ChunkStepOutput = z.infer<typeof chunkStepSchema>;
 
 export function chunkStepName(index: number): string {

@@ -13,14 +13,30 @@ type U = Awaited<ReturnType<typeof signUp>>;
 const json = { "content-type": "application/json", origin: BASE };
 
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data, error: body.error };
 }
 
 const words = Array.from({ length: 80 }, (_, i) => ({ text: i === 40 || i === 41 ? "the" : `w${i}`, start: i, end: i + 0.8 }));
-const flag = (id: string, wordIndex: number, o: Record<string, unknown> = {}) => ({ id, kind: "disfluency", subkind: "repetition", wordIndex, span: 1, start: wordIndex, end: wordIndex + 0.8, heard: words[wordIndex]!.text, suggested: "", confidence: 0.6, status: "pending", ...o });
+const flag = (id: string, wordIndex: number, o: Record<string, unknown> = {}) => ({
+  id,
+  kind: "disfluency",
+  subkind: "repetition",
+  wordIndex,
+  span: 1,
+  start: wordIndex,
+  end: wordIndex + 0.8,
+  heard: words[wordIndex]!.text,
+  suggested: "",
+  confidence: 0.6,
+  status: "pending",
+  ...o,
+});
 
 describe("decision log", () => {
   const pool = db();
@@ -30,13 +46,30 @@ describe("decision log", () => {
   const replacedId = randomUUID();
 
   const rows = async (kind?: string) =>
-    (await pool.query<{ kind: string; explicit: boolean; before: Record<string, unknown> | null; after: Record<string, unknown> | null; context: Record<string, unknown>; source: Record<string, unknown>; clip_id: string | null }>(`select kind, explicit, before, after, context, source, clip_id from user_decisions where project_id = $1${kind ? " and kind = $2" : ""} order by id`, kind ? [projectId, kind] : [projectId])).rows;
+    (
+      await pool.query<{
+        kind: string;
+        explicit: boolean;
+        before: Record<string, unknown> | null;
+        after: Record<string, unknown> | null;
+        context: Record<string, unknown>;
+        source: Record<string, unknown>;
+        clip_id: string | null;
+      }>(
+        `select kind, explicit, before, after, context, source, clip_id from user_decisions where project_id = $1${kind ? " and kind = $2" : ""} order by id`,
+        kind ? [projectId, kind] : [projectId],
+      )
+    ).rows;
 
   before(async () => {
     owner = await signUp();
     await pool.query(
       `insert into projects (id, user_id, title, source_type, source_url, source_meta, status, settings, duration_sec) values ($1, $2, 'Decisions', 'url', 'https://www.youtube.com/watch?v=abc', $3, 'done', '{}', 600)`,
-      [projectId, owner.userId, JSON.stringify({ webpage_url: "https://www.youtube.com/watch?v=abc", videoId: "abc", extractor: "Youtube", sha256: "ab".repeat(32) })],
+      [
+        projectId,
+        owner.userId,
+        JSON.stringify({ webpage_url: "https://www.youtube.com/watch?v=abc", videoId: "abc", extractor: "Youtube", sha256: "ab".repeat(32) }),
+      ],
     );
     await pool.query(`insert into transcripts (project_id, text, words, raw_words, segments, flags) values ($1, 'x', $2, $2, $3, $4)`, [
       projectId,
@@ -44,7 +77,11 @@ describe("decision log", () => {
       JSON.stringify([{ text: words.map((w) => w.text).join(" "), start: 0, end: 80 }]),
       JSON.stringify([flag("accept-me", 41), flag("reject-me", 10), flag("delete-me", 60, { status: "auto" })]),
     ]);
-    const clip = (id: string, index: number, extra = "") => pool.query(`insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status${extra ? ", edited_at" : ""}) values ($1, $2, $3, 'AI title', 'AI hook', ${index * 30}, ${index * 30 + 25}, 72, 'because', '[]', 'done'${extra ? ", now()" : ""})`, [id, projectId, index]);
+    const clip = (id: string, index: number, extra = "") =>
+      pool.query(
+        `insert into clips (id, project_id, index, title, hook, start_sec, end_sec, score, reasoning, hashtags, status${extra ? ", edited_at" : ""}) values ($1, $2, $3, 'AI title', 'AI hook', ${index * 30}, ${index * 30 + 25}, 72, 'because', '[]', 'done'${extra ? ", now()" : ""})`,
+        [id, projectId, index],
+      );
     await clip(clipId, 0);
     await clip(replacedId, 1);
   });
@@ -56,7 +93,14 @@ describe("decision log", () => {
   });
 
   it("records accepts and rejects with the word window and the source", async () => {
-    const r = await trpc(owner.cookie, "transcripts.review", { projectId, decisions: [{ id: "accept-me", status: "accepted" }, { id: "reject-me", status: "rejected" }], rerender: false });
+    const r = await trpc(owner.cookie, "transcripts.review", {
+      projectId,
+      decisions: [
+        { id: "accept-me", status: "accepted" },
+        { id: "reject-me", status: "rejected" },
+      ],
+      rerender: false,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.error));
     const [a] = await rows("fix.accept");
     const [j] = await rows("fix.reject");
@@ -89,14 +133,32 @@ describe("decision log", () => {
 
   it("a manual cut over the detector's unreviewed cut records an inferred accept", async () => {
     const other = randomUUID();
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Absorb', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [other, owner.userId]);
-    await pool.query(`insert into transcripts (project_id, text, words, raw_words, segments, flags) values ($1, 'x', $2, $2, '[]', $3)`, [other, JSON.stringify(words), JSON.stringify([flag("absorb-me", 70)])]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Absorb', 'url', 'https://example.com/v.mp4', 'done', '{}')`,
+      [other, owner.userId],
+    );
+    await pool.query(`insert into transcripts (project_id, text, words, raw_words, segments, flags) values ($1, 'x', $2, $2, '[]', $3)`, [
+      other,
+      JSON.stringify(words),
+      JSON.stringify([flag("absorb-me", 70)]),
+    ]);
     const cut = await trpc(owner.cookie, "transcripts.addCut", { projectId: other, start: 69, end: 71.8, rerender: false });
     assert.equal(cut.status, 200, JSON.stringify(cut.error));
-    const kinds = (await pool.query<{ kind: string; flag: string; explicit: boolean }>(`select kind, explicit, context->>'flagId' as flag from user_decisions where project_id = $1 order by id`, [other])).rows;
-    assert.deepEqual(kinds.map((r) => r.kind), ["fix.accept", "fix.manual"]);
+    const kinds = (
+      await pool.query<{ kind: string; flag: string; explicit: boolean }>(
+        `select kind, explicit, context->>'flagId' as flag from user_decisions where project_id = $1 order by id`,
+        [other],
+      )
+    ).rows;
+    assert.deepEqual(
+      kinds.map((r) => r.kind),
+      ["fix.accept", "fix.manual"],
+    );
     assert.equal(kinds[0]!.flag, "absorb-me");
-    assert.deepEqual(kinds.map((r) => r.explicit), [false, true]);
+    assert.deepEqual(
+      kinds.map((r) => r.explicit),
+      [false, true],
+    );
     await pool.query(`delete from user_decisions where project_id = $1`, [other]);
     await pool.query(`delete from projects where id = $1`, [other]);
   });
@@ -140,14 +202,19 @@ describe("decision log", () => {
   it("lists and exports a user's decisions, with eval cases", async () => {
     const page = (await trpc(owner.cookie, "decisions.list", { kind: "fix.reject" }, "GET")).data as { items: Array<{ kind: string }>; total: number };
     assert.equal(page.total, 1);
-    const ex = (await trpc(owner.cookie, "decisions.export", {}, "GET")).data as { items: Array<{ id: number }>; cases: { disfluency: Array<{ expect: string }> } };
+    const ex = (await trpc(owner.cookie, "decisions.export", {}, "GET")).data as {
+      items: Array<{ id: number }>;
+      cases: { disfluency: Array<{ expect: string }> };
+    };
     assert.ok(ex.items.length >= 6);
     assert.deepEqual(ex.cases.disfluency.map((c) => c.expect).sort(), ["cut", "cut", "keep", "keep"]);
   });
 
   it("a delete that asked to forget hides the decisions from learning, a restore takes it back, the purge honours it", async () => {
     const n = (await rows()).length;
-    const exported = async () => ((await trpc(owner.cookie, "decisions.export", {}, "GET")).data as { items: Array<{ projectId: string }> }).items.filter((d) => d.projectId === projectId).length;
+    const exported = async () =>
+      ((await trpc(owner.cookie, "decisions.export", {}, "GET")).data as { items: Array<{ projectId: string }> }).items.filter((d) => d.projectId === projectId)
+        .length;
     assert.equal((await trpc(owner.cookie, "projects.delete", { id: projectId, forgetDecisions: true })).status, 200);
     assert.equal(await exported(), 0);
     assert.equal((await rows()).length, n); // kept until the purge, so a restore loses nothing
@@ -160,8 +227,14 @@ describe("decision log", () => {
 
   it("a purge without the option (the toast, the retention sweep) still forgets a project deleted with it", async () => {
     const other = randomUUID();
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Other', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [other, owner.userId]);
-    await pool.query(`insert into user_decisions (user_id, project_id, kind, explicit, context, source, app_version) values ($1, $2, 'fix.reject', true, '{}', '{"type":"url"}', 'test')`, [owner.userId, other]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Other', 'url', 'https://example.com/v.mp4', 'done', '{}')`,
+      [other, owner.userId],
+    );
+    await pool.query(
+      `insert into user_decisions (user_id, project_id, kind, explicit, context, source, app_version) values ($1, $2, 'fix.reject', true, '{}', '{"type":"url"}', 'test')`,
+      [owner.userId, other],
+    );
     assert.equal((await trpc(owner.cookie, "projects.delete", { id: other, forgetDecisions: true })).status, 200);
     const purge = await trpc(owner.cookie, "projects.purge", { id: other });
     assert.equal((purge.data as { forgottenDecisions: number }).forgottenDecisions, 1, JSON.stringify(purge.error));

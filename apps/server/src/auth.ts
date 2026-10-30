@@ -42,7 +42,6 @@ export function withClientIp(req: Request, trust: Pick<Config, "TRUST_PROXY" | "
   return new Request(req, { headers });
 }
 
-
 export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
   // read them at request time, never once here. Better Auth checks `emailAndPassword.*` on the options
@@ -89,7 +88,11 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
     onRequest: async (request, ctx) => {
       const s = settings.get();
       if (!s.CAPTCHA_PROVIDER || !s.CAPTCHA_SITE_KEY || !s.CAPTCHA_SECRET_KEY) return;
-      return captcha({ provider: s.CAPTCHA_PROVIDER, secretKey: s.CAPTCHA_SECRET_KEY, endpoints: ["/sign-up/email", "/sign-in/email", "/request-password-reset"] }).onRequest!(request, ctx);
+      return captcha({
+        provider: s.CAPTCHA_PROVIDER,
+        secretKey: s.CAPTCHA_SECRET_KEY,
+        endpoints: ["/sign-up/email", "/sign-in/email", "/request-password-reset"],
+      }).onRequest!(request, ctx);
     },
   };
   /** emails whose sign-up saw an empty user table; resolved in the `after` hook */
@@ -177,7 +180,9 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
               });
               u = { ...u, role: won ? "admin" : "user", approvedAt: won || mode() === "open" ? (u.approvedAt ?? new Date()) : null };
             }
-            await db.insert(schema.adminEvents).values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() } });
+            await db
+              .insert(schema.adminEvents)
+              .values({ type: "user.signed_up", userId: u.id, email: u.email, payload: { role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() } });
             log.info({ userId: u.id, role: u.role ?? "user", approved: !!u.approvedAt, mode: mode() }, "sign-up");
             // id and role only: no email or name goes to PostHog
             telemetry?.identify(u.id, { role: u.role ?? "user" });

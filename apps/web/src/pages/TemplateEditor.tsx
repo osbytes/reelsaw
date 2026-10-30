@@ -21,7 +21,9 @@ export function TemplateEditorPage() {
             {missing ? "∅" : "▲"}
           </span>
           <b className="text-lg">{missing ? "This template doesn’t exist" : "Couldn’t load this template"}</b>
-          <p className="text-[13px] leading-relaxed text-ink2">{missing ? "It may have been deleted (you can restore it from Deleted), or it belongs to another account." : q.error?.message}</p>
+          <p className="text-[13px] leading-relaxed text-ink2">
+            {missing ? "It may have been deleted (you can restore it from Deleted), or it belongs to another account." : q.error?.message}
+          </p>
           <div className="mt-1 flex gap-2">
             <Link to="/templates" className="btn-primary py-2 no-underline">
               Back to templates

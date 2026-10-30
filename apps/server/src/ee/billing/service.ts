@@ -40,7 +40,18 @@ export interface SyncJob {
 }
 
 /** Event types that carry a subscription we track (also what scripts/stripe-setup.ts subscribes the endpoint to). Anything else is recorded and marked processed at once. */
-export const TRACKED_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.trial_will_end", "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required"] as const satisfies readonly Stripe.Event.Type[];
+export const TRACKED_EVENTS = [
+  "checkout.session.completed",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "customer.subscription.trial_will_end",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "invoice.payment_action_required",
+] as const satisfies readonly Stripe.Event.Type[];
 
 /** Stripe's statuses are a subset of ours (ours adds `complimentary`); a status this SDK does not know grants nothing. */
 export function toBillingStatus(s: string): BillingStatus {
@@ -84,7 +95,20 @@ export function subscriptionIdOf(event: Stripe.Event): string | null {
   }
 }
 
-type Mapped = Pick<BillingSubscriptionRow, "stripeSubscriptionId" | "stripeCustomerId" | "stripeCreated" | "plan" | "status" | "interval" | "priceId" | "periodStart" | "periodEnd" | "cancelAtPeriodEnd" | "endedAt">;
+type Mapped = Pick<
+  BillingSubscriptionRow,
+  | "stripeSubscriptionId"
+  | "stripeCustomerId"
+  | "stripeCreated"
+  | "plan"
+  | "status"
+  | "interval"
+  | "priceId"
+  | "periodStart"
+  | "periodEnd"
+  | "cancelAtPeriodEnd"
+  | "endedAt"
+>;
 
 /** Our row shape for a Stripe subscription. The price's lookup key names the plan; an unknown price is kept as `unknown:<id>` and logged. */
 export function mapSubscription(sub: Stripe.Subscription): Mapped & { unknownPrice: boolean } {
@@ -124,7 +148,9 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     appInfo: { name: "Reelsaw", version: config.REELSAW_VERSION, url: config.APP_URL },
     maxNetworkRetries: 2,
     // development only: a stripe-mock or test/stripe-mock.ts instead of api.stripe.com
-    ...(base ? { host: base.hostname, port: Number(base.port || (base.protocol === "https:" ? 443 : 80)), protocol: base.protocol === "https:" ? "https" : "http" } : {}),
+    ...(base
+      ? { host: base.hostname, port: Number(base.port || (base.protocol === "https:" ? 443 : 80)), protocol: base.protocol === "https:" ? "https" : "http" }
+      : {}),
   });
   if (base) log.warn({ base: base.origin }, "Stripe calls go to STRIPE_API_BASE, not api.stripe.com");
   const entitlements = createEntitlements({ graceDays: () => config.BILLING_GRACE_DAYS, appUrl: config.APP_URL });
@@ -137,7 +163,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const found = new Map<string, string>();
     for await (const p of stripe.prices.list({ lookup_keys: ALL_LOOKUP_KEYS, active: true, limit: 100 })) if (p.lookup_key) found.set(p.lookup_key, p.id);
     const missing = ALL_LOOKUP_KEYS.filter((k) => !found.has(k));
-    if (missing.length) throw new Error(`Stripe has no active price for lookup key(s) ${missing.join(", ")}: create them in the Dashboard (ee/billing/plans.ts lists the keys)`);
+    if (missing.length)
+      throw new Error(`Stripe has no active price for lookup key(s) ${missing.join(", ")}: create them in the Dashboard (ee/billing/plans.ts lists the keys)`);
     prices = found;
   }
 
@@ -151,11 +178,14 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const have = await db().query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) });
     if (have) return have.stripeCustomerId;
     const existing = (await stripe.customers.list({ email: user.email, limit: 10 })).data.find((c) => c.metadata?.userId === user.id);
-    const customer = existing ?? (await stripe.customers.create({ email: user.email, name: user.name, metadata: { userId: user.id } }, { idempotencyKey: `customer:${user.id}` }));
+    const customer =
+      existing ??
+      (await stripe.customers.create({ email: user.email, name: user.name, metadata: { userId: user.id } }, { idempotencyKey: `customer:${user.id}` }));
     if (existing) log.info({ userId: user.id, customerId: existing.id }, "reusing the Stripe customer found by email and metadata");
     await db().insert(schema.billingCustomers).values({ userId: user.id, stripeCustomerId: customer.id }).onConflictDoNothing();
     const row = await db().query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) });
-    if (row && row.stripeCustomerId !== customer.id) log.warn({ userId: user.id, kept: row.stripeCustomerId, duplicate: customer.id }, "two Stripe customers for one account; keeping the first");
+    if (row && row.stripeCustomerId !== customer.id)
+      log.warn({ userId: user.id, kept: row.stripeCustomerId, duplicate: customer.id }, "two Stripe customers for one account; keeping the first");
     return row?.stripeCustomerId ?? customer.id;
   }
 
@@ -172,31 +202,47 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * confirm-update flow instead (Stripe prorates and the webhook updates us); a new Checkout would make a
    * second subscription.
    */
-  async function checkout(user: { id: string; email: string; name: string }, plan: string, interval: Interval): Promise<{ url: string; kind: "checkout" | "change" | "portal" }> {
+  async function checkout(
+    user: { id: string; email: string; name: string },
+    plan: string,
+    interval: Interval,
+  ): Promise<{ url: string; kind: "checkout" | "change" | "portal" }> {
     const price = await priceFor(plan, interval);
     const row = await entitlements.rowFor(db(), user.id);
     const customer = await ensureCustomer(user);
     if (row?.stripeSubscriptionId && isLive(row.status) && row.status !== "complimentary") {
-      if (row.priceId === price) throw new TRPCError({ code: "BAD_REQUEST", message: `You are already on ${planOf(plan).label} (${interval === "year" ? "yearly" : "monthly"}).` });
+      if (row.priceId === price)
+        throw new TRPCError({ code: "BAD_REQUEST", message: `You are already on ${planOf(plan).label} (${interval === "year" ? "yearly" : "monthly"}).` });
       const sub = await stripe.subscriptions.retrieve(row.stripeSubscriptionId);
       const item = sub.items.data[0];
       if (!item) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The subscription has no item to change; contact support." });
       const session = await stripe.billingPortal.sessions.create({
         customer,
         return_url: url(billingPath()),
-        flow_data: { type: "subscription_update_confirm", subscription_update_confirm: { subscription: sub.id, items: [{ id: item.id, price, quantity: 1 }] }, after_completion: { type: "redirect", redirect: { return_url: url(billingPath("changed")) } } },
+        flow_data: {
+          type: "subscription_update_confirm",
+          subscription_update_confirm: { subscription: sub.id, items: [{ id: item.id, price, quantity: 1 }] },
+          after_completion: { type: "redirect", redirect: { return_url: url(billingPath("changed")) } },
+        },
       });
       log.info({ userId: user.id, plan, interval, subscriptionId: sub.id }, "plan change started");
       return { url: session.url, kind: "change" };
     }
-    if (row?.status === "complimentary") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `This account has ${planOf(row.plan).label} as a courtesy; ask an admin before paying for a plan.` });
+    if (row?.status === "complimentary")
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `This account has ${planOf(row.plan).label} as a courtesy; ask an admin before paying for a plan.`,
+      });
     // our row can lag Stripe (a lost webhook, a sync still queued): never start a second subscription for a customer
     // who has one that is not over. Bring the row up to date and let them manage that one in the Billing Portal.
     const existing = await openSubscriptionOf(customer);
     if (existing) {
       await sync(existing.id, "checkout");
       const portalSession = await stripe.billingPortal.sessions.create({ customer, return_url: url(billingPath()) });
-      log.warn({ userId: user.id, plan, interval, subscriptionId: existing.id, status: existing.status }, "checkout skipped: the customer already has a subscription at Stripe");
+      log.warn(
+        { userId: user.id, plan, interval, subscriptionId: existing.id, status: existing.status },
+        "checkout skipped: the customer already has a subscription at Stripe",
+      );
       return { url: portalSession.url, kind: "portal" };
     }
     const session = await stripe.checkout.sessions.create({
@@ -234,7 +280,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * The webhook endpoint's work: verify, record, queue. Returns what happened; the HTTP layer maps a
    * `SignatureError` to 400 and anything else thrown to 500 (Stripe retries).
    */
-  async function recordWebhook(raw: string, signature: string | null, rlog: Logger = log): Promise<{ eventId: string; type: string; duplicate: boolean; queued: boolean }> {
+  async function recordWebhook(
+    raw: string,
+    signature: string | null,
+    rlog: Logger = log,
+  ): Promise<{ eventId: string; type: string; duplicate: boolean; queued: boolean }> {
     if (!signature) throw new SignatureError("missing stripe-signature header");
     let event: Stripe.Event;
     try {
@@ -246,7 +296,14 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const r = await svc.tx(async (u) => {
       const inserted = await u.db
         .insert(schema.billingEvents)
-        .values({ id: event.id, type: event.type, subscriptionId, created: new Date(event.created * 1000), payload: event.data.object, processedAt: subscriptionId ? null : new Date() })
+        .values({
+          id: event.id,
+          type: event.type,
+          subscriptionId,
+          created: new Date(event.created * 1000),
+          payload: event.data.object,
+          processedAt: subscriptionId ? null : new Date(),
+        })
         .onConflictDoNothing()
         .returning({ id: schema.billingEvents.id });
       if (!inserted.length) return { duplicate: true, queued: false };
@@ -279,7 +336,10 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * Rewrite the account's billing row from Stripe. Idempotent and convergent: whatever events were missed or
    * reordered, the row ends up as Stripe has it now. One transaction: lock, upsert, admin events, mark events.
    */
-  async function sync(subscriptionId: string, reason = "manual"): Promise<{ userId: string | null; changed: boolean; plan: string | null; status: string | null }> {
+  async function sync(
+    subscriptionId: string,
+    reason = "manual",
+  ): Promise<{ userId: string | null; changed: boolean; plan: string | null; status: string | null }> {
     const slog = log.child({ subscriptionId, reason });
     // events received after this instant were not seen by this read: they stay pending for the next sync
     const readAt = new Date();
@@ -295,15 +355,21 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     if (!userId || !account) {
       // nobody we know (or an account that was removed): record it so the reconcile lists orphans, then stop
       const why = userId ? "the account was removed" : "no account for this subscription";
-      slog.warn({ userId, customerId: sub ? idOf(sub.customer) : null, live: sub ? isLive(sub.status) : false }, userId ? "subscription of a removed account" : "subscription without a Reelsaw account");
+      slog.warn(
+        { userId, customerId: sub ? idOf(sub.customer) : null, live: sub ? isLive(sub.status) : false },
+        userId ? "subscription of a removed account" : "subscription without a Reelsaw account",
+      );
       await db()
         .update(schema.billingEvents)
         .set({ processedAt: new Date(), error: why })
-        .where(and(eq(schema.billingEvents.subscriptionId, subscriptionId), isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, readAt)));
+        .where(
+          and(eq(schema.billingEvents.subscriptionId, subscriptionId), isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, readAt)),
+        );
       return { userId: null, changed: false, plan: null, status: null };
     }
     const mapped = sub ? mapSubscription(sub) : null;
-    if (mapped?.unknownPrice) slog.error({ priceId: mapped.priceId }, "subscription price has no plan (lookup key unknown); the account gets Free until it is fixed");
+    if (mapped?.unknownPrice)
+      slog.error({ priceId: mapped.priceId }, "subscription price has no plan (lookup key unknown); the account gets Free until it is fixed");
     const graceDays = config.BILLING_GRACE_DAYS;
     return svc.tx(async (u) => {
       await takeTxLock(u.db, txLock.billing(userId));
@@ -334,28 +400,41 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
             slog.error({ userId, keeping: cur.stripeSubscriptionId, older: subscriptionId }, "account has two live subscriptions; the newer keeps the row");
             return unchanged("older of two live subscriptions");
           }
-          slog.error({ userId, keeping: subscriptionId, other: cur.stripeSubscriptionId }, "account has two live subscriptions; the newer takes the row, cancel the other in Stripe");
+          slog.error(
+            { userId, keeping: subscriptionId, other: cur.stripeSubscriptionId },
+            "account has two live subscriptions; the newer takes the row, cancel the other in Stripe",
+          );
         }
       }
       const pastDueSince = next.status === "past_due" ? (cur?.status === "past_due" ? (cur.pastDueSince ?? now) : now) : null;
       const values = { ...next, userId, pastDueSince, syncedAt: now, updatedAt: now };
-      await u.db
-        .insert(schema.billingSubscriptions)
-        .values(values)
-        .onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
+      await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       const before = effectivePlan(cur, graceDays, now);
       const after = effectivePlan(values, graceDays, now);
-      const changed = !cur || cur.status !== next.status || cur.plan !== next.plan || cur.interval !== next.interval || cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd || cur.periodEnd?.getTime() !== next.periodEnd?.getTime() || cur.stripeSubscriptionId !== next.stripeSubscriptionId;
+      const changed =
+        !cur ||
+        cur.status !== next.status ||
+        cur.plan !== next.plan ||
+        cur.interval !== next.interval ||
+        cur.cancelAtPeriodEnd !== next.cancelAtPeriodEnd ||
+        cur.periodEnd?.getTime() !== next.periodEnd?.getTime() ||
+        cur.stripeSubscriptionId !== next.stripeSubscriptionId;
       const base = { actorId: null, userId, email: account.email };
       const ids = { subscriptionId, plan: next.plan, interval: next.interval, status: next.status };
-      const audit = async (type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.canceled", payload: Record<string, unknown>) => {
+      const audit = async (
+        type: "billing.subscribed" | "billing.changed" | "billing.payment_failed" | "billing.canceled",
+        payload: Record<string, unknown>,
+      ) => {
         await u.db.insert(schema.adminEvents).values({ ...base, type, payload });
         u.afterCommit(() => svc.telemetry.capture(type, userId, { plan: next!.plan, interval: next!.interval, status: next!.status }));
       };
       if ((!cur || !isLive(cur.status)) && isLive(next.status)) await audit("billing.subscribed", ids);
-      else if (cur && isLive(cur.status) && isLive(next.status) && (cur.plan !== next.plan || cur.interval !== next.interval)) await audit("billing.changed", { ...ids, from: { plan: cur.plan, interval: cur.interval } });
-      if (cur?.status !== "past_due" && next.status === "past_due") await audit("billing.payment_failed", { ...ids, graceEndsAt: new Date(now.getTime() + graceDays * 86_400_000).toISOString() });
-      if ((cur && isLive(cur.status) && !isLive(next.status)) || (!cur?.cancelAtPeriodEnd && next.cancelAtPeriodEnd)) await audit("billing.canceled", { ...ids, endsAt: (next.cancelAtPeriodEnd ? next.periodEnd : (next.endedAt ?? now))?.toISOString() ?? null });
+      else if (cur && isLive(cur.status) && isLive(next.status) && (cur.plan !== next.plan || cur.interval !== next.interval))
+        await audit("billing.changed", { ...ids, from: { plan: cur.plan, interval: cur.interval } });
+      if (cur?.status !== "past_due" && next.status === "past_due")
+        await audit("billing.payment_failed", { ...ids, graceEndsAt: new Date(now.getTime() + graceDays * 86_400_000).toISOString() });
+      if ((cur && isLive(cur.status) && !isLive(next.status)) || (!cur?.cancelAtPeriodEnd && next.cancelAtPeriodEnd))
+        await audit("billing.canceled", { ...ids, endsAt: (next.cancelAtPeriodEnd ? next.periodEnd : (next.endedAt ?? now))?.toISOString() ?? null });
       // a price no plan matches puts the account on Free without anyone being told: say so once per price
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
@@ -363,7 +442,12 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         u.afterCommit(() => svc.telemetry.captureException(new Error(message), { userId, subscriptionId, priceId: next!.priceId }));
       }
       await markProcessed(u, subscriptionId, readAt);
-      u.afterCommit(() => slog[changed ? "info" : "debug"]({ userId, plan: next!.plan, status: next!.status, effective: after.plan.name, was: before.plan.name, cancelAtPeriodEnd: next!.cancelAtPeriodEnd }, changed ? "subscription synced" : "subscription unchanged"));
+      u.afterCommit(() =>
+        slog[changed ? "info" : "debug"](
+          { userId, plan: next!.plan, status: next!.status, effective: after.plan.name, was: before.plan.name, cancelAtPeriodEnd: next!.cancelAtPeriodEnd },
+          changed ? "subscription synced" : "subscription unchanged",
+        ),
+      );
       return { userId, changed, plan: next.plan, status: next.status };
     });
   }
@@ -373,7 +457,9 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     u.db
       .update(schema.billingEvents)
       .set({ processedAt: new Date(), error: null })
-      .where(and(eq(schema.billingEvents.subscriptionId, subscriptionId), isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, readAt)));
+      .where(
+        and(eq(schema.billingEvents.subscriptionId, subscriptionId), isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, readAt)),
+      );
 
   /** The statuses that grant anything (plus `unpaid`, which must be seen to revoke): what the walk lists. Ended subscriptions are history. */
   const LISTED_STATUSES = ["active", "trialing", "past_due", "unpaid", "paused"] as const satisfies readonly Stripe.SubscriptionListParams.Status[];
@@ -384,10 +470,17 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
    * re-read one by one, but never en masse: a wrong or rotated key would otherwise cancel every account at
    * once, so when more than a few rows are unseen the walk refuses and says so. Returns what it looked at.
    */
-  async function reconcile(opts: { userId?: string } = {}): Promise<{ checked: number; synced: number; orphans: string[]; pendingEvents: number; refused?: string }> {
+  async function reconcile(
+    opts: { userId?: string } = {},
+  ): Promise<{ checked: number; synced: number; orphans: string[]; pendingEvents: number; refused?: string }> {
     const d = db();
     const orphans: string[] = [];
-    const out: { checked: number; synced: number; orphans: string[]; pendingEvents: number; refused?: string } = { checked: 0, synced: 0, orphans, pendingEvents: 0 };
+    const out: { checked: number; synced: number; orphans: string[]; pendingEvents: number; refused?: string } = {
+      checked: 0,
+      synced: 0,
+      orphans,
+      pendingEvents: 0,
+    };
     const seen = new Set<string>();
     const consider = async (s: Stripe.Subscription) => {
       out.checked++;
@@ -395,7 +488,13 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       const row = await d.query.billingSubscriptions.findFirst({ where: eq(schema.billingSubscriptions.stripeSubscriptionId, s.id) });
       const m = mapSubscription(s);
       if (!row && !isLive(m.status)) return; // an ended subscription we never recorded: nothing to grant or revoke
-      const differs = !row || row.status !== m.status || row.plan !== m.plan || row.interval !== m.interval || row.cancelAtPeriodEnd !== m.cancelAtPeriodEnd || row.periodEnd?.getTime() !== m.periodEnd?.getTime();
+      const differs =
+        !row ||
+        row.status !== m.status ||
+        row.plan !== m.plan ||
+        row.interval !== m.interval ||
+        row.cancelAtPeriodEnd !== m.cancelAtPeriodEnd ||
+        row.periodEnd?.getTime() !== m.periodEnd?.getTime();
       if (!differs) return;
       const r = await sync(s.id, "reconcile");
       if (!r.userId) orphans.push(s.id);
@@ -409,7 +508,10 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     }
     for (const status of LISTED_STATUSES) for await (const s of stripe.subscriptions.list({ status, limit: 100 })) await consider(s);
     // rows that point at a subscription Stripe no longer lists among the live ones: ended since, or deleted test data
-    const rows = await d.select({ id: schema.billingSubscriptions.stripeSubscriptionId, status: schema.billingSubscriptions.status }).from(schema.billingSubscriptions).where(sql`${schema.billingSubscriptions.stripeSubscriptionId} is not null`);
+    const rows = await d
+      .select({ id: schema.billingSubscriptions.stripeSubscriptionId, status: schema.billingSubscriptions.status })
+      .from(schema.billingSubscriptions)
+      .where(sql`${schema.billingSubscriptions.stripeSubscriptionId} is not null`);
     const unseen = rows.filter((r) => r.id && !seen.has(r.id) && isLive(r.status));
     if (unseen.length > 10 && unseen.length > rows.length * 0.2) {
       out.refused = `${unseen.length} of ${rows.length} live rows are unknown to Stripe; refusing to cancel them all (wrong or rotated STRIPE_SECRET_KEY?)`;
@@ -421,7 +523,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       }
     }
     // events acknowledged but never processed (a sync that kept failing): try again
-    const pending = await d.select({ id: schema.billingEvents.subscriptionId }).from(schema.billingEvents).where(and(isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, new Date(Date.now() - 3_600_000)))).limit(500);
+    const pending = await d
+      .select({ id: schema.billingEvents.subscriptionId })
+      .from(schema.billingEvents)
+      .where(and(isNull(schema.billingEvents.processedAt), lt(schema.billingEvents.receivedAt, new Date(Date.now() - 3_600_000))))
+      .limit(500);
     const ids = [...new Set(pending.map((p) => p.id).filter((x): x is string => !!x))];
     out.pendingEvents = ids.length;
     for (const id of ids) if ((await sync(id, "reconcile")).changed) out.synced++;
@@ -434,14 +540,22 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const { boss } = svc.queue;
     // stately: one queued and one active job per subscription. A webhook during an active sync still queues the
     // next one (which reads Stripe afterwards); a second webhook while one is queued is covered by that one.
-    const syncQueue = { policy: "stately" as const, retryLimit: 8, retryDelay: 30, retryBackoff: true, expireInSeconds: 300, deleteAfterSeconds: 7 * 24 * 3600 };
+    const syncQueue = {
+      policy: "stately" as const,
+      retryLimit: 8,
+      retryDelay: 30,
+      retryBackoff: true,
+      expireInSeconds: 300,
+      deleteAfterSeconds: 7 * 24 * 3600,
+    };
     await boss.createQueue(SYNC_QUEUE, syncQueue);
     // a queue's policy is fixed at creation (an install from before this was `exclusive`): recreate it when it is idle
     const existing = await boss.getQueue(SYNC_QUEUE);
     if (existing && existing.policy !== syncQueue.policy) {
       const [stats] = await boss.getQueueStats(SYNC_QUEUE);
       const busy = (stats?.queuedCount ?? 0) + (stats?.activeCount ?? 0);
-      if (busy > 0) log.warn({ policy: existing.policy, busy }, "billing.sync queue has the old policy and jobs in flight; it is recreated at the next idle boot");
+      if (busy > 0)
+        log.warn({ policy: existing.policy, busy }, "billing.sync queue has the old policy and jobs in flight; it is recreated at the next idle boot");
       else {
         await boss.deleteQueue(SYNC_QUEUE);
         await boss.createQueue(SYNC_QUEUE, syncQueue);
@@ -483,7 +597,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     const graceDays = config.BILLING_GRACE_DAYS;
     const eff = effectivePlan(row, graceDays);
     const detail = await limitsDetail(d, svc.settings.get(), user.id, entitlements);
-    const [usage, watermark, customer] = await Promise.all([limitUsage(d, user.id, detail.grants), watermarkFor(d, svc.settings.get(), user, entitlements), d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) })]);
+    const [usage, watermark, customer] = await Promise.all([
+      limitUsage(d, user.id, detail.grants),
+      watermarkFor(d, svc.settings.get(), user, entitlements),
+      d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, user.id) }),
+    ]);
     const period = detail.grants?.period ?? null;
     return {
       enabled: true as const,
@@ -527,13 +645,31 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       const user = await u.db.query.user.findFirst({ where: eq(schema.user.id, userId), columns: { email: true } });
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No such user" });
       const [cur] = await u.db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId)).for("update");
-      if (cur?.stripeSubscriptionId && isLive(cur.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This account pays through Stripe; cancel that subscription in Stripe first." });
+      if (cur?.stripeSubscriptionId && isLive(cur.status))
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This account pays through Stripe; cancel that subscription in Stripe first." });
       const now = new Date();
       if (plan) {
-        const values = { userId, stripeSubscriptionId: null, stripeCustomerId: cur?.stripeCustomerId ?? null, plan, status: "complimentary" as const, interval: null, priceId: null, periodStart: null, periodEnd: null, cancelAtPeriodEnd: false, pastDueSince: null, endedAt: null, syncedAt: now, updatedAt: now };
+        const values = {
+          userId,
+          stripeSubscriptionId: null,
+          stripeCustomerId: cur?.stripeCustomerId ?? null,
+          plan,
+          status: "complimentary" as const,
+          interval: null,
+          priceId: null,
+          periodStart: null,
+          periodEnd: null,
+          cancelAtPeriodEnd: false,
+          pastDueSince: null,
+          endedAt: null,
+          syncedAt: now,
+          updatedAt: now,
+        };
         await u.db.insert(schema.billingSubscriptions).values(values).onConflictDoUpdate({ target: schema.billingSubscriptions.userId, set: values });
       } else if (cur) await u.db.delete(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, userId));
-      await u.db.insert(schema.adminEvents).values({ type: "billing.complimentary", actorId, userId, email: user.email, payload: { plan, from: cur?.plan ?? null } });
+      await u.db
+        .insert(schema.adminEvents)
+        .values({ type: "billing.complimentary", actorId, userId, email: user.email, payload: { plan, from: cur?.plan ?? null } });
       u.afterCommit(() => log.info({ userId, plan, actorId }, "complimentary plan set"));
       return { ok: true, plan };
     });
@@ -552,7 +688,10 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         if (customer) await stripe.customers.update(customer.stripeCustomerId, { metadata: { userId: "", removedAt: new Date().toISOString() } });
         log.info({ userId, subscriptionId: row?.stripeSubscriptionId ?? null }, "account removed; subscription canceled at Stripe");
       } catch (err) {
-        log.error({ err, userId, subscriptionId: row?.stripeSubscriptionId ?? null }, "could not cancel the removed account's subscription at Stripe; cancel it by hand");
+        log.error(
+          { err, userId, subscriptionId: row?.stripeSubscriptionId ?? null },
+          "could not cancel the removed account's subscription at Stripe; cancel it by hand",
+        );
       }
     };
   }
@@ -560,9 +699,30 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
   /** `reelsaw billing <user>`: the row, the customer, and Stripe's view side by side. */
   async function inspect(userId: string) {
     const d = db();
-    const [row, customer] = await Promise.all([entitlements.rowFor(d, userId), d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, userId) })]);
-    const stripeSubs = customer ? (await stripe.subscriptions.list({ customer: customer.stripeCustomerId, status: "all", limit: 10 })).data.map((s) => ({ id: s.id, status: s.status, price: s.items.data[0]?.price.lookup_key ?? s.items.data[0]?.price.id ?? null, cancelAtPeriodEnd: s.cancel_at_period_end })) : [];
-    const events = await d.select({ id: schema.billingEvents.id, type: schema.billingEvents.type, created: schema.billingEvents.created, processedAt: schema.billingEvents.processedAt, error: schema.billingEvents.error }).from(schema.billingEvents).where(row?.stripeSubscriptionId ? eq(schema.billingEvents.subscriptionId, row.stripeSubscriptionId) : sql`false`).orderBy(sql`${schema.billingEvents.created} desc`).limit(20);
+    const [row, customer] = await Promise.all([
+      entitlements.rowFor(d, userId),
+      d.query.billingCustomers.findFirst({ where: eq(schema.billingCustomers.userId, userId) }),
+    ]);
+    const stripeSubs = customer
+      ? (await stripe.subscriptions.list({ customer: customer.stripeCustomerId, status: "all", limit: 10 })).data.map((s) => ({
+          id: s.id,
+          status: s.status,
+          price: s.items.data[0]?.price.lookup_key ?? s.items.data[0]?.price.id ?? null,
+          cancelAtPeriodEnd: s.cancel_at_period_end,
+        }))
+      : [];
+    const events = await d
+      .select({
+        id: schema.billingEvents.id,
+        type: schema.billingEvents.type,
+        created: schema.billingEvents.created,
+        processedAt: schema.billingEvents.processedAt,
+        error: schema.billingEvents.error,
+      })
+      .from(schema.billingEvents)
+      .where(row?.stripeSubscriptionId ? eq(schema.billingEvents.subscriptionId, row.stripeSubscriptionId) : sql`false`)
+      .orderBy(sql`${schema.billingEvents.created} desc`)
+      .limit(20);
     return { row, customer: customer?.stripeCustomerId ?? null, effective: effectivePlan(row, config.BILLING_GRACE_DAYS), stripe: stripeSubs, events };
   }
 

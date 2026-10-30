@@ -29,7 +29,13 @@ export const DEFAULT_FACTORS: { local: Factors; cloud: Factors } = {
 };
 
 /** Which model decides whether a stage runs "local" or "cloud" speed. */
-const STAGE_MODEL: Record<PipelineStage, "language" | "transcription" | null> = { ingest: null, transcribe: "transcription", refine: "language", analyze: "language", render: null };
+const STAGE_MODEL: Record<PipelineStage, "language" | "transcription" | null> = {
+  ingest: null,
+  transcribe: "transcription",
+  refine: "language",
+  analyze: "language",
+  render: null,
+};
 
 export interface Models {
   language: string;
@@ -94,7 +100,9 @@ export interface StageEstimate {
  */
 export function estimateStages(durationSec: number, models: Models, history: StageSample[], defaults: Factors): StageEstimate[] {
   return PIPELINE_STAGES.map((stage) => {
-    const factors = history.flatMap((h) => (h.durationSec > 0 && h.stages[stage] !== undefined && comparable(stage, h.models, models) ? [h.stages[stage]! / h.durationSec] : []));
+    const factors = history.flatMap((h) =>
+      h.durationSec > 0 && h.stages[stage] !== undefined && comparable(stage, h.models, models) ? [h.stages[stage]! / h.durationSec] : [],
+    );
     const f = factors.length ? median(factors) : defaults[stage];
     return { stage, expectedSec: Math.round(f * durationSec), source: factors.length ? "history" : "default", samples: factors.length };
   });
@@ -119,7 +127,10 @@ export async function loadHistory(db: Db, limit = 40): Promise<StageSample[]> {
       order by r.updated_at desc
     `)
   ).rows as Array<{ id: string; title: string; duration_sec: number | string; updated_at: Date | string; models: Partial<Models> | null }>;
-  const logs = await loadRunLogs(db, rows.map((r) => r.id));
+  const logs = await loadRunLogs(
+    db,
+    rows.map((r) => r.id),
+  );
   // each stage counts from the first run that completed it: a later refine / re-analyze / re-render on the same project must not stretch it
   return rows.map((r) => ({
     projectId: r.id,
@@ -145,7 +156,13 @@ export interface ProcessingTimes {
     actualAvgSec: number | null;
     expectedAvgSec: number | null;
   }>;
-  recent: Array<{ projectId: string; title: string; durationSec: number; finishedAt: string; stages: Partial<Record<PipelineStage, { actualSec: number; expectedSec: number }>> }>;
+  recent: Array<{
+    projectId: string;
+    title: string;
+    durationSec: number;
+    finishedAt: string;
+    stages: Partial<Record<PipelineStage, { actualSec: number; expectedSec: number }>>;
+  }>;
 }
 
 /** The Settings → System view: learned factors, how they fit the recent projects, and those projects. */

@@ -105,7 +105,10 @@ describe("collapseDecoderLoops", () => {
     assert.equal(join(applyFlags(words, flags)), join(out));
     assert.equal(join(applyFlags(words, [{ ...flags[0]!, status: "rejected" }])), join(words));
     const filled = applyFlags(words, [{ ...flags[0]!, status: "accepted", replacement: "[unclear]" }]);
-    assert.equal(filled.some((x) => x.text === "[unclear]"), true);
+    assert.equal(
+      filled.some((x) => x.text === "[unclear]"),
+      true,
+    );
     assert.ok((filled.find((x) => x.text === "[unclear]")?.end ?? 0) >= 49);
   });
   it("does not treat 'no no' as a 2-gram (that would keep 2 instead of 4)", () => {
@@ -148,7 +151,10 @@ describe("collapseDecoderLoops", () => {
     const words = spoken(["no", "no", "no", "no", "no"]);
     const out = collapseDecoderLoops(words);
     assert.equal(out.length, 4);
-    assert.equal(out.every((x) => tokenKey(x.text) === "no"), true);
+    assert.equal(
+      out.every((x) => tokenKey(x.text) === "no"),
+      true,
+    );
   });
 });
 
@@ -170,7 +176,10 @@ describe("toWords collapse", () => {
     ]);
     const nNo = words.filter((x) => tokenKey(x.text) === "no").length;
     assert.ok(nNo <= 4, `kept ${nNo} nos`);
-    assert.equal(words.some((x) => x.text === "Michelle"), true);
+    assert.equal(
+      words.some((x) => x.text === "Michelle"),
+      true,
+    );
   });
   it("can skip collapse for callers that want the raw split", () => {
     const words = toWords([{ text: "no no no no no", startSecond: 0, endSecond: 1 }], { collapseLoops: false });

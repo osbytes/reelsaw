@@ -34,10 +34,20 @@ export const durationText = (sec: number) => `${sec.toFixed(sec % 1 ? 1 : 0)} s`
 export const assetFacts = (a: PickerAsset) => `${a.kind} · ${durationText(a.durationSec)} · ${a.width}×${a.height}`;
 
 /** The 9:16 thumbnail in a fixed box, so nothing moves while the image loads. */
-export function Thumb({ asset, className = "h-9 w-5" }: { asset: Pick<PickerAsset, "name" | "thumbnailUrl"> & { kind?: PickerAsset["kind"] }; className?: string }) {
+export function Thumb({
+  asset,
+  className = "h-9 w-5",
+}: {
+  asset: Pick<PickerAsset, "name" | "thumbnailUrl"> & { kind?: PickerAsset["kind"] };
+  className?: string;
+}) {
   return (
     <span className={`relative inline-grid shrink-0 place-items-center overflow-hidden rounded-[4px] border border-line bg-sunk text-ink3 ${className}`}>
-      {asset.kind === "audio" ? <Music className="h-3 w-3" aria-hidden /> : asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" /> : null}
+      {asset.kind === "audio" ? (
+        <Music className="h-3 w-3" aria-hidden />
+      ) : asset.thumbnailUrl ? (
+        <img src={asset.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+      ) : null}
     </span>
   );
 }
@@ -45,7 +55,9 @@ export function Thumb({ asset, className = "h-9 w-5" }: { asset: Pick<PickerAsse
 export const clockText = (sec: number) => (sec >= 60 ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}` : durationText(sec));
 
 const Badge = ({ children, tone = "plain" }: { children: ReactNode; tone?: "plain" | "acc" }) => (
-  <span className={`shrink-0 rounded-[5px] px-1 py-px text-[10px] font-semibold ${tone === "acc" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink2"}`}>{children}</span>
+  <span className={`shrink-0 rounded-[5px] px-1 py-px text-[10px] font-semibold ${tone === "acc" ? "bg-acc-soft text-acc-text" : "bg-sunk text-ink2"}`}>
+    {children}
+  </span>
 );
 
 /** Facts and badges of one asset, shared by the combobox rows. */
@@ -53,7 +65,13 @@ function AssetLine({ a, isDefault, slot }: { a: PickerAsset; isDefault: boolean;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-ink3">
       <Badge>{formatTag(a.mime) ?? a.kind}</Badge>
-      <span className="font-mono">{a.kind === "audio" ? clockText(a.durationSec) : a.kind === "image" ? `shows ${durationText(a.durationSec)} · ${a.width}×${a.height}` : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}</span>
+      <span className="font-mono">
+        {a.kind === "audio"
+          ? clockText(a.durationSec)
+          : a.kind === "image"
+            ? `shows ${durationText(a.durationSec)} · ${a.width}×${a.height}`
+            : `${durationText(a.durationSec)} · ${a.width}×${a.height}`}
+      </span>
       {isDefault && <Badge tone="acc">default {slot}</Badge>}
       {a.usedBy > 0 && <span>used by {a.usedBy}</span>}
     </span>
@@ -94,7 +112,11 @@ export function BumperCombobox({
   const [q, setQ] = useState("");
   const fuzzy = useMemo(
     () => ({
-      assets: createFuzzy(assets, [{ name: "name", weight: 2 }, { name: "kind", weight: 0.5 }, { name: "mime", weight: 0.3 }]),
+      assets: createFuzzy(assets, [
+        { name: "name", weight: 2 },
+        { name: "kind", weight: 0.5 },
+        { name: "mime", weight: 0.3 },
+      ]),
       fixed: createFuzzy(fixed, ["label", "hint"], { minMatchCharLength: 1 }),
     }),
     [assets, fixed],
@@ -103,7 +125,9 @@ export function BumperCombobox({
   const pickedAsset = pickedFixed ? undefined : known.find((a) => a.id === value);
   const removed = pickedAsset && !assets.some((a) => a.id === pickedAsset.id);
   const shownFixed = q.trim() ? fuzzy.fixed.search(q).map((r) => r.item) : fixed;
-  const shownAssets = q.trim() ? fuzzy.assets.search(q).map((r) => ({ item: r.item, matches: r.matches })) : assets.map((item) => ({ item, matches: undefined }));
+  const shownAssets = q.trim()
+    ? fuzzy.assets.search(q).map((r) => ({ item: r.item, matches: r.matches }))
+    : assets.map((item) => ({ item, matches: undefined }));
   const pick = (v: string) => {
     onChange(v);
     setOpen(false);
@@ -112,7 +136,13 @@ export function BumperCombobox({
   return (
     <Popover.Root open={open} onOpenChange={(o) => (setOpen(o), o && setQ(""))}>
       <Popover.Trigger asChild>
-        <button type="button" role="combobox" aria-expanded={open} aria-label={label} className={`input flex h-[38px] w-full min-w-0 items-center gap-2 py-1 text-left ${className}`}>
+        <button
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={label}
+          className={`input flex h-[38px] w-full min-w-0 items-center gap-2 py-1 text-left ${className}`}
+        >
           {pickedFixed ? (
             <span className="grid h-6 w-5 shrink-0 place-items-center text-ink2">{pickedFixed.icon}</span>
           ) : pickedAsset ? (
@@ -121,7 +151,15 @@ export function BumperCombobox({
             <span className="h-7 w-4 shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate">
-            {pickedFixed ? pickedFixed.label : pickedAsset ? `${pickedAsset.name}${removed ? " (deleted)" : ""}` : loading ? <Skeleton className="h-3.5 w-28" /> : <span className="text-ink3">Choose…</span>}
+            {pickedFixed ? (
+              pickedFixed.label
+            ) : pickedAsset ? (
+              `${pickedAsset.name}${removed ? " (deleted)" : ""}`
+            ) : loading ? (
+              <Skeleton className="h-3.5 w-28" />
+            ) : (
+              <span className="text-ink3">Choose…</span>
+            )}
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink3" />
         </button>
@@ -137,7 +175,12 @@ export function BumperCombobox({
           className="z-[80] w-[max(var(--radix-popover-trigger-width),18rem)] max-w-[calc(100vw-24px)] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop"
         >
           <Command loop shouldFilter={false}>
-            <Command.Input value={q} onValueChange={setQ} placeholder={`Search ${slot}s…`} className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
+            <Command.Input
+              value={q}
+              onValueChange={setQ}
+              placeholder={`Search ${slot}s…`}
+              className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3"
+            />
             <ScrollArea className="max-h-[min(320px,calc(var(--radix-popover-content-available-height)-60px))]">
               <Command.List className="p-1">
                 {!loading && <Command.Empty className="px-3 py-6 text-center text-sm text-ink3">No matches</Command.Empty>}

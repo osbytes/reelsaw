@@ -18,8 +18,28 @@ import type { Config } from "../src/config.js";
 import { createProviderGate, parseProviderConcurrency } from "../src/ai/gate.js";
 import { db, signUp } from "./helpers.js";
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
-const limits = (maxLive: number) => ({ MAX_PROJECTS_PER_USER: 0, MAX_SOURCE_MINUTES_PER_DAY: 0, MAX_NEW_PROJECTS_PER_HOUR: 0, MAX_LIVE_JOBS_PER_USER: maxLive, MAX_RERENDERS_PER_HOUR: 0, MAX_STORAGE_MB: 0, RUN_WORKERS: false, SHUTDOWN_GRACE_SECONDS: 1 }) as unknown as Config;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
+const limits = (maxLive: number) =>
+  ({
+    MAX_PROJECTS_PER_USER: 0,
+    MAX_SOURCE_MINUTES_PER_DAY: 0,
+    MAX_NEW_PROJECTS_PER_HOUR: 0,
+    MAX_LIVE_JOBS_PER_USER: maxLive,
+    MAX_RERENDERS_PER_HOUR: 0,
+    MAX_STORAGE_MB: 0,
+    RUN_WORKERS: false,
+    SHUTDOWN_GRACE_SECONDS: 1,
+  }) as unknown as Config;
 
 describe("fair share between users", () => {
   let pool: pg.Pool;
@@ -32,13 +52,19 @@ describe("fair share between users", () => {
     pool = db();
     queue = createQueue(limits(0), pool, false, quiet);
     await queue.boss.createQueue(name, { policy: "exclusive" });
-    for (const [who, n] of [["heavy", 6], ["light", 1]] as const) {
+    for (const [who, n] of [
+      ["heavy", 6],
+      ["light", 1],
+    ] as const) {
       const { userId } = await signUp();
       users.push(userId);
       projects[who] = [];
       for (let i = 0; i < n; i++) {
         const id = randomUUID();
-        await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Fairness test', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [id, userId]);
+        await pool.query(
+          `insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Fairness test', 'url', 'https://example.com/v.mp4', 'done', '{}')`,
+          [id, userId],
+        );
         projects[who]!.push(id);
       }
     }
@@ -51,7 +77,13 @@ describe("fair share between users", () => {
   });
 
   const enqueue = (maxLive: number, projectId: string) => createUnitOfWork(pool, queue, quiet, () => limits(maxLive))((u) => u.enqueue(name, { projectId }));
-  const jobs = async () => (await pool.query<{ project: string; user: string; priority: number; by: string | null }>(`select data->>'projectId' as project, data->>'userId' as user, priority, data->>'by' as by from pgboss.job where name = $1 order by priority desc, created_on`, [name])).rows;
+  const jobs = async () =>
+    (
+      await pool.query<{ project: string; user: string; priority: number; by: string | null }>(
+        `select data->>'projectId' as project, data->>'userId' as user, priority, data->>'by' as by from pgboss.job where name = $1 order by priority desc, created_on`,
+        [name],
+      )
+    ).rows;
 
   it("serves a user with nothing in flight before another user's backlog", async () => {
     // the heavy user's five are their own requests (no limit yet); the light user's one is a pipeline hand-off
@@ -59,7 +91,10 @@ describe("fair share between users", () => {
     await enqueue(0, projects.light![0]!);
     const order = await jobs();
     assert.equal(order.length, 6);
-    assert.ok(order.every((j) => users.includes(j.user)), "every job carries its owner");
+    assert.ok(
+      order.every((j) => users.includes(j.user)),
+      "every job carries its owner",
+    );
     const light = order.find((j) => j.project === projects.light![0])!;
     assert.equal(light.priority, 0);
     assert.deepEqual(
@@ -67,13 +102,17 @@ describe("fair share between users", () => {
       [0, -1, -2, -3, -4],
     );
     // fetch order (priority desc, created_on): the heavy user's first job, then the light user's, then the rest
-    assert.equal(order.findIndex((j) => j.project === projects.light![0]), 1);
+    assert.equal(
+      order.findIndex((j) => j.project === projects.light![0]),
+      1,
+    );
   });
 
   it("refuses a user's own request past MAX_LIVE_JOBS_PER_USER with a sentence", async () => {
     await assert.rejects(
       asUserRequest(users[0]!, () => enqueue(5, projects.heavy![5]!)),
-      (err: unknown) => err instanceof QuotaError && /You have 5 requests queued or running, the most this account may have at once \(5\)/.test((err as Error).message),
+      (err: unknown) =>
+        err instanceof QuotaError && /You have 5 requests queued or running, the most this account may have at once \(5\)/.test((err as Error).message),
     );
     assert.equal((await jobs()).length, 6, "nothing was queued");
   });
@@ -98,7 +137,13 @@ describe("provider concurrency gate", () => {
   });
 
   it("parses PROVIDER_CONCURRENCY and defaults self-hosted providers to 2 (a local whisper on openai to 1), cloud to unlimited", () => {
-    assert.deepEqual([...parseProviderConcurrency("compat=3, openai=16", "ollama")], [["ollama", 3], ["openai", 16]]);
+    assert.deepEqual(
+      [...parseProviderConcurrency("compat=3, openai=16", "ollama")],
+      [
+        ["ollama", 3],
+        ["openai", 16],
+      ],
+    );
     assert.throws(() => parseProviderConcurrency("ollama", "ollama"), /provider=number/);
     const gate = createProviderGate("", "ollama", (p) => p === "ollama" || p === "openai", quiet);
     assert.equal(gate.limitOf("ollama"), 2);

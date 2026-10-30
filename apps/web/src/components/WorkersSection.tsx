@@ -58,7 +58,10 @@ export function WorkersSection() {
               : ""}
         </span>
       </div>
-      <p className="text-[13px] text-ink2">Every API and worker process reports every 15 seconds: CPUs, memory, disk, GPU, render slots, and the jobs it is running. A replica that stops checking in is marked gone after 45 seconds.</p>
+      <p className="text-[13px] text-ink2">
+        Every API and worker process reports every 15 seconds: CPUs, memory, disk, GPU, render slots, and the jobs it is running. A replica that stops checking
+        in is marked gone after 45 seconds.
+      </p>
       {q.error && !d ? (
         <div className="h-5 text-xs text-ink3">{q.error.message}</div>
       ) : !d ? (
@@ -94,7 +97,10 @@ export function WorkersSection() {
                     </span>
                     <span className="chip shrink-0 bg-sunk text-ink2">{ROLE[w.role] ?? w.role}</span>
                     {diskPaused(w) ? (
-                      <span className="chip shrink-0 bg-warn-soft text-warn" title="Not taking media jobs: disk is below the floor and nothing more can be evicted. Other workers take them; it resumes once free disk is back.">
+                      <span
+                        className="chip shrink-0 bg-warn-soft text-warn"
+                        title="Not taking media jobs: disk is below the floor and nothing more can be evicted. Other workers take them; it resumes once free disk is back."
+                      >
                         disk full
                       </span>
                     ) : null}

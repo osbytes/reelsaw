@@ -16,10 +16,23 @@ import { createMediaTools } from "../src/media.js";
 import { StageTimeoutError, StaleJobError } from "../src/pipeline/common.js";
 import { StepRunner, type StepStore, type StepWrite, type StoredStep } from "../src/pipeline/steps.js";
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
 
 function mediaWith(ffmpegPath: string) {
-  return createMediaTools({ FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: "ffprobe", YTDLP_PATH: "yt-dlp", FFMPEG_ENCODER: "auto" } as Config, createLogger({ LOG_LEVEL: "error", LOG_FORMAT: "json" }));
+  return createMediaTools(
+    { FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: "ffprobe", YTDLP_PATH: "yt-dlp", FFMPEG_ENCODER: "auto" } as Config,
+    createLogger({ LOG_LEVEL: "error", LOG_FORMAT: "json" }),
+  );
 }
 
 function stub(dir: string, name: string, body: string): string {
@@ -88,24 +101,37 @@ describe("refine.scenes steps", () => {
     const saved: { cuts: number[] | null } = { cuts: null }; // transcripts.sceneCuts
     let detections = 0;
     let scans = 0;
-    const keyOf = (cuts: number[]) => ({ cuts: { input: "source-key", model: "ffmpeg-scene", promptVersion: "scenes-1", params: { floor: 0.1, width: 320 } }, scan: { input: { source: "source-key", cuts }, model: "text-detector", promptVersion: "text-scan-1" } });
+    const keyOf = (cuts: number[]) => ({
+      cuts: { input: "source-key", model: "ffmpeg-scene", promptVersion: "scenes-1", params: { floor: 0.1, width: 320 } },
+      scan: { input: { source: "source-key", cuts }, model: "text-detector", promptVersion: "text-scan-1" },
+    });
 
     const run = async (a: ReturnType<typeof attempt>, failScan: boolean) => {
       const cuts = z.number();
-      await a.r.step("scene-cuts", keyOf([]).cuts, async () => {
-        detections++;
-        saved.cuts = [3, 9.5];
-        return saved.cuts.length;
-      }, { schema: cuts, timeoutMs: 1000 });
+      await a.r.step(
+        "scene-cuts",
+        keyOf([]).cuts,
+        async () => {
+          detections++;
+          saved.cuts = [3, 9.5];
+          return saved.cuts.length;
+        },
+        { schema: cuts, timeoutMs: 1000 },
+      );
       const have = saved.cuts ?? [];
-      return a.r.step("text-scan", keyOf(have).scan, async (signal) => {
-        scans++;
-        if (failScan) {
-          a.ctl.abort(new Error("stage idle"));
-          signal.throwIfAborted();
-        }
-        return { overlays: [] as number[] };
-      }, { schema: z.object({ overlays: z.array(z.number()) }), timeoutMs: 1000 });
+      return a.r.step(
+        "text-scan",
+        keyOf(have).scan,
+        async (signal) => {
+          scans++;
+          if (failScan) {
+            a.ctl.abort(new Error("stage idle"));
+            signal.throwIfAborted();
+          }
+          return { overlays: [] as number[] };
+        },
+        { schema: z.object({ overlays: z.array(z.number()) }), timeoutMs: 1000 },
+      );
     };
 
     const first = attempt(store);
@@ -123,11 +149,19 @@ describe("refine.scenes steps", () => {
   it("a failed cuts step is recorded failed, not done, so it runs again", async () => {
     const store = new MemoryStore();
     const a = attempt(store);
-    await assert.rejects(a.r.step("scene-cuts", { input: "s", model: "m", promptVersion: "v" }, async () => { throw new Error("Shot-change detection failed: boom"); }, { schema: z.number(), timeoutMs: 1000 }));
+    await assert.rejects(
+      a.r.step(
+        "scene-cuts",
+        { input: "s", model: "m", promptVersion: "v" },
+        async () => {
+          throw new Error("Shot-change detection failed: boom");
+        },
+        { schema: z.number(), timeoutMs: 1000 },
+      ),
+    );
     assert.ok([...store.rows.values()].every((r) => r.status === "failed"));
     let ran = 0;
     await attempt(store).r.step("scene-cuts", { input: "s", model: "m", promptVersion: "v" }, async () => (ran++, 0), { schema: z.number(), timeoutMs: 1000 });
     assert.equal(ran, 1);
   });
 });
-

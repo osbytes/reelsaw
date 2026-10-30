@@ -165,10 +165,14 @@ export class FetchEventSource {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const t = setTimeout(resolve, ms);
-      this.abort.signal.addEventListener("abort", () => {
-        clearTimeout(t);
-        resolve();
-      }, { once: true });
+      this.abort.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 }

@@ -11,7 +11,8 @@ import { socialMeta } from "@/lib/social-meta";
 export const revalidate = 3600;
 
 const title = "Releases";
-const description = "Every published Reelsaw version with its change notes, newest first, and a 90-day map of commits to the open-source repo. Days we tagged a release light up.";
+const description =
+  "Every published Reelsaw version with its change notes, newest first, and a 90-day map of commits to the open-source repo. Days we tagged a release light up.";
 
 export const metadata: Metadata = {
   title,
@@ -49,7 +50,12 @@ export default async function ReleasesPage() {
     <>
       <Header />
       <main id="main" className="container-page flex max-w-[880px] flex-col gap-5 py-6 sm:py-8">
-        <Breadcrumbs items={[{ href: "/", label: SITE.name }, { href: "/releases", label: "Releases" }]} />
+        <Breadcrumbs
+          items={[
+            { href: "/", label: SITE.name },
+            { href: "/releases", label: "Releases" },
+          ]}
+        />
         {feed ? (
           <ReleasesView feed={feed} heading={heading} />
         ) : (

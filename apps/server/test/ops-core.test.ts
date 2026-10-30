@@ -33,11 +33,36 @@ describe("WORKER_ID collision", () => {
 describe("health checks", () => {
   it("settle reports ok, a reason, a rejection and a timeout", async () => {
     const errors: unknown[] = [];
-    assert.equal(await settle(async () => null, (e) => errors.push(e)), "ok");
-    assert.equal(await settle(async () => "queue is down", (e) => errors.push(e)), "queue is down");
-    assert.equal(await settle(async () => Promise.reject(new Error("ECONNREFUSED 10.0.0.5")), (e) => errors.push(e)), "unreachable");
+    assert.equal(
+      await settle(
+        async () => null,
+        (e) => errors.push(e),
+      ),
+      "ok",
+    );
+    assert.equal(
+      await settle(
+        async () => "queue is down",
+        (e) => errors.push(e),
+      ),
+      "queue is down",
+    );
+    assert.equal(
+      await settle(
+        async () => Promise.reject(new Error("ECONNREFUSED 10.0.0.5")),
+        (e) => errors.push(e),
+      ),
+      "unreachable",
+    );
     assert.equal(errors.length, 1, "the rejection goes to the log, not the response");
-    assert.equal(await settle(() => new Promise<string | null>(() => {}), (e) => errors.push(e), 20), "timed out after 0.02 s");
+    assert.equal(
+      await settle(
+        () => new Promise<string | null>(() => {}),
+        (e) => errors.push(e),
+        20,
+      ),
+      "timed out after 0.02 s",
+    );
     assert.equal(errors.length, 1);
   });
   it("is healthy only when every check is ok", () => {

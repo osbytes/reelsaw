@@ -99,7 +99,14 @@ const TX_ATTEMPTS = 3;
 /** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
 const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
 
-export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, instanceLimits?: () => InstanceLimits, entitlements: () => Entitlements | null = () => null, telemetry?: Telemetry): RunInTx {
+export function createUnitOfWork(
+  pool: pg.Pool,
+  queue: Queue,
+  log: Logger,
+  instanceLimits?: () => InstanceLimits,
+  entitlements: () => Entitlements | null = () => null,
+  telemetry?: Telemetry,
+): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
@@ -133,7 +140,10 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               try {
                 checkJobLimits(limits, a, USER_RERUN_QUEUES.includes(q));
               } catch (err) {
-                log.warn({ userId: a.userId, queue: q, live: a.live, userLive: a.userLive, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
+                log.warn(
+                  { userId: a.userId, queue: q, live: a.live, userLive: a.userLive, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message },
+                  "job limit reached",
+                );
                 throw err;
               }
             }

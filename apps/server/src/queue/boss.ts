@@ -65,7 +65,14 @@ export interface Admission {
 export const fairPriority = (live: number) => -Math.min(Math.max(0, live), 1000);
 
 /** queues whose user-requested jobs count toward MAX_RERENDERS_PER_HOUR: renders and new clips, and re-runs of analysis and refinement */
-export const USER_RERUN_QUEUES: QueueName[] = [QUEUES.render, QUEUES.prepare, QUEUES.analyze, QUEUES.refineEntities, QUEUES.refineDisfluency, QUEUES.refineScenes];
+export const USER_RERUN_QUEUES: QueueName[] = [
+  QUEUES.render,
+  QUEUES.prepare,
+  QUEUES.analyze,
+  QUEUES.refineEntities,
+  QUEUES.refineDisfluency,
+  QUEUES.refineScenes,
+];
 
 // Jobs lose their heartbeat within seconds of a worker crash, which lets pg-boss
 // hand them to another worker long before the hard expiry hits.
@@ -74,7 +81,7 @@ const HEARTBEAT_SECONDS = 15;
 // expireInSeconds is the queue DEFAULT. analyze and the refine stages override it per job from the
 // project's duration (`expireInSecondsFor`), so a long source on a slow model is not cut off at 1800 s; every
 // other queue uses its value here as the hard cap.
-export const queueDefs:Array<{ name: QueueName; expireInSeconds: number; retryLimit: number }> = [
+export const queueDefs: Array<{ name: QueueName; expireInSeconds: number; retryLimit: number }> = [
   { name: QUEUES.ingest, expireInSeconds: 3 * 3600, retryLimit: 3 },
   { name: QUEUES.transcribe, expireInSeconds: 3 * 3600, retryLimit: 3 },
   { name: QUEUES.refineEntities, expireInSeconds: 1800, retryLimit: 3 },
@@ -161,7 +168,12 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       [data.projectId, data.userId ?? null, USER_RERUN_QUEUES],
     );
     const r = res.rows[0] as Admission | undefined;
-    return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userLive: Number(r?.userLive ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };
+    return {
+      userId: r?.userId ?? null,
+      live: Number(r?.live ?? 0),
+      userLive: Number(r?.userLive ?? 0),
+      userRendersLastHour: Number(r?.userRendersLastHour ?? 0),
+    };
   };
 
   return {
@@ -185,7 +197,9 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
           deleteAfterSeconds: 3 * 24 * 3600,
         });
         // createQueue is a no-op for existing queues; keep retry/expiry in sync with the code
-        await boss.updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit }).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
+        await boss
+          .updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit })
+          .catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
       started = true;
     },
@@ -197,7 +211,8 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       started = false;
     },
     admission,
-    send: (queue, data, opts) => boss.send(queue, data, { ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}), ...(opts?.db ? { db: opts.db } : {}) }),
+    send: (queue, data, opts) =>
+      boss.send(queue, data, { ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}), ...(opts?.db ? { db: opts.db } : {}) }),
     async enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
       const a = opts?.admission ?? (await admission(data, opts));
@@ -207,12 +222,19 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
       let expireInSeconds = opts?.expireInSeconds;
       if (!("clipId" in data) && (data.seq === undefined || (expireInSeconds === undefined && hasDurationExpiry(queue)))) {
         const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
-        const r = (await exec.executeSql(`select stage_seq as seq, duration_sec as "durationSec" from projects where id = $1`, [data.projectId])).rows[0] as { seq?: number; durationSec?: number | null } | undefined;
+        const r = (await exec.executeSql(`select stage_seq as seq, duration_sec as "durationSec" from projects where id = $1`, [data.projectId])).rows[0] as
+          | { seq?: number; durationSec?: number | null }
+          | undefined;
         if (r?.seq !== undefined && data.seq === undefined) payload = { ...payload, seq: r.seq };
         expireInSeconds ??= expireInSecondsFor(queue, r?.durationSec, languageSelfHosted());
       }
       // a plan's boost (ee) lifts the account above others with the same backlog, never above an idle account's first job by more than the boost
-      return boss.send(queue, payload, { singletonKey, priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0), ...(expireInSeconds ? { expireInSeconds } : {}), ...(opts?.db ? { db: opts.db } : {}) });
+      return boss.send(queue, payload, {
+        singletonKey,
+        priority: fairPriority(a.live) + (opts?.priorityBoost ?? 0),
+        ...(expireInSeconds ? { expireInSeconds } : {}),
+        ...(opts?.db ? { db: opts.db } : {}),
+      });
     },
     async hasLiveJob(queue, key, opts) {
       const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
@@ -224,10 +246,10 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     },
     async cancelLiveJobs(queue, key, opts) {
       const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
-      const res = await exec.executeSql(
-        `select id from pgboss.job where name = $1 and singleton_key = $2 and state in ('created','retry','active')`,
-        [queue, key],
-      );
+      const res = await exec.executeSql(`select id from pgboss.job where name = $1 and singleton_key = $2 and state in ('created','retry','active')`, [
+        queue,
+        key,
+      ]);
       const ids = (res.rows as Array<{ id: string }>).map((r) => r.id);
       if (ids.length) await boss.cancel(queue, ids, opts?.db ? { db: opts.db } : undefined);
     },

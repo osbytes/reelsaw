@@ -50,7 +50,8 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
   };
   const parse = (id: string) => {
     const [prefix, name] = id.split(":");
-    if (!prefix || !name || !(ICONIFY_SETS as readonly string[]).includes(prefix) || !/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new ProviderError("That is not an Iconify id from an allowed set (<prefix>:<name>).");
+    if (!prefix || !name || !(ICONIFY_SETS as readonly string[]).includes(prefix) || !/^[a-z0-9][a-z0-9-]*$/.test(name))
+      throw new ProviderError("That is not an Iconify id from an allowed set (<prefix>:<name>).");
     return { prefix, name };
   };
   return {
@@ -62,7 +63,12 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
       if (kind && kind !== "image") return { items: [] };
       const start = Math.max(0, Number(cursor) || 0);
       const u = new URL(`${base()}/search`);
-      u.search = new URLSearchParams({ query: q, limit: String(Math.min(999, Math.max(32, limit))), start: String(start), prefixes: ICONIFY_SETS.join(",") }).toString();
+      u.search = new URLSearchParams({
+        query: q,
+        limit: String(Math.min(999, Math.max(32, limit))),
+        start: String(start),
+        prefixes: ICONIFY_SETS.join(","),
+      }).toString();
       const [r, lic] = await Promise.all([http.json("iconify", u), setLicenses()]);
       const icons = arr(obj(r).icons).filter((i): i is string => typeof i === "string");
       const items = icons.flatMap((id) => {
@@ -71,7 +77,22 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
         if (!prefix || !name || !license || !PERMISSIVE.test(license.id)) return [];
         // previews are dark-friendly grey; the import colours the file
         const preview = svgUrl(prefix, name, "ffffff", 128);
-        return [{ provider: "iconify", externalId: id, kind: "image" as const, mime: "image/svg+xml", name: name.replace(/-/g, " "), previewUrl: preview, thumbUrl: preview, width: 512, height: 512, license, attribution: license.id.startsWith("cc-by") ? `${name} icon (${prefix}) via Iconify` : undefined, url: `https://icon-sets.iconify.design/${prefix}/${name}/` }];
+        return [
+          {
+            provider: "iconify",
+            externalId: id,
+            kind: "image" as const,
+            mime: "image/svg+xml",
+            name: name.replace(/-/g, " "),
+            previewUrl: preview,
+            thumbUrl: preview,
+            width: 512,
+            height: 512,
+            license,
+            attribution: license.id.startsWith("cc-by") ? `${name} icon (${prefix}) via Iconify` : undefined,
+            url: `https://icon-sets.iconify.design/${prefix}/${name}/`,
+          },
+        ];
       });
       const total = Number(obj(r).total) || 0;
       const used = icons.length + start;
@@ -88,7 +109,14 @@ export function iconify({ settings, http }: ProviderDeps): Provider {
         name: clip(name.replace(/-/g, " "), 120),
         kind: "image",
         tags: [...name.split("-"), prefix, "icon"],
-        provenance: { provider: "iconify", externalId, variant: (opts?.color ?? "#ffffff").replace(/^#/, "").toLowerCase(), url: `https://icon-sets.iconify.design/${prefix}/${name}/`, license, attribution: license.id.startsWith("cc-by") ? clip(`${name} icon (${prefix}) via Iconify`, 300) : undefined },
+        provenance: {
+          provider: "iconify",
+          externalId,
+          variant: (opts?.color ?? "#ffffff").replace(/^#/, "").toLowerCase(),
+          url: `https://icon-sets.iconify.design/${prefix}/${name}/`,
+          license,
+          attribution: license.id.startsWith("cc-by") ? clip(`${name} icon (${prefix}) via Iconify`, 300) : undefined,
+        },
       };
     },
   };

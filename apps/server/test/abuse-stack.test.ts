@@ -12,7 +12,10 @@ import { BASE, db, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data as never, error: body.error };
@@ -20,7 +23,11 @@ async function trpc(cookie: string, path: string, input?: unknown, method: "GET"
 /** A raw sign-up attempt from a given (proxied) address; returns the status and the server's sentence. */
 async function trySignup(email: string, ip: string) {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${BASE}/api/auth/sign-up/email`, { method: "POST", headers: { ...json, "x-forwarded-for": ip }, body: JSON.stringify({ email, password: `pw-${randomUUID()}`, name: "Guard" }) });
+    const res = await fetch(`${BASE}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { ...json, "x-forwarded-for": ip },
+      body: JSON.stringify({ email, password: `pw-${randomUUID()}`, name: "Guard" }),
+    });
     const text = await res.text();
     if (res.status !== 429 || attempt >= 12) {
       let userId: string | null = null;
@@ -89,7 +96,10 @@ describe("abuse guards", () => {
     assert.match(fourth.error!.message, /More than 3 changes in a minute/);
     const read = await trpc(u.cookie, "me.get", undefined, "GET");
     assert.equal(read.error, undefined);
-    const lim = (await trpc(admin.cookie, "admin.users.limits", { id: u.userId }, "GET")).data as { usage: Record<string, number>; source: Record<string, string> };
+    const lim = (await trpc(admin.cookie, "admin.users.limits", { id: u.userId }, "GET")).data as {
+      usage: Record<string, number>;
+      source: Record<string, string>;
+    };
     assert.equal(lim.source.MAX_REQUESTS_PER_MINUTE, "override");
     assert.ok(lim.usage.MAX_REQUESTS_PER_MINUTE >= 3);
   });
@@ -106,10 +116,16 @@ describe("abuse guards", () => {
     const { drizzle } = await import("drizzle-orm/node-postgres");
     const { schema } = await import("../src/db/index.js");
     const d = drizzle(pool, { schema });
-    const fake = { database: { db: d } as never, log: { child: () => ({ info() {}, warn() {} }) } as never, tx: async (fn: (u: { db: typeof d }) => Promise<void>) => fn({ db: d }) };
+    const fake = {
+      database: { db: d } as never,
+      log: { child: () => ({ info() {}, warn() {} }) } as never,
+      tx: async (fn: (u: { db: typeof d }) => Promise<void>) => fn({ db: d }),
+    };
     const r = await flagAccounts(fake as never);
     assert.ok(r.flagged >= 3, `flagged ${r.flagged}`);
-    const list = (await trpc(admin.cookie, "admin.users.list", { flagged: true, limit: 100 }, "GET")).data as { items: Array<{ signupIp: string | null; flags: string[] }> };
+    const list = (await trpc(admin.cookie, "admin.users.list", { flagged: true, limit: 100 }, "GET")).data as {
+      items: Array<{ signupIp: string | null; flags: string[] }>;
+    };
     const ours = list.items.filter((x) => x.signupIp === ip);
     assert.equal(ours.length, 3);
     for (const x of ours) assert.ok(x.flags.includes("shared_ip"), x.flags.join(","));

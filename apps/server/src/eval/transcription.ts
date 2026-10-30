@@ -107,7 +107,9 @@ for (const modelId of models) {
     for (const c of cases) {
       const audio = await fs.readFile(path.join(audioDir, `${c.id}.mp3`));
       const entities = extractEntities(c.meta);
-      const providerOptions = { [provider]: { ...(ai.transcriptionOptions(modelId)[provider] ?? {}), ...(bias ? biasProviderOptions(provider, entities) : {}) } } as Record<string, JSONObject>;
+      const providerOptions = {
+        [provider]: { ...(ai.transcriptionOptions(modelId)[provider] ?? {}), ...(bias ? biasProviderOptions(provider, entities) : {}) },
+      } as Record<string, JSONObject>;
       const t0 = Date.now();
       const res = await transcribe({ model, audio, providerOptions, maxRetries: 1 });
       const words = toWords(res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })));
@@ -131,7 +133,8 @@ for (const modelId of models) {
           w = r.words;
           corrections += r.applied.length;
           pending += r.flags.length - r.applied.length;
-          if (process.env.EVAL_VERBOSE && r.flags.length) console.error(`    flags: ${r.flags.map((f) => `${f.heard}→${f.suggested} ${f.confidence} ${f.status}`).join("; ")}`);
+          if (process.env.EVAL_VERBOSE && r.flags.length)
+            console.error(`    flags: ${r.flags.map((f) => `${f.heard}→${f.suggested} ${f.confidence} ${f.status}`).join("; ")}`);
         }
         const hyp = normTokens(w.map((x) => x.text).join(" "));
         const ref = normTokens(c.text);
@@ -140,7 +143,10 @@ for (const modelId of models) {
         hit += es.hit;
         refN += es.refN;
         extra += es.extra;
-        if (process.env.EVAL_VERBOSE) console.error(`  ${modelId} bias=${bias} correct=${correct} ${c.id}: wer=${wer(ref, hyp).toFixed(3)} entities=${es.hit}/${es.refN} extra=${es.extra}\n    ${w.map((x) => x.text).join(" ")}`);
+        if (process.env.EVAL_VERBOSE)
+          console.error(
+            `  ${modelId} bias=${bias} correct=${correct} ${c.id}: wer=${wer(ref, hyp).toFixed(3)} entities=${es.hit}/${es.refN} extra=${es.extra}\n    ${w.map((x) => x.text).join(" ")}`,
+          );
       }
       rows.push({ model: modelId, bias, correct, wer: werSum / perCase.length, recall: refN ? hit / refN : 1, extra, refN, corrections, pending, ms });
     }
@@ -151,6 +157,8 @@ console.log(`\nTranscription eval · ${cases.length} cases · ${rows[0]?.refN ??
 console.log("| model | vocab bias | LLM correction | WER | entity recall | false entity insertions | auto-fixed | flagged for review | time |");
 console.log("|---|---|---|---|---|---|---|---|---|");
 for (const r of rows) {
-  console.log(`| ${r.model.replace("openai:Systran/", "")} | ${r.bias ? "yes" : "no"} | ${r.correct ? "yes" : "no"} | ${(r.wer * 100).toFixed(1)}% | ${(r.recall * 100).toFixed(0)}% | ${r.extra} | ${r.corrections} | ${r.pending} | ${(r.ms / 1000).toFixed(0)}s |`);
+  console.log(
+    `| ${r.model.replace("openai:Systran/", "")} | ${r.bias ? "yes" : "no"} | ${r.correct ? "yes" : "no"} | ${(r.wer * 100).toFixed(1)}% | ${(r.recall * 100).toFixed(0)}% | ${r.extra} | ${r.corrections} | ${r.pending} | ${(r.ms / 1000).toFixed(0)}s |`,
+  );
 }
 process.exit(0);

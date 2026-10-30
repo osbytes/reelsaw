@@ -170,12 +170,17 @@ export function otelLogFromLine(line: string, scrub: (value: string) => string =
     addLogAttribute(attributes, k, v, scrub, 1);
   }
   const severity =
-    level >= 60 ? { severityNumber: 21, severityText: "FATAL" }
-    : level >= 50 ? { severityNumber: 17, severityText: "ERROR" }
-    : level >= 40 ? { severityNumber: 13, severityText: "WARN" }
-    : level >= 30 ? { severityNumber: 9, severityText: "INFO" }
-    : level >= 20 ? { severityNumber: 5, severityText: "DEBUG" }
-    : { severityNumber: 1, severityText: "TRACE" };
+    level >= 60
+      ? { severityNumber: 21, severityText: "FATAL" }
+      : level >= 50
+        ? { severityNumber: 17, severityText: "ERROR" }
+        : level >= 40
+          ? { severityNumber: 13, severityText: "WARN" }
+          : level >= 30
+            ? { severityNumber: 9, severityText: "INFO" }
+            : level >= 20
+              ? { severityNumber: 5, severityText: "DEBUG" }
+              : { severityNumber: 1, severityText: "TRACE" };
   return { ...severity, body: scrub(row.msg), attributes };
 }
 
@@ -192,7 +197,17 @@ function addLogAttribute(out: Record<string, string | number | boolean>, key: st
     return;
   }
   if (Array.isArray(value)) {
-    if (value.length > 0 && value.every((x) => x == null || isScalar(x))) addLogAttribute(out, key, value.filter((x) => x != null).map(String).join(" "), scrub, 0);
+    if (value.length > 0 && value.every((x) => x == null || isScalar(x)))
+      addLogAttribute(
+        out,
+        key,
+        value
+          .filter((x) => x != null)
+          .map(String)
+          .join(" "),
+        scrub,
+        0,
+      );
     return;
   }
   if (depth > 0 && isPlain(value)) {

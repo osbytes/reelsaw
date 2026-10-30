@@ -316,14 +316,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) throw new ConfigError("Invalid environment:\n" + z.prettifyError(parsed.error));
   const { ALLOW_SIGNUP, ...rest } = parsed.data;
-  const c: Config = { ...rest, SIGNUP_MODE: rest.SIGNUP_MODE ?? (ALLOW_SIGNUP !== undefined && !["1", "true", "yes", "on"].includes(ALLOW_SIGNUP.toLowerCase()) ? "closed" : "open") };
+  const c: Config = {
+    ...rest,
+    SIGNUP_MODE: rest.SIGNUP_MODE ?? (ALLOW_SIGNUP !== undefined && !["1", "true", "yes", "on"].includes(ALLOW_SIGNUP.toLowerCase()) ? "closed" : "open"),
+  };
   if (c.EMAIL_DRIVER !== "none" && !c.EMAIL_FROM) throw new ConfigError(`EMAIL_DRIVER=${c.EMAIL_DRIVER} requires EMAIL_FROM`);
   if (c.EMAIL_DRIVER === "smtp" && !c.SMTP_URL) throw new ConfigError("EMAIL_DRIVER=smtp requires SMTP_URL");
   if (c.EMAIL_DRIVER === "resend" && !c.RESEND_API_KEY) throw new ConfigError("EMAIL_DRIVER=resend requires RESEND_API_KEY");
   if (c.REQUIRE_EMAIL_VERIFICATION && c.EMAIL_DRIVER === "none") throw new ConfigError("REQUIRE_EMAIL_VERIFICATION needs an EMAIL_DRIVER");
-  if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY)) throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
+  if (c.CAPTCHA_PROVIDER && (!c.CAPTCHA_SITE_KEY || !c.CAPTCHA_SECRET_KEY))
+    throw new ConfigError("CAPTCHA_PROVIDER requires CAPTCHA_SITE_KEY and CAPTCHA_SECRET_KEY");
   if (c.STORAGE_DRIVER === "s3" && !c.S3_BUCKET) throw new ConfigError("STORAGE_DRIVER=s3 requires S3_BUCKET");
-  if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET)) throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
+  if (c.REELSAW_EE && (!c.STRIPE_SECRET_KEY || !c.STRIPE_WEBHOOK_SECRET))
+    throw new ConfigError("REELSAW_EE=true requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET");
   // the operator CLI (src/cli.ts) runs with both off on purpose
   if (!c.RUN_HTTP && !c.RUN_WORKERS && env.REELSAW_CLI !== "1") throw new ConfigError("RUN_HTTP and RUN_WORKERS are both false; nothing to run");
   if (c.NODE_ENV === "production" && c.BETTER_AUTH_SECRET.length < 32) throw new ConfigError("BETTER_AUTH_SECRET must be at least 32 characters in production");

@@ -66,7 +66,10 @@ export function upgradeHowTo(current: string): UpdateState["upgrade"] {
   };
 }
 
-type FetchLike = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+type FetchLike = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 export function createUpdateChecker(
   config: Pick<Config, "REELSAW_VERSION" | "UPDATE_CHECK" | "UPDATE_CHECK_URL" | "UPDATE_CHECK_HOURS">,
@@ -106,7 +109,11 @@ export function createUpdateChecker(
       const tag = typeof body.tag_name === "string" ? body.tag_name : "";
       const version = releaseVersion(tag);
       if (!version) throw new Error(`unexpected release tag "${tag}"`);
-      state.latest = { version, url: typeof body.html_url === "string" ? body.html_url : `${REPO_URL}/releases/tag/${tag}`, publishedAt: typeof body.published_at === "string" ? body.published_at : null };
+      state.latest = {
+        version,
+        url: typeof body.html_url === "string" ? body.html_url : `${REPO_URL}/releases/tag/${tag}`,
+        publishedAt: typeof body.published_at === "string" ? body.published_at : null,
+      };
       const running = releaseVersion(current);
       state.available = running ? semver.gt(version, running) : null;
       state.error = null;

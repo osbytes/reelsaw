@@ -67,13 +67,24 @@ describe("segmentLayouts at scene cuts", () => {
 });
 
 describe("fitTextHeavy keeps one-shot pieces", () => {
-  const seg = (layout: "fit" | "split" | "face", start: number, end: number): ResolvedSegment => ({ start, end, manual: false, decision: staticDecision(layout, layout) });
+  const seg = (layout: "fit" | "split" | "face", start: number, end: number): ResolvedSegment => ({
+    start,
+    end,
+    manual: false,
+    decision: staticDecision(layout, layout),
+  });
   it("leaves a short piece that no text run touches alone", () => {
     const out = fitTextHeavy([seg("face", 0, 3.5), seg("split", 3.5, 4.6), seg("fit", 4.6, 6)], [[0, 1.6]]);
-    assert.deepEqual(out.map((s) => `${s.decision.layout} ${s.start}-${s.end}`), ["fit 0-1.6", "face 1.6-3.5", "split 3.5-4.6", "fit 4.6-6"]);
+    assert.deepEqual(
+      out.map((s) => `${s.decision.layout} ${s.start}-${s.end}`),
+      ["fit 0-1.6", "face 1.6-3.5", "split 3.5-4.6", "fit 4.6-6"],
+    );
   });
   it("still folds the sliver left after a run into that run", () => {
     const out = fitTextHeavy([seg("face", 0, 6), seg("face", 6, 10)], [[2, 5]]);
-    assert.deepEqual(out.map((s) => `${s.decision.layout} ${s.start}-${s.end}`), ["face 0-2", "fit 2-6", "face 6-10"]);
+    assert.deepEqual(
+      out.map((s) => `${s.decision.layout} ${s.start}-${s.end}`),
+      ["face 0-2", "fit 2-6", "face 6-10"],
+    );
   });
 });

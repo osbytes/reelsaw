@@ -18,8 +18,20 @@ import { materialize, type CaseResult, type MediaSource, type Suite, type EvalCo
 
 type Box = [number, number, number, number];
 interface Labels {
-  frames: Array<{ file: string; t: number; video?: string; labels: Array<{ name: string; kind: "caption" | "watermark" | "lower-third" | "scene"; box: Box; required?: boolean }> }>;
-  aggregate: Array<{ id: string; source: MediaSource; sceneCuts: number[]; expectOverlays: Array<{ name: string; box: Box; kind?: "caption" | "watermark" }>; mustNotCover: Array<{ name: string; box: Box }>; expectPresentation?: boolean }>;
+  frames: Array<{
+    file: string;
+    t: number;
+    video?: string;
+    labels: Array<{ name: string; kind: "caption" | "watermark" | "lower-third" | "scene"; box: Box; required?: boolean }>;
+  }>;
+  aggregate: Array<{
+    id: string;
+    source: MediaSource;
+    sceneCuts: number[];
+    expectOverlays: Array<{ name: string; box: Box; kind?: "caption" | "watermark" }>;
+    mustNotCover: Array<{ name: string; box: Box }>;
+    expectPresentation?: boolean;
+  }>;
 }
 
 /** Fraction of `target` covered by the union of `boxes` (grid sampling, exact enough for grading). */
@@ -57,7 +69,20 @@ export const overlaysSuite: Suite = {
     }
     const allBoxes: Box[] = [];
     for (const f of spec.frames) {
-      const rgb = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", path.join(dir, f.file), "-vf", `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+      const rgb = await ctx.exec(cfg.FFMPEG_PATH, [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        path.join(dir, f.file),
+        "-vf",
+        `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "pipe:1",
+      ]);
       const boxes = (await det.detect(new Uint8Array(rgb))).map((b) => [b.x1, b.y1, b.x2, b.y2] as Box);
       const want = f.labels.filter((l) => l.kind !== "scene" && l.required !== false);
       const cov = Object.fromEntries(f.labels.map((l) => [l.name, Number(unionCoverage(l.box, boxes).toFixed(2))]));
@@ -82,13 +107,32 @@ export const overlaysSuite: Suite = {
     // remain detectable. Regression for "captions visible outside the blur" (long lines, 2nd lines).
     {
       const core: SourceOverlay = { x1: 0.3, x2: 0.7, y1: 0.67, y2: 0.74, kind: "caption", coverage: 0.9 };
-      const grown = growOverlays([core], allBoxes.map(([x1, y1, x2, y2]) => ({ x1, y1, x2, y2 })), { quantile: 1 });
+      const grown = growOverlays(
+        [core],
+        allBoxes.map(([x1, y1, x2, y2]) => ({ x1, y1, x2, y2 })),
+        { quantile: 1 },
+      );
       const mask = sourceVideo(grown, TEXT_INPUT_W, TEXT_INPUT_H, 1);
       let residual = 0;
       const leaks: string[] = [];
       for (const f of spec.frames.filter((x) => !x.video)) {
         const graph = `[0:v]scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}[s];${mask.prefix.replace("[0:v]", "[s]")}${mask.labels[0]}null[o]`;
-        const rgb = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", path.join(dir, f.file), "-filter_complex", graph, "-map", "[o]", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+        const rgb = await ctx.exec(cfg.FFMPEG_PATH, [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          path.join(dir, f.file),
+          "-filter_complex",
+          graph,
+          "-map",
+          "[o]",
+          "-f",
+          "rawvideo",
+          "-pix_fmt",
+          "rgb24",
+          "pipe:1",
+        ]);
         const left = (await det.detect(new Uint8Array(rgb))).map((b) => [b.x1, b.y1, b.x2, b.y2] as Box);
         for (const l of f.labels.filter((x) => x.name === "caption" || x.name === "handle")) {
           const c = unionCoverage(l.box, left);
@@ -99,7 +143,12 @@ export const overlaysSuite: Suite = {
         }
       }
       const g = grown[0]!;
-      out.push({ id: "mask-residual", pass: residual === 0, metrics: { residual, regionW: Number((g.x2 - g.x1).toFixed(2)), regionH: Number((g.y2 - g.y1).toFixed(2)) }, notes: leaks.join("; ") });
+      out.push({
+        id: "mask-residual",
+        pass: residual === 0,
+        metrics: { residual, regionW: Number((g.x2 - g.x1).toFixed(2)), regionH: Number((g.y2 - g.y1).toFixed(2)) },
+        notes: leaks.join("; "),
+      });
     }
 
     for (const a of spec.aggregate) {
@@ -122,13 +171,31 @@ export const overlaysSuite: Suite = {
       // slide decks / screen shares must be recognised (masking off by default), and other videos must not be
       const wrongKind = a.expectPresentation !== undefined && scan.textProfile.presentation !== a.expectPresentation;
       // the region that covers most of an expected overlay must also have the expected kind (a channel bug is a watermark, subtitles are captions)
-      const kindOf = (e: { box: Box }) => [...scan.overlays].sort((p, q) => unionCoverage(e.box, [[q.x1, q.y1, q.x2, q.y2]]) - unionCoverage(e.box, [[p.x1, p.y1, p.x2, p.y2]]))[0]?.kind;
-      const misKinded = a.expectOverlays.filter((e) => e.kind && !missing.includes(e.name) && kindOf(e) !== e.kind).map((e) => `${e.name} is ${kindOf(e)}, expected ${e.kind}`);
+      const kindOf = (e: { box: Box }) =>
+        [...scan.overlays].sort((p, q) => unionCoverage(e.box, [[q.x1, q.y1, q.x2, q.y2]]) - unionCoverage(e.box, [[p.x1, p.y1, p.x2, p.y2]]))[0]?.kind;
+      const misKinded = a.expectOverlays
+        .filter((e) => e.kind && !missing.includes(e.name) && kindOf(e) !== e.kind)
+        .map((e) => `${e.name} is ${kindOf(e)}, expected ${e.kind}`);
       out.push({
         id: `aggregate-${a.id}`,
         pass: !missing.length && !falsePos.length && !wrongKind && !misKinded.length,
-        metrics: { regions: regions.length, frames: scan.frames, textHeavy: `${scan.textProfile.textHeavy}/${scan.textProfile.frames}`, ...Object.fromEntries(Object.entries(covered).map(([k, v]) => [`hit:${k}`, v])), ...Object.fromEntries(Object.entries(leaked).map(([k, v]) => [`fp:${k}`, v])), sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
-        notes: [missing.length ? `missed ${missing.join(", ")}` : "", falsePos.length ? `false positive on ${falsePos.join(", ")}` : "", wrongKind ? `presentation=${scan.textProfile.presentation}, expected ${a.expectPresentation}` : "", misKinded.length ? `wrong kind: ${misKinded.join(", ")}` : "", JSON.stringify(scan.overlays.map((o) => [o.kind, o.x1, o.y1, o.x2, o.y2]))].filter(Boolean).join("; "),
+        metrics: {
+          regions: regions.length,
+          frames: scan.frames,
+          textHeavy: `${scan.textProfile.textHeavy}/${scan.textProfile.frames}`,
+          ...Object.fromEntries(Object.entries(covered).map(([k, v]) => [`hit:${k}`, v])),
+          ...Object.fromEntries(Object.entries(leaked).map(([k, v]) => [`fp:${k}`, v])),
+          sec: Number(((Date.now() - t0) / 1000).toFixed(1)),
+        },
+        notes: [
+          missing.length ? `missed ${missing.join(", ")}` : "",
+          falsePos.length ? `false positive on ${falsePos.join(", ")}` : "",
+          wrongKind ? `presentation=${scan.textProfile.presentation}, expected ${a.expectPresentation}` : "",
+          misKinded.length ? `wrong kind: ${misKinded.join(", ")}` : "",
+          JSON.stringify(scan.overlays.map((o) => [o.kind, o.x1, o.y1, o.x2, o.y2])),
+        ]
+          .filter(Boolean)
+          .join("; "),
       });
     }
     return out;
@@ -151,7 +218,9 @@ export const overlaysSuite: Suite = {
       overlayRecall: { value: Number((sum("found") / (sum("wanted") || 1)).toFixed(2)), better: "higher", tolerance: 0.03 },
       rawPrecision: { value: Number((sum("onOverlay") / (sum("boxes") || 1)).toFixed(2)), better: "higher", tolerance: 0.05 },
       // only when aggregates ran: with their media uncached (--offline) a 0 here would read as a regression
-      ...(results.some((r) => r.id.startsWith("aggregate-")) ? { aggregatePass: { value: results.filter((r) => r.id.startsWith("aggregate-") && r.pass).length, better: "higher" as const } } : {}),
+      ...(results.some((r) => r.id.startsWith("aggregate-"))
+        ? { aggregatePass: { value: results.filter((r) => r.id.startsWith("aggregate-") && r.pass).length, better: "higher" as const } }
+        : {}),
     };
   },
 };

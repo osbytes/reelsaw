@@ -20,7 +20,13 @@ describe("adjustOf", () => {
 });
 
 describe("framingOfClip", () => {
-  const clip = { startSec: 800, layoutSections: [{ start: 800, end: 810, mode: "auto" as const }, { start: 810, end: 858, mode: "stack" as const, crop: tile, offsetX: 0 }] };
+  const clip = {
+    startSec: 800,
+    layoutSections: [
+      { start: 800, end: 810, mode: "auto" as const },
+      { start: 810, end: 858, mode: "stack" as const, crop: tile, offsetX: 0 },
+    ],
+  };
   it("takes the first section that is framed, with its adjustment", () => {
     assert.deepEqual(framingOfClip(clip), { reframe: "stack", adjust: { crop: tile } });
   });

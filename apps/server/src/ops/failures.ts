@@ -175,9 +175,7 @@ export async function listFailures(svc: Services, filter: FailureFilter = {}): P
           .orderBy(desc(schema.clips.updatedAt), desc(schema.clips.id))
           .limit(FETCH)
       : Promise.resolve([]),
-    wantProjects
-      ? db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(projectWhere)
-      : Promise.resolve([{ n: 0 }]),
+    wantProjects ? db.select({ n: sql<number>`count(*)::int` }).from(schema.projects).where(projectWhere) : Promise.resolve([{ n: 0 }]),
   ]);
 
   const clips = clipRows.filter((c) => !stage || clipFailureStage(c) === stage);
@@ -233,10 +231,7 @@ export async function getFailure(svc: Services, kind: FailureKind, id: string): 
   const [item] = await loadByIds(svc, [{ kind, id }]);
   if (!item) return null;
   if (kind === "clip") {
-    const [p] = await svc.database.db
-      .select({ status: schema.projects.status })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, item.projectId));
+    const [p] = await svc.database.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, item.projectId));
     if (p?.status === "failed") return null;
   }
   return item;

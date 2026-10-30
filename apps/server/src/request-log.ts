@@ -53,7 +53,15 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
     const ms = Math.round(performance.now() - t0);
     const level = accessLevel(c.req.method, path, status, ms);
     // durations belong to the http span/metrics; the line carries one only when it is an anomaly
-    const entry = { requestId, method: c.req.method, path, route: c.req.routePath, status, userId: c.get("userId"), ...(level === "warn" && status < 400 ? { ms } : {}) };
+    const entry = {
+      requestId,
+      method: c.req.method,
+      path,
+      route: c.req.routePath,
+      status,
+      userId: c.get("userId"),
+      ...(level === "warn" && status < 400 ? { ms } : {}),
+    };
     if (c.error) httpLog.error({ ...entry, err: c.error }, "request failed");
     else httpLog[level](entry, status >= 500 ? "request failed" : level === "warn" && status < 400 ? "slow request" : "request");
   };
@@ -87,8 +95,18 @@ export function trpcLogLevel(code: string): Level {
   }
 }
 
-export function logTrpcError(log: Logger, e: { path?: string | undefined; type?: string; code: string; requestId?: string | undefined; userId?: string | undefined; err: Error }) {
+export function logTrpcError(
+  log: Logger,
+  e: { path?: string | undefined; type?: string; code: string; requestId?: string | undefined; userId?: string | undefined; err: Error },
+) {
   const level = trpcLogLevel(e.code);
-  const fields = { procedure: e.path, type: e.type, code: e.code, requestId: e.requestId, userId: e.userId, ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }) };
+  const fields = {
+    procedure: e.path,
+    type: e.type,
+    code: e.code,
+    requestId: e.requestId,
+    userId: e.userId,
+    ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }),
+  };
   log[level](fields, "trpc error");
 }

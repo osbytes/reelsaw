@@ -23,7 +23,9 @@ export const SLIDE_TEXT_SHARE = 0.22;
 type Box = { x1: number; y1: number; x2: number; y2: number };
 function textCells(boxes: Box[]): Set<number> {
   const cells = new Set<number>();
-  for (const b of boxes) for (let gy = Math.floor(b.y1 * GY); gy < Math.ceil(b.y2 * GY); gy++) for (let gx = Math.floor(b.x1 * GX); gx < Math.ceil(b.x2 * GX); gx++) cells.add(gy * GX + gx);
+  for (const b of boxes)
+    for (let gy = Math.floor(b.y1 * GY); gy < Math.ceil(b.y2 * GY); gy++)
+      for (let gx = Math.floor(b.x1 * GX); gx < Math.ceil(b.x2 * GX); gx++) cells.add(gy * GX + gx);
   return cells;
 }
 export const isSlide = (boxes: Box[]) => textCells(boxes).size / (GX * GY) > SLIDE_TEXT_SHARE;
@@ -110,7 +112,10 @@ export function drifts(o: Box, boxes: Box[]): boolean {
   };
   const cys = own.map((b) => (b.y1 + b.y2) / 2);
   const cxs = own.map((b) => (b.x1 + b.x2) / 2);
-  const h = q(own.map((b) => b.y2 - b.y1), 0.5);
+  const h = q(
+    own.map((b) => b.y2 - b.y1),
+    0.5,
+  );
   return q(cys, 0.9) - q(cys, 0.1) > 1.8 * h && q(cxs, 0.9) - q(cxs, 0.1) > 0.05;
 }
 
@@ -161,7 +166,11 @@ function toFaceInput(rgb: Uint8Array): Uint8Array {
  * faces, or is left too thin to hold a line of text, is dropped. `share` = fraction of face-bearing
  * frames it may touch.
  */
-export function dropFaceOverlaps<O extends Box>(overlays: O[], frames: Array<{ t?: number; faces: Box[] }>, opts: { share?: number; active?: (o: O, t: number) => boolean } = {}): { kept: O[]; dropped: O[]; trimmed: Array<{ from: O; to: O }> } {
+export function dropFaceOverlaps<O extends Box>(
+  overlays: O[],
+  frames: Array<{ t?: number; faces: Box[] }>,
+  opts: { share?: number; active?: (o: O, t: number) => boolean } = {},
+): { kept: O[]; dropped: O[]; trimmed: Array<{ from: O; to: O }> } {
   const limit = opts.share ?? 0.1;
   const withFaces = frames.filter((f) => f.faces.length);
   if (!withFaces.length) return { kept: overlays, dropped: [], trimmed: [] };
@@ -203,7 +212,30 @@ const MIN_TRIMMED_H = 0.04;
 function frameAt(ffmpegPath: string, source: string, t: number, signal?: AbortSignal): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", t.toFixed(2), "-i", source, "-frames:v", "1", "-vf", `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal });
+    const p = spawn(
+      ffmpegPath,
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        ...ffmpegPipeThreads,
+        "-ss",
+        t.toFixed(2),
+        "-i",
+        source,
+        "-frames:v",
+        "1",
+        "-vf",
+        `scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "pipe:1",
+      ],
+      { signal },
+    );
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.on("error", reject);
     p.on("close", (code) => (code === 0 ? resolve(new Uint8Array(Buffer.concat(chunks))) : reject(new Error(`ffmpeg exited ${code}`))));
@@ -252,16 +284,21 @@ export async function detectOverlays(
   const valid = sampled.filter((g) => !g.slide);
   const slides = sampled.length - valid.length;
   const heavy = sampled.filter((g) => g.textHeavy).length;
-  const textProfile: TextProfile = { frames: sampled.length, textHeavy: heavy, presentation: sampled.length > 0 && heavy / sampled.length >= PRESENTATION_SHARE };
+  const textProfile: TextProfile = {
+    frames: sampled.length,
+    textHeavy: heavy,
+    presentation: sampled.length > 0 && heavy / sampled.length >= PRESENTATION_SHARE,
+  };
   if (!valid.length) return { overlays: [], frames: 0, scenes: 0, slides, faceDropped: [], moving: [], ui: [], textProfile };
 
   const sceneIds = new Set(valid.map((g) => g.scene));
   const hits = new Float32Array(GX * GY);
   const scenesPerCell = Array.from({ length: GX * GY }, () => new Set<number>());
-  for (const g of valid) for (const c of g.cells) {
-    hits[c]!++;
-    scenesPerCell[c]!.add(g.scene);
-  }
+  for (const g of valid)
+    for (const c of g.cells) {
+      hits[c]!++;
+      scenesPerCell[c]!.add(g.scene);
+    }
   // overlay cells: text in enough frames AND (when the video has cuts) in several different shots
   const multiShot = sceneIds.size >= 3;
   const needScenes = multiShot ? Math.max(2, Math.ceil(sceneIds.size * 0.2)) : 1;
@@ -285,20 +322,33 @@ export async function detectOverlays(
     if (!keep[c] || seen[c]) continue;
     const stack = [c];
     seen[c] = 1;
-    let x1 = GX, y1 = GY, x2 = 0, y2 = 0, maxFreq = 0, count = 0;
+    let x1 = GX,
+      y1 = GY,
+      x2 = 0,
+      y2 = 0,
+      maxFreq = 0,
+      count = 0;
     while (stack.length) {
       const p = stack.pop()!;
       const x = p % GX;
       const y = (p - x) / GX;
-      x1 = Math.min(x1, x); x2 = Math.max(x2, x); y1 = Math.min(y1, y); y2 = Math.max(y2, y);
+      x1 = Math.min(x1, x);
+      x2 = Math.max(x2, x);
+      y1 = Math.min(y1, y);
+      y2 = Math.max(y2, y);
       maxFreq = Math.max(maxFreq, hits[p]! / valid.length);
       count++;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= GX || ny >= GY) continue;
-        const q = ny * GX + nx;
-        if (keep[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
-      }
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx,
+            ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= GX || ny >= GY) continue;
+          const q = ny * GX + nx;
+          if (keep[q] && !seen[q]) {
+            seen[q] = 1;
+            stack.push(q);
+          }
+        }
     }
     if (count < 2) continue;
     overlays.push({
@@ -319,7 +369,16 @@ export async function detectOverlays(
   const steady = grown.filter((o) => !drifts(o, allBoxes));
   const { kept: burned, ui } = splitInterface(steady);
   const { kept, dropped } = dropFaceOverlaps(burned, valid);
-  return { overlays: kept, frames: valid.length, scenes: sceneIds.size, slides, faceDropped: dropped, moving: grown.filter((o) => !steady.includes(o)), ui, textProfile };
+  return {
+    overlays: kept,
+    frames: valid.length,
+    scenes: sceneIds.size,
+    slides,
+    faceDropped: dropped,
+    moving: grown.filter((o) => !steady.includes(o)),
+    ui,
+    textProfile,
+  };
 }
 
 const quant = (xs: number[], q: number) => {
@@ -332,7 +391,11 @@ const quant = (xs: number[], q: number) => {
  * stacked right against it (a second subtitle line), horizontally near it. Extents use a high
  * quantile so a stray detection can't blow the region up. Iterates so a second line pulls in a third.
  */
-export function growOverlays(overlays: SourceOverlay[], boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>, opts: { quantile?: number; pad?: number } = {}): SourceOverlay[] {
+export function growOverlays(
+  overlays: SourceOverlay[],
+  boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>,
+  opts: { quantile?: number; pad?: number } = {},
+): SourceOverlay[] {
   const q = opts.quantile ?? 0.995;
   const pad = opts.pad ?? 0.006;
   const inCore = (b: { x1: number; y1: number; x2: number; y2: number }, c: SourceOverlay) => {
@@ -356,10 +419,46 @@ export function growOverlays(overlays: SourceOverlay[], boxes: Array<{ x1: numbe
       if (members.length < (opts.quantile === 1 ? 1 : 3)) break;
       const next = {
         ...o,
-        x1: Math.max(0, Math.min(o.x1, quant(members.map((b) => b.x1), 1 - q) - pad)),
-        x2: Math.min(1, Math.max(o.x2, quant(members.map((b) => b.x2), q) + pad)),
-        y1: Math.max(0, Math.min(o.y1, quant(members.map((b) => b.y1), 1 - q) - pad)),
-        y2: Math.min(1, Math.max(o.y2, quant(members.map((b) => b.y2), q) + pad)),
+        x1: Math.max(
+          0,
+          Math.min(
+            o.x1,
+            quant(
+              members.map((b) => b.x1),
+              1 - q,
+            ) - pad,
+          ),
+        ),
+        x2: Math.min(
+          1,
+          Math.max(
+            o.x2,
+            quant(
+              members.map((b) => b.x2),
+              q,
+            ) + pad,
+          ),
+        ),
+        y1: Math.max(
+          0,
+          Math.min(
+            o.y1,
+            quant(
+              members.map((b) => b.y1),
+              1 - q,
+            ) - pad,
+          ),
+        ),
+        y2: Math.min(
+          1,
+          Math.max(
+            o.y2,
+            quant(
+              members.map((b) => b.y2),
+              q,
+            ) + pad,
+          ),
+        ),
       };
       const changed = Math.abs(next.x1 - o.x1) + Math.abs(next.x2 - o.x2) + Math.abs(next.y1 - o.y1) + Math.abs(next.y2 - o.y2) > 0.002;
       o = next;
@@ -382,9 +481,38 @@ export interface ClipTextFrame {
 }
 
 /** Text boxes per frame in a clip's own time range (one ffmpeg pass at `fps`). */
-export async function sampleClipText(deps: { detector: TextDetector; ffmpegPath: string; signal?: AbortSignal }, source: string, startSec: number, durationSec: number, fps = 2): Promise<ClipTextFrame[]> {
+export async function sampleClipText(
+  deps: { detector: TextDetector; ffmpegPath: string; signal?: AbortSignal },
+  source: string,
+  startSec: number,
+  durationSec: number,
+  fps = 2,
+): Promise<ClipTextFrame[]> {
   const frameBytes = TEXT_INPUT_W * TEXT_INPUT_H * 3;
-  const ff = spawn(deps.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", startSec.toFixed(3), "-t", durationSec.toFixed(3), "-i", source, "-vf", `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] });
+  const ff = spawn(
+    deps.ffmpegPath,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      ...ffmpegPipeThreads,
+      "-ss",
+      startSec.toFixed(3),
+      "-t",
+      durationSec.toFixed(3),
+      "-i",
+      source,
+      "-vf",
+      `fps=${fps},scale=${TEXT_INPUT_W}:${TEXT_INPUT_H}`,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1",
+    ],
+    { signal: deps.signal, stdio: ["ignore", "pipe", "ignore"] },
+  );
   const frames: ClipTextFrame[] = [];
   let buf = Buffer.alloc(0);
   for await (const chunk of ff.stdout) {
@@ -405,7 +533,12 @@ export async function sampleClipText(deps: { detector: TextDetector; ffmpegPath:
  * overlapping the region, padded and merged into windows. Regions never seen in the clip get no
  * windows (the caller drops them); regions on screen nearly the whole time stay always-on.
  */
-export function overlayWindows(overlays: SourceOverlay[], frames: ClipTextFrame[], durationSec: number, opts: { fps?: number; pad?: number; mergeGap?: number; alwaysOn?: number } = {}): SourceOverlay[] {
+export function overlayWindows(
+  overlays: SourceOverlay[],
+  frames: ClipTextFrame[],
+  durationSec: number,
+  opts: { fps?: number; pad?: number; mergeGap?: number; alwaysOn?: number } = {},
+): SourceOverlay[] {
   const fps = opts.fps ?? 2;
   const pad = opts.pad ?? 0.6;
   const mergeGap = opts.mergeGap ?? 1.2;
@@ -435,7 +568,12 @@ export function overlayWindows(overlays: SourceOverlay[], frames: ClipTextFrame[
  * window (the renderer fades each in and out). Watermarks, and every region when there are no
  * frames, are returned as they are.
  */
-export function tightenOverlays(overlays: SourceOverlay[], frames: ClipTextFrame[], durationSec: number, opts: { fps?: number; pad?: number; boxPad?: number; grow?: number; maxPieces?: number; cores?: Box[]; staticSec?: number } = {}): SourceOverlay[] {
+export function tightenOverlays(
+  overlays: SourceOverlay[],
+  frames: ClipTextFrame[],
+  durationSec: number,
+  opts: { fps?: number; pad?: number; boxPad?: number; grow?: number; maxPieces?: number; cores?: Box[]; staticSec?: number } = {},
+): SourceOverlay[] {
   const fps = opts.fps ?? 2;
   const pad = opts.pad ?? 0.6;
   const boxPad = opts.boxPad ?? 0.008;
@@ -459,7 +597,8 @@ export function tightenOverlays(overlays: SourceOverlay[], frames: ClipTextFrame
     const cy = (b.y1 + b.y2) / 2;
     return (opts.cores ?? []).some((c) => cx >= c.x1 && cx <= c.x2 && cy >= c.y1 && cy <= c.y2);
   };
-  const scene = (b: Box) => opts.cores !== undefined && !inCores(b) && frames.filter((f) => !f.slide && f.boxes.some((x) => iou(x, b) >= 0.7)).length >= minStatic;
+  const scene = (b: Box) =>
+    opts.cores !== undefined && !inCores(b) && frames.filter((f) => !f.slide && f.boxes.some((x) => iou(x, b) >= 0.7)).length >= minStatic;
   const out: SourceOverlay[] = [];
   for (const o of overlays) {
     // a logo or handle has one extent; a missed detection would only make its blur flicker

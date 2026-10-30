@@ -11,7 +11,8 @@ export interface ShortcutGroup {
 }
 
 /** Typing in a text field never triggers a shortcut (checkboxes and sliders still allow them). */
-export const isTypingTarget = (el: EventTarget | null) => !!(el as HTMLElement | null)?.closest?.("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]");
+export const isTypingTarget = (el: EventTarget | null) =>
+  !!(el as HTMLElement | null)?.closest?.("input:not([type=checkbox]):not([type=range]), textarea, select, [contenteditable]");
 
 // One registry of what each mounted view offers, so the `?` sheet lists exactly what works on this
 // screen. Handlers stay with their views; this holds the documentation.
@@ -92,7 +93,10 @@ export function useShortcut(
       enableOnFormTags: true,
       enableOnContentEditable: true,
       // a shifted character is matched on `event.key` with modifiers ignored, so ⌘? / Alt+! are refused here
-      ignoreEventWhen: (e) => (!inFields && isTypingTarget(e.target)) || (!opts.inDialogs && inDialog(e.target)) || (!!opts.useKey && !opts.ignoreModifiers && (e.metaKey || e.ctrlKey || e.altKey)),
+      ignoreEventWhen: (e) =>
+        (!inFields && isTypingTarget(e.target)) ||
+        (!opts.inDialogs && inDialog(e.target)) ||
+        (!!opts.useKey && !opts.ignoreModifiers && (e.metaKey || e.ctrlKey || e.altKey)),
       preventDefault: opts.preventDefault ?? true,
       useKey: opts.useKey ?? false,
       ignoreModifiers: opts.ignoreModifiers ?? opts.useKey ?? false,

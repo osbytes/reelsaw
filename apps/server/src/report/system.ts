@@ -47,7 +47,11 @@ function hashJobData(data: Record<string, unknown> | null) {
 /** `full` (admin-generated reports only) adds the configuration dump: machine, models, storage driver, roles. Others get versions only. */
 export async function systemInfo(svc: Services, instance: boolean, full: boolean) {
   const c = svc.config;
-  if (!full) return { app: { version: c.REELSAW_VERSION, commit: c.REELSAW_COMMIT, builtAt: c.REELSAW_BUILT_AT }, runtime: { node: process.version, platform: process.platform, arch: process.arch } };
+  if (!full)
+    return {
+      app: { version: c.REELSAW_VERSION, commit: c.REELSAW_COMMIT, builtAt: c.REELSAW_BUILT_AT },
+      runtime: { node: process.version, platform: process.platform, arch: process.arch },
+    };
   const accounts = instance
     ? await svc.database.db.execute(sql`
         select
@@ -59,13 +63,25 @@ export async function systemInfo(svc: Services, instance: boolean, full: boolean
     : null;
   return {
     app: { version: c.REELSAW_VERSION, commit: c.REELSAW_COMMIT, builtAt: c.REELSAW_BUILT_AT },
-    runtime: { node: process.version, platform: process.platform, arch: process.arch, uptimeSec: Math.round(process.uptime()), rssMB: Math.round(process.memoryUsage().rss / 1048576) },
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      uptimeSec: Math.round(process.uptime()),
+      rssMB: Math.round(process.memoryUsage().rss / 1048576),
+    },
     resources: await svc.resources.snapshot().catch(() => null),
     tools: { ffmpeg: await toolVersion(c.FFMPEG_PATH, ["-version"]), ytDlp: await toolVersion("yt-dlp", ["--version"]) },
     gpu: svc.resources.gpu(),
     videoEncoder: svc.media.encoder(),
     // the execution provider each on-device model runs on (null = off); the VAD is always on the cpu
-    onDevice: { requested: c.ONNX_EXECUTION_PROVIDER, faces: svc.faces?.provider ?? null, text: svc.text?.provider ?? null, vad: svc.vad ? "cpu" : null, aligner: svc.aligner?.provider ?? null },
+    onDevice: {
+      requested: c.ONNX_EXECUTION_PROVIDER,
+      faces: svc.faces?.provider ?? null,
+      text: svc.text?.provider ?? null,
+      vad: svc.vad ? "cpu" : null,
+      aligner: svc.aligner?.provider ?? null,
+    },
     storage: svc.storage.driver,
     roles: { http: c.RUN_HTTP, workers: c.RUN_WORKERS },
     ...(instance
@@ -89,7 +105,10 @@ export async function queueInfo(svc: Services, scope: { projectIds: string[] } |
           where state = 'failed' order by completed_on desc nulls last limit ${MAX_FAILED_JOBS}`)
       : scope.projectIds.length
         ? await db.execute(sql`select name, state, retry_count as retries, data, output, created_on, completed_on from pgboss.job
-            where state = 'failed' and data->>'projectId' in (${sql.join(scope.projectIds.map((id) => sql`${id}`), sql`, `)})
+            where state = 'failed' and data->>'projectId' in (${sql.join(
+              scope.projectIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})
             order by completed_on desc nulls last limit ${MAX_FAILED_JOBS}`)
         : { rows: [] };
     // job data carries the owner's user id (fair scheduling); the bundle pseudonymises it like project.json's ownerHash
@@ -128,7 +147,11 @@ export async function usageInfo(svc: Services, scope: { userId: string } | { ins
  * user's content (including from projects since deleted) can't ride along. Admins who opt into
  * instance-wide diagnostics get every error/fatal line, still redacted.
  */
-export async function recentErrors(svc: Services, own: { projectIds: string[]; clipIds: string[]; instance?: boolean }, redact: (s: string) => string): Promise<string[]> {
+export async function recentErrors(
+  svc: Services,
+  own: { projectIds: string[]; clipIds: string[]; instance?: boolean },
+  redact: (s: string) => string,
+): Promise<string[]> {
   const file = svc.config.LOG_FILE;
   if (!file) return [];
   const since = Date.now() - ERROR_WINDOW_DAYS * 864e5;
@@ -157,7 +180,9 @@ export async function recentErrors(svc: Services, own: { projectIds: string[]; c
         continue; // a job or someone else's project: not ours to share
       }
       const err = d.err as { type?: unknown; message?: unknown } | undefined;
-      out.push(redact(JSON.stringify({ time: d.time, level: d.level, msg: d.msg, module: d.module, err: err ? { type: err.type, message: err.message } : undefined })));
+      out.push(
+        redact(JSON.stringify({ time: d.time, level: d.level, msg: d.msg, module: d.module, err: err ? { type: err.type, message: err.message } : undefined })),
+      );
     }
   }
   return out.slice(-MAX_ERROR_LINES);
@@ -186,17 +211,25 @@ export async function stuckInfo(svc: Services) {
     // raw rows keep timestamptz as text (drizzle's node-postgres driver), so it is cast and read as a string
     db.execute<{ project_id: string; type: string; at: string }>(sql`
       select distinct on (project_id) project_id, type, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at
-      from project_events where project_id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+      from project_events where project_id in (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})
       order by project_id, id desc`),
     db.query.clips.findMany({
       where: and(inArray(schema.clips.projectId, ids), isNull(schema.clips.deletedAt)),
       columns: { id: true, projectId: true, index: true, status: true, origin: true, reasoning: true, scores: true },
     }),
-    db.execute<LiveJob>(sql`
+    db
+      .execute<LiveJob>(sql`
       select name, state, retry_count as retries, singleton_key as "singletonKey", started_on as "startedOn", output, data->>'projectId' as "projectId"
       from pgboss.job
-      where state in ('created','retry','active') and data->>'projectId' in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
-      order by created_on`).catch(() => ({ rows: [] as LiveJob[] })),
+      where state in ('created','retry','active') and data->>'projectId' in (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+      order by created_on`)
+      .catch(() => ({ rows: [] as LiveJob[] })),
   ]);
 
   const lastBy = new Map(lastEvents.rows.map((e) => [e.project_id, e]));
@@ -232,10 +265,21 @@ export async function stuckInfo(svc: Services) {
         runStartedAt: p.runStartedAt?.toISOString() ?? null,
         error: p.error,
         lastEvent: last ? { type: last.type, at: last.at } : null,
-        liveJobs: live.map((j) => ({ name: j.name, state: j.state, retries: j.retries, singletonKey: j.singletonKey, startedOn: j.startedOn, output: j.output })),
+        liveJobs: live.map((j) => ({
+          name: j.name,
+          state: j.state,
+          retries: j.retries,
+          singletonKey: j.singletonKey,
+          startedOn: j.startedOn,
+          output: j.output,
+        })),
         unfinishedClips: unfinished.map((c) => {
           const js = live.filter((j) => j.singletonKey === c.id);
-          const problems = [needsPrepare(c) && c.status !== "preparing" ? "unprepared" : "", !js.length ? "NO JOB" : "", js.some((j) => j.retries > 0) ? "retried" : ""].filter(Boolean);
+          const problems = [
+            needsPrepare(c) && c.status !== "preparing" ? "unprepared" : "",
+            !js.length ? "NO JOB" : "",
+            js.some((j) => j.retries > 0) ? "retried" : "",
+          ].filter(Boolean);
           return { id: c.id, index: c.index, status: c.status, origin: c.origin, jobs: js.map((j) => `${j.name}:${j.state}#${j.retries}`), problems };
         }),
       };
@@ -249,7 +293,18 @@ export async function stuckInfo(svc: Services) {
  */
 export async function instanceProjectSummaries(svc: Services) {
   const db = svc.database.db;
-  const cols = { id: true, title: true, status: true, stage: true, error: true, sourceType: true, durationSec: true, createdAt: true, updatedAt: true, userId: true } as const;
+  const cols = {
+    id: true,
+    title: true,
+    status: true,
+    stage: true,
+    error: true,
+    sourceType: true,
+    durationSec: true,
+    createdAt: true,
+    updatedAt: true,
+    userId: true,
+  } as const;
   const [working, failed, recent] = await Promise.all([
     db.query.projects.findMany({
       where: and(inArray(schema.projects.status, WORKING), isNull(schema.projects.deletedAt)),
@@ -287,5 +342,9 @@ export async function instanceProjectSummaries(svc: Services) {
       updatedAt: p.updatedAt.toISOString(),
       ownerHash: hashOwner(p.userId),
     }));
-  return { truncated: byId.size > MAX_INSTANCE_PROJECTS || working.length === MAX_STUCK || failed.length === MAX_STUCK, limit: MAX_INSTANCE_PROJECTS, projects: items };
+  return {
+    truncated: byId.size > MAX_INSTANCE_PROJECTS || working.length === MAX_STUCK || failed.length === MAX_STUCK,
+    limit: MAX_INSTANCE_PROJECTS,
+    projects: items,
+  };
 }

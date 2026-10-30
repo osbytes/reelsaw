@@ -146,7 +146,14 @@ function grade(c: Case): CaseResult {
       pass = false;
       notes.push("applyFlags(raw, flags) ≠ collapsed words");
     }
-    if (joined(applyFlags(input, flags.map((f) => ({ ...f, status: "rejected" as const })))) !== joined(input)) {
+    if (
+      joined(
+        applyFlags(
+          input,
+          flags.map((f) => ({ ...f, status: "rejected" as const })),
+        ),
+      ) !== joined(input)
+    ) {
       pass = false;
       notes.push("rejecting the loop flag did not restore as-heard words");
     }

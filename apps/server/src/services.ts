@@ -110,7 +110,15 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // the logger comes first (from raw env, before validation) so config errors are logged too
   const fmt = env.LOG_FORMAT === "json" || env.LOG_FORMAT === "pretty" ? env.LOG_FORMAT : "auto";
   const role = env.REELSAW_CLI === "1" ? "cli" : env.RUN_HTTP === "false" ? "worker" : env.RUN_WORKERS === "false" ? "api" : "app";
-  const log = createLogger({ LOG_LEVEL: env.LOG_LEVEL || "info", LOG_FORMAT: fmt, LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined, WORKER_ID: env.WORKER_ID }, { role: env.REELSAW_CLI === "1" ? "cli" : role });
+  const log = createLogger(
+    {
+      LOG_LEVEL: env.LOG_LEVEL || "info",
+      LOG_FORMAT: fmt,
+      LOG_FILE: env.REELSAW_CLI === "1" ? undefined : env.LOG_FILE || undefined,
+      WORKER_ID: env.WORKER_ID,
+    },
+    { role: env.REELSAW_CLI === "1" ? "cli" : role },
+  );
   const bootLog = log.child({ module: "boot" });
   const step = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
     try {
@@ -168,7 +176,12 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   const providers = createProviderSettings(config, log.child({ module: "providers" }));
   // model calls in flight per provider; self-hosted = the compatible server or openai pointed at a base URL
   const gate = await step("provider concurrency", () =>
-    createProviderGate(config.PROVIDER_CONCURRENCY, config.OPENAI_COMPATIBLE_NAME, (p) => (p === config.OPENAI_COMPATIBLE_NAME || p === "openai") && !!providers.get(p).baseUrl, log.child({ module: "ai" })),
+    createProviderGate(
+      config.PROVIDER_CONCURRENCY,
+      config.OPENAI_COMPATIBLE_NAME,
+      (p) => (p === config.OPENAI_COMPATIBLE_NAME || p === "openai") && !!providers.get(p).baseUrl,
+      log.child({ module: "ai" }),
+    ),
   );
   let models!: ReturnType<typeof createModelSettings>;
   const ai = await step(`ai models (${config.AI_MODEL}, ${config.TRANSCRIPTION_MODEL})`, async () => {
@@ -183,23 +196,33 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   // (the API) skips loading them, so it starts faster and a missing model file does not stop it. The aligner is the
   // exception: the API's cut preview (pipeline/cutpreview.ts) uses it to show the boundaries a render would cut at.
   const detectors = config.RUN_WORKERS;
-  const faces = await step(!config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (UltraFace ONNX)" : "face detector (skipped, no workers in this process)", async () => {
-    if (!config.FACE_DETECTION || !detectors) return null;
-    try {
-      return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
-    } catch (err) {
-      throw new Error(`cannot load ${config.FACE_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set FACE_DETECTION=false.`);
-    }
-  });
+  const faces = await step(
+    !config.FACE_DETECTION ? "face detector (disabled)" : detectors ? "face detector (UltraFace ONNX)" : "face detector (skipped, no workers in this process)",
+    async () => {
+      if (!config.FACE_DETECTION || !detectors) return null;
+      try {
+        return await loadFaceDetector(config.FACE_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "faces" }) });
+      } catch (err) {
+        throw new Error(`cannot load ${config.FACE_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set FACE_DETECTION=false.`);
+      }
+    },
+  );
 
-  const vad = await step(!config.VAD ? "voice activity detector (disabled)" : detectors ? "voice activity detector (Silero VAD)" : "voice activity detector (skipped, no workers in this process)", async () => {
-    if (!config.VAD || !detectors) return null;
-    try {
-      return await loadVad(config.VAD_MODEL_PATH);
-    } catch (err) {
-      throw new Error(`cannot load ${config.VAD_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set VAD=false.`);
-    }
-  });
+  const vad = await step(
+    !config.VAD
+      ? "voice activity detector (disabled)"
+      : detectors
+        ? "voice activity detector (Silero VAD)"
+        : "voice activity detector (skipped, no workers in this process)",
+    async () => {
+      if (!config.VAD || !detectors) return null;
+      try {
+        return await loadVad(config.VAD_MODEL_PATH);
+      } catch (err) {
+        throw new Error(`cannot load ${config.VAD_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set VAD=false.`);
+      }
+    },
+  );
 
   const aligner = await step(config.ALIGNER ? "forced aligner (wav2vec2 CTC)" : "forced aligner (disabled)", async () => {
     if (!config.ALIGNER) return null;
@@ -210,14 +233,17 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     }
   });
 
-  const text = await step(!config.TEXT_DETECTION ? "text detector (disabled)" : detectors ? "text detector (PP-OCRv4 ONNX)" : "text detector (skipped, no workers in this process)", async () => {
-    if (!config.TEXT_DETECTION || !detectors) return null;
-    try {
-      return await loadTextDetector(config.TEXT_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "text" }) });
-    } catch (err) {
-      throw new Error(`cannot load ${config.TEXT_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set TEXT_DETECTION=false.`);
-    }
-  });
+  const text = await step(
+    !config.TEXT_DETECTION ? "text detector (disabled)" : detectors ? "text detector (PP-OCRv4 ONNX)" : "text detector (skipped, no workers in this process)",
+    async () => {
+      if (!config.TEXT_DETECTION || !detectors) return null;
+      try {
+        return await loadTextDetector(config.TEXT_MODEL_PATH, { provider: config.ONNX_EXECUTION_PROVIDER, log: log.child({ module: "text" }) });
+      } catch (err) {
+        throw new Error(`cannot load ${config.TEXT_MODEL_PATH}: ${(err as Error).message}. Run "pnpm models:download" or set TEXT_DETECTION=false.`);
+      }
+    },
+  );
 
   const storage = await step(`storage (${config.STORAGE_DRIVER})`, async () => {
     const s = createStorage(config, paths, log.child({ module: "storage" }));
@@ -227,7 +253,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const asr = await step("asr cache", async () => {
     const a = createAsr(ai, () => models.get().transcription, path.join(config.DATA_DIR, "cache", "asr"), log.child({ module: "asr" }), gate, storage);
-    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1") void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
+    if (config.ASR_CACHE_DAYS > 0 && env.REELSAW_CLI !== "1")
+      void a.prune(config.ASR_CACHE_DAYS).then((n) => n && log.info({ module: "asr", removed: n }, "pruned old asr cache entries"));
     return a;
   });
 
@@ -252,7 +279,8 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   await step("model settings", async () => {
     await providers.attach(database.db);
     const s = await models.attach(database.db);
-    if (Object.keys(s.override).length) log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
+    if (Object.keys(s.override).length)
+      log.info({ module: "models", models: s.current, override: s.override, by: s.updatedBy }, "admin model override in force");
   });
 
   // the provider limits now hold across every process (ai/gate.ts); each in-flight call holds a connection, so on its own pool
@@ -267,7 +295,14 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
       ["TRANSCRIPTION_MODEL", "transcription", config.TRANSCRIPTION_MODEL, eff.transcription],
     ] as const) {
       if (envId === effId) continue;
-      await ai.verify(kind, envId).catch((err) => log.warn({ module: "models", envVar, model: envId, reason: (err as Error).message }, `${envVar} is not usable but an admin override is in force; fix it or clear the override before relying on the default`));
+      await ai
+        .verify(kind, envId)
+        .catch((err) =>
+          log.warn(
+            { module: "models", envVar, model: envId, reason: (err as Error).message },
+            `${envVar} is not usable but an admin override is in force; fix it or clear the override before relying on the default`,
+          ),
+        );
     }
   });
 
@@ -296,7 +331,14 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
       histogram("gen_ai.client.token.usage", u.inputTokens, "{token}", { ...attrs, "gen_ai.token.type": "input" }, "Tokens per language model call");
       histogram("gen_ai.client.token.usage", u.outputTokens, "{token}", { ...attrs, "gen_ai.token.type": "output" }, "Tokens per language model call");
     }
-    if (u.costUsd) count("reelsaw.llm.cost", u.costUsd, "USD", { "gen_ai.request.model": u.model, "reelsaw.stage": attrs["reelsaw.stage"] }, "Provider-reported language model cost");
+    if (u.costUsd)
+      count(
+        "reelsaw.llm.cost",
+        u.costUsd,
+        "USD",
+        { "gen_ai.request.model": u.model, "reelsaw.stage": attrs["reelsaw.stage"] },
+        "Provider-reported language model cost",
+      );
   };
   asr.onUsage = (u) => {
     void database.db
@@ -329,7 +371,9 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const queue = await step("job queue (pg-boss)", async () => {
-    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }));
+    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), () =>
+      isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }),
+    );
     await q.start();
     return q;
   });
@@ -344,8 +388,46 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
 
   const auth = await step("auth", () => createAuth(config, database.db, email, log.child({ module: "auth" }), settings, telemetry));
 
-  const svc: Services = { log, logLevel, config, paths, otel, database, storage, ai, settings, models, providers, catalog, llmTrace, asr, media, events, queue, tx: undefined as unknown as RunInTx, auth, email, resources, updates, releases, telemetry, faces, text, vad, aligner, ee: null, entitlements: null };
-  svc.tx = createUnitOfWork(database.pool, queue, log.child({ module: "uow" }), () => settings.get(), () => svc.entitlements, telemetry);
+  const svc: Services = {
+    log,
+    logLevel,
+    config,
+    paths,
+    otel,
+    database,
+    storage,
+    ai,
+    settings,
+    models,
+    providers,
+    catalog,
+    llmTrace,
+    asr,
+    media,
+    events,
+    queue,
+    tx: undefined as unknown as RunInTx,
+    auth,
+    email,
+    resources,
+    updates,
+    releases,
+    telemetry,
+    faces,
+    text,
+    vad,
+    aligner,
+    ee: null,
+    entitlements: null,
+  };
+  svc.tx = createUnitOfWork(
+    database.pool,
+    queue,
+    log.child({ module: "uow" }),
+    () => settings.get(),
+    () => svc.entitlements,
+    telemetry,
+  );
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));
   // and claims its scratch against the volume's live leases first, so two jobs cannot both pass on the same free bytes (disk-leases.ts)

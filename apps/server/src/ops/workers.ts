@@ -138,7 +138,9 @@ export function classifyWorkers(
       thisProcess: r.id === selfId,
     };
   });
-  views.sort((a, b) => Number(b.live) - Number(a.live) || ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.hostname.localeCompare(b.hostname) || a.id.localeCompare(b.id));
+  views.sort(
+    (a, b) => Number(b.live) - Number(a.live) || ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.hostname.localeCompare(b.hostname) || a.id.localeCompare(b.id),
+  );
   return views;
 }
 
@@ -167,7 +169,14 @@ export async function listWorkers(svc: Services): Promise<{ items: WorkerView[];
  * what jobs in flight have leased on its volume (an unmeasurable disk, -1, counts as room: it never
  * refuses work). Null when nobody does.
  */
-export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number; diskLeasedMB?: number }>, now: Date, selfId: string, queue: QueueName, requiredMB: number, staleMs = WORKER_STALE_MS): { workerId: string } | null {
+export function pickWorkerWithRoom(
+  rows: Array<{ id: string; lastSeenAt: Date; queues: string[] | null; diskFreeMB: number; diskLeasedMB?: number }>,
+  now: Date,
+  selfId: string,
+  queue: QueueName,
+  requiredMB: number,
+  staleMs = WORKER_STALE_MS,
+): { workerId: string } | null {
   for (const r of rows) {
     if (r.id === selfId || now.getTime() - r.lastSeenAt.getTime() > staleMs) continue;
     if (!r.queues?.includes(queue)) continue;
@@ -180,7 +189,13 @@ export function pickWorkerWithRoom(rows: Array<{ id: string; lastSeenAt: Date; q
 /** Is there another worker this job could run on with `requiredMB` free? Read from the last heartbeats. */
 export async function workerWithRoom(svc: Services, queue: QueueName, requiredMB: number): Promise<{ workerId: string } | null> {
   const rows = await svc.database.db
-    .select({ id: schema.workerInstances.id, lastSeenAt: schema.workerInstances.lastSeenAt, queues: schema.workerInstances.queues, diskFreeMB: schema.workerInstances.diskFreeMB, diskLeasedMB: schema.workerInstances.diskLeasedMB })
+    .select({
+      id: schema.workerInstances.id,
+      lastSeenAt: schema.workerInstances.lastSeenAt,
+      queues: schema.workerInstances.queues,
+      diskFreeMB: schema.workerInstances.diskFreeMB,
+      diskLeasedMB: schema.workerInstances.diskLeasedMB,
+    })
     .from(schema.workerInstances)
     .where(gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)));
   return pickWorkerWithRoom(rows, new Date(), workerIdOf(svc.config), queue, requiredMB);
@@ -200,7 +215,9 @@ export async function beat(svc: Services): Promise<void> {
   const queues = svc.config.RUN_WORKERS ? listeningQueues() : [];
   // disk promised to jobs in flight on this volume, by every process on it: what a hand-off subtracts from "free"
   const lease = svc.resources.leases();
-  const diskLeasedMB = lease.volume ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb : lease.ownMB;
+  const diskLeasedMB = lease.volume
+    ? (await volumeLeases(svc.database.db, { volume: lease.volume, selfId: id, staleMs: LEASE_STALE_MS, now })).mb
+    : lease.ownMB;
   const row = {
     role: processRole(svc.config),
     hostname,
@@ -243,8 +260,7 @@ export async function forget(svc: Services): Promise<void> {
  */
 export function startHeartbeat(svc: Services): () => Promise<void> {
   const log = svc.log.child({ module: "ops" });
-  const tick = () =>
-    beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
+  const tick = () => beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
   const t = setInterval(tick, WORKER_HEARTBEAT_MS);
   t.unref();
   return async () => {

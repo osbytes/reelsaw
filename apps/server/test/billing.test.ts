@@ -34,7 +34,8 @@ const row = (o: Partial<BillingSubscriptionRow>): BillingSubscriptionRow => ({
 describe("effectivePlan", () => {
   it("no row, canceled, unpaid, incomplete and paused are Free", () => {
     assert.equal(effectivePlan(null, 7, now).plan.name, "free");
-    for (const status of ["canceled", "unpaid", "incomplete", "incomplete_expired", "paused"] as const) assert.equal(effectivePlan(row({ status }), 7, now).plan.name, "free", status);
+    for (const status of ["canceled", "unpaid", "incomplete", "incomplete_expired", "paused"] as const)
+      assert.equal(effectivePlan(row({ status }), 7, now).plan.name, "free", status);
   });
   it("active and trialing grant the plan; cancel-at-period-end keeps it until Stripe says canceled", () => {
     assert.equal(effectivePlan(row({ status: "active" }), 7, now).plan.name, "creator");
@@ -74,7 +75,13 @@ describe("grants and the quota chain", () => {
     assert.equal(grantsOf(row({ plan: "pro" }), 7, "https://app.example.com", now).queuePriority, 5);
   });
   it("a stale period (row not yet synced past its end) falls back to the calendar month instead of counting forever", () => {
-    const g: Grants = { plan: "creator", planLabel: "Creator", limits: {}, watermark: false, period: { start: new Date("2026-08-01T00:00:00Z"), end: new Date("2026-09-01T00:00:00Z") } };
+    const g: Grants = {
+      plan: "creator",
+      planLabel: "Creator",
+      limits: {},
+      watermark: false,
+      period: { start: new Date("2026-08-01T00:00:00Z"), end: new Date("2026-09-01T00:00:00Z") },
+    };
     assert.equal(periodFor(g, now).source, "calendar");
   });
 });
@@ -83,16 +90,27 @@ describe("allowanceWindow", () => {
   const start = new Date("2026-01-31T10:00:00Z");
   const end = new Date("2027-01-31T10:00:00Z");
   it("a monthly subscription counts in its billing period", () => {
-    assert.deepEqual(allowanceWindow(start, new Date("2026-02-28T10:00:00Z"), "month", new Date("2026-02-10T00:00:00Z")), { start, end: new Date("2026-02-28T10:00:00Z") });
+    assert.deepEqual(allowanceWindow(start, new Date("2026-02-28T10:00:00Z"), "month", new Date("2026-02-10T00:00:00Z")), {
+      start,
+      end: new Date("2026-02-28T10:00:00Z"),
+    });
   });
   it("a yearly subscription counts in the current month of the year, anchored on the period start", () => {
     assert.deepEqual(allowanceWindow(start, end, "year", new Date("2026-02-10T00:00:00Z")), { start, end: new Date("2026-02-28T10:00:00Z") });
-    assert.deepEqual(allowanceWindow(start, end, "year", new Date("2026-03-15T00:00:00Z")), { start: new Date("2026-02-28T10:00:00Z"), end: new Date("2026-03-31T10:00:00Z") });
+    assert.deepEqual(allowanceWindow(start, end, "year", new Date("2026-03-15T00:00:00Z")), {
+      start: new Date("2026-02-28T10:00:00Z"),
+      end: new Date("2026-03-31T10:00:00Z"),
+    });
     const last = allowanceWindow(start, end, "year", new Date("2027-01-20T00:00:00Z"));
     assert.equal(last.end.toISOString(), end.toISOString(), "the last month ends with the period");
   });
   it("grants expose the window, so a yearly Pro gets 750 minutes a month", () => {
-    const g = grantsOf(row({ plan: "pro", interval: "year", periodStart: start, periodEnd: end }), 7, "https://app.example.com", new Date("2026-06-05T00:00:00Z"));
+    const g = grantsOf(
+      row({ plan: "pro", interval: "year", periodStart: start, periodEnd: end }),
+      7,
+      "https://app.example.com",
+      new Date("2026-06-05T00:00:00Z"),
+    );
     assert.equal(g.limits.MAX_SOURCE_MINUTES_PER_MONTH, 750);
     assert.ok(g.period && g.period.end.getTime() - g.period.start.getTime() < 32 * 86_400_000, "about a month, not a year");
   });
@@ -107,7 +125,16 @@ describe("mapSubscription", () => {
       cancel_at_period_end: false,
       ended_at: null,
       metadata: { userId: "u9" },
-      items: { data: [{ id: "si_1", current_period_start: 1_760_000_000, current_period_end: 1_762_600_000, price: { id: "price_pro_m", lookup_key: "pro_monthly", recurring: { interval: "month" } } }] },
+      items: {
+        data: [
+          {
+            id: "si_1",
+            current_period_start: 1_760_000_000,
+            current_period_end: 1_762_600_000,
+            price: { id: "price_pro_m", lookup_key: "pro_monthly", recurring: { interval: "month" } },
+          },
+        ],
+      },
       ...o,
     }) as never;
   it("reads the plan from the price lookup key and the period from the item", () => {
@@ -120,7 +147,9 @@ describe("mapSubscription", () => {
     assert.equal(m.stripeCustomerId, "cus_9");
   });
   it("keeps an unknown price visible instead of guessing a plan", () => {
-    const m = mapSubscription(sub({ items: { data: [{ id: "si_1", price: { id: "price_old", lookup_key: "legacy_2025", recurring: { interval: "year" } } }] } }));
+    const m = mapSubscription(
+      sub({ items: { data: [{ id: "si_1", price: { id: "price_old", lookup_key: "legacy_2025", recurring: { interval: "year" } } }] } }),
+    );
     assert.equal(m.plan, "unknown:price_old");
     assert.equal(m.interval, "year");
     assert.equal(m.unknownPrice, true);
@@ -155,8 +184,24 @@ describe("plans", () => {
     const { PRICING } = await import("../../../website/content/pricing.js").catch(() => ({ PRICING: null }));
     if (!PRICING) return; // website not checked out next to the server (the package is outside the workspace)
     assert.deepEqual(
-      PRICING.map((p) => ({ name: p.name, price: p.price, minutes: p.minutes, storageMb: p.storageMb, projects: p.projects, watermark: p.watermark, first: p.firstVideoFreeMinutes })),
-      PLANS.map((p) => ({ name: p.name, price: p.price, minutes: p.limits.MAX_SOURCE_MINUTES_PER_MONTH ?? 0, storageMb: p.limits.MAX_STORAGE_MB ?? 0, projects: p.limits.MAX_PROJECTS_PER_USER ?? 0, watermark: p.watermark !== false, first: p.firstVideoFreeMinutes })),
+      PRICING.map((p) => ({
+        name: p.name,
+        price: p.price,
+        minutes: p.minutes,
+        storageMb: p.storageMb,
+        projects: p.projects,
+        watermark: p.watermark,
+        first: p.firstVideoFreeMinutes,
+      })),
+      PLANS.map((p) => ({
+        name: p.name,
+        price: p.price,
+        minutes: p.limits.MAX_SOURCE_MINUTES_PER_MONTH ?? 0,
+        storageMb: p.limits.MAX_STORAGE_MB ?? 0,
+        projects: p.limits.MAX_PROJECTS_PER_USER ?? 0,
+        watermark: p.watermark !== false,
+        first: p.firstVideoFreeMinutes,
+      })),
     );
   });
 });

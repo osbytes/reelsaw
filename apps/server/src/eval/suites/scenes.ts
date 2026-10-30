@@ -25,11 +25,30 @@ export const scenesSuite: Suite = {
       try {
         media = await materialize(ctx, { ...c.source, strictSha: true }); // cut times are sub-second labels
       } catch (err) {
-        out.push(err instanceof MediaDriftError ? { id: c.id, pass: false, notes: (err as Error).message } : { id: c.id, pass: false, skipped: (err as Error).message });
+        out.push(
+          err instanceof MediaDriftError
+            ? { id: c.id, pass: false, notes: (err as Error).message }
+            : { id: c.id, pass: false, skipped: (err as Error).message },
+        );
         continue;
       }
       const until = c.gradeUntil ?? c.source.end - c.source.start;
-      const raw = await ctx.exec(ctx.config().FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-nostdin", "-t", String(until + 1), "-i", media, "-an", "-vf", "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score:file=-", "-f", "null", "-"]);
+      const raw = await ctx.exec(ctx.config().FFMPEG_PATH, [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-t",
+        String(until + 1),
+        "-i",
+        media,
+        "-an",
+        "-vf",
+        "scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score:file=-",
+        "-f",
+        "null",
+        "-",
+      ]);
       const { times, scores } = parseSceneScores(raw.toString().split("\n"));
       const found = pickSceneCuts(times, scores).filter((t) => t <= until);
       const tol = c.tolerance ?? 0.25;
@@ -44,7 +63,13 @@ export const scenesSuite: Suite = {
       out.push({
         id: c.id,
         pass: recall >= 0.85 && precision >= 0.85,
-        metrics: { recall: Number(recall.toFixed(2)), precision: Number(precision.toFixed(2)), found: hard.length, expected: c.expectCuts.length, inGradual: found.length - hard.length },
+        metrics: {
+          recall: Number(recall.toFixed(2)),
+          precision: Number(precision.toFixed(2)),
+          found: hard.length,
+          expected: c.expectCuts.length,
+          inGradual: found.length - hard.length,
+        },
         notes: missed.length || extra.length ? `missed ${missed.join(", ") || "-"}; extra ${extra.join(", ") || "-"}` : "",
       });
     }

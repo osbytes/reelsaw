@@ -8,11 +8,21 @@ import type { Db } from "../src/db/index.js";
 import type { Logger } from "../src/log.js";
 
 const log = { info() {}, warn() {}, error() {}, debug() {}, child: () => log } as unknown as Logger;
-const config = { BETTER_AUTH_SECRET: "a-very-long-test-secret-for-hkdf-derivation", OPENAI_COMPATIBLE_NAME: "compat", OPENAI_API_KEY: "sk-env-openai", OPENAI_BASE_URL: undefined, OPENAI_COMPATIBLE_BASE_URL: "http://ollama:11434/v1", OPENAI_COMPATIBLE_API_KEY: undefined } as unknown as Config;
+const config = {
+  BETTER_AUTH_SECRET: "a-very-long-test-secret-for-hkdf-derivation",
+  OPENAI_COMPATIBLE_NAME: "compat",
+  OPENAI_API_KEY: "sk-env-openai",
+  OPENAI_BASE_URL: undefined,
+  OPENAI_COMPATIBLE_BASE_URL: "http://ollama:11434/v1",
+  OPENAI_COMPATIBLE_API_KEY: undefined,
+} as unknown as Config;
 const actor = { id: "u1", email: "admin@example.com" };
 
 function fakeDb() {
-  const rows = new Map<string, { provider: string; apiKeyEnc: string | null; apiKeyHint: string | null; baseUrl: string | null; updatedBy: string | null; updatedAt: Date }>();
+  const rows = new Map<
+    string,
+    { provider: string; apiKeyEnc: string | null; apiKeyHint: string | null; baseUrl: string | null; updatedBy: string | null; updatedAt: Date }
+  >();
   const events: unknown[] = [];
   const tx = {
     insert: () => ({

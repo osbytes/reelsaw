@@ -24,7 +24,13 @@ export const LIST_LIMIT_MAX = 500;
 /** The `{ limit, cursor }` input of those lists; omitted = the first page of the default size. */
 export const listPageInput = z
   .object({
-    limit: z.number().int().min(1).max(LIST_LIMIT_MAX).default(LIST_LIMIT_DEFAULT).describe(`Items per page (1-${LIST_LIMIT_MAX}, default ${LIST_LIMIT_DEFAULT})`),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(LIST_LIMIT_MAX)
+      .default(LIST_LIMIT_DEFAULT)
+      .describe(`Items per page (1-${LIST_LIMIT_MAX}, default ${LIST_LIMIT_DEFAULT})`),
     cursor: z.string().max(300).optional().describe("nextCursor from the previous page; omit for the first page"),
   })
   .optional();

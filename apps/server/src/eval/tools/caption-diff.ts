@@ -209,7 +209,8 @@ function candidateAt(al: Alignment, videoId: string, first: number, span: number
   };
 }
 
-const inRange = (t: number, opts: { from?: number | undefined; to?: number | undefined }) => (opts.from === undefined || t >= opts.from) && (opts.to === undefined || t < opts.to);
+const inRange = (t: number, opts: { from?: number | undefined; to?: number | undefined }) =>
+  (opts.from === undefined || t >= opts.from) && (opts.to === undefined || t < opts.to);
 
 /** ASR words that the human track has no counterpart for, grouped into runs (pure insertions only: substitutions are mis-hearings, not disfluencies). */
 export function insertions(al: Alignment, videoId: string, opts: { window?: number; from?: number | undefined; to?: number | undefined } = {}): Candidate[] {
@@ -277,7 +278,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * have no `en-orig` track (only machine translations): with `requireAuto: false` that returns
  * `auto: null` instead of failing.
  */
-export async function fetchTracks(videoId: string, dir: string, opts: { requireAuto?: boolean; ytdlp?: string } = {}): Promise<{ manual: string; auto: string | null }> {
+export async function fetchTracks(
+  videoId: string,
+  dir: string,
+  opts: { requireAuto?: boolean; ytdlp?: string } = {},
+): Promise<{ manual: string; auto: string | null }> {
   const ytdlp = opts.ytdlp ?? (process.env.YTDLP_PATH || "yt-dlp");
   await fs.mkdir(dir, { recursive: true });
   const url = `https://www.youtube.com/watch?v=${videoId}`;
@@ -331,7 +336,11 @@ async function main() {
   if (ref) {
     if (!al.auto.length) console.error(`${videoId}: no ASR track; human words keep their caption-line times (±1 s at the edges)`);
     const [a, b] = ref.split("-").map(Number);
-    console.log(humanWordsIn(al, a!, b!).map((w) => w.text).join(" "));
+    console.log(
+      humanWordsIn(al, a!, b!)
+        .map((w) => w.text)
+        .join(" "),
+    );
     return;
   }
   const from = opt("from");

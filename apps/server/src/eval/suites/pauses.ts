@@ -38,13 +38,31 @@ export const pausesSuite: Suite = {
         continue;
       }
       const graph = `[0:a]aresample=${VAD_SR},atrim=0:${c.at},asetpts=PTS-STARTPTS[a];anullsrc=r=${VAD_SR}:cl=mono,atrim=0:${c.silence}[s];[0:a]aresample=${VAD_SR},atrim=${c.at},asetpts=PTS-STARTPTS[b];[a][s][b]concat=n=3:v=0:a=1[o]`;
-      const raw = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", wav, "-filter_complex", graph, "-map", "[o]", "-ac", "1", "-f", "f32le", "pipe:1"]);
+      const raw = await ctx.exec(cfg.FFMPEG_PATH, [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        wav,
+        "-filter_complex",
+        graph,
+        "-map",
+        "[o]",
+        "-ac",
+        "1",
+        "-f",
+        "f32le",
+        "pipe:1",
+      ]);
       const pcm = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
       const duration = pcm.length / VAD_SR;
       const segs = speechSegments(await vad.probabilities(pcm));
       const cuts = pauseCuts(segs, duration, { maxPause: MAX_PAUSE });
       // the inserted gap: the silence between speech segments that overlaps [at, at+silence]
-      const gap = segs.slice(1).map((s, i) => ({ start: segs[i]!.end, end: s.start })).find((g) => g.end > c.at && g.start < c.at + c.silence);
+      const gap = segs
+        .slice(1)
+        .map((s, i) => ({ start: segs[i]!.end, end: s.start }))
+        .find((g) => g.end > c.at && g.start < c.at + c.silence);
       const gapLen = gap ? gap.end - gap.start : 0;
       const cutInGap = gap ? cuts.filter((k) => k.start >= gap.start - 0.01 && k.end <= gap.end + 0.01).reduce((n, k) => n + k.end - k.start, 0) : 0;
       const keptInGap = gapLen - cutInGap;
@@ -56,7 +74,13 @@ export const pausesSuite: Suite = {
         id,
         pass: foundOk && keptOk,
         metrics: { gapSec: Number(gapLen.toFixed(2)), keptSec: Number(keptInGap.toFixed(2)), otherCutSec: Number(other.toFixed(2)), segments: segs.length },
-        notes: !gap ? "inserted silence not detected" : !foundOk ? `gap ${gapLen.toFixed(2)}s vs inserted ${c.silence}s` : !keptOk ? `kept ${keptInGap.toFixed(2)}s, want ${MAX_PAUSE}` : "",
+        notes: !gap
+          ? "inserted silence not detected"
+          : !foundOk
+            ? `gap ${gapLen.toFixed(2)}s vs inserted ${c.silence}s`
+            : !keptOk
+              ? `kept ${keptInGap.toFixed(2)}s, want ${MAX_PAUSE}`
+              : "",
       });
     }
     return out;

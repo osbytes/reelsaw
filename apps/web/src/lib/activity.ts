@@ -1,11 +1,26 @@
 import { formatTime, type ProjectEvent } from "@reelsaw/shared";
 import { summarizeError } from "./errors";
 
-const STAGE: Record<string, string> = { prepare: "Clip preparation", ingest: "Preparing source", transcribe: "Transcription", refine: "Refine", analyze: "Finding moments", render: "Rendering", review: "Applying fixes" };
+const STAGE: Record<string, string> = {
+  prepare: "Clip preparation",
+  ingest: "Preparing source",
+  transcribe: "Transcription",
+  refine: "Refine",
+  analyze: "Finding moments",
+  render: "Rendering",
+  review: "Applying fixes",
+};
 const STEP: Record<string, string> = { entities: "names", disfluency: "disfluencies", scenes: "scene changes", overlays: "on-screen text" };
 export type Tone = "ok" | "run" | "warn" | "err";
 
-const REASON: Record<string, string> = { created: "new project", retry: "retry", rerender: "re-render", refine: "refine", reanalyze: "re-analyze", clip_added: "clip added" };
+const REASON: Record<string, string> = {
+  created: "new project",
+  retry: "retry",
+  rerender: "re-render",
+  refine: "refine",
+  reanalyze: "re-analyze",
+  clip_added: "clip added",
+};
 export const reasonLabel = (r: unknown) => (typeof r === "string" ? (REASON[r] ?? r) : null);
 const sec = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -32,8 +47,10 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
         return p.rerendered
           ? { text: `Transcript updated, re-rendering ${p.rerendered} clip${p.rerendered === 1 ? "" : "s"}`, tone: "run" }
           : { text: p.changed ? `Transcript updated (${p.changed} fix${p.changed === 1 ? "" : "es"})` : "Transcript updated", tone: "ok" };
-      if (p.stage === "refine" && Array.isArray(p.steps)) return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
-      if (p.stage === "analyze" && p.repick && typeof p.kept === "number" && p.kept > 0) return { text: `Finding new moments. Kept ${p.kept} clip${p.kept === 1 ? "" : "s"} you made or edited`, tone: "run" };
+      if (p.stage === "refine" && Array.isArray(p.steps))
+        return { text: `Refining: ${(p.steps as string[]).map((s) => STEP[s] ?? s).join(", ")}`, tone: "run" };
+      if (p.stage === "analyze" && p.repick && typeof p.kept === "number" && p.kept > 0)
+        return { text: `Finding new moments. Kept ${p.kept} clip${p.kept === 1 ? "" : "s"} you made or edited`, tone: "run" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} ${p.retried ? "restarted" : "started"}`, tone: "run" };
     case "run.started": {
       const why = reasonLabel(p.reason);
@@ -50,14 +67,18 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     }
     case "stage.failed":
       // a refine step that gave up: optional work, the project went on without it
-      if (p.final === true && typeof p.step === "string") return { text: `${STAGE[String(p.stage)] ?? p.stage} step "${p.step}" gave up, continuing without it: ${errText(p.error)}`, tone: "warn" };
+      if (p.final === true && typeof p.step === "string")
+        return { text: `${STAGE[String(p.stage)] ?? p.stage} step "${p.step}" gave up, continuing without it: ${errText(p.error)}`, tone: "warn" };
       return { text: `${STAGE[String(p.stage)] ?? p.stage} failed (attempt ${p.attempt} of ${p.max}): ${errText(p.error)}`, tone: "err" };
     case "project.failed":
       return { text: `Stopped: ${errText(p.error)}`, tone: "err" };
     case "project.done": {
       const t = sec(p.runSec);
       const why = p.runReason === "created" ? null : reasonLabel(p.runReason);
-      return { text: `All done: ${p.clips} clip${p.clips === 1 ? "" : "s"} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`, tone: "ok" };
+      return {
+        text: `All done: ${p.clips} clip${p.clips === 1 ? "" : "s"} ready${p.failed ? `, ${p.failed} failed` : ""}${t !== null ? ` in ${formatTime(t)}` : ""}${why ? ` · ${why}` : ""}`,
+        tone: "ok",
+      };
     }
     case "clip.created":
       return { text: `Found a moment: “${p.title}”`, tone: "ok" };
@@ -86,9 +107,15 @@ export function describeEvent(e: ProjectEvent, opts?: DescribeOpts | ((stage: st
     case "project.updated":
       return { text: `Project updated: ${Array.isArray(p.changed) ? p.changed.join(", ") : "settings"}`, tone: "ok" };
     case "transcript.imported":
-      return { text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`, tone: "ok" };
+      return {
+        text: `Transcript imported from a ${String(p.format).toUpperCase()} file (${p.cues} cues, ${p.words} words)${Number(p.warnings) ? `, ${p.warnings} warning${Number(p.warnings) === 1 ? "" : "s"}` : ""}`,
+        tone: "ok",
+      };
     case "job.stalled":
-      return { text: typeof p.message === "string" ? `${p.message} ${p.hint ?? ""}`.trim() : `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`, tone: "warn" };
+      return {
+        text: typeof p.message === "string" ? `${p.message} ${p.hint ?? ""}`.trim() : `No progress for ${p.idleMinutes} min. ${p.hint ?? ""}`,
+        tone: "warn",
+      };
     default:
       return null;
   }
@@ -116,7 +143,15 @@ export function groupByRun(log: ProjectEvent[], describe: (e: ProjectEvent) => E
   const explicit = log.some((e) => e.type === "run.started");
   const groups: RunGroup[] = [];
   let cur: RunGroup | null = null;
-  const fresh = (seq: number, reason: string | null, startedAt: number): RunGroup => ({ seq, reason, startedAt, outcome: "running", runSec: null, continued: false, entries: [] });
+  const fresh = (seq: number, reason: string | null, startedAt: number): RunGroup => ({
+    seq,
+    reason,
+    startedAt,
+    outcome: "running",
+    runSec: null,
+    continued: false,
+    entries: [],
+  });
   for (const e of log) {
     if (e.type === "stage.progress") continue;
     const t = new Date(e.createdAt).getTime();

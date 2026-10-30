@@ -110,7 +110,21 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
     base: { app: "reelsaw", ...base },
     timestamp: pino.stdTimeFunctions.isoTime,
     redact: {
-      paths: ["*.password", "*.apiKey", "*.authorization", "*.cookie", "*.token", "*.secret", "password", "apiKey", "token", "secret", "headers.cookie", "headers.authorization", 'headers["x-api-key"]'],
+      paths: [
+        "*.password",
+        "*.apiKey",
+        "*.authorization",
+        "*.cookie",
+        "*.token",
+        "*.secret",
+        "password",
+        "apiKey",
+        "token",
+        "secret",
+        "headers.cookie",
+        "headers.authorization",
+        'headers["x-api-key"]',
+      ],
       censor: "[redacted]",
     },
     serializers: { err: pino.stdSerializers.err },
@@ -127,25 +141,31 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
       },
     },
   };
-  const console = pretty ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } } : { target: "pino/file", options: { destination: 1 } };
+  const console = pretty
+    ? { target: "pino-pretty", options: { colorize: true, translateTime: "SYS:HH:MM:ss.l", ignore: "pid,hostname,app" } }
+    : { target: "pino/file", options: { destination: 1 } };
   // same id ops/workers.ts registers under; each process writes its own files so rotation never prunes another's
   const logFile = env.LOG_FILE && !dest ? logFileFor(env.LOG_FILE, env.WORKER_ID?.trim() || `${os.hostname()}:${process.pid}`) : undefined;
   if (env.LOG_FILE && logFile) pruneOldLogs(env.LOG_FILE, 7);
   const root = dest
     ? pino(opts, dest)
     : logFile
-    ? pino({
-        ...opts,
-        transport: {
-          targets: [
-            { ...console, level: "trace" },
-            { target: "pino-roll", level: "trace", options: { file: logFile, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" } },
-          ],
-        },
-      })
-    : pretty
-      ? pino({ ...opts, transport: console })
-      : pino(opts);
+      ? pino({
+          ...opts,
+          transport: {
+            targets: [
+              { ...console, level: "trace" },
+              {
+                target: "pino-roll",
+                level: "trace",
+                options: { file: logFile, frequency: "daily", limit: { count: 7 }, mkdir: true, dateFormat: "yyyy-MM-dd" },
+              },
+            ],
+          },
+        })
+      : pretty
+        ? pino({ ...opts, transport: console })
+        : pino(opts);
 
   let current = envLevels;
   const levelFor = (module: string | undefined): LogLevel => (module && current.modules[module]) || current.global;

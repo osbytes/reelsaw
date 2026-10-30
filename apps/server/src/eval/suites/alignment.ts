@@ -35,12 +35,28 @@ export const alignmentSuite: Suite = {
       if (!(await fs.stat(caseDir)).isDirectory()) continue;
       const c = JSON.parse(await fs.readFile(path.join(caseDir, "case.json"), "utf8")) as Case;
       if (!c.verifiedCut) continue;
-      const raw = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-i", path.join(caseDir, "audio.wav"), "-ac", "1", "-ar", String(ALIGN_SR), "-f", "f32le", "pipe:1"]);
+      const raw = await ctx.exec(cfg.FFMPEG_PATH, [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        path.join(caseDir, "audio.wav"),
+        "-ac",
+        "1",
+        "-ar",
+        String(ALIGN_SR),
+        "-f",
+        "f32le",
+        "pipe:1",
+      ]);
       const pcm = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
       const dur = pcm.length / ALIGN_SR;
       const words = c.words.filter((w) => w.start >= -0.1 && w.end <= dur + 0.1);
       const t0 = Date.now();
-      const spans = await aligner.align(pcm, words.map((w) => w.text));
+      const spans = await aligner.align(
+        pcm,
+        words.map((w) => w.text),
+      );
       const ms = Date.now() - t0;
       const di = words.findIndex((w) => w.start >= c.range.start - 0.02 && w.end <= c.range.end + 0.02);
       const d = spans[di];
@@ -56,7 +72,15 @@ export const alignmentSuite: Suite = {
         id: name,
         pass: inside && neighboursOut && ordered && inBounds,
         metrics: { deletedStart: d?.start ?? -1, deletedEnd: d?.end ?? -1, ms, placed: placed.length, words: words.length },
-        notes: !inside ? `"${c.deleted.join(" ")}" aligned ${d?.start}-${d?.end}, verified cut ${c.verifiedCut.start}-${c.verifiedCut.end}` : !neighboursOut ? "a neighbour overlaps the cut" : !ordered ? "spans out of order" : !inBounds ? "span outside audio" : "",
+        notes: !inside
+          ? `"${c.deleted.join(" ")}" aligned ${d?.start}-${d?.end}, verified cut ${c.verifiedCut.start}-${c.verifiedCut.end}`
+          : !neighboursOut
+            ? "a neighbour overlaps the cut"
+            : !ordered
+              ? "spans out of order"
+              : !inBounds
+                ? "span outside audio"
+                : "",
       });
     }
     return out;
