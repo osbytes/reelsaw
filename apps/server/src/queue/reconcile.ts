@@ -36,6 +36,14 @@ export const MAX_RECONCILE_REQUEUES = 3;
 export const shouldGiveUp = (requeues: number): boolean => requeues > MAX_RECONCILE_REQUEUES;
 export const INTERRUPTED_MESSAGE = `Processing was interrupted ${MAX_RECONCILE_REQUEUES + 1} times (the worker crashed, ran out of memory, or was stopped). Retry to try again.`;
 
+/** A job that kept vanishing mid-run (crash, out of memory, stop): a worker problem a person must look at. */
+export class JobInterruptedError extends Error {
+  constructor() {
+    super(INTERRUPTED_MESSAGE);
+    this.name = "JobInterruptedError";
+  }
+}
+
 const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = {
   queued: "ingest",
   ingesting: "ingest",
@@ -170,12 +178,16 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
 
 async function giveUpProject(svc: Services, projectId: string, status: ProjectStatus, requeues: number) {
   svc.log.child({ module: "reconcile" }).error({ projectId, status, requeues }, "gave up re-enqueueing a project whose job keeps getting lost");
-  await failProject(svc, projectId, stageOfStatus[status] ?? "ingest", new Error(INTERRUPTED_MESSAGE));
+  const err = new JobInterruptedError();
+  svc.telemetry.captureException(err, { projectId, status, requeues });
+  await failProject(svc, projectId, stageOfStatus[status] ?? "ingest", err);
 }
 
 async function giveUpClip(svc: Services, projectId: string, clipId: string, requeues: number) {
   svc.log.child({ module: "reconcile" }).error({ projectId, clipId, requeues }, "gave up re-enqueueing a clip whose job keeps getting lost");
-  await markClipFailed(svc, projectId, clipId, new Error(INTERRUPTED_MESSAGE));
+  const err = new JobInterruptedError();
+  svc.telemetry.captureException(err, { projectId, clipId, requeues });
+  await markClipFailed(svc, projectId, clipId, err);
 }
 
 export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
@@ -184,12 +196,20 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
   // every RUN_WORKERS process runs a tick, but one at a time across the fleet (a session advisory lock held for the
   // tick): no duplicate job.stalled events, no two sweeps racing on the prune_state cursors. reconcile() itself takes
   // no lock, so the CLI's `recover` can call it directly.
+  // one monitor for the fleet: whichever process held the lock checks in, so a tick nobody ran is a missed check-in
+  const monitor = (status: "ok" | "error") =>
+    svc.telemetry.checkIn("reconciler", status, { type: "interval", minutes: Math.max(1, Math.round(intervalMs / 60_000)) });
   const tick = () =>
     withSessionLock(svc.database.pool, sessionLock.reconcile(), run)
       .then((r) => {
         if (!r.ran) log.debug("another process holds the reconciler lock; skipping this tick");
+        else monitor("ok");
       })
-      .catch((err) => log.error({ err }, "reconcile failed"));
+      .catch((err) => {
+        log.error({ err }, "reconcile failed");
+        svc.telemetry.captureException(err, { where: "reconcile" });
+        monitor("error");
+      });
   const run = () =>
     reconcile(svc)
       .then(() => detectStalls(svc, svc.settings.get().STALL_MINUTES))

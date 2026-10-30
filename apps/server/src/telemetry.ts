@@ -20,9 +20,13 @@ import { readGauges, setMetricSink, type MetricSink } from "./metrics.js";
 import { otel } from "./otel.js";
 
 export interface TelemetryPublic {
-  sentry: { dsn: string; environment: string; release: string } | null;
+  /** replaysOnErrorSampleRate: share of browser errors that keep a masked replay of the moments before them (0 = none) */
+  sentry: { dsn: string; environment: string; release: string; replaysOnErrorSampleRate: number } | null;
   posthog: { key: string; host: string } | null;
 }
+
+/** How often a monitored loop checks in: a crontab (UTC) or every N minutes. */
+export type CheckInSchedule = { type: "crontab"; value: string; maxRuntimeMin?: number } | { type: "interval"; minutes: number };
 
 export interface Telemetry {
   enabled: { sentry: boolean; posthog: boolean };
@@ -33,6 +37,11 @@ export interface Telemetry {
   /** a product event for one account */
   capture(event: string, distinctId: string, properties?: Record<string, unknown>): void;
   identify(distinctId: string, properties: Record<string, unknown>): void;
+  /**
+   * A Sentry cron check-in for something that must keep happening (worker heartbeat, reconciler tick, daily billing
+   * reconcile). The monitor is created on the first check-in from `schedule`; Sentry alerts when one is missed.
+   */
+  checkIn(monitor: string, status: "ok" | "error", schedule: CheckInSchedule): void;
   /** flush what is queued (shutdown) */
   shutdown(): Promise<void>;
 }
@@ -57,7 +66,10 @@ const sentryMetricSink: MetricSink = {
 };
 
 export function createTelemetry(
-  config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV">,
+  config: Pick<
+    Config,
+    "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV"
+  >,
   log: Logger,
 ): Telemetry {
   const release = `reelsaw@${config.REELSAW_VERSION}`;
@@ -100,7 +112,7 @@ export function createTelemetry(
   return {
     enabled: { sentry, posthog: !!posthog },
     public: {
-      sentry: sentry ? { dsn: config.SENTRY_DSN!, environment, release } : null,
+      sentry: sentry ? { dsn: config.SENTRY_DSN!, environment, release, replaysOnErrorSampleRate: config.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE } : null,
       posthog: posthog ? { key: config.POSTHOG_KEY!, host: config.POSTHOG_HOST } : null,
     },
     captureException(err, tags) {
@@ -117,6 +129,19 @@ export function createTelemetry(
     },
     identify(distinctId, properties) {
       posthog?.identify({ distinctId, properties });
+    },
+    checkIn(monitor, status, schedule) {
+      if (!sentry) return;
+      const slug = monitor
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .slice(0, 50);
+      Sentry.captureCheckIn(
+        { monitorSlug: slug, status },
+        schedule.type === "crontab"
+          ? { schedule: { type: "crontab", value: schedule.value }, timezone: "UTC", checkinMargin: 10, maxRuntime: schedule.maxRuntimeMin ?? 60 }
+          : { schedule: { type: "interval", value: schedule.minutes, unit: "minute" }, checkinMargin: Math.max(2, schedule.minutes) },
+      );
     },
     async shutdown() {
       setMetricSink(null);

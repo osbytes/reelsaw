@@ -28,7 +28,7 @@ import { Header } from "@/components/header";
 import { GitHubMark } from "@/components/logo";
 import { ALTERNATIVE_LINKS, GUIDE_NAV } from "@/content/links";
 import { CHECKED } from "@/content/reelsaw";
-import { SITE } from "@/lib/site";
+import { SITE, appLink } from "@/lib/site";
 
 const STEPS = [
   {
@@ -218,7 +218,7 @@ export default function HomePage() {
               </div>
               <p className="text-sm text-ink3">
                 Prefer not to run a machine?{" "}
-                <a href={SITE.app} className="prose-link">
+                <a href={appLink("/", "home_hosted_free")} className="prose-link">
                   Try the hosted Free plan
                 </a>
               </p>

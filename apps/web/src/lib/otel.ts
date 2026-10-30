@@ -56,6 +56,8 @@ export function initOtel(t: Public | null | undefined): Promise<void> {
     registerInstrumentations({
       instrumentations: [
         getWebAutoInstrumentations({
+          // every click was a 0 ms root span with nothing under it: most of the trace volume, none of the insight
+          "@opentelemetry/instrumentation-user-interaction": { enabled: false },
           "@opentelemetry/instrumentation-fetch": {
             propagateTraceHeaderCorsUrls: [origin],
             ignoreUrls,

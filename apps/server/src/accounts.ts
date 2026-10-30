@@ -43,6 +43,8 @@ export async function approveUser(svc: Services, actorId: string | null, userId:
     await u.db.insert(schema.adminEvents).values({ type: "user.approved", actorId, userId, email: user.email, payload: {} });
     audit(svc, u, "user.approved", actorId, userId);
     u.afterCommit(() => svc.email.send({ to: user.email, ...templates.approved(svc.config.APP_URL) }));
+    // how long sign-ups wait for an admin (SIGNUP_MODE=approval); the approved account is the distinct id
+    u.afterCommit(() => svc.telemetry.capture("user.approved", userId, { waitHours: Math.round((Date.now() - user.createdAt.getTime()) / 360_000) / 10 }));
     return { ok: true, changed: true };
   });
 }

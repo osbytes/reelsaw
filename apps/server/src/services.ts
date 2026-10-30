@@ -379,7 +379,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const email = await step(config.EMAIL_DRIVER === "none" ? "email (disabled)" : `email (${config.EMAIL_DRIVER})`, async () => {
-    const e = createEmail(config, log.child({ module: "email" }));
+    const e = createEmail(config, log.child({ module: "email" }), telemetry);
     // only the HTTP process sends mail (sign-up, reset, approvals); a worker would only fail to boot over a mail server it never uses.
     // The driver's settings are still validated by the config schema above.
     if (env.REELSAW_CLI !== "1" && config.RUN_HTTP) await e.check();

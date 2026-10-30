@@ -9,7 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import type { Context as HonoContext } from "hono";
 import { TRPCError } from "@trpc/server";
-import { QuotaError } from "./quota.js";
+import { QuotaError, trackQuotaRefusal } from "./quota.js";
 import { and, inArray } from "drizzle-orm";
 import { defaultStyle, resolveFraming, resolveStyle } from "@reelsaw/shared";
 import { exportPlan } from "./export.js";
@@ -29,6 +29,11 @@ import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
+
+/** The product token of a User-Agent, lower-cased and bounded: a name for analytics, never the full header. */
+export function mcpClientName(ua: string | null): string {
+  return /^[A-Za-z][\w.-]{0,39}/.exec(ua ?? "")?.[0]?.toLowerCase() ?? "unknown";
+}
 
 function mmss(s: number) {
   const m = Math.floor(s / 60);
@@ -51,11 +56,20 @@ export function createMcpServer(
   requestId = resolveRequestId(req.headers.get("x-request-id")),
 ): McpServer {
   const log = svc.log.child({ module: "mcp", userId: user.id, requestId });
-  const ctx: Context = { svc, who: { user, via: access.via, canAdminister: access.canAdminister, session: null, blocked: null }, req, requestId, log };
+  const ctx: Context = {
+    svc,
+    who: { user, via: access.via, canAdminister: access.canAdminister, session: null, blocked: null },
+    req,
+    requestId,
+    log,
+    surface: "mcp",
+  };
   const api = appRouter.createCaller(ctx);
   const db = svc.database.db;
   const abs = (p: string | null) => (p ? new URL(p, svc.config.APP_URL).toString() : null);
   const server = new McpServer({ name: "reelsaw", version: svc.config.REELSAW_VERSION }, { instructions: INSTRUCTIONS });
+  // the client's product name from its User-Agent ("claude-code/2.1 …" → "claude-code"); stateless requests carry no clientInfo
+  const client = mcpClientName(req.headers.get("user-agent"));
   // every tool call is logged the same way: one info line (tool, ms, outcome), the argument ids at debug
   const register = server.registerTool.bind(server) as unknown as (name: string, config: unknown, cb: (...a: unknown[]) => unknown) => unknown;
   (server as unknown as { registerTool: typeof register }).registerTool = (name, config, cb) =>
@@ -65,6 +79,14 @@ export function createMcpServer(
       const res = (await cb(...a)) as { isError?: boolean; content?: Array<{ text?: string }> };
       const code = res?.isError ? /^([A-Z_]{4,}):/.exec(res.content?.[0]?.text ?? "")?.[1] : undefined;
       tlog[res?.isError ? "warn" : "info"]({ ok: !res?.isError, ...(res?.isError ? { code: code ?? "ERROR" } : {}) }, "mcp tool");
+      // which tools agents use and which fail, by client; never the arguments or the result
+      svc.telemetry.capture("mcp.tool_called", user.id, {
+        tool: name,
+        ok: !res?.isError,
+        ...(res?.isError ? { code: code ?? "ERROR" } : {}),
+        client,
+        auth: access.via,
+      });
       return res;
     });
 
@@ -73,9 +95,13 @@ export function createMcpServer(
     try {
       return text(await fn());
     } catch (err) {
-      if (err instanceof QuotaError) return fail(`${err.code}: ${err.message}${err.quota ? `\n${JSON.stringify({ quota: err.quota })}` : ""}`);
+      if (err instanceof QuotaError) {
+        trackQuotaRefusal(svc.telemetry, user.id, err, "mcp");
+        return fail(`${err.code}: ${err.message}${err.quota ? `\n${JSON.stringify({ quota: err.quota })}` : ""}`);
+      }
       if (err instanceof TRPCError) return fail(`${err.code}: ${err.message}`);
       log.error({ err }, "mcp tool failed");
+      svc.telemetry.captureException(err, { surface: "mcp", userId: user.id, requestId });
       return fail(err instanceof Error ? err.message : String(err));
     }
   };

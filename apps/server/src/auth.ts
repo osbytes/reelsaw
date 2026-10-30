@@ -75,6 +75,9 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
           await rememberEmailVerifyToken(db, user.email, token);
           await email.send({ to: user.email, ...templates.verifyEmail(withLoginCallback(url)) });
         },
+        afterEmailVerification: async (user: { id: string }) => {
+          telemetry?.capture("user.email_verified", user.id);
+        },
       }
     : undefined;
   settings.subscribe((s) => {

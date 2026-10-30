@@ -14,7 +14,7 @@
  * and a trace it drops stays dropped here. Resolution helpers live in otel-config.ts.
  */
 import { createRequire } from "node:module";
-import { trace, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
+import { trace, SpanKind, SpanStatusCode, type Attributes, type Span } from "@opentelemetry/api";
 import { applyServerSampler, publicFromResolved, resolveOtlp, spanMetricAttributes, type OtelPublic } from "./otel-config.js";
 import { setOtelLogsEnabled } from "./otel-log.js";
 import { histogram } from "./metrics.js";
@@ -36,10 +36,11 @@ export interface Otel {
 function start(): Otel {
   if (!truthy(process.env.OTEL_ENABLED)) return { enabled: false, public: null, sentryMetrics: false, shutdown: async () => {} };
   const cfg = resolveOtlp(process.env);
+  const operatorSampler = !!process.env.OTEL_TRACES_SAMPLER?.trim();
   // Before the SDK loads: it reads OTEL_TRACES_SAMPLER when it starts. The browser uses cfg.sampleRate.
   applyServerSampler(process.env, cfg.sampleRate);
   const require = createRequire(import.meta.url);
-  const { NodeSDK, metrics } = require("@opentelemetry/sdk-node");
+  const { NodeSDK, metrics, tracing } = require("@opentelemetry/sdk-node");
   const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
   const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
   const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
@@ -67,6 +68,14 @@ function start(): Otel {
           exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 30_000),
         })
       : undefined,
+    // unless the operator chose a sampler: parent-based at OTEL_TRACES_SAMPLE_RATE, minus orphan client spans
+    ...(operatorSampler
+      ? {}
+      : {
+          sampler: new tracing.ParentBasedSampler({
+            root: dropOrphanClientSpans(new tracing.TraceIdRatioBasedSampler(cfg.sampleRate), tracing.SamplingDecision.NOT_RECORD),
+          }),
+        }),
     instrumentations: [
       getNodeAutoInstrumentations({
         "@opentelemetry/instrumentation-fs": { enabled: false },
@@ -104,6 +113,20 @@ function start(): Otel {
     }) + "\n",
   );
   return { enabled: true, public: publicFromResolved(cfg), sentryMetrics: cfg.sentryMetrics, shutdown: () => sdk.shutdown() };
+}
+
+/**
+ * A root sampler that drops client spans with no parent: an S3 read, a pg query or a fetch that no request, job or
+ * stage span is around (pg-boss polling, a stream read after its handler returned). Alone, each is a one-span trace
+ * with nothing to explain it, and together they were most of the trace volume. Everything else goes to `inner`.
+ */
+export function dropOrphanClientSpans<S extends { shouldSample(...a: unknown[]): unknown }>(inner: S, notRecord: number) {
+  return {
+    shouldSample(context: unknown, traceId: string, name: string, kind: SpanKind, attributes: Attributes, links: unknown) {
+      return kind === SpanKind.CLIENT ? { decision: notRecord } : inner.shouldSample(context, traceId, name, kind, attributes, links);
+    },
+    toString: () => `DropOrphanClientSpans{${String(inner)}}`,
+  };
 }
 
 export const otel: Otel = start();

@@ -185,7 +185,7 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
     })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
-  if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, ...facts });
+  if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, cancelled: true, ...facts });
   await u.emit(projectId, "project.deleted", { days: days(svc), stopped: working });
   return true;
 }
@@ -859,7 +859,7 @@ export async function createProject(svc: Services, userId: string, input: Create
     if (!row) throw new Error("the project row was not returned");
     await recordProjectCreated(u.db, userId, id, row.createdAt);
     await syncProjectRefs(u.db, row); // the defaults' intro/outro
-    await u.emit(id, "project.created", { title });
+    await u.emit(id, "project.created", { title, sourceType: row.sourceType });
     await startRun(u, id, { reason: "created", status: "queued" });
     await u.enqueue(QUEUES.ingest, { projectId: id });
     return row;

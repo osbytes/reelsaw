@@ -741,13 +741,24 @@ short reason per failing check (`db`, `events`, `queue`, `workers`), and the log
 `HEALTHCHECK` and any load balancer pointed at it restart or drain a process that is up but cannot work.
 
 **Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports boot
-failures, 5xx API errors and a job's final failed attempt; the web app reports render errors.
-`POSTHOG_KEY` (and `POSTHOG_HOST`, EU cloud or self-hosted) turns on PostHog: the server sends
-sign-ups, project created / done / failed, billing and abuse-flag events; the web app sends page
-views and a handful of product events (`lib/telemetry.ts`), people identified by user id with email
-and name on the profile, no autocapture and no session recording. Both are off unless set, the
-browser gets the public keys from `system.status`, and the SDK chunks are only requested when on.
-Prompts, transcripts and media never go through either (`apps/server/src/telemetry.ts`).
+failures, 5xx responses (API and file routes), unexpected MCP tool errors, a job's final failed
+attempt, a job the reconciler gave up on, failed emails and billing syncs; the web app reports
+render errors and unhandled rejections, but not the 4xx refusals it already shows the person. The
+worker heartbeat (`heartbeat-<WORKER_ID or role>`), the reconciler and the daily billing reconcile
+check in as Sentry cron monitors, so a stopped worker or a loop that no longer runs raises an alert.
+`SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` (default 0) keeps a fully masked replay of the moments before
+a browser error. `POSTHOG_KEY` (and `POSTHOG_HOST`, EU cloud or self-hosted) turns on PostHog: the
+server sends sign-ups, approvals, email verification, project created / done / failed / cancelled,
+clip done / failed, jobs a person asked for, quota refusals, clip downloads and exports, MCP tool
+calls (tool, outcome, client name), and billing and abuse-flag events, each with the surface it came
+through (`web`, `api`, `mcp`, `cli`); the web app sends page views and a handful of product events
+(`lib/telemetry.ts`). Event properties are ids, counts, durations and names, never a title, an
+error message or other free text; people are identified by user id, role and plan only, with no
+autocapture and no session recording. Both are off unless set, the browser gets the public keys
+from `system.status`, and the SDK chunks are only requested when on. Prompts, transcripts and media
+never go through either (`apps/server/src/telemetry.ts`). Release images upload their source maps to
+Sentry when the release workflow has `SENTRY_AUTH_TOKEN` (`.github/workflows/release.yml`); no map
+ships in the image.
 
 
 ```
@@ -782,9 +793,9 @@ Metrics. Durations are seconds. Attributes are bounded sets (stage, proxy id, mo
 
 Over OTLP, the auto-instrumentation adds `http.server.request.duration`, and pg-boss adds `messaging.process.duration` and `pgboss.queue.jobs` (backlog by queue and state). A proxy dashboard: `reelsaw.ytdlp.download.realtime_factor` p50/p95 by `proxy`, `reelsaw.ytdlp.attempts` rate by `proxy` and `outcome`, and `reelsaw.ytdlp.proxy.healthy` by `proxy`.
 
-Spans: inbound HTTP (`/api/health` excluded), Postgres queries, outbound fetch to AI vendors, `pipeline.<stage>` per job with `reelsaw.project_id` / `reelsaw.clip_id` / `reelsaw.attempt`, `exec ffmpeg|ffprobe|yt-dlp`, and the AI SDK's own `ai.generateText` / `ai.transcribe` spans (inputs/outputs not recorded). pg-boss propagates trace context from `send()` into the worker span, so one trace follows a project from the create mutation through every stage.
+Spans: inbound HTTP named by route (`POST /api/trpc/projects.create`; `/api/health` excluded), Postgres queries, outbound fetch to AI vendors, `pipeline.<stage>` per job with `reelsaw.project_id` / `reelsaw.clip_id` / `reelsaw.attempt`, `exec ffmpeg|ffprobe|yt-dlp`, and the AI SDK's own `ai.generateText` / `ai.transcribe` spans (inputs/outputs not recorded). pg-boss propagates trace context from `send()` into the worker span, so one trace follows a project from the create mutation through every stage. A client span with no parent (an S3 read or a query no request or job is around, such as queue polling) is not recorded unless `OTEL_TRACES_SAMPLER` is set.
 
-The browser exports its own spans as `reelsaw-web` (page load, clicks, fetch, and live subscriptions) and sends `traceparent` on API calls, including the subscription stream, so a click and the server work it starts are one trace. `OTEL_TRACES_SAMPLE_RATE` (default `1`) is the fraction kept, on the browser and the server together. The Sentry browser SDK does not trace; those spans would be a second copy.
+The browser exports its own spans as `reelsaw-web` (page load, navigation, fetch, and live subscriptions; not clicks) and sends `traceparent` on API calls, including the subscription stream, so a click and the server work it starts are one trace. `OTEL_TRACES_SAMPLE_RATE` (default `1`) is the fraction kept, on the browser and the server together. The Sentry browser SDK does not trace; those spans would be a second copy.
 
 ## Entity-aware transcription
 

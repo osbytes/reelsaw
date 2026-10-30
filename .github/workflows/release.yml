@@ -6,6 +6,9 @@
 #   vars.GHCR_IMAGE        optional, default ghcr.io/<owner>/reelsaw
 #   vars.DOCKERHUB_IMAGE   optional, e.g. osbytes/reelsaw; Docker Hub is skipped unless this and
 #   secrets.DOCKERHUB_USERNAME / secrets.DOCKERHUB_TOKEN are set
+#   secrets.SENTRY_AUTH_TOKEN, vars.SENTRY_ORG, vars.SENTRY_PROJECT
+#                          optional: upload the bundles' source maps to Sentry (they never ship in the image)
+#                          and attach the release's commits; skipped unless all three are set
 name: release
 
 on:
@@ -31,6 +34,9 @@ jobs:
       DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,6 +102,11 @@ jobs:
             REELSAW_VERSION=${{ steps.v.outputs.version }}
             REELSAW_COMMIT=${{ steps.v.outputs.commit }}
             REELSAW_BUILT_AT=${{ steps.v.outputs.built_at }}
+            SENTRY_ORG=${{ vars.SENTRY_ORG }}
+            SENTRY_PROJECT=${{ vars.SENTRY_PROJECT }}
+          # a BuildKit secret: never in a layer, the cache or the build log
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
           # layer cache in GHCR, not the Actions cache: Actions caches are scoped to the ref, so a cache
           # written by one tag was never readable by the next (every release built from scratch and
           # spent ~7 min uploading a cache nothing used). The ci.yml stack job reads it too.
@@ -134,6 +145,16 @@ jobs:
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(-t "$t"); done <<< "$TAGS"
           docker buildx imagetools create "${args[@]}" "$STAGING"
+
+      # the Sentry release the maps were uploaded under gets its commits (suspect commits on new issues) and is finalized
+      - name: Sentry release
+        if: startsWith(github.ref, 'refs/tags/v') && env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != '' && env.SENTRY_PROJECT != ''
+        env:
+          RELEASE: reelsaw@${{ steps.v.outputs.version }}
+        run: |
+          npx --yes @sentry/cli@2.39.1 releases new -p "$SENTRY_PROJECT" "$RELEASE"
+          npx --yes @sentry/cli@2.39.1 releases set-commits "$RELEASE" --auto --ignore-missing || echo "commits not attached (is the GitHub integration installed in Sentry?)"
+          npx --yes @sentry/cli@2.39.1 releases finalize "$RELEASE"
 
       - name: Install folder
         env:

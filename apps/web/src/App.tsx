@@ -315,7 +315,7 @@ function TelemetryBridge() {
   }, [otel]);
   useEffect(() => {
     if (!session) identify(null);
-    else if (me.data) identify({ id: me.data.id, email: me.data.email, name: me.data.name, role: me.data.role });
+    else if (me.data) identify({ id: me.data.id, role: me.data.role });
   }, [session, me.data]);
   useEffect(() => {
     pageview(loc.pathname);

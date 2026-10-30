@@ -353,12 +353,16 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   SENTRY_DSN: [
     "observability",
-    "Sentry DSN. Set, the server reports boot failures, 5xx API errors and a job's final failed attempt, and the web app reports render errors (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent.",
+    "Sentry DSN. Set, the server reports boot failures, 5xx responses, unexpected MCP tool errors, a job's final failed attempt, jobs the reconciler gave up on, failed emails and billing syncs, and checks in the worker heartbeat, reconciler and billing reconcile as cron monitors; the web app reports render errors and unhandled rejections other than 4xx refusals (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent.",
   ],
   SENTRY_ENVIRONMENT: ["observability", "Sentry environment tag. Default: `production` under NODE_ENV=production, else `development`."],
+  SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: [
+    "observability",
+    "Share (0–1) of browser errors that send a Sentry session replay of the moments before the error. Replays mask all text and inputs and block all media; nothing is recorded for sessions without an error. 0 (default) loads no replay code.",
+  ],
   POSTHOG_KEY: [
     "observability",
-    "PostHog project key (public). Set, the server sends sign-ups, project created/done/failed, billing and abuse-flag events, and the web app sends page views and a few product events; people are identified by user id and role only (no email or name). Unset, nothing is sent.",
+    "PostHog project key (public). Set, the server sends sign-ups, approvals, project created/done/failed/cancelled, clip done/failed, requested jobs, quota refusals, downloads and exports, MCP tool calls, billing and abuse-flag events (with the surface: web, api, mcp, cli), and the web app sends page views and a few product events; properties are ids, counts and names, and people are identified by user id, role and plan only (no email or name). Unset, nothing is sent.",
   ],
   POSTHOG_HOST: ["observability", "PostHog ingestion host (`https://eu.i.posthog.com` for the EU cloud, or a self-hosted instance)."],
 

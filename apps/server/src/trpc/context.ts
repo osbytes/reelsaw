@@ -6,7 +6,7 @@ import { ADMIN_REFUSED_MESSAGE, cannotUseApp, requester, type Requester } from "
 import type { Logger } from "../log.js";
 import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
-import { asUserRequest } from "../uow.js";
+import { asUserRequest, type Surface } from "../uow.js";
 import { checkRequestRate } from "../abuse.js";
 
 export type Context = {
@@ -18,6 +18,8 @@ export type Context = {
   requestId: string;
   /** child logger carrying requestId and, once known, userId */
   log: Logger;
+  /** which surface the call came through (product analytics only); absent = the browser or an API key, from `who.via` */
+  surface?: Surface;
 };
 
 export function contextFactory(svc: Services) {
@@ -67,7 +69,7 @@ export const protectedProcedure = signedInProcedure.use(async ({ ctx, next, type
     }
   }
   // jobs this call enqueues for the user's own projects are their requests: fair-share limits apply (uow.ts)
-  return asUserRequest(ctx.who.user.id, () => next({ ctx }));
+  return asUserRequest(ctx.who.user.id, ctx.surface ?? (ctx.who.via === "session" ? "web" : "api"), () => next({ ctx }));
 });
 
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
