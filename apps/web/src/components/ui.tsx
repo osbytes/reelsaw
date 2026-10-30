@@ -39,7 +39,7 @@ export function StatusBadge({ status, label, tone }: { status: ProjectStatus | C
 }
 
 /** Inline status: glyph + word in the tone colour, no background. */
-export function StatusText({ status, label, className = "" }: { status: ProjectStatus | ClipStatus; label?: string; className?: string }) {
+export function StatusText({ status, label, className = "" }: { status: ProjectStatus | ClipStatus; label?: string | undefined; className?: string }) {
   const [g, w, t] = statusMeta(status);
   return (
     <span className={`text-xs font-semibold whitespace-nowrap ${TONE_FG[t]} ${className}`}>
@@ -110,7 +110,7 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 /** Centered confirm / info dialog in the design's style. */
-export function Modal({ open, onOpenChange, title, children, width = 420 }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode; width?: number }) {
+export function Modal({ open, onOpenChange, title, children, width = 420 }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode; width?: number | undefined }) {
   // portaled menus (Select, Combobox) live outside this node; a click on one is not a dismiss
   const keepIfMenu = (e: { target: EventTarget | null; preventDefault: () => void }) => {
     if (e.target instanceof Element && e.target.closest(".menu")) e.preventDefault();
@@ -184,14 +184,14 @@ export function ConfirmDialog({ open, onOpenChange, title, body, confirm, danger
 /** Radix Select never accepts "" as an item value, so "no choice" travels as this. */
 const NONE = "__none__";
 
-export type SelectOption = { value: string; label: ReactNode; hint?: string; disabled?: boolean };
+export type SelectOption = { value: string; label: ReactNode; hint?: string | undefined; disabled?: boolean };
 
 /**
  * The one dropdown for choosing a value (never a native `<select>`). The trigger matches `.input`
  * (md) or a compact button (sm); give it a width via `className` so a longer label never shifts layout.
  * An option with value "" is allowed (it means "unset").
  */
-export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md"; className?: string; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
+export function Select({ value, onValueChange, options, placeholder, size = "md", className = "", ariaLabel, onClick, disabled }: { value: string; onValueChange: (v: string) => void; options: SelectOption[]; placeholder?: string; size?: "sm" | "md" | undefined; className?: string | undefined; ariaLabel: string; onClick?: (e: React.MouseEvent) => void; disabled?: boolean }) {
   const cls = size === "sm" ? "rounded-[8px] px-2 py-1 text-xs" : "rounded-[10px] px-3 py-2 text-sm";
   return (
     // z-[80]: a Select inside Modal (overlay z-70) must paint above it. Combobox uses the same z-index.

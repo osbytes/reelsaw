@@ -14,7 +14,7 @@ const API = "https://api.klipy.com/api/v1";
 const LICENSE = { id: "klipy", name: "Klipy terms", url: "https://klipy.com/terms" };
 
 /** Tenor-style `media_formats`, or Klipy's `file` map (hd/md/sm → gif/mp4/webp), whichever the answer has. */
-function formats(g: Record<string, unknown>): { mp4?: string; gif?: string; thumb?: string; width?: number; height?: number } {
+function formats(g: Record<string, unknown>): { mp4?: string | undefined; gif?: string | undefined; thumb?: string | undefined; width?: number | undefined; height?: number | undefined } {
   const mf = obj(g.media_formats);
   if (Object.keys(mf).length) {
     const dims = arr(obj(mf.gif).dims);

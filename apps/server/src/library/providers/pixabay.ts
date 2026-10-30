@@ -17,6 +17,7 @@ function bestVideo(videos: Record<string, unknown>): { url: string; width: numbe
     const url = httpsUrl(v.url);
     if (url) return { url, width: num(v.width) ?? 0, height: num(v.height) ?? 0 };
   }
+  return undefined;
 }
 const tagsOf = (h: Record<string, unknown>) => (str(h.tags) ?? "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 12);
 

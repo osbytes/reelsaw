@@ -3,8 +3,11 @@ import type { Faq, Link, Table } from "@/content/types";
 import { SITE } from "@/lib/site";
 import { ScrollArea } from "./scroll-area";
 
+/** Structured data for search engines. `<` is escaped so no string in it can close the script tag. */
 export function JsonLd({ data }: { data: unknown }) {
-  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;
+  const json = JSON.stringify(data).replace(/</g, "\\u003c");
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD has to be the script's raw text; it is escaped above
+  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: json }} />;
 }
 
 /** Visible breadcrumb trail plus BreadcrumbList structured data. Each crumb is {href, label}; the last is the current page. */

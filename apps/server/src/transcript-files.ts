@@ -49,7 +49,7 @@ async function projectOf(svc: Services, actor: Actor, projectId: string) {
 }
 
 /** The captions of a clip's last render as a file: exactly the lines and times that were burned in (or would have been, with captions off). */
-export async function clipCaptionsFile(svc: Services, actor: Actor, clipId: string, o: { format: CaptionFormat; words?: boolean }): Promise<CaptionFile> {
+export async function clipCaptionsFile(svc: Services, actor: Actor, clipId: string, o: { format: CaptionFormat; words?: boolean | undefined }): Promise<CaptionFile> {
   const clip = await svc.database.db.query.clips.findFirst({ where: and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt)), columns: { projectId: true, index: true, title: true, captions: true } });
   if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: "No such clip" });
   await projectOf(svc, actor, clip.projectId);
@@ -59,7 +59,7 @@ export async function clipCaptionsFile(svc: Services, actor: Actor, clipId: stri
 }
 
 /** The project transcript as a file: one cue per transcript segment (VTT can carry the word times). */
-export async function projectTranscriptFile(svc: Services, actor: Actor, projectId: string, o: { format: CaptionFormat; words?: boolean }): Promise<CaptionFile> {
+export async function projectTranscriptFile(svc: Services, actor: Actor, projectId: string, o: { format: CaptionFormat; words?: boolean | undefined }): Promise<CaptionFile> {
   const project = await projectOf(svc, actor, projectId);
   const t = await svc.database.db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, projectId), columns: { segments: true, words: true } });
   if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "This project has no transcript yet. Export it once the project has been transcribed." });
@@ -108,10 +108,10 @@ export async function fetchSubtitleText(url: string, deps: { fetch?: typeof fetc
 }
 
 export interface ImportTranscriptInput {
-  text?: string;
-  uploadId?: string;
+  text?: string | undefined;
+  uploadId?: string | undefined;
   format?: "auto" | CaptionFormat;
-  language?: string;
+  language?: string | undefined;
 }
 
 export interface ImportTranscriptResult {

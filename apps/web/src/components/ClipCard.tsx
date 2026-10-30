@@ -75,8 +75,8 @@ export function ClipCard({
   selecting = false,
   onToggleSelect,
 }: {
-  projectIntroId?: string | null;
-  projectOutroId?: string | null;
+  projectIntroId?: string | null | undefined;
+  projectOutroId?: string | null | undefined;
   selected?: boolean;
   /** some clip is selected: every card shows its checkbox */
   selecting?: boolean;
@@ -84,7 +84,7 @@ export function ClipCard({
   onCopyLink?: () => void;
   clip: ClipView;
   projectId: string;
-  progress?: number;
+  progress?: number | undefined;
   active?: boolean;
   busy?: boolean;
   onRerender: () => void;
@@ -112,7 +112,7 @@ export function ClipCard({
       .catch(() => void toast.error("Couldn’t copy"));
   const meta = clipMeta(clip, { modeLabel: MODE_LABEL, projectHasIntro: !!projectIntroId, projectHasOutro: !!projectOutroId });
   const fail = clip.status === "failed" ? summarizeError(clip.error ?? "Render failed", { admin: isAdmin }) : null;
-  const detail: { text: string; cls: string; title?: string } | null =
+  const detail: { text: string; cls: string; title?: string | undefined } | null =
     fail
       ? { text: fail.summary, cls: "bg-err-soft", title: isAdmin ? (clip.error ?? undefined) : undefined }
       : clip.status === "pending"

@@ -4,7 +4,7 @@
  * Raw text stays in `detail` for admins only when it adds anything the summary drops
  * (PRINCIPLES: plain language, detail one click away).
  */
-export function summarizeError(raw: string, opts: { admin?: boolean } = {}): { summary: string; detail: string | null } {
+export function summarizeError(raw: string, opts: { admin?: boolean | undefined } = {}): { summary: string; detail: string | null } {
   const admin = !!opts.admin;
   const text = raw.replace(/\s+/g, " ").trim();
   if (!text) return { summary: "Something went wrong.", detail: null };

@@ -23,7 +23,7 @@ export interface ThoughtLimits {
   /** Pause that ends a sentence when nothing else does. */
   pauseSec?: number;
   /** Never move outside these times (a user's selection). */
-  bounds?: [number, number];
+  bounds?: [number, number] | undefined;
 }
 
 export type EndSignal = "punctuation" | "pause" | "capital" | "transcript-end";

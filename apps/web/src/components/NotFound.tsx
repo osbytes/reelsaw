@@ -4,7 +4,7 @@ import { Link } from "react-router";
 interface Props {
   what: "project" | "clip";
   /** the query error, if any: NOT_FOUND reads as "gone or not yours", anything else as a load failure */
-  error?: { message?: string; data?: { code?: string } | null } | null;
+  error?: { message?: string; data?: { code?: string } | null | undefined } | null;
   onRetry?: () => void;
 }
 

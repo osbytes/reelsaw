@@ -34,10 +34,10 @@ export interface PickedAsset {
   name: string;
   kind: LibraryKind;
   durationSec: number;
-  mime?: string | null;
-  width?: number;
-  height?: number;
-  hasAudio?: boolean;
+  mime?: string | null | undefined;
+  width?: number | undefined;
+  height?: number | undefined;
+  hasAudio?: boolean | undefined;
   thumbnailUrl?: string;
 }
 
@@ -106,9 +106,9 @@ const rowKey = (provider: string, externalId: string) => `${provider}:${external
 
 export interface AssetFinderProps {
   /** limit to these kinds (the editor's pickers know what they want) */
-  kinds?: LibraryKind[];
+  kinds?: LibraryKind[] | undefined;
   /** shorthand for `kinds={[kind]}` */
-  kind?: LibraryKind;
+  kind?: LibraryKind | undefined;
   mode?: "library" | "picker";
   /** picker: called with the asset once it is ready (a catalog / provider result is imported first) */
   onPick?: (asset: PickedAsset) => void | Promise<void>;
@@ -423,8 +423,8 @@ function SourceTiles({
   sid: string;
   provider?: string;
   q: string;
-  kind?: LibraryKind;
-  license?: "cc0" | "by";
+  kind?: LibraryKind | undefined;
+  license?: "cc0" | "by" | undefined;
   kindOk: (k: string) => boolean;
   node: (i: RemoteItem) => React.ReactNode;
   register: (id: string, st: SourceState, fetchNext: () => void) => void;

@@ -52,6 +52,8 @@ export function callSignal(signal: AbortSignal | undefined, timeoutMs: number | 
   if (!timeoutMs) return signal;
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
+/** `abortSignal` for an AI SDK call, left out when there is none */
+export const abortOpt = (signal: AbortSignal | undefined) => (signal ? { abortSignal: signal } : {});
 
 export function medianOf(xs: readonly number[]): number | null {
   if (!xs.length) return null;
@@ -216,7 +218,7 @@ const RECENT = 20;
  */
 class UnitDeadline implements SlotWaitListener {
   private readonly ctl = new AbortController();
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   private left: number;
   private since = 0;
   private waits = 0;
@@ -259,7 +261,7 @@ class UnitDeadline implements SlotWaitListener {
 
 export class StepRunner {
   private recent: number[] = [];
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   /** Inside `steps()`: finished units feed the idle timer. A direct `step()` does not, so work after it is not timed as a step. */
   private inBatch = false;
   private lastUnitMs = 0;

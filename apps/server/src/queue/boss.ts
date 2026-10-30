@@ -112,7 +112,7 @@ export interface Queue {
    */
   enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission; priorityBoost?: number; expireInSeconds?: number }): Promise<string | null>;
   /** A job on any queue the caller created itself (ee/ billing): plain pg-boss send on the transaction's connection when given. */
-  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string }): Promise<string | null>;
+  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string | undefined }): Promise<string | null>;
   /** The job owner's in-flight work (see `Admission`), on the transaction's connection when given. */
   admission(data: JobData, opts?: TxOpts): Promise<Admission>;
   /** True if a job for this key is created, retrying, or active. */

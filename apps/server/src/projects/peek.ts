@@ -3,7 +3,7 @@ import { z } from "zod";
 const oembedSchema = z.object({ title: z.string().optional(), thumbnail_url: z.string().optional(), author_name: z.string().optional() });
 
 /** Best-effort title + thumbnail for a URL before ingest runs (YouTube/Vimeo oEmbed, 4 s budget). */
-export async function peekUrlMeta(url: string): Promise<{ title?: string; thumbnail?: string; uploader?: string }> {
+export async function peekUrlMeta(url: string): Promise<{ title?: string | undefined; thumbnail?: string | undefined; uploader?: string | undefined }> {
   let host = "";
   try {
     host = new URL(url).hostname.replace(/^www\./, "");

@@ -21,7 +21,7 @@ import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from
 import { z } from "zod";
 import { clipCandidateSchema, rubricTotal, type ClipCandidate, type ClipScores, type TranscriptSegment } from "@reelsaw/shared";
 import { fmtTs } from "./transcript.js";
-import { callSignal } from "./steps.js";
+import { abortOpt, callSignal } from "./steps.js";
 import { withLlmContext } from "../ai/trace.js";
 import type { Logger } from "../log.js";
 
@@ -120,7 +120,7 @@ export interface LlmOpts {
    * Longest one logical call may take, all its HTTP attempts together (retries, the salvage and plain-text
    * fallbacks included). Unset inside a checkpointed step, whose own signal already carries its limit.
    */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }
 
 /** Bump a prompt's version whenever its text changes: saved steps (job_steps) are keyed on it, so they stop applying. */
@@ -136,8 +136,7 @@ async function llmJson<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name
 }
 
 async function llmJsonInner<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
-  const abortSignal = callSignal(o.signal, o.timeoutMs);
-  const common = { model: o.model, prompt, abortSignal, maxRetries: 2, temperature } as const;
+  const common = { model: o.model, prompt, ...abortOpt(callSignal(o.signal, o.timeoutMs)), maxRetries: 2, temperature } as const;
   try {
     const { output } = await generateText({ ...common, output: Output.object({ schema, name }), telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}`, recordInputs: false, recordOutputs: false } });
     return output as T;
@@ -240,14 +239,14 @@ export interface SelectContext {
   durationSec: number;
   minSec: number;
   maxSec: number;
-  maxClips?: number;
-  focus?: string;
-  instructions?: string;
+  maxClips?: number | undefined;
+  focus?: string | undefined;
+  instructions?: string | undefined;
 }
 
 const mapSchema = z.object({ clips: z.array(clipCandidateSchema) });
 
-export function buildMapPrompt(chunk: Chunk, c: SelectContext, opts: { exclude?: string } = {}) {
+export function buildMapPrompt(chunk: Chunk, c: SelectContext, opts: { exclude?: string | undefined } = {}) {
   const focus = c.focus ? `\nThe user only wants clips about: "${c.focus}". Skip anything unrelated, however good.\n` : "";
   const extra = c.instructions ? `\nAdditional instructions from the user:\n${c.instructions}\n` : "";
   return `You are an expert short-form video editor who finds the moments in long videos that go viral on TikTok, YouTube Shorts and Instagram Reels.

@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -41,7 +42,8 @@ export type RemoteFactory = (url: URL, apiKey: string) => Promise<Client>;
 
 export const connectRemote: RemoteFactory = async (url, apiKey) => {
   const client = new Client({ name: "reelsaw-stdio", version: "0" });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${apiKey}` } } }));
+  // the SDK's own transport declares `sessionId: string | undefined` against `sessionId?: string` (exactOptionalPropertyTypes)
+  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { authorization: `Bearer ${apiKey}` } } }) as Transport);
   return client;
 };
 

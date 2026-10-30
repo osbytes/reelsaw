@@ -47,7 +47,7 @@ function Action({ action, quota }: { action: QuotaAction; quota: QuotaRefusal })
 }
 
 /** Sentence plus the upgrade / request / free-space actions the server attached to a quota refusal. */
-export function QuotaNotice({ message, quota, className }: { message: string; quota?: QuotaRefusal; className?: string }) {
+export function QuotaNotice({ message, quota, className }: { message: string; quota?: QuotaRefusal | undefined; className?: string }) {
   return (
     <div className={`flex min-w-0 flex-col gap-2 ${className ?? ""}`}>
       <p className="text-[13px] leading-snug text-err">{message}</p>

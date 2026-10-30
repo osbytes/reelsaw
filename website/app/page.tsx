@@ -22,6 +22,7 @@ import transcriptFixes from "@/public/transcript-fixes.png";
 import workspace from "@/public/workspace.png";
 import { Code, Command } from "@/components/command";
 import { PipelineFilm } from "@/components/pipeline-film";
+import { JsonLd } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { GitHubMark } from "@/components/logo";
@@ -114,7 +115,7 @@ function SectionHeading({ eyebrow, title, body, id }: { eyebrow: string; title: 
   );
 }
 
-function JsonLd() {
+function HomeJsonLd() {
   // The application sits under the source code (targetProduct), not at the top level. Google treats a
   // top-level SoftwareApplication as a rich result candidate, and that requires aggregateRating or
   // review, which an open-source project has no honest source for.
@@ -154,13 +155,13 @@ function JsonLd() {
       },
     ],
   };
-  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;
+  return <JsonLd data={data} />;
 }
 
 export default function HomePage() {
   return (
     <>
-      <JsonLd />
+      <HomeJsonLd />
       <Header />
       <main id="main">
         {/* Hero */}

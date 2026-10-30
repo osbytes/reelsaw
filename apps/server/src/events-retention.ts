@@ -26,7 +26,7 @@ export function retentionCutoff(days: number, now = Date.now()): Date | null {
 
 export interface PruneRow {
   id: number;
-  type?: string;
+  type?: string | undefined;
   createdAt: Date;
 }
 export interface PrunePlan {

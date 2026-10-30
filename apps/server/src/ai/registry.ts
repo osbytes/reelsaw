@@ -127,7 +127,10 @@ export function createAi(
       import("@ai-sdk/gateway"),
     ]);
     const c = (p: string) => credentials.get(p);
-    const key = (p: string) => (c(p).apiKey ? { apiKey: c(p).apiKey } : {});
+    const key = (p: string) => {
+      const apiKey = c(p).apiKey;
+      return apiKey ? { apiKey } : {};
+    };
     const openaiCreds = c("openai");
     const openai = createOpenAI({ ...key("openai"), ...(openaiCreds.baseUrl ? { baseURL: openaiCreds.baseUrl } : {}) });
     // OpenAI itself prefers the Responses API; OpenAI-compatible servers (Ollama, vLLM, LM Studio,
@@ -213,7 +216,7 @@ export function createAi(
     const base = baseURL.replace(/\/+$/, "");
     // admin-entered URLs may carry user:pass@; only the redacted form is ever logged or put in an error
     const shown = redactUrl(base);
-    const headers = apiKey ? { authorization: `Bearer ${apiKey}` } : undefined;
+    const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
     const get = async (path: string) => {
       try {
         return await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(10_000) });

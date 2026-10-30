@@ -56,7 +56,7 @@ export interface CatalogStatus {
 export interface Catalog {
   /** Manifest in force (reads the cache file again when another process changed it). */
   manifest(): Promise<{ manifest: Manifest; source: CatalogSource }>;
-  search(q: string, opts: { kind?: AssetKind; cursor?: string; limit: number }): Promise<{ items: ProviderItem[]; nextCursor?: string }>;
+  search(q: string, opts: { kind?: AssetKind | undefined; cursor?: string | undefined; limit: number }): Promise<{ items: ProviderItem[]; nextCursor?: string }>;
   find(id: string): Promise<{ item: CatalogItem; fileUrl: string; localPath?: string } | undefined>;
   /** Ask `CATALOG_URL` for a newer manifest; never throws. */
   refresh(opts?: { force?: boolean }): Promise<{ changed: boolean; status: CatalogStatus }>;
@@ -67,9 +67,9 @@ export interface CatalogDeps {
   config: Pick<Config, "DATA_DIR" | "REELSAW_VERSION">;
   url: () => string;
   log: Logger;
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   /** where the starter pack lives; default `assets/catalog` next to the server's working directory */
-  bundledDir?: string;
+  bundledDir?: string | undefined;
   now?: () => number;
 }
 

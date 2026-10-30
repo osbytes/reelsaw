@@ -49,7 +49,7 @@ export interface ModelSettings {
    * Save a new override (verified first, all-or-nothing) and apply it here at once. `patch` keys set
    * to null fall back to the environment; an empty result removes the row.
    */
-  set(patch: Partial<Record<ModelKind, string | null>>, actor: { id: string; email: string }): Promise<ModelsState>;
+  set(patch: { [K in ModelKind]?: string | null | undefined }, actor: { id: string; email: string }): Promise<ModelsState>;
   stop(): void;
 }
 

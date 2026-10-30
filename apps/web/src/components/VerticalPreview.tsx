@@ -19,9 +19,9 @@ export interface Framing {
   /** "stack": the speaker is a webcam tile at these bounds; the bottom pane shows the tile alone */
   tile?: ContentRegion;
   /** a crop the user fixed on the first pane (the only pane, the top of a split, the speaker of a stack): shown at its own shape over a blurred copy */
-  crop?: ContentRegion;
+  crop?: ContentRegion | undefined;
   /** a crop the user fixed on the bottom pane of a split */
-  crop2?: ContentRegion;
+  crop2?: ContentRegion | undefined;
 }
 /** What a right-click on the frame landed on: a crop pane, or the top (content) part of a stack. */
 export type PaneHit = 0 | 1 | "top";
@@ -180,7 +180,7 @@ interface Props {
   showSafeZones?: boolean;
   platform?: Platform;
   /** small label in the top-left corner (e.g. which framing is showing) */
-  tag?: string;
+  tag?: string | undefined;
   /** burned-in source text to blur (and keep out of speaker crops), like the renderer */
   overlays?: SourceOverlay[];
   className?: string;

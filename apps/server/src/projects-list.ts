@@ -35,7 +35,7 @@ async function clipFacts(db: Db, projectIds: string[]): Promise<Map<string, Fact
 }
 
 /** `deleted: true` lists only deleted (still restorable) projects; otherwise deleted ones are left out. */
-export type ListInput = { cursor?: string; limit: number; status?: ProjectStatus; deleted?: boolean };
+export type ListInput = { cursor?: string | undefined; limit: number; status?: ProjectStatus | undefined; deleted?: boolean | undefined };
 
 export async function listProjectsPage(db: Db, userId: string, input: ListInput) {
   const P = schema.projects;
@@ -47,7 +47,7 @@ export async function listProjectsPage(db: Db, userId: string, input: ListInput)
     if (!c) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid cursor" });
     conds.push(sql`(${P.updatedAt}, ${P.id}) < (${String(c[0])}::timestamptz, ${String(c[1])})`);
   }
-  const [fetched, [{ total }]] = await Promise.all([
+  const [fetched, [{ total } = { total: 0 }]] = await Promise.all([
     db
       .select({ row: P, ts: sql<string>`${P.updatedAt}::text` })
       .from(P)

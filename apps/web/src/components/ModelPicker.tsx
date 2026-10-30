@@ -263,7 +263,7 @@ function ProviderSummary({
   state: PickerProviderState;
   catalog: PickerProvider;
   onClear: (provider: string) => Promise<unknown>;
-  saving?: boolean;
+  saving?: boolean | undefined;
   onSave: (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => Promise<unknown>;
 }) {
   const [edit, setEdit] = useState(false);
@@ -303,7 +303,7 @@ function ProviderForm({
 }: {
   state: PickerProviderState;
   catalog: PickerProvider;
-  saving?: boolean;
+  saving?: boolean | undefined;
   onSave: (provider: string, patch: { apiKey?: string | null; baseUrl?: string | null }) => Promise<unknown>;
   onClear: (provider: string) => Promise<unknown>;
   compact?: boolean;

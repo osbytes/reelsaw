@@ -19,11 +19,11 @@ export type FailureStage = (typeof FAILURE_STAGES)[number];
 export type FailureKind = "project" | "clip";
 
 export interface FailureFilter {
-  q?: string;
-  stage?: FailureStage;
-  since?: string;
-  cursor?: string;
-  limit?: number;
+  q?: string | undefined;
+  stage?: FailureStage | undefined;
+  since?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
 }
 
 export interface FailureItem {
@@ -256,7 +256,7 @@ export async function retryFailures(
   svc: Services,
   filter: FailureFilter,
   actor: FailureActor | null,
-  opts: { ids?: Array<{ kind: FailureKind; id: string }>; limit?: number } = {},
+  opts: { ids?: Array<{ kind: FailureKind; id: string }> | undefined; limit?: number | undefined } = {},
 ): Promise<RetryResult> {
   const limit = Math.min(FAILURE_PAGE, Math.max(1, opts.limit ?? FAILURE_PAGE));
   let items: FailureItem[];

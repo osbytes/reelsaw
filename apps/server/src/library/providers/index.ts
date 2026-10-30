@@ -41,7 +41,7 @@ export interface ProviderRegistry {
   list(): ProviderInfo[];
   has(id: string): boolean;
   search(id: string, q: string, opts?: Partial<SearchOptions>): Promise<CatalogSearchResult>;
-  resolve(id: string, externalId: string, opts?: { color?: string }): Promise<Resolved>;
+  resolve(id: string, externalId: string, opts?: { color?: string | undefined }): Promise<Resolved>;
 }
 
 export function createProviderRegistry(deps: { settings: () => RuntimeSettings; http: ProviderHttp; catalog: Catalog; now?: () => number }): ProviderRegistry {

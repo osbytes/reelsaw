@@ -22,7 +22,7 @@ export interface Storage {
   ensureLocal(key: string, localPath: string): Promise<string>;
   exists(key: string): Promise<boolean>;
   /** Either a local file path to stream, or a URL to redirect the client to. */
-  resolve(key: string, opts?: { downloadName?: string }): Promise<{ file: string } | { url: string }>;
+  resolve(key: string, opts?: { downloadName?: string | undefined }): Promise<{ file: string } | { url: string }>;
   delete(key: string): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
   /** Up to `limit` objects under `prefix` (keys as passed to the other methods) with their last-modified time. A bounded listing, not a walk of the bucket. */
@@ -170,12 +170,9 @@ class S3Storage implements Storage {
     const { config } = this;
     const client = new sdk.S3Client({
       region: config.S3_REGION,
-      endpoint: config.S3_ENDPOINT,
+      ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
       forcePathStyle: config.S3_FORCE_PATH_STYLE,
-      credentials:
-        config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
-          ? { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY }
-          : undefined,
+      ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY ? { credentials: { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY } } : {}),
     });
     this.client = client;
     this.sdk = sdk;

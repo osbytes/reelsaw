@@ -42,17 +42,17 @@ export interface RefineResult {
   skipped: Array<{ range: CutRange; reason: string }>;
 }
 export interface CutDeps {
-  log?: Logger;
+  log?: Logger | undefined;
   /** called before each verification so long searches show progress (cut index, total, attempt) */
-  onProgress?: (cut: number, total: number, attempt: number) => void;
+  onProgress?: ((cut: number, total: number, attempt: number) => void) | undefined;
   ffmpegPath: string;
   /** transcribe an mp3 buffer; returns words with timestamps relative to the buffer start */
   transcribe: (audio: Buffer) => Promise<Word[]>;
   /** CTC forced alignment (16 kHz float PCM + known words → spans relative to the PCM start) */
   align?: (pcm: Float32Array, words: string[]) => Promise<Array<{ text: string; start?: number; end?: number; score?: number }>>;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   /** spoken language of the transcript; the English-only CTC aligner is skipped for any other */
-  language?: string | null;
+  language?: string | null | undefined;
 }
 
 function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
@@ -158,8 +158,8 @@ export interface Located {
   /** aligned word indices of the first and last deleted word */
   from: number;
   to: number;
-  prevIdx?: number;
-  nextIdx?: number;
+  prevIdx?: number | undefined;
+  nextIdx?: number | undefined;
   /** tokens that differ from the expected words (0 = exact) */
   drift: number;
 }

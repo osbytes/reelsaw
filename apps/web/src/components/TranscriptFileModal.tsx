@@ -16,7 +16,7 @@ export function TranscriptFileModal({ open, onOpenChange, projectId, hasTranscri
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("");
   const imp = useMutation({
-    mutationFn: async ({ file, language }: { file: File; language?: string }) => {
+    mutationFn: async ({ file, language }: { file: File; language?: string | undefined }) => {
       const uploadId = await uploadFile(file);
       return client.projects.importTranscript.mutate({ id: projectId, uploadId, language });
     },

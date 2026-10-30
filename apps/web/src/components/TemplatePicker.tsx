@@ -174,7 +174,7 @@ export interface ApplyAction {
   label: string;
   primary?: boolean;
   disabled?: boolean;
-  title?: string;
+  title?: string | undefined;
   run: (template: Template, mode: ApplyMode) => void | Promise<unknown>;
 }
 
@@ -374,7 +374,7 @@ export function SaveAsTemplateDialog({ open, onOpenChange, layers, range, defaul
 }
 
 /** Project menu → Layer template…: the template new clips of this project start with. */
-export function ProjectTemplateModal({ open, onOpenChange, projectId, templateId }: { open: boolean; onOpenChange: (o: boolean) => void; projectId: string; templateId?: string | null }) {
+export function ProjectTemplateModal({ open, onOpenChange, projectId, templateId }: { open: boolean; onOpenChange: (o: boolean) => void; projectId: string; templateId?: string | null | undefined }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [v, setV] = useState(templateId ?? "");

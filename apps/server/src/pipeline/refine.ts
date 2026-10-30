@@ -114,7 +114,7 @@ export async function mergeRefine(
   svc: Services,
   projectId: string,
   step: RefineStep,
-  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
+  result: { status: "done" | "failed"; error?: string; flags?: TranscriptFlag[]; sceneCuts?: number[]; overlays?: SourceOverlay[]; textProfile?: TextProfile | undefined; skipped?: string; artifact?: { data: unknown; models: Record<string, string> } },
   /** the step job's projects.stage_seq: a superseded step merges nothing and hands nothing to analyze */
   seq?: number,
 ) {

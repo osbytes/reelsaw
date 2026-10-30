@@ -708,7 +708,7 @@ export function createMcpServer(svc: Services, user: AuthUser, access: Pick<Requ
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
   const server = createMcpServer(svc, user, access, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
-  const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  const transport = new StreamableHTTPTransport({ enableJsonResponse: true }) // no sessionIdGenerator: stateless;
   await server.connect(transport);
   return (await transport.handleRequest(c)) ?? c.text("Not found", 404);
 }

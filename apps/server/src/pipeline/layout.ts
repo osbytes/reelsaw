@@ -82,16 +82,16 @@ export interface LayoutDecision {
   /** Smoothed face center per second (normalized x,y), for the following crop. */
   track: Array<{ t: number; x: number; y: number }>;
   /** Second speaker's track for the split layout. */
-  track2?: Array<{ t: number; x: number; y: number }>;
+  track2?: Array<{ t: number; x: number; y: number }> | undefined;
   /** Per-speaker median face heights for split crops (first = track, second = track2). */
-  speakerSizes?: [number, number];
+  speakerSizes?: [number, number] | undefined;
   faceCount: number;
   /** "stack" only: the part of the frame shown on top (FULL_FRAME for a corner webcam over a screen, a region for an app screen or title card beside the speaker) */
-  content?: ContentRegion;
+  content?: ContentRegion | undefined;
   /** content-region detector inputs and outcome, for the debug log */
-  contentSignals?: ContentSignals;
+  contentSignals?: ContentSignals | undefined;
   /** "stack" only: the speaker is a webcam tile at these bounds; the speaker pane shows just the tile */
-  tile?: ContentRegion;
+  tile?: ContentRegion | undefined;
 }
 
 export interface LayoutOptions {
@@ -581,7 +581,7 @@ export interface LayoutDiag {
   voting: number;
   candidates: RunCandidate[];
   /** the decision made for each kept run */
-  decisions: Array<{ start: number; end: number; content: boolean; signals?: ContentSignals }>;
+  decisions: Array<{ start: number; end: number; content: boolean; signals?: ContentSignals | undefined }>;
 }
 export const newLayoutDiag = (): LayoutDiag => ({ frames: 0, voting: 0, candidates: [], decisions: [] });
 
@@ -618,17 +618,17 @@ export type TimelineMode = "auto" | Layout;
  * picks which face the pane follows (pane 1 = the only pane or the top of a split, pane 2 = the bottom).
  */
 export interface SectionAdjust {
-  offsetX?: number;
-  offsetY?: number;
-  offsetX2?: number;
-  offsetY2?: number;
-  subjectX?: number;
-  subjectX2?: number;
+  offsetX?: number | undefined;
+  offsetY?: number | undefined;
+  offsetX2?: number | undefined;
+  offsetY2?: number | undefined;
+  subjectX?: number | undefined;
+  subjectX2?: number | undefined;
   /** a fixed crop for pane 1 / pane 2: exactly this part of the source, instead of a face-sized crop around the followed face */
-  crop?: ContentRegion;
-  crop2?: ContentRegion;
+  crop?: ContentRegion | undefined;
+  crop2?: ContentRegion | undefined;
   /** stack: the part of the frame shown on top, instead of the whole frame or the detected content region */
-  contentCrop?: ContentRegion;
+  contentCrop?: ContentRegion | undefined;
 }
 const ADJUST_NUMBERS = ["offsetX", "offsetY", "offsetX2", "offsetY2", "subjectX", "subjectX2"] as const;
 const ADJUST_REGIONS = ["crop", "crop2", "contentCrop"] as const;
@@ -752,7 +752,7 @@ function shiftDecision(d: LayoutDecision, by: number): LayoutDecision {
 
 export interface ResolvedSegment extends LayoutSegment {
   manual: boolean;
-  adjust?: SectionAdjust;
+  adjust?: SectionAdjust | undefined;
   /** what a subject request came to, per pane */
   subject?: "followed" | "fixed";
   subject2?: "followed" | "fixed";

@@ -247,10 +247,10 @@ export async function clipEditDecision(db: Db, projectId: string, before: ClipRo
 const notBeingForgotten = sql`${schema.userDecisions.projectId} not in (select ${schema.projects.id} from ${schema.projects} where ${schema.projects.forgetDecisionsOnPurge})`;
 
 export interface ListDecisionsInput {
-  kind?: DecisionKind;
-  projectId?: string;
+  kind?: DecisionKind | undefined;
+  projectId?: string | undefined;
   /** id of the last row of the previous page */
-  cursor?: number;
+  cursor?: number | undefined;
   limit?: number;
 }
 
@@ -289,7 +289,7 @@ export async function decisionSummary(db: Db, userId: string) {
 }
 
 /** Delete a user's decisions: one project's (`projectId`) or all of them. Returns how many went. */
-export async function forgetDecisions(db: Db, userId: string, o: { projectId?: string } = {}): Promise<number> {
+export async function forgetDecisions(db: Db, userId: string, o: { projectId?: string | undefined } = {}): Promise<number> {
   const gone = await db
     .delete(schema.userDecisions)
     .where(and(eq(schema.userDecisions.userId, userId), o.projectId ? eq(schema.userDecisions.projectId, o.projectId) : undefined))
@@ -337,7 +337,7 @@ export const EXPORT_MAX = 1000;
  * A page of a user's decisions in export form (oldest first, so an export can resume from `nextCursor`), plus the
  * eval cases they stand for (`decisions/cases.ts`). `reelsaw decisions export` writes the items as JSON lines.
  */
-export async function exportDecisions(db: Db, userId: string, input: { cursor?: number; limit?: number; since?: Date; kind?: DecisionKind } = {}) {
+export async function exportDecisions(db: Db, userId: string, input: { cursor?: number | undefined; limit?: number; since?: Date | undefined; kind?: DecisionKind | undefined } = {}) {
   const limit = Math.min(Math.max(input.limit ?? 200, 1), EXPORT_MAX);
   const rows = await db
     .select()

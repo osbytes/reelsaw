@@ -16,7 +16,7 @@
  * a wrong jump cut is worse than a missed "um".
  */
 import { generateText, Output, type LanguageModel } from "ai";
-import { callSignal, isAbortError } from "./steps.js";
+import { abortOpt, callSignal, isAbortError } from "./steps.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
@@ -65,7 +65,7 @@ export interface DisfluencyOptions {
   log?: Logger;
   signal?: AbortSignal;
   /** save the model passes' units as steps (see DisfluencyCheckpoint) */
-  checkpoint?: DisfluencyCheckpoint;
+  checkpoint?: DisfluencyCheckpoint | undefined;
   /** errors that must end the run, never be skipped as one window's bad answer (a stage timeout, a superseded job) */
   isFatal?: (err: unknown) => boolean;
   /** limit on each model call, ms */
@@ -268,7 +268,7 @@ export async function findModelCandidates(model: LanguageModel, words: Word[], o
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: signal,
+      ...abortOpt(signal),
       output: Output.object({ schema: rewriteSchema, name: "cleaned" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies", recordInputs: false, recordOutputs: false },
       prompt: rewritePrompt(slice.map((w) => w.text).join(" ")),
@@ -361,7 +361,7 @@ export async function verifyCandidates(model: LanguageModel, words: Word[], cand
       model,
       temperature: 0,
       maxRetries: 1,
-      abortSignal: signal,
+      ...abortOpt(signal),
       output: Output.object({ schema: verdictSchema, name: "verdicts" }),
       telemetry: { isEnabled: opts.telemetry ?? false, functionId: "transcribe.disfluencies.verify", recordInputs: false, recordOutputs: false },
       prompt: verifyPrompt(
@@ -416,7 +416,7 @@ export interface DisfluencyTraceEntry {
   certain: boolean;
   prior: number;
   why: string;
-  verdict?: { cut: boolean; confidence: number } | null;
+  verdict?: { cut: boolean; confidence: number } | null | undefined;
   outcome: string;
 }
 

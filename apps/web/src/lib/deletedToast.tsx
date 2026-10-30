@@ -37,9 +37,9 @@ function failToast(err: { message: string }) {
 
 export function showDeletedToast(opts: {
   items: DeletedToastItem[];
-  restorable?: string;
-  storedBytes?: number;
-  canPurge?: boolean;
+  restorable?: string | undefined;
+  storedBytes?: number | undefined;
+  canPurge?: boolean | undefined;
   onUndo: () => Promise<unknown>;
   onPurge: () => Promise<unknown>;
 }) {
@@ -106,7 +106,7 @@ export function useDeletedToast() {
     void qc.invalidateQueries({ queryKey: trpc.search.pathKey() });
     void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
   };
-  return (opts: { items: DeletedToastItem[]; restorable?: string; storedBytes?: number; canPurge?: boolean; afterUndo?: () => void }) => {
+  return (opts: { items: DeletedToastItem[]; restorable?: string | undefined; storedBytes?: number; canPurge?: boolean; afterUndo?: () => void }) => {
     const refs = opts.items.map((i) => ({ kind: i.kind, id: i.id }));
     showDeletedToast({
       items: opts.items,

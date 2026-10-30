@@ -8,7 +8,7 @@ export interface MetaClip {
   layoutOverride: string | null;
   layoutSections?: Array<{ mode: string }>;
   layoutSegments?: Array<{ layout: string }>;
-  bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null;
+  bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null;
   diagnostics?: {
     pauses?: { cuts: number; removedSec: number };
     cuts: { applied: Array<unknown>; skipped: Array<{ start: number; reason: string }> };

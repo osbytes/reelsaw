@@ -14,21 +14,21 @@ export interface RunResult {
   stderr: string;
 }
 export interface RunOptions {
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   /** each complete stderr line (split on \n or \r, so carriage-return progress bars arrive as lines) */
-  onStderr?: (line: string) => void;
+  onStderr?: ((line: string) => void) | undefined;
   /** each complete stdout line; yt-dlp writes its `[download]` progress here, not to stderr */
   onStdout?: (line: string) => void;
   cwd?: string;
 }
 export interface ProbeInfo {
   durationSec: number;
-  width?: number;
-  height?: number;
+  width?: number | undefined;
+  height?: number | undefined;
   hasAudio: boolean;
-  fps?: number;
+  fps?: number | undefined;
   /** frames in the first video stream when the container says (an animated GIF or WebP has more than one) */
-  frames?: number;
+  frames?: number | undefined;
 }
 
 export class CommandError extends Error {
@@ -99,7 +99,7 @@ export function encoderCandidates(requested: EncoderSetting, platform: NodeJS.Pl
 /** Wrapper around the external media binaries (ffmpeg, ffprobe, yt-dlp). */
 export interface MediaTools {
   run(bin: string, args: string[], opts?: RunOptions): Promise<RunResult>;
-  ffmpeg(args: string[], opts?: { signal?: AbortSignal; onProgress?: (sec: number) => void }): Promise<RunResult>;
+  ffmpeg(args: string[], opts?: { signal?: AbortSignal | undefined; onProgress?: (sec: number) => void }): Promise<RunResult>;
   /** the H.264 encoder renders use, decided by `check()` from FFMPEG_ENCODER and a probe */
   encoder(): EncoderChoice;
   /** `-c:v …` for the encoder in use (or a named one, for a software retry after a hardware failure) */

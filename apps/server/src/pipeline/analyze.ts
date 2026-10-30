@@ -365,7 +365,7 @@ export async function analyze(ctx: StageContext) {
     const over = pool.findIndex((k) => overlapRatio(k, c) > 0.3);
     if (over >= 0) {
       fate[i]!.outcome = "overlap";
-      fate[i]!.overlaps = poolIdx[over];
+      fate[i]!.overlaps = poolIdx[over]!;
       continue;
     }
     pool.push(c);

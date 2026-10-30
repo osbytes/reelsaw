@@ -2,9 +2,9 @@
 import { useSyncExternalStore } from "react";
 
 export interface ReportTarget {
-  projectId?: string;
+  projectId?: string | undefined;
   projectTitle?: string;
-  clipId?: string;
+  clipId?: string | undefined;
   /** Opens the report with this already in the box (capacity requests from a quota refusal). */
   prefill?: string;
   tags?: Record<string, string>;

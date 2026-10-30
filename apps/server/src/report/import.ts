@@ -127,9 +127,9 @@ const INJECTION: Array<[RegExp, string]> = [
 
 export interface ImportOptions {
   /** local user to own the project (default: the oldest account) */
-  userEmail?: string;
+  userEmail?: string | undefined;
   /** use this file as the source video instead of downloading it */
-  sourceFile?: string;
+  sourceFile?: string | undefined;
   allowAnyUrl?: boolean;
   noDownload?: boolean;
   allowOnRelease?: boolean;

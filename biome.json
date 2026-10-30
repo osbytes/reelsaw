@@ -6,8 +6,11 @@
       "apps/**/*.{ts,tsx,js,mjs,cjs}",
       "packages/**/*.{ts,tsx,js,mjs,cjs}",
       "scripts/**/*.{ts,js,mjs,cjs}",
+      "website/**/*.{ts,tsx,js,mjs,cjs}",
       "!**/dist",
-      "!**/dist-bundle"
+      "!**/dist-bundle",
+      "!website/.next",
+      "!website/next-env.d.ts"
     ]
   },
   "formatter": { "enabled": false },

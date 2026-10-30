@@ -24,7 +24,7 @@ export interface ReleaseFeed {
 }
 
 /** MCP / CLI shape: the changelog without the heatmap cells. */
-export function listReleasesResult(state: ReleaseFeedState, input: { limit?: number; tag?: string } = {}) {
+export function listReleasesResult(state: ReleaseFeedState, input: { limit?: number; tag?: string | undefined } = {}) {
   const feed = state.feed;
   const limit = input.limit ?? 20;
   const needle = input.tag?.trim().replace(/^v/i, "").toLowerCase();

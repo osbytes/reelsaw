@@ -17,7 +17,7 @@ export interface CatalogModel {
   id: string;
   label: string;
   /** one short line: size, price, family */
-  note?: string;
+  note?: string | undefined;
   /** self-hosted servers: present on disk (false = listed by the registry, can be pulled) */
   installed?: boolean;
   sizeBytes?: number;
@@ -53,12 +53,12 @@ export interface PullJob {
 }
 
 export interface ModelCatalog {
-  list(kind: CatalogKind, opts?: { refresh?: boolean }): Promise<CatalogProvider[]>;
+  list(kind: CatalogKind, opts?: { refresh?: boolean | undefined }): Promise<CatalogProvider[]>;
   /**
    * Try credentials before they are saved: list the provider's models with them. Returns how many
    * models answered per kind, or the error the provider gave (bad key, unreachable server).
    */
-  probe(provider: string, creds: { apiKey?: string; baseUrl?: string }): Promise<{ ok: boolean; language: number; transcription: number; error?: string }>;
+  probe(provider: string, creds: { apiKey?: string | undefined; baseUrl?: string | undefined }): Promise<{ ok: boolean; language: number; transcription: number; error?: string }>;
   /** Start a download on a self-hosted server; one per model at a time. Returns the job to poll. */
   pull(provider: string, model: string): Promise<PullJob>;
   pulls(): PullJob[];
@@ -156,7 +156,7 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
     }
   }
 
-  async function cloud(provider: string, kind: CatalogKind, override?: { apiKey?: string }): Promise<CatalogProvider> {
+  async function cloud(provider: string, kind: CatalogKind, override?: { apiKey?: string | undefined }): Promise<CatalogProvider> {
     const title = TITLES[provider] ?? provider;
     const apiKey = override?.apiKey ?? keyFor(provider);
     const out: CatalogProvider = { provider, title, kind, available: !!apiKey, source: "live", models: [] };
@@ -226,7 +226,7 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
     return out;
   }
 
-  async function providerFor(provider: string, kind: CatalogKind, override?: { apiKey?: string; baseUrl?: string }): Promise<CatalogProvider> {
+  async function providerFor(provider: string, kind: CatalogKind, override?: { apiKey?: string | undefined; baseUrl?: string | undefined }): Promise<CatalogProvider> {
     const creds = override ?? credentials.get(provider);
     if (provider === "openai" && creds.baseUrl) return selfHosted("openai", creds.baseUrl, creds.apiKey, kind);
     if (provider === compat) {

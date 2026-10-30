@@ -102,7 +102,7 @@ export interface SearchInput {
    * Link needles (a YouTube id, or host + path): projects whose source link contains one of them, so the
    * client can tell whether a pasted link already has a project. The client decides which candidates really match.
    */
-  links?: string[];
+  links?: string[] | undefined;
 }
 
 export async function searchLibrary(db: Db, userId: string, input: SearchInput) {

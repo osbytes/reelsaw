@@ -95,7 +95,7 @@ export const bumperNameSchema = z.string().trim().min(1).max(120);
  * Assets are otherwise immutable; the normalised file is named by its seconds, so projects pick up a new length on
  * their next render. A name is only a label: nothing re-renders.
  */
-export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string; imageSeconds?: number; tags?: string[] }) {
+export async function updateBumperAsset(svc: Services, userId: string, id: string, patch: { name?: string | undefined; imageSeconds?: number | undefined; tags?: string[] | undefined }) {
   if (patch.name === undefined && patch.imageSeconds === undefined && patch.tags === undefined) throw new TRPCError({ code: "BAD_REQUEST", message: "Give a name, imageSeconds or tags" });
   return svc.tx(async (u) => {
     const [a] = await u.db.select().from(schema.assets).where(and(eq(schema.assets.id, id), assetVisibleTo(userId))).for("update");
@@ -135,10 +135,10 @@ export interface CreateAssetInput {
   /** the account whose upload holds the bytes (and who is importing, for a shared row) */
   actorId: string;
   uploadId: string;
-  imageSeconds?: number;
-  setDefault?: "intro" | "outro";
-  name?: string;
-  tags?: string[];
+  imageSeconds?: number | undefined;
+  setDefault?: "intro" | "outro" | undefined;
+  name?: string | undefined;
+  tags?: string[] | undefined;
   provenance?: AssetProvenance;
   system?: boolean;
 }
@@ -265,7 +265,7 @@ export async function createAsset(svc: Services, input: CreateAssetInput): Promi
 }
 
 /** `library.add` takes exactly one source: an upload, a link, or a catalog / provider result (provider + externalId together). */
-export function requireOneSource(i: { url?: string; uploadId?: string; provider?: string; externalId?: string }) {
+export function requireOneSource(i: { url?: string | undefined; uploadId?: string | undefined; provider?: string | undefined; externalId?: string | undefined }) {
   if (!!i.provider !== !!i.externalId) throw new Error("provider and externalId go together");
   if ([i.url, i.uploadId, i.provider].filter(Boolean).length !== 1) throw new Error("Give exactly one of uploadId, url or provider + externalId");
 }
@@ -305,7 +305,7 @@ export async function insertUploadWithinQuota(svc: Services, row: typeof schema.
  * Download `url` into the uploads table exactly as POST /api/upload would (same storage key, same row), so
  * `bumpers.create` takes it from there with its own type, size and ffprobe checks. Max 50 MB, 60 s, 3 redirects.
  */
-export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string; ext?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
+export async function downloadAsUpload(svc: Services, userId: string, url: string, deps: FetchDeps & { name?: string | undefined; ext?: string } = {}): Promise<{ uploadId: string; filename: string; sizeBytes: number }> {
   const lookup = deps.lookup ?? (async (h: string) => (await dnsLookup(h, { all: true })).map((a) => a.address));
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   // resolved once, checked, and connected to at that address, hop by hop (lib/safe-url.ts): a name cannot rebind to a private address in between
@@ -392,8 +392,8 @@ export interface EffectiveSlot {
  * settings (a snapshot of the user's default at creation unless changed since). Seconds fall back to the asset's own length.
  */
 export function effectiveBumpers(
-  project: { introAssetId?: string | null; outroAssetId?: string | null; introSec?: number; outroSec?: number },
-  clip: { bumpers?: { intro?: string | null; outro?: string | null; introSec?: number; outroSec?: number } | null },
+  project: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined },
+  clip: { bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined; introSec?: number | undefined; outroSec?: number | undefined } | null },
   assets: Map<string, AssetRef>,
 ): Record<Slot, EffectiveSlot> {
   const r = resolveClipBumpers(project, clip);
@@ -461,7 +461,7 @@ export interface ProjectBumperSummary {
 export async function projectBumperSummaries(
   db: Db,
   userId: string,
-  projects: { id: string; settings: { introAssetId?: string | null; outroAssetId?: string | null } | null; clips: { bumpers?: { intro?: string | null; outro?: string | null } | null }[] }[],
+  projects: { id: string; settings: { introAssetId?: string | null | undefined; outroAssetId?: string | null | undefined } | null; clips: { bumpers?: { intro?: string | null | undefined; outro?: string | null | undefined } | null }[] }[],
 ): Promise<Map<string, ProjectBumperSummary>> {
   const coverage = new Map<string, BumperCoverage>(projects.map((p) => [p.id, bumperCoverage(p, p.clips)]));
   const ids = new Set<string>();

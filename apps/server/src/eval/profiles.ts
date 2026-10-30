@@ -18,7 +18,7 @@ interface MatrixFile {
 }
 
 /** Profiles from `--matrix file` (optionally filtered by `--profiles a,b`) and/or one ad-hoc profile from `--set K=V`. */
-export function parseProfiles(opts: { matrix?: string; profiles?: string; set: string[] }): Profile[] {
+export function parseProfiles(opts: { matrix?: string | undefined; profiles?: string | undefined; set: string[] }): Profile[] {
   const out: Profile[] = [];
   if (opts.matrix) {
     const parsed = JSON.parse(readFileSync(path.resolve(opts.matrix), "utf8")) as MatrixFile;

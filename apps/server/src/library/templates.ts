@@ -63,7 +63,7 @@ const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `No such laye
  * One keyset page of the account's templates, newest change first (`items`, `nextCursor`, `total` of all live ones), and
  * the ones removed in the last 30 days (restorable; at most 200, newest first).
  */
-export async function listLayerTemplates(db: Db, userId: string, opts: { limit?: number; cursor?: string } = {}) {
+export async function listLayerTemplates(db: Db, userId: string, opts: { limit?: number; cursor?: string | undefined } = {}) {
   const T = schema.layerTemplates;
   const limit = opts.limit ?? LIST_LIMIT_DEFAULT;
   const cur = pageCursor(opts.cursor, 2);
@@ -133,7 +133,7 @@ function checkTemplateLayers(layers: TemplateLayer[]) {
   }
 }
 
-export async function createLayerTemplate(svc: Services, userId: string, input: { name: string; layers: TemplateLayer[]; bumpers?: TemplateBumpers | null }) {
+export async function createLayerTemplate(svc: Services, userId: string, input: { name: string; layers: TemplateLayer[]; bumpers?: TemplateBumpers | null | undefined }) {
   checkTemplateLayers(input.layers);
   const bumpers = storedBumpers(input.bumpers);
   return svc.tx(async (u) => {
@@ -145,7 +145,7 @@ export async function createLayerTemplate(svc: Services, userId: string, input: 
 }
 
 /** `bumpers`: undefined = unchanged, null = the template sets no intro / outro, an object replaces the template's choice. */
-export async function updateLayerTemplate(svc: Services, userId: string, id: string, patch: { name?: string; layers?: TemplateLayer[]; bumpers?: TemplateBumpers | null }) {
+export async function updateLayerTemplate(svc: Services, userId: string, id: string, patch: { name?: string | undefined; layers?: TemplateLayer[] | undefined; bumpers?: TemplateBumpers | null | undefined }) {
   if (patch.layers) checkTemplateLayers(patch.layers);
   const bumpers = patch.bumpers === undefined ? undefined : storedBumpers(patch.bumpers);
   return svc.tx(async (u) => {
@@ -245,7 +245,7 @@ export interface ApplyResult {
  * re-rendered when finished. One transaction: clips locked in id order (like lockProjectClips), asset refs rewritten
  * with the layers. A clip still being prepared has no final bounds and is skipped with a reason.
  */
-export async function applyLayerTemplate(svc: Services, userId: string, input: { templateId: string; projectId: string; clipIds?: string[]; mode: "replace" | "add"; rerender: boolean }): Promise<ApplyResult> {
+export async function applyLayerTemplate(svc: Services, userId: string, input: { templateId: string; projectId: string; clipIds?: string[] | undefined; mode: "replace" | "add"; rerender: boolean }): Promise<ApplyResult> {
   const log = svc.log.child({ module: "templates", userId, projectId: input.projectId, templateId: input.templateId });
   return svc.tx(async (u) => {
     const [p] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt)));
@@ -330,7 +330,7 @@ export function bumpersForNewClip(template: NewClipTemplate | null, own: ClipBum
  * A template's intro / outro after a CLI-style change: per slot "keep" = the template leaves clips' own choice alone,
  * "none" = no intro / outro, an id = that asset; a slot not mentioned stays as it is. Seconds go with the slot.
  */
-export function templateBumpersWith(cur: TemplateBumpers | null, change: { intro?: string; outro?: string; introSec?: number; outroSec?: number }): TemplateBumpers | null {
+export function templateBumpersWith(cur: TemplateBumpers | null, change: { intro?: string | undefined; outro?: string | undefined; introSec?: number | undefined; outroSec?: number | undefined }): TemplateBumpers | null {
   const next: TemplateBumpers = { ...(cur ?? {}) };
   for (const s of ["intro", "outro"] as const) {
     const choice = change[s];

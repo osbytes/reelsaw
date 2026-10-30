@@ -331,9 +331,9 @@ export function SlotRow({
   fixed: FixedOption[];
   assets: LibraryAsset[];
   known: LibraryAsset[];
-  defaultId?: string | null;
+  defaultId?: string | null | undefined;
   /** the asset a "follow the project / default" choice ends up using */
-  inheritedId?: string | null;
+  inheritedId?: string | null | undefined;
   /** seconds may be set even when the choice is "default" (the project modal) */
   secOnInherit?: boolean;
 }) {
@@ -395,7 +395,7 @@ function TagEditor({ asset: a, busy, onTags }: { asset: Pick<LibraryAsset, "name
 }
 
 /** Intro / outro / delete, in the same order on the card and in the viewer. */
-function AssetActions({ asset: a, introId, outroId, busy, onUse, onDelete, withLabels = false }: { asset: LibraryAsset; introId?: string; outroId?: string; busy: boolean; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; withLabels?: boolean }) {
+function AssetActions({ asset: a, introId, outroId, busy, onUse, onDelete, withLabels = false }: { asset: LibraryAsset; introId?: string | undefined; outroId?: string | undefined; busy: boolean; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; withLabels?: boolean }) {
   const slotBtn = (slot: "intro" | "outro", on: boolean) => (
     <button type="button" className={`btn-ghost justify-center px-1 py-1 text-xs ${on ? "!bg-acc-soft !text-acc-text" : ""}`} disabled={busy || a.kind === "audio"} aria-pressed={on} aria-label={on ? `Stop using ${a.name} as the default ${slot}` : `Use ${a.name} as the default ${slot}`} title={a.kind === "audio" ? "Music goes under a clip (editor → Overlays → Music), not before or after it" : on ? `Not the default ${slot}` : `Use as ${slot}`} onClick={() => onUse(slot)}>
       {on ? "● " : ""}
@@ -481,7 +481,7 @@ export function StatusLine({ asset: a, isIntro, isOutro, applied }: { asset: Lib
 }
 
 /** Click a thumbnail: the item at full size (a video plays with sound), its facts and the card's actions. Esc or a click outside closes. */
-export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onDelete, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string; outroId?: string; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; onRename: (name: string) => void }) {
+export function AssetLightbox({ asset: a, introId, outroId, busy, onClose, onUse, onDelete, onRename, onTags }: { onTags: (tags: string[]) => void; asset: LibraryAsset | null; introId?: string | undefined; outroId?: string | undefined; busy: boolean; onClose: () => void; onUse: (slot: "intro" | "outro") => void; onDelete: () => void; onRename: (name: string) => void }) {
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -656,7 +656,7 @@ export const effectiveSeconds = (clipSec: number | undefined, ownChoice: string 
  * Intro and Outro rows for one clip or a selection of clips: Project default (name) / None / each library asset.
  * `template`: a layer template's slots instead (Clip's own / None / each asset; there is no project to follow).
  */
-export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false, template = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null; projectOutroId?: string | null; className?: string; keep?: boolean; reserveSec?: boolean; template?: boolean }) {
+export function BumperSelects({ value, onChange, projectIntroId, projectOutroId, className = "", keep = false, reserveSec = false, template = false }: { value: SlotChoices; onChange: (v: SlotChoices) => void; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined; className?: string; keep?: boolean; reserveSec?: boolean; template?: boolean }) {
   const library = useBumperLibrary();
   const defaults = useMe().data?.projectDefaults;
   // music is for the audio lane, never a slot
@@ -698,7 +698,7 @@ export function BumperSelects({ value, onChange, projectIntroId, projectOutroId,
 }
 
 /** "Intro / outro…" from a clip card's ⋯ menu: this clip's own choice without opening the editor. */
-export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId }: { open: boolean; onOpenChange: (o: boolean) => void; clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null; projectOutroId?: string | null }) {
+export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpers, rendered, projectIntroId, projectOutroId }: { open: boolean; onOpenChange: (o: boolean) => void; clipId: string; projectId: string; bumpers: ClipBumpers | null | undefined; rendered: boolean; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [v, setV] = useState<SlotChoices>(choicesFrom(bumpers));
@@ -741,7 +741,7 @@ export function ClipBumpersDialog({ open, onOpenChange, clipId, projectId, bumpe
 }
 
 /** Applies an intro and/or outro to every selected clip (the selection bar's ⋯ menu). Slots left on "Leave as it is" are untouched. Pass `open` to drive it from that menu; otherwise it renders its own button. */
-export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className, open: openProp, onOpenChange }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null; projectOutroId?: string | null; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function BulkBumpersPopover({ projectId, clipIds, rerenderable, projectIntroId, projectOutroId, onDone, className, open: openProp, onOpenChange }: { projectId: string; clipIds: string[]; rerenderable: number; projectIntroId?: string | null | undefined; projectOutroId?: string | null | undefined; onDone: () => void; className?: string; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [inner, setInner] = useState(false);
@@ -829,8 +829,8 @@ export function ProjectBumpersModal({
   clipCount: number;
   introId: string | null | undefined;
   outroId: string | null | undefined;
-  introSec?: number;
-  outroSec?: number;
+  introSec?: number | undefined;
+  outroSec?: number | undefined;
 }) {
   const trpc = useTRPC();
   const qc = useQueryClient();

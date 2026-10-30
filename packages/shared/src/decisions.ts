@@ -24,16 +24,16 @@ export type DecisionKind = (typeof DECISION_KINDS)[number];
  */
 export interface SourceRef {
   type: "url" | "upload";
-  url?: string;
+  url?: string | undefined;
   /** yt-dlp extractor_key, e.g. Youtube */
-  extractor?: string;
+  extractor?: string | undefined;
   /** the platform's id for the video */
-  videoId?: string;
+  videoId?: string | undefined;
   /** yt-dlp format_id of the download */
-  formatId?: string;
-  durationSec?: number;
+  formatId?: string | undefined;
+  durationSec?: number | undefined;
   /** sha256 of the stored source file, hex */
-  sha256?: string;
-  title?: string;
-  uploader?: string;
+  sha256?: string | undefined;
+  title?: string | undefined;
+  uploader?: string | undefined;
 }

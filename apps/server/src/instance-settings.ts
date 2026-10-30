@@ -108,7 +108,7 @@ export type RuntimeKey = keyof typeof RUNTIME_SETTINGS;
 export const RUNTIME_KEYS = Object.keys(RUNTIME_SETTINGS) as RuntimeKey[];
 /** The settings in force, typed like the environment they default from. */
 export type RuntimeSettings = Pick<Config, RuntimeKey>;
-export type SettingsPatch = { [K in RuntimeKey]?: z.infer<(typeof RUNTIME_SETTINGS)[K]["schema"]> | null };
+export type SettingsPatch = { [K in RuntimeKey]?: z.infer<(typeof RUNTIME_SETTINGS)[K]["schema"]> | null | undefined };
 
 /** A patch as the API takes it: each key optional; null = back to the environment. Descriptions double as tool docs. */
 export const settingsPatchSchema = z.object(Object.fromEntries(RUNTIME_KEYS.map((k) => [k, RUNTIME_SETTINGS[k].schema.nullable().optional().describe(RUNTIME_SETTINGS[k].help)])) as { [K in RuntimeKey]: z.ZodOptional<z.ZodNullable<(typeof RUNTIME_SETTINGS)[K]["schema"]>> });

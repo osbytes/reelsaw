@@ -60,12 +60,12 @@ const TIMEOUT_MIN = Number(flagValue("timeout-min") ?? 90);
 const STAGES = ["ingest", "transcribe", "refine", "analyze", "render"] as const;
 
 interface LlmLine {
-  stage?: string;
-  call?: string;
+  stage?: string | undefined;
+  call?: string | undefined;
   model: string;
-  provider?: string;
+  provider?: string | undefined;
   ms: number;
-  usage?: { input: number; output: number };
+  usage?: { input: number; output: number } | undefined;
   failed: boolean;
 }
 

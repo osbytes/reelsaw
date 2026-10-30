@@ -1,6 +1,6 @@
 // Recent client-side errors for issue reports: uncaught errors, unhandled rejections and
 // console.error/warn, kept in a small ring buffer in memory (never sent anywhere on their own).
-type Entry = { at: string; kind: string; message: string; stack?: string };
+type Entry = { at: string; kind: string; message: string; stack?: string | undefined };
 const MAX = 100;
 const buf: Entry[] = [];
 

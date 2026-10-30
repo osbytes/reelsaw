@@ -84,7 +84,7 @@ export function BumperCombobox({
   assets: PickerAsset[];
   known?: PickerAsset[];
   /** the user's default asset for this slot, badged in the list */
-  defaultId?: string | null;
+  defaultId?: string | null | undefined;
   /** what is being picked ("intro", "outro", "overlay"): names the search box and the default badge */
   slot: string;
   label: string;
@@ -136,7 +136,7 @@ export function BumperCombobox({
           // above the dialogs and popovers it lives in
           className="z-[80] w-[max(var(--radix-popover-trigger-width),18rem)] max-w-[calc(100vw-24px)] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop"
         >
-          <Command loop shouldFilter={false} value={undefined}>
+          <Command loop shouldFilter={false}>
             <Command.Input value={q} onValueChange={setQ} placeholder={`Search ${slot}s…`} className="w-full border-b border-line bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-ink3" />
             <ScrollArea className="max-h-[min(320px,calc(var(--radix-popover-content-available-height)-60px))]">
               <Command.List className="p-1">

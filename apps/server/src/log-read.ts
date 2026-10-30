@@ -15,11 +15,11 @@ export interface LogQuery {
   /** keep lines mentioning any of these (project, clip, job, request ids) */
   ids?: string[];
   /** drop lines older than this */
-  since?: Date;
+  since?: Date | undefined;
   /** drop lines below this level (`debug`, `warn`, ...) */
-  minLevel?: keyof typeof LEVEL_NUM;
+  minLevel?: keyof typeof LEVEL_NUM | undefined;
   /** keep one module's lines (`render`, `http`, ...) */
-  module?: string;
+  module?: string | undefined;
   /** keep at most this many (the newest) */
   limit?: number;
 }

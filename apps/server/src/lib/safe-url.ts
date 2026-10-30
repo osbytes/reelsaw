@@ -87,7 +87,7 @@ export interface SafeUrlOptions {
   /** Self-hosters who ingest from a LAN NAS turn the check off (ALLOW_PRIVATE_SOURCE_URLS). */
   allowPrivate?: boolean;
   /** Injectable for tests. */
-  lookup?: (host: string) => Promise<Array<{ address: string }>>;
+  lookup?: ((host: string) => Promise<Array<{ address: string }>>) | undefined;
 }
 
 /**
@@ -135,7 +135,7 @@ export interface PublicResponse {
   ok: boolean;
   status: number;
   headers: { get(name: string): string | null };
-  body: { cancel(): Promise<void>; getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> } } | null;
+  body: { cancel(): Promise<void>; getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array | undefined }>; cancel(): Promise<void> } } | null;
 }
 
 /** The body's chunks, in order. Stops reading (and the download) if the consumer stops. */
@@ -159,7 +159,7 @@ export interface FetchPublicOptions extends SafeUrlOptions {
   signal?: AbortSignal;
   headers?: Record<string, string>;
   /** Injectable for tests: called instead of the network with the validated URL (and the pinned address). */
-  fetch?: (url: URL, init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string> }, pinned: string | null) => Promise<PublicResponse>;
+  fetch?: ((url: URL, init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string> }, pinned: string | null) => Promise<PublicResponse>) | undefined;
 }
 
 /** A dispatcher that connects to `address` whatever the hostname resolves to now; TLS still checks the certificate against the hostname. */
@@ -189,7 +189,7 @@ export async function fetchPublic(raw: string, opts: FetchPublicOptions = {}): P
   let next = raw;
   for (let hop = 0; ; hop++) {
     const { url, address } = await resolvePublicHttpUrl(next, opts);
-    const init = { redirect: "manual" as const, signal: opts.signal, headers: opts.headers };
+    const init = { redirect: "manual" as const, ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.headers ? { headers: opts.headers } : {}) };
     // one agent per hop: close() lets the in-flight request (and the body the caller reads) finish, then frees the sockets
     const agent = !opts.fetch && address ? pinnedAgent(address) : undefined;
     const closeAgent = () => void agent?.close().catch(() => undefined);
