@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.29.1
+
+### Patch Changes
+
+- [#210](https://github.com/osbytes/reelsaw/pull/210) [`dcc6db2`](https://github.com/osbytes/reelsaw/commit/dcc6db29a6ce29ebe47f99fdcc81d6ff73558d73) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Release images build again with the Sentry source map upload on: the build stage now has CA certificates, so `sentry-cli` can reach Sentry. A failed upload (Sentry unreachable, a bad token) now prints a warning and the release goes on without maps instead of failing.
+
 ## 0.29.0
 
 ### Minor Changes
