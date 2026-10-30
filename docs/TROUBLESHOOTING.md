@@ -452,8 +452,9 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
   nothing in flight goes ahead of another user's backlog, and one user's jobs stay first-come first-served. The
   priority is fixed at enqueue: a backlog queued before a second user arrived keeps its place only for the jobs
   already ahead. Jobs a person asked for (create, retry, re-render, new clip, from the UI, MCP or `--user` CLI calls)
-  also carry `data.by = "user"` and are refused past `MAX_LIVE_JOBS_PER_USER` ("You have 12 jobs queued or
-  running…") or `MAX_RERENDERS_PER_HOUR` (renders, new clips and re-analyze / refine runs); pipeline hand-offs and the reconciler are never refused. Both are
+  also carry `data.by = "user"` and are refused past `MAX_LIVE_JOBS_PER_USER` ("You have 12 requests queued or
+  running…"; only `by = "user"` jobs count, so a project's own transcribe/analyze/render hand-offs never block the
+  owner's next request) or `MAX_RERENDERS_PER_HOUR` (renders, new clips and re-analyze / refine runs); pipeline hand-offs and the reconciler are never refused. Both are
   counted from `pgboss.job` under a per-user advisory lock in the same transaction as the enqueue, so replicas
   agree. Jobs queued before this change have no `userId` and are not counted. See one account with
   `reelsaw limits <email>`; inspect the queue with

@@ -122,6 +122,8 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     // to sign-in with the password they just chose. Leaving for a fresh form is where a password
     // manager offers a new strong password, and that sign-in then fails.
     if (mode === "signup" && res.data && res.data.token == null) {
+      // the account exists: count it, or the funnel loses every sign-up that has to confirm an email first
+      track("signup_completed", { plan: plan ?? undefined, confirm_email: true });
       const text = signupCreatedNotice(signupMode);
       setBusy(false);
       setCaptchaToken(null);

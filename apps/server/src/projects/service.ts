@@ -13,7 +13,8 @@ import { z } from "zod";
 import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { REFINE_STEPS, adjustOf, bumperSecondsSchema, formatBytes, projectSettingsSchema, styleOverrideSchema, styleSchema, type ClearableSetting, type CreateProjectInput, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
-import { checkProjectQuota, checkRestoreQuota, projectStoredBytes, recordProjectCreated } from "../quota.js";
+import { checkAnnouncedMinutes, checkProjectQuota, checkRestoreQuota, hasMinuteLimits, projectStoredBytes, recordProjectCreated } from "../quota.js";
+import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
@@ -29,7 +30,7 @@ import { enqueueRefine, REFINE_QUEUE } from "../pipeline/refine.js";
 import { resolveProjectSettings, userDefaults } from "../pipeline/settings.js";
 import { syncProjectRefs } from "../library/refs.js";
 import { assetVisibleTo } from "../library/visible.js";
-import { peekUrlMeta } from "./peek.js";
+import { announcedDuration, peekUrlMeta } from "./peek.js";
 import { runFacts } from "../pipeline/common.js";
 import { deadlineIn, keysetLoop } from "../lib/batch.js";
 import { getLayerTemplate } from "../library/templates.js";
@@ -649,7 +650,9 @@ export async function createProject(svc: Services, userId: string, input: Create
     sourceMeta = { uploadId: up.id, filename: up.filename };
     title ||= up.filename.replace(/\.[^.]+$/, "");
   } else if (input.sourceUrl) {
-    const peek = await peekUrlMeta(input.sourceUrl);
+    const [peek, announced] = await Promise.all([peekUrlMeta(input.sourceUrl), announcedMinutesFor(svc, userId, input.sourceUrl, log)]);
+    // a video the account's minutes cannot cover is refused here, with the upgrade offer, not created and failed by ingest
+    if (announced) await checkAnnouncedMinutes(db, svc.settings.get(), userId, announced, svc.entitlements).catch(quotaReached);
     sourceMeta = { ...(peek.thumbnail ? { thumbnail: peek.thumbnail } : {}), ...(peek.uploader ? { uploader: peek.uploader } : {}) };
     title ||= peek.title ?? "";
   }
@@ -674,6 +677,24 @@ export async function createProject(svc: Services, userId: string, input: Create
     return row;
   });
 }
+
+/**
+ * The length a link announces, in seconds, looked up only when the account has a minutes limit (no lookup, no wait, for
+ * everyone else). Null when the site does not say, the link is not a public address, or the lookup is slow or fails:
+ * ingest checks again before downloading and on the file itself.
+ */
+async function announcedMinutesFor(svc: Services, userId: string, url: string, log: Services["log"]): Promise<number | null> {
+  if (!(await hasMinuteLimits(svc.database.db, svc.settings.get(), userId, svc.entitlements))) return null;
+  try {
+    await assertPublicHttpUrl(url, { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
+    return await announcedDuration(svc.media, url, AbortSignal.timeout(ANNOUNCED_LOOKUP_MS));
+  } catch (err) {
+    log.debug({ err }, "could not look up the video's length before creating the project");
+    return null;
+  }
+}
+/** How long creating a project from a link may wait for the site to say how long the video is. */
+const ANNOUNCED_LOOKUP_MS = 12_000;
 
 /** Resume a project from its furthest completed stage (the Retry button, retry_project, `reelsaw retry`). */
 export async function retryOwnedProject(svc: Services, actor: Actor, projectId: string) {
