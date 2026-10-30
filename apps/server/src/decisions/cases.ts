@@ -19,7 +19,17 @@ export const exportedDecisionSchema = z.object({
   context: z.record(z.string(), z.unknown()),
   models: z.record(z.string(), z.string()).default({}),
   source: z
-    .object({ type: z.enum(["url", "upload"]), url: z.string(), extractor: z.string(), videoId: z.string(), formatId: z.string(), durationSec: z.number(), sha256: z.string(), title: z.string(), uploader: z.string() })
+    .object({
+      type: z.enum(["url", "upload"]),
+      url: z.string(),
+      extractor: z.string(),
+      videoId: z.string(),
+      formatId: z.string(),
+      durationSec: z.number(),
+      sha256: z.string(),
+      title: z.string(),
+      uploader: z.string(),
+    })
     .partial(),
   appVersion: z.string().optional(),
   createdAt: z.string(),
@@ -69,11 +79,24 @@ export function disfluencyCaseOf(d: ExportedDecision): DisfluencyCase | null {
   if (!ctx) return null;
   const manual = ctx.subkind === "manual";
   const expect: "cut" | "keep" | null =
-    d.kind === "fix.accept" && !manual ? "cut" : d.kind === "fix.reject" && !manual ? "keep" : d.kind === "fix.delete" && !manual ? "keep" : d.kind === "fix.manual" ? "cut" : null;
+    d.kind === "fix.accept" && !manual
+      ? "cut"
+      : d.kind === "fix.reject" && !manual
+        ? "keep"
+        : d.kind === "fix.delete" && !manual
+          ? "keep"
+          : d.kind === "fix.manual"
+            ? "cut"
+            : null;
   if (!expect) return null;
   const { words, target } = ctx;
   const said = words.slice(target.index, target.index + target.span).map((w) => w.text);
-  const slug = said.join("-").toLowerCase().replace(/[^a-z0-9-]+/g, "").slice(0, 40) || "span";
+  const slug =
+    said
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "")
+      .slice(0, 40) || "span";
   const at = words[target.index]!.start;
   return {
     id: `d${d.id}-${slug}`,
@@ -97,7 +120,16 @@ export function disfluencyCaseOf(d: ExportedDecision): DisfluencyCase | null {
 export function caseKey(c: Pick<DisfluencyCase, "words" | "target">): string {
   const a = Math.max(0, c.target.index - 6);
   const b = c.target.index + c.target.span + 6;
-  return `${c.words.slice(a, c.target.index).map((w) => w.text).join(" ")}[${c.words.slice(c.target.index, c.target.index + c.target.span).map((w) => w.text).join(" ")}]${c.words.slice(c.target.index + c.target.span, b).map((w) => w.text).join(" ")}`.toLowerCase();
+  return `${c.words
+    .slice(a, c.target.index)
+    .map((w) => w.text)
+    .join(" ")}[${c.words
+    .slice(c.target.index, c.target.index + c.target.span)
+    .map((w) => w.text)
+    .join(" ")}]${c.words
+    .slice(c.target.index + c.target.span, b)
+    .map((w) => w.text)
+    .join(" ")}`.toLowerCase();
 }
 
 /**

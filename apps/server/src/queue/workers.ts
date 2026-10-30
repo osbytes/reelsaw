@@ -26,7 +26,10 @@ type Job<T> = { id: string; data: T; retryCount: number; signal: AbortSignal };
  */
 async function previousAttempt(svc: Services, jobId: string): Promise<string | undefined> {
   try {
-    const r = await svc.database.pool.query<{ output: { message?: string; value?: { message?: string } } | null }>("select output from pgboss.job where id = $1", [jobId]);
+    const r = await svc.database.pool.query<{ output: { message?: string; value?: { message?: string } } | null }>(
+      "select output from pgboss.job where id = $1",
+      [jobId],
+    );
     const o = r.rows[0]?.output;
     const msg = o?.message ?? o?.value?.message;
     return msg ? String(msg).slice(0, 500) : undefined;
@@ -94,7 +97,13 @@ async function measured<T>(svc: Services, stage: string, scope: { projectId: str
     if (outcome === "ok") {
       void mediaSeconds(svc, scope.projectId, scope.clipId).then((media) => {
         if (media === null) return;
-        histogram("reelsaw.pipeline.media.duration", media, "s", attrs, "Seconds of media a finished stage job covered (source length; clip length for prepare and render)");
+        histogram(
+          "reelsaw.pipeline.media.duration",
+          media,
+          "s",
+          attrs,
+          "Seconds of media a finished stage job covered (source length; clip length for prepare and render)",
+        );
         const rtf = realtimeFactor(sec, media);
         if (rtf !== null) histogram("reelsaw.pipeline.realtime_factor", rtf, "1", attrs, "Stage wall seconds per second of media; 1 = as long as the video");
       });
@@ -103,7 +112,10 @@ async function measured<T>(svc: Services, stage: string, scope: { projectId: str
 }
 
 function runTracked<T>(job: Job<ProjectJob>, queue: QueueName, extra: { clipId?: string }, fn: () => Promise<T>): Promise<T> {
-  return trackJob({ jobId: job.id, queue, projectId: job.data.projectId, ...(extra.clipId ? { clipId: extra.clipId } : {}), startedAt: new Date().toISOString() }, fn);
+  return trackJob(
+    { jobId: job.id, queue, projectId: job.data.projectId, ...(extra.clipId ? { clipId: extra.clipId } : {}), startedAt: new Date().toISOString() },
+    fn,
+  );
 }
 
 /**
@@ -131,7 +143,10 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
     return runTracked(job, queue, {}, async () => {
       try {
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
-        log.info({ attempt, maxAttempts: max + 1, seq, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
+        log.info(
+          { attempt, maxAttempts: max + 1, seq, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) },
+          job.retryCount ? "job retry" : "job start",
+        );
         const t0 = Date.now();
         await measured(svc, stage, { projectId }, () =>
           withSpan(`pipeline.${stage}`, { "reelsaw.project_id": projectId, "reelsaw.attempt": attempt }, () =>
@@ -151,7 +166,7 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
       } catch (thrown) {
         // the stage idled out: that, not whatever the abort surfaced as inside a model call, is why it ended (unless the
         // handler itself saw the project deleted or the job superseded: that is not a failure)
-        const err = thrown instanceof ProjectGoneError || thrown instanceof StaleJobError ? thrown : current?.timedOut ?? thrown;
+        const err = thrown instanceof ProjectGoneError || thrown instanceof StaleJobError ? thrown : (current?.timedOut ?? thrown);
         if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
         // cancelling a pg-boss job does not stop a running handler: the superseded one ends here, writing nothing
         if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
@@ -189,7 +204,11 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
   // every queue's registration, so the disk gate can take a queue off this process and put it back
   const registrations = new Map<QueueName, () => Promise<void>>();
   let concurrency = 0;
-  const work = async <T extends ProjectJob>(queue: QueueName, options: { pollingIntervalSeconds: number; localConcurrency: number }, handler: (jobs: Job<T>[]) => Promise<void>) => {
+  const work = async <T extends ProjectJob>(
+    queue: QueueName,
+    options: { pollingIntervalSeconds: number; localConcurrency: number },
+    handler: (jobs: Job<T>[]) => Promise<void>,
+  ) => {
     concurrency += options.localConcurrency;
     const register = () => boss.work<T>(queue, options, handler).then(() => undefined);
     registrations.set(queue, register);
@@ -261,8 +280,20 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
     return runTracked(job, QUEUES.prepare, { clipId }, async () => {
       try {
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
-        log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
-        if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "prepare", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
+        log.info(
+          { attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) },
+          job.retryCount ? "job retry" : "job start",
+        );
+        if (prev)
+          await svc.events
+            .emit(projectId, "clip.retrying", {
+              clipId,
+              step: "prepare",
+              attempt: job.retryCount + 1,
+              max: max + 1,
+              reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300),
+            })
+            .catch(() => {});
         await measured(svc, "prepare", { projectId, clipId }, () =>
           withSpan("pipeline.prepare", { "reelsaw.project_id": projectId, "reelsaw.clip_id": clipId }, () =>
             withLlmContext({ projectId, clipId, stage: "prepare", jobId: job.id }, async () => {
@@ -303,8 +334,20 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
     return runTracked(job, QUEUES.render, { clipId }, async () => {
       try {
         const prev = job.retryCount ? await previousAttempt(svc, job.id) : undefined;
-        log.info({ attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) }, job.retryCount ? "job retry" : "job start");
-        if (prev) await svc.events.emit(projectId, "clip.retrying", { clipId, step: "render", attempt: job.retryCount + 1, max: max + 1, reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300) }).catch(() => {});
+        log.info(
+          { attempt: job.retryCount + 1, maxAttempts: max + 1, ...(prev ? { previousAttempt: prev, interrupted: interrupted(prev) } : {}) },
+          job.retryCount ? "job retry" : "job start",
+        );
+        if (prev)
+          await svc.events
+            .emit(projectId, "clip.retrying", {
+              clipId,
+              step: "render",
+              attempt: job.retryCount + 1,
+              max: max + 1,
+              reason: interrupted(prev) ? "interrupted (worker restarted or crashed)" : prev.slice(0, 300),
+            })
+            .catch(() => {});
         const release = await svc.resources.renderSlot({ signal: job.signal, onWait: (reason) => log.info({ reason }, "waiting for a render slot") });
         try {
           await measured(svc, "render", { projectId, clipId }, () =>
@@ -339,22 +382,45 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
   });
 
   // this process only; pg-boss reports the cluster-wide backlog as pgboss.queue.jobs (OTLP)
-  gauge("reelsaw.render.slots", "{render}", () => {
-    const r = svc.resources.renders();
-    return [[r.running, { state: "running" }], [r.limit, { state: "limit" }]];
-  }, "Renders running in this worker and the limit CPU and memory allow right now");
-  gauge("reelsaw.worker.jobs.active", "{job}", () => {
-    const by = new Map<string, number>(Object.values(QUEUES).map((q) => [q, 0]));
-    for (const j of inflightJobs()) by.set(j.queue, (by.get(j.queue) ?? 0) + 1);
-    return [...by].map(([queue, n]) => [n, { queue }]);
-  }, "Jobs this worker process is running, by queue");
+  gauge(
+    "reelsaw.render.slots",
+    "{render}",
+    () => {
+      const r = svc.resources.renders();
+      return [
+        [r.running, { state: "running" }],
+        [r.limit, { state: "limit" }],
+      ];
+    },
+    "Renders running in this worker and the limit CPU and memory allow right now",
+  );
+  gauge(
+    "reelsaw.worker.jobs.active",
+    "{job}",
+    () => {
+      const by = new Map<string, number>(Object.values(QUEUES).map((q) => [q, 0]));
+      for (const j of inflightJobs()) by.set(j.queue, (by.get(j.queue) ?? 0) + 1);
+      return [...by].map(([queue, n]) => [n, { queue }]);
+    },
+    "Jobs this worker process is running, by queue",
+  );
 
-  svc.log.info({ module: "worker", queues: Object.values(QUEUES), renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders() }, "workers listening");
+  svc.log.info(
+    {
+      module: "worker",
+      queues: Object.values(QUEUES),
+      renders: svc.resources.renders().mode === "auto" ? `auto, up to ${svc.resources.maxRenders()}` : svc.resources.maxRenders(),
+    },
+    "workers listening",
+  );
   // a running job takes a pooled connection only for its writes and pg-boss needs some for fetching and heartbeats. The defaults
   // already have more job slots than connections (they are rarely all busy), so warn only when the slots are over twice the pool: more
   // than that, queries queue on the pool and a heartbeat can be missed. (Model-call slots use their own pool, ai/gate.ts.)
   if (concurrency > svc.database.poolMax * 2) {
-    svc.log.warn({ module: "worker", jobSlots: concurrency, poolMax: svc.database.poolMax }, "job concurrency exceeds the Postgres pool; raise DB_POOL_MAX to at least the job slots plus a few");
+    svc.log.warn(
+      { module: "worker", jobSlots: concurrency, poolMax: svc.database.poolMax },
+      "job concurrency exceeds the Postgres pool; raise DB_POOL_MAX to at least the job slots plus a few",
+    );
   }
   // room is made (or the gate closes) before the first job lands, not after it fails
   await diskGate.check().catch((err) => svc.log.warn({ module: "worker", err }, "disk gate check failed"));

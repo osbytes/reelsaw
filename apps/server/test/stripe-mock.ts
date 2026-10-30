@@ -26,10 +26,20 @@ const id = (p: string) => `${p}_${RUN}${(seq++).toString(36).padStart(5, "0")}`;
 const now = () => Math.floor(Date.now() / 1000);
 
 const prices = new Map<string, Obj>();
-for (const p of PAID_PLANS) for (const interval of ["month", "year"] as const) {
-  const key = p.lookupKeys![interval];
-  prices.set(`price_${key}`, { id: `price_${key}`, object: "price", active: true, lookup_key: key, product: `prod_${p.name}`, unit_amount: p.price![interval] * 100, currency: "usd", recurring: { interval } });
-}
+for (const p of PAID_PLANS)
+  for (const interval of ["month", "year"] as const) {
+    const key = p.lookupKeys![interval];
+    prices.set(`price_${key}`, {
+      id: `price_${key}`,
+      object: "price",
+      active: true,
+      lookup_key: key,
+      product: `prod_${p.name}`,
+      unit_amount: p.price![interval] * 100,
+      currency: "usd",
+      recurring: { interval },
+    });
+  }
 const customers = new Map<string, Obj>();
 const sessions = new Map<string, Obj>();
 const subscriptions = new Map<string, Obj>();
@@ -78,7 +88,9 @@ async function deliver(type: string, object: Obj, opts: { eventId?: string } = {
   const event = { id: opts.eventId ?? id("evt"), object: "event", type, created: now(), data: { object }, livemode: false, api_version: "2026-01-01" };
   const payload = JSON.stringify(event);
   const header = Stripe.webhooks.generateTestHeaderString({ payload, secret: SECRET });
-  const res = await fetch(WEBHOOK, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": header }, body: payload }).catch((err: Error) => ({ status: 0, text: async () => err.message }));
+  const res = await fetch(WEBHOOK, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": header }, body: payload }).catch(
+    (err: Error) => ({ status: 0, text: async () => err.message }),
+  );
   const r = { id: event.id, type, status: res.status, body: await res.text() };
   delivered.push(r);
   console.log(`-> ${type} ${event.id}: ${r.status} ${r.body.slice(0, 120)}`);
@@ -98,7 +110,8 @@ const json = (res: http.ServerResponse, status: number, body: unknown) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 };
-const notFound = (res: http.ServerResponse, what: string) => json(res, 404, { error: { type: "invalid_request_error", code: "resource_missing", message: `No such ${what}` } });
+const notFound = (res: http.ServerResponse, what: string) =>
+  json(res, 404, { error: { type: "invalid_request_error", code: "resource_missing", message: `No such ${what}` } });
 
 const server = http.createServer(async (req, res) => {
   const chunks: Buffer[] = [];
@@ -137,12 +150,30 @@ const server = http.createServer(async (req, res) => {
     return reply(c);
   }
   if (m === "POST" && p === "/v1/checkout/sessions") {
-    const s = { id: id("cs"), object: "checkout.session", mode: form.mode, customer: form.customer, line_items: form.line_items, subscription_data: form.subscription_data, metadata: form.metadata, managed_payments: form.managed_payments ?? null, success_url: form.success_url, cancel_url: form.cancel_url, subscription: null as string | null };
+    const s = {
+      id: id("cs"),
+      object: "checkout.session",
+      mode: form.mode,
+      customer: form.customer,
+      line_items: form.line_items,
+      subscription_data: form.subscription_data,
+      metadata: form.metadata,
+      managed_payments: form.managed_payments ?? null,
+      success_url: form.success_url,
+      cancel_url: form.cancel_url,
+      subscription: null as string | null,
+    };
     (s as Obj).url = `http://localhost:${PORT}/_mock/checkout/${s.id}`;
     sessions.set(s.id, s);
     return reply(s);
   }
-  if (m === "POST" && p === "/v1/billing_portal/sessions") return reply({ id: id("bps"), object: "billing_portal.session", customer: form.customer, url: `http://localhost:${PORT}/_mock/portal/${form.customer}${form.flow_data ? "?flow=" + ((form.flow_data as Obj).type as string) : ""}` });
+  if (m === "POST" && p === "/v1/billing_portal/sessions")
+    return reply({
+      id: id("bps"),
+      object: "billing_portal.session",
+      customer: form.customer,
+      url: `http://localhost:${PORT}/_mock/portal/${form.customer}${form.flow_data ? "?flow=" + ((form.flow_data as Obj).type as string) : ""}`,
+    });
   if (m === "GET" && p === "/v1/subscriptions") {
     const cust = url.searchParams.get("customer");
     return json(res, 200, { object: "list", data: [...subscriptions.values()].filter((s) => !cust || s.customer === cust), has_more: false });
@@ -158,7 +189,8 @@ const server = http.createServer(async (req, res) => {
   // ---- controls
   const body = raw ? (JSON.parse(raw) as Obj) : {};
   const opts = { reverse: !!body.reverse, duplicate: !!body.duplicate };
-  if (p === "/_mock/state") return json(res, 200, { customers: [...customers.values()], subscriptions: [...subscriptions.values()], sessions: [...sessions.keys()], delivered });
+  if (p === "/_mock/state")
+    return json(res, 200, { customers: [...customers.values()], subscriptions: [...subscriptions.values()], sessions: [...sessions.keys()], delivered });
   mm = /^\/_mock\/checkout\/([^/]+)$/.exec(p);
   if (mm && m === "GET") {
     res.writeHead(200, { "content-type": "text/html" });
@@ -172,7 +204,14 @@ const server = http.createServer(async (req, res) => {
     const sub = subscriptionFor(s, priceId);
     s.subscription = sub.id;
     s.status = "complete";
-    const out = await deliverAll([["customer.subscription.created", sub], ["checkout.session.completed", s], ["invoice.paid", { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: sub.id } } }]], opts);
+    const out = await deliverAll(
+      [
+        ["customer.subscription.created", sub],
+        ["checkout.session.completed", s],
+        ["invoice.paid", { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: sub.id } } }],
+      ],
+      opts,
+    );
     return json(res, 200, { subscription: sub.id, delivered: out });
   }
   mm = /^\/_mock\/(fail|recover|cancel|change|redeliver)\/([^/]+)$/.exec(p);
@@ -183,15 +222,36 @@ const server = http.createServer(async (req, res) => {
     switch (mm[1]) {
       case "fail": {
         s.status = "past_due";
-        return json(res, 200, { delivered: await deliverAll([["invoice.payment_failed", { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: s.id } } }], ["customer.subscription.updated", s]], opts) });
+        return json(res, 200, {
+          delivered: await deliverAll(
+            [
+              [
+                "invoice.payment_failed",
+                { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: s.id } } },
+              ],
+              ["customer.subscription.updated", s],
+            ],
+            opts,
+          ),
+        });
       }
       case "recover":
         s.status = "active";
-        return json(res, 200, { delivered: await deliverAll([["invoice.paid", { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: s.id } } }], ["customer.subscription.updated", s]], opts) });
+        return json(res, 200, {
+          delivered: await deliverAll(
+            [
+              ["invoice.paid", { id: id("in"), object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: s.id } } }],
+              ["customer.subscription.updated", s],
+            ],
+            opts,
+          ),
+        });
       case "cancel":
         if (body.atPeriodEnd) s.cancel_at_period_end = true;
         else Object.assign(s, { status: "canceled", ended_at: now() });
-        return json(res, 200, { delivered: await deliverAll([[body.atPeriodEnd ? "customer.subscription.updated" : "customer.subscription.deleted", s]], opts) });
+        return json(res, 200, {
+          delivered: await deliverAll([[body.atPeriodEnd ? "customer.subscription.updated" : "customer.subscription.deleted", s]], opts),
+        });
       case "change": {
         const price = [...prices.values()].find((x) => x.lookup_key === body.lookupKey);
         if (!price) return notFound(res, "price");
@@ -205,7 +265,11 @@ const server = http.createServer(async (req, res) => {
     }
   }
   if (p === "/_mock/unsigned") {
-    const r = await fetch(WEBHOOK, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=bad" }, body: JSON.stringify({ id: "evt_bad", type: "customer.subscription.updated", data: { object: {} } }) });
+    const r = await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=bad" },
+      body: JSON.stringify({ id: "evt_bad", type: "customer.subscription.updated", data: { object: {} } }),
+    });
     return json(res, 200, { status: r.status, body: await r.text() });
   }
   return notFound(res, `route ${m} ${p}`);

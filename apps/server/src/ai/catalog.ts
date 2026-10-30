@@ -58,7 +58,10 @@ export interface ModelCatalog {
    * Try credentials before they are saved: list the provider's models with them. Returns how many
    * models answered per kind, or the error the provider gave (bad key, unreachable server).
    */
-  probe(provider: string, creds: { apiKey?: string | undefined; baseUrl?: string | undefined }): Promise<{ ok: boolean; language: number; transcription: number; error?: string }>;
+  probe(
+    provider: string,
+    creds: { apiKey?: string | undefined; baseUrl?: string | undefined },
+  ): Promise<{ ok: boolean; language: number; transcription: number; error?: string }>;
   /** Start a download on a self-hosted server; one per model at a time. Returns the job to poll. */
   pull(provider: string, model: string): Promise<PullJob>;
   pulls(): PullJob[];
@@ -88,7 +91,15 @@ const STATIC: Record<string, Array<[string, string, CatalogKind]>> = {
   ],
 };
 
-const TITLES: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", groq: "Groq", deepgram: "Deepgram", assemblyai: "AssemblyAI", gateway: "Vercel AI Gateway" };
+const TITLES: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  groq: "Groq",
+  deepgram: "Deepgram",
+  assemblyai: "AssemblyAI",
+  gateway: "Vercel AI Gateway",
+};
 
 function fmtBytes(n: number) {
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
@@ -119,7 +130,14 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
   async function selfHosted(provider: string, baseUrl: string, apiKey: string | undefined, kind: CatalogKind): Promise<CatalogProvider> {
     const base = baseUrl.replace(/\/+$/, "");
     const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
-    const out: CatalogProvider = { provider, title: provider === "openai" ? `OpenAI-compatible server (${base})` : `${compat} (${base})`, kind, available: true, source: "installed", models: [] };
+    const out: CatalogProvider = {
+      provider,
+      title: provider === "openai" ? `OpenAI-compatible server (${base})` : `${compat} (${base})`,
+      kind,
+      available: true,
+      source: "installed",
+      models: [],
+    };
     try {
       const installed = ((await get(`${base}/models`, headers)) as { data?: Array<{ id: string }> }).data?.map((m) => m.id) ?? [];
       // Ollama: native API has sizes and can pull
@@ -127,12 +145,24 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
       if (ollama?.models) {
         out.selfHosted = { baseUrl: base, server: "ollama", canPull: true };
         if (kind === "language") {
-          for (const m of ollama.models as Array<{ name: string; size: number; details?: { parameter_size?: string; quantization_level?: string; family?: string } }>) {
+          for (const m of ollama.models as Array<{
+            name: string;
+            size: number;
+            details?: { parameter_size?: string; quantization_level?: string; family?: string };
+          }>) {
             if (/embed/i.test(m.name)) continue;
-            out.models.push({ id: `${provider}:${m.name}`, label: m.name, installed: true, sizeBytes: m.size, note: [fmtBytes(m.size), m.details?.parameter_size, m.details?.quantization_level].filter(Boolean).join(" · ") });
+            out.models.push({
+              id: `${provider}:${m.name}`,
+              label: m.name,
+              installed: true,
+              sizeBytes: m.size,
+              note: [fmtBytes(m.size), m.details?.parameter_size, m.details?.quantization_level].filter(Boolean).join(" · "),
+            });
           }
           const have = new Set(out.models.map((m) => m.label.replace(/:latest$/, "")));
-          for (const [name, note] of OLLAMA_SUGGESTIONS) if (!have.has(name) && !have.has(name.replace(/:latest$/, ""))) out.models.push({ id: `${provider}:${name}`, label: name, installed: false, note: `${note} · not installed` });
+          for (const [name, note] of OLLAMA_SUGGESTIONS)
+            if (!have.has(name) && !have.has(name.replace(/:latest$/, "")))
+              out.models.push({ id: `${provider}:${name}`, label: name, installed: false, note: `${note} · not installed` });
         }
         return out;
       }
@@ -143,12 +173,14 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
         if (kind === "transcription") {
           const have = new Set(installed);
           for (const id of installed) out.models.push({ id: `${provider}:${id}`, label: id, installed: true });
-          for (const m of registry.data as Array<{ id: string }>) if (!have.has(m.id) && /whisper/i.test(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: false, note: "not installed" });
+          for (const m of registry.data as Array<{ id: string }>)
+            if (!have.has(m.id) && /whisper/i.test(m.id)) out.models.push({ id: `${provider}:${m.id}`, label: m.id, installed: false, note: "not installed" });
         }
         return out;
       }
       out.selfHosted = { baseUrl: base, server: "openai-compatible", canPull: false };
-      for (const id of installed) if (kind === "language" ? !/whisper|embed/i.test(id) : /whisper/i.test(id)) out.models.push({ id: `${provider}:${id}`, label: id, installed: true });
+      for (const id of installed)
+        if (kind === "language" ? !/whisper|embed/i.test(id) : /whisper/i.test(id)) out.models.push({ id: `${provider}:${id}`, label: id, installed: true });
       return out;
     } catch (err) {
       out.error = `cannot list ${base}: ${(err as Error).message}`;
@@ -176,15 +208,22 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
         const data = ((await get("https://api.openai.com/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string }> }).data;
         const ids = data.map((m) => m.id).sort();
         if (kind === "language") for (const id of ids) if (isOpenAiLanguageModel(id)) out.models.push({ id: `openai:${id}`, label: id });
-        if (kind === "transcription") for (const id of ids) if (supportsWordTimestamps(`openai:${id}`)) out.models.push({ id: `openai:${id}`, label: id, note: "word timestamps" });
+        if (kind === "transcription")
+          for (const id of ids) if (supportsWordTimestamps(`openai:${id}`)) out.models.push({ id: `openai:${id}`, label: id, note: "word timestamps" });
       } else if (provider === "anthropic") {
         if (kind === "language") {
-          const data = ((await get("https://api.anthropic.com/v1/models?limit=100", { "x-api-key": key, "anthropic-version": "2023-06-01" })) as { data: Array<{ id: string; display_name?: string }> }).data;
+          const data = (
+            (await get("https://api.anthropic.com/v1/models?limit=100", { "x-api-key": key, "anthropic-version": "2023-06-01" })) as {
+              data: Array<{ id: string; display_name?: string }>;
+            }
+          ).data;
           for (const m of data) out.models.push({ id: `anthropic:${m.id}`, label: m.id, note: m.display_name });
         }
       } else if (provider === "google") {
         if (kind === "language") {
-          const data = (await get(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`)) as { models: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> };
+          const data = (await get(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`)) as {
+            models: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }>;
+          };
           for (const m of data.models ?? []) {
             if (!m.supportedGenerationMethods?.includes("generateContent")) continue;
             const id = m.name.replace(/^models\//, "");
@@ -193,7 +232,9 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
           }
         }
       } else if (provider === "groq") {
-        const data = ((await get("https://api.groq.com/openai/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string; owned_by?: string }> }).data;
+        const data = (
+          (await get("https://api.groq.com/openai/v1/models", { authorization: `Bearer ${key}` })) as { data: Array<{ id: string; owned_by?: string }> }
+        ).data;
         for (const m of data.sort((a, b) => a.id.localeCompare(b.id))) {
           const stt = /whisper/i.test(m.id);
           if ((kind === "transcription") !== stt) continue;
@@ -206,17 +247,27 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
           const gw = createGateway({ apiKey: key });
           // the model listing is public; only an authenticated call proves the key
           await gw.getCredits().catch((err) => {
-            throw new Error(/40[13]|unauthori|forbidden|invalid/i.test(String((err as Error).message)) ? `the gateway rejected the key (${(err as Error).message})` : (err as Error).message);
+            throw new Error(
+              /40[13]|unauthori|forbidden|invalid/i.test(String((err as Error).message))
+                ? `the gateway rejected the key (${(err as Error).message})`
+                : (err as Error).message,
+            );
           });
           const { models } = await gw.getAvailableModels();
           for (const m of models) {
             if (m.modelType && m.modelType !== "language") continue;
-            const price = m.pricing ? `$${(Number(m.pricing.input) * 1e6).toFixed(2)} / $${(Number(m.pricing.output) * 1e6).toFixed(2)} per 1M tokens` : undefined;
+            const price = m.pricing
+              ? `$${(Number(m.pricing.input) * 1e6).toFixed(2)} / $${(Number(m.pricing.output) * 1e6).toFixed(2)} per 1M tokens`
+              : undefined;
             out.models.push({ id: `gateway:${m.id}`, label: m.id, note: [m.name !== m.id ? m.name : "", price].filter(Boolean).join(" · ") || undefined });
           }
         } else {
           out.source = "static";
-          out.models.push({ id: "gateway:openai/whisper-1", label: "openai/whisper-1", note: "word timestamps; the gateway's other transcription models return segments only" });
+          out.models.push({
+            id: "gateway:openai/whisper-1",
+            label: "openai/whisper-1",
+            note: "word timestamps; the gateway's other transcription models return segments only",
+          });
         }
       }
     } catch (err) {
@@ -226,11 +277,24 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
     return out;
   }
 
-  async function providerFor(provider: string, kind: CatalogKind, override?: { apiKey?: string | undefined; baseUrl?: string | undefined }): Promise<CatalogProvider> {
+  async function providerFor(
+    provider: string,
+    kind: CatalogKind,
+    override?: { apiKey?: string | undefined; baseUrl?: string | undefined },
+  ): Promise<CatalogProvider> {
     const creds = override ?? credentials.get(provider);
     if (provider === "openai" && creds.baseUrl) return selfHosted("openai", creds.baseUrl, creds.apiKey, kind);
     if (provider === compat) {
-      if (!creds.baseUrl) return { provider, title: "Ollama / OpenAI-compatible server", kind, available: false, reason: "needs the server's base URL, e.g. http://host.docker.internal:11434/v1: enter it here, or set OPENAI_COMPATIBLE_BASE_URL in .env", source: "static", models: [] };
+      if (!creds.baseUrl)
+        return {
+          provider,
+          title: "Ollama / OpenAI-compatible server",
+          kind,
+          available: false,
+          reason: "needs the server's base URL, e.g. http://host.docker.internal:11434/v1: enter it here, or set OPENAI_COMPATIBLE_BASE_URL in .env",
+          source: "static",
+          models: [],
+        };
       return selfHosted(provider, creds.baseUrl, creds.apiKey, kind);
     }
     return cloud(provider, kind, override);
@@ -267,7 +331,11 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
 
   async function pullSpeaches(job: PullJob & { abort: AbortController }, base: string, apiKey: string | undefined) {
     job.message = "downloading (Speaches reports no progress)";
-    const res = await fetch(`${base}/models/${job.model}`, { method: "POST", headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}, signal: job.abort.signal });
+    const res = await fetch(`${base}/models/${job.model}`, {
+      method: "POST",
+      headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+      signal: job.abort.signal,
+    });
     if (!res.ok && res.status !== 409) throw new Error(`HTTP ${res.status} ${await res.text().catch(() => "")}`);
   }
 
@@ -296,11 +364,25 @@ export function createModelCatalog(config: Config, log: Logger, credentials: Cre
       const existing = [...jobs.values()].find((j) => j.provider === provider && j.model === model && j.status === "running");
       if (existing) return existing;
       const { baseUrl: base, apiKey } = provider === "openai" || provider === compat ? credentials.get(provider) : {};
-      if (!base) throw new Error(`"${provider}" is not a self-hosted server here; models are downloaded only onto Ollama or Speaches (a base URL under Settings → Models, or OPENAI_COMPATIBLE_BASE_URL / OPENAI_BASE_URL)`);
+      if (!base)
+        throw new Error(
+          `"${provider}" is not a self-hosted server here; models are downloaded only onto Ollama or Speaches (a base URL under Settings → Models, or OPENAI_COMPATIBLE_BASE_URL / OPENAI_BASE_URL)`,
+        );
       const b = base.replace(/\/+$/, "");
       const server = (await providerFor(provider, "language")).selfHosted?.server ?? (await providerFor(provider, "transcription")).selfHosted?.server;
       if (server !== "ollama" && server !== "speaches") throw new Error(`${b} is neither Ollama nor Speaches, so it cannot download models on request`);
-      const job: PullJob & { abort: AbortController } = { id: `pull-${++seq}`, provider, model, status: "running", completed: 0, total: 0, message: "starting", startedAt: new Date().toISOString(), finishedAt: null, abort: new AbortController() };
+      const job: PullJob & { abort: AbortController } = {
+        id: `pull-${++seq}`,
+        provider,
+        model,
+        status: "running",
+        completed: 0,
+        total: 0,
+        message: "starting",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        abort: new AbortController(),
+      };
       jobs.set(job.id, job);
       void (server === "ollama" ? pullOllama(job, b, apiKey) : pullSpeaches(job, b, apiKey))
         .then(() => {

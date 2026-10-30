@@ -32,13 +32,13 @@ async function main() {
   // a data router (the app's own <Routes> live under one splat route) so editors can block leaving with unsaved edits
   const router = createBrowserRouter([{ path: "*", element: <App /> }]);
   ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <RouterProvider router={router} />
-      </TRPCProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+          <RouterProvider router={router} />
+        </TRPCProvider>
+      </QueryClientProvider>
+    </React.StrictMode>,
   );
 }
 

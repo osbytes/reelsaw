@@ -56,7 +56,10 @@ export interface CatalogStatus {
 export interface Catalog {
   /** Manifest in force (reads the cache file again when another process changed it). */
   manifest(): Promise<{ manifest: Manifest; source: CatalogSource }>;
-  search(q: string, opts: { kind?: AssetKind | undefined; cursor?: string | undefined; limit: number }): Promise<{ items: ProviderItem[]; nextCursor?: string }>;
+  search(
+    q: string,
+    opts: { kind?: AssetKind | undefined; cursor?: string | undefined; limit: number },
+  ): Promise<{ items: ProviderItem[]; nextCursor?: string }>;
   find(id: string): Promise<{ item: CatalogItem; fileUrl: string; localPath?: string } | undefined>;
   /** Ask `CATALOG_URL` for a newer manifest; never throws. */
   refresh(opts?: { force?: boolean }): Promise<{ changed: boolean; status: CatalogStatus }>;
@@ -82,7 +85,13 @@ const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
  */
 export const DEFAULT_BUNDLED_DIR = (() => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [path.resolve(here, "../assets/catalog"), path.resolve(here, "../../assets/catalog"), path.resolve(here, "../../../assets/catalog"), path.resolve(process.cwd(), "assets/catalog"), path.resolve(process.cwd(), "apps/server/assets/catalog")];
+  const candidates = [
+    path.resolve(here, "../assets/catalog"),
+    path.resolve(here, "../../assets/catalog"),
+    path.resolve(here, "../../../assets/catalog"),
+    path.resolve(process.cwd(), "assets/catalog"),
+    path.resolve(process.cwd(), "apps/server/assets/catalog"),
+  ];
   return candidates.find((d) => existsSync(path.join(d, "index.json"))) ?? candidates[0]!;
 })();
 
@@ -146,7 +155,10 @@ export function createCatalog(deps: CatalogDeps): Catalog {
       url: deps.url(),
       lastCheckedAt: lastCheckedAt ? new Date(lastCheckedAt).toISOString() : null,
       lastError,
-      etag: await fs.readFile(etagFile, "utf8").then((s) => s.trim() || null, () => null),
+      etag: await fs.readFile(etagFile, "utf8").then(
+        (s) => s.trim() || null,
+        () => null,
+      ),
     };
   }
 
@@ -156,8 +168,17 @@ export function createCatalog(deps: CatalogDeps): Catalog {
     lastCheckedAt = now();
     try {
       if (!/^https:\/\//i.test(url)) throw new Error("CATALOG_URL must be an https URL");
-      const etag = force ? null : await fs.readFile(etagFile, "utf8").then((s) => s.trim(), () => null);
-      const res = await doFetch(url, { headers: { accept: "application/json", "user-agent": `reelsaw/${deps.config.REELSAW_VERSION}`, ...(etag ? { "if-none-match": etag } : {}) }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" });
+      const etag = force
+        ? null
+        : await fs.readFile(etagFile, "utf8").then(
+            (s) => s.trim(),
+            () => null,
+          );
+      const res = await doFetch(url, {
+        headers: { accept: "application/json", "user-agent": `reelsaw/${deps.config.REELSAW_VERSION}`, ...(etag ? { "if-none-match": etag } : {}) },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: "follow",
+      });
       if (res.status === 304) {
         lastError = null;
         log.debug({ url }, "catalog unchanged");
@@ -204,14 +225,27 @@ export function createCatalog(deps: CatalogDeps): Catalog {
     async search(q, { kind, cursor, limit }) {
       const { manifest, source } = await load();
       if (fuse?.manifest !== manifest) {
-        fuse = { manifest, index: new Fuse(manifest.items, { keys: [{ name: "name", weight: 2 }, { name: "tags", weight: 1.5 }], threshold: 0.35, ignoreLocation: true }) };
+        fuse = {
+          manifest,
+          index: new Fuse(manifest.items, {
+            keys: [
+              { name: "name", weight: 2 },
+              { name: "tags", weight: 1.5 },
+            ],
+            threshold: 0.35,
+            ignoreLocation: true,
+          }),
+        };
       }
       const query = q.trim();
       const all = query ? fuse.index.search(query).map((r) => r.item) : manifest.items;
       const filtered = kind ? all.filter((i) => i.kind === kind) : all;
       const start = Math.max(0, Number(cursor) || 0);
       const page = filtered.slice(start, start + limit);
-      return { items: page.map((i) => toProviderItem(i, source, deps.url())), ...(start + limit < filtered.length ? { nextCursor: String(start + limit) } : {}) };
+      return {
+        items: page.map((i) => toProviderItem(i, source, deps.url())),
+        ...(start + limit < filtered.length ? { nextCursor: String(start + limit) } : {}),
+      };
     },
   };
 }
@@ -220,5 +254,19 @@ export function createCatalog(deps: CatalogDeps): Catalog {
 export function toProviderItem(i: CatalogItem, source: CatalogSource, manifestUrl: string): ProviderItem {
   const license: ItemLicense = i.license;
   const preview = source === "bundled" && !/^https:\/\//i.test(i.url) ? `/media/catalog/${path.basename(i.url)}` : new URL(i.url, manifestUrl).toString();
-  return { provider: "reelsaw", externalId: i.id, kind: i.kind, mime: i.mime, name: i.name, previewUrl: preview, thumbUrl: i.kind === "image" ? preview : undefined, durationSec: i.durationSec, width: i.width, height: i.height, license, attribution: i.attribution, url: i.source.url };
+  return {
+    provider: "reelsaw",
+    externalId: i.id,
+    kind: i.kind,
+    mime: i.mime,
+    name: i.name,
+    previewUrl: preview,
+    thumbUrl: i.kind === "image" ? preview : undefined,
+    durationSec: i.durationSec,
+    width: i.width,
+    height: i.height,
+    license,
+    attribution: i.attribution,
+    url: i.source.url,
+  };
 }

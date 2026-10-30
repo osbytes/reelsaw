@@ -194,7 +194,8 @@ export function TemplatesPage() {
               <Layers className="h-6 w-6 text-ink3" aria-hidden />
               <b className="text-[15px]">No templates yet</b>
               <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">
-                A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save a clip’s layers as a template from the clip editor.
+                A template is a set of layers (a logo in the first seconds, a call to action at the end, a music bed) that fits any clip. Make one here, or save
+                a clip’s layers as a template from the clip editor.
               </p>
             </div>
           )}
@@ -204,7 +205,11 @@ export function TemplatesPage() {
               {templates.map((t) => row(t))}
             </ul>
           )}
-          {templates.length > 0 && <p className="pt-1 text-xs tabular-nums text-ink3">Showing {templates.length.toLocaleString()} of {totalTemplates.toLocaleString()} templates</p>}
+          {templates.length > 0 && (
+            <p className="pt-1 text-xs tabular-nums text-ink3">
+              Showing {templates.length.toLocaleString()} of {totalTemplates.toLocaleString()} templates
+            </p>
+          )}
         </section>
 
         {deleted.length > 0 && (
@@ -241,7 +246,12 @@ export function TemplatesPage() {
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
         title="Delete this template?"
-        body={<>“{confirm?.name}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them. {restoreWindow.hint()}</>}
+        body={
+          <>
+            “{confirm?.name}” is deleted from your templates and from your project defaults. Clips that already have its layers keep them.{" "}
+            {restoreWindow.hint()}
+          </>
+        }
         confirm="Delete"
         danger
         onConfirm={() => {

@@ -56,7 +56,10 @@ export function createEmail(config: Config, log: Logger): Email {
         await transport.verify();
       }
       if (driver === "resend") {
-        const res = await fetch("https://api.resend.com/domains", { headers: { authorization: `Bearer ${config.RESEND_API_KEY}` }, signal: AbortSignal.timeout(10_000) });
+        const res = await fetch("https://api.resend.com/domains", {
+          headers: { authorization: `Bearer ${config.RESEND_API_KEY}` },
+          signal: AbortSignal.timeout(10_000),
+        });
         if (res.status === 401 || res.status === 403) throw new Error("RESEND_API_KEY was rejected");
       }
     },
@@ -122,9 +125,7 @@ function linkFallback(href: string): string {
 /** Muted footer under the card: brand + source repo (no tracking). */
 function footerHtml(): string {
   const href = escapeHtml(REPO_URL);
-  return (
-    `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`
-  );
+  return `Sent by Reelsaw · <a href="${href}" style="color:${ink3};text-decoration:underline">github.com/osbytes/reelsaw</a> · No tracking.`;
 }
 
 function footerText(): string {
@@ -188,9 +189,7 @@ export const templates = {
       title: "You're in",
       text: `An admin approved your account. Sign in: ${url}\n`,
       bodyHtml:
-        `<p style="margin:0 0 12px">An admin approved your account. You can sign in and start cutting.</p>` +
-        ctaButton(url, "Sign in") +
-        linkFallback(url),
+        `<p style="margin:0 0 12px">An admin approved your account. You can sign in and start cutting.</p>` + ctaButton(url, "Sign in") + linkFallback(url),
     });
   },
   resetPassword: (url: string) =>

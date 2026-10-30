@@ -23,7 +23,10 @@ test("pickExportClips: empty list keeps everything and no subset note", () => {
 test("pickExportClips: narrows to the allow-list and reports unknown ids and the total rendered", () => {
   const all = [clip("a", "done", "k"), clip("b", "done", "k2"), clip("c", "failed", null)];
   const r = pickExportClips(all, ["b", "c", "zzz"]);
-  assert.deepEqual(r.clips.map((c) => c.id), ["b", "c"]);
+  assert.deepEqual(
+    r.clips.map((c) => c.id),
+    ["b", "c"],
+  );
   assert.deepEqual(r.unknown, ["zzz"]);
   assert.deepEqual(r.subset, { requested: 3, total: 2 });
 });

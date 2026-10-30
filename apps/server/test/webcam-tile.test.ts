@@ -130,7 +130,12 @@ describe("webcam tile", () => {
     const tile: TileProbe = { x1: 0.875, y1: 0.083, x2: 1, y2: 0.2, s: 0.3, band: "right" };
     const box = { x1: 0.92, y1: 0.11, x2: 0.95, y2: 0.165, score: 0.8 };
     // the face is seen in 1 of every 10 frames; the tile (probed around the last face) in 9 of 10
-    const samples: FaceSample[] = Array.from({ length: 80 }, (_, i) => ({ t: i / 4, box: i % 10 === 0 ? box : null, boxes: i % 10 === 0 ? [box] : [], ...(i % 10 === 9 ? {} : { tiles: [tile] }) }));
+    const samples: FaceSample[] = Array.from({ length: 80 }, (_, i) => ({
+      t: i / 4,
+      box: i % 10 === 0 ? box : null,
+      boxes: i % 10 === 0 ? [box] : [],
+      ...(i % 10 === 9 ? {} : { tiles: [tile] }),
+    }));
     const d = decideLayout(samples, cfg, []);
     assert.equal(d.layout, "stack");
     assert.deepEqual(d.tile, { x1: 0.875, y1: 0.083, x2: 1, y2: 0.2 });

@@ -19,7 +19,9 @@ export function NotFound({ what, error, onRetry }: Props) {
         </span>
         <b className="text-lg">{missing ? `This ${what} doesn’t exist` : `Couldn’t load this ${what}`}</b>
         <p className="text-[13px] leading-relaxed text-ink2">
-          {missing ? `It may have been deleted, or it belongs to another account. Links only open ${what}s of the account you’re signed in to.` : (error?.message ?? "Something went wrong talking to the server.")}
+          {missing
+            ? `It may have been deleted, or it belongs to another account. Links only open ${what}s of the account you’re signed in to.`
+            : (error?.message ?? "Something went wrong talking to the server.")}
         </p>
         <div className="mt-1 flex gap-2">
           <Link to="/" className="btn-primary py-2 no-underline">

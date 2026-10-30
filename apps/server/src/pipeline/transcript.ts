@@ -19,9 +19,7 @@ export function looksWordLevel(segments: RawSegment[]): boolean {
 export function toWords(segments: RawSegment[], opts?: { collapseLoops?: boolean }): Word[] {
   let words: Word[];
   if (looksWordLevel(segments)) {
-    words = segments
-      .map((s) => ({ text: s.text.trim(), start: s.startSecond, end: Math.max(s.endSecond, s.startSecond) }))
-      .filter((w) => w.text.length > 0);
+    words = segments.map((s) => ({ text: s.text.trim(), start: s.startSecond, end: Math.max(s.endSecond, s.startSecond) })).filter((w) => w.text.length > 0);
   } else {
     words = [];
     for (const seg of segments) {

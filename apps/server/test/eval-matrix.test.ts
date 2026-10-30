@@ -14,7 +14,10 @@ import { underlyingProvider, providerOf } from "../src/ai/registry.js";
 describe("profiles", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reelsaw-matrix-"));
   const file = path.join(dir, "m.json");
-  fs.writeFileSync(file, JSON.stringify({ profiles: { a: { AI_MODEL: "gateway:openai/gpt-4o-mini" }, b: { AI_MODEL: "compat:qwen3:8b", TRANSCRIPTION_MODEL: "deepgram:nova-3" } } }));
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ profiles: { a: { AI_MODEL: "gateway:openai/gpt-4o-mini" }, b: { AI_MODEL: "compat:qwen3:8b", TRANSCRIPTION_MODEL: "deepgram:nova-3" } } }),
+  );
 
   it("reads every profile of a matrix file in order", () => {
     const p = parseProfiles({ matrix: file, set: [] });

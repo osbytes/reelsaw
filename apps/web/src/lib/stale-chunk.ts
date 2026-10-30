@@ -27,7 +27,9 @@ let reloadInFlight = false;
 
 export function isStaleChunkError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? "");
-  return /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|unable to preload css/i.test(msg);
+  return /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|unable to preload css/i.test(
+    msg,
+  );
 }
 
 /**

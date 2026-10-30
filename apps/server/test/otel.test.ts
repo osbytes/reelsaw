@@ -3,7 +3,17 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { otlpBase, parseOtlpHeaders, resolveOtlp, otelLogFromLine, spanMetricAttributes, traceSampleRate, applyServerSampler, publicFromResolved, injectOtelBoot } from "../src/otel-config.js";
+import {
+  otlpBase,
+  parseOtlpHeaders,
+  resolveOtlp,
+  otelLogFromLine,
+  spanMetricAttributes,
+  traceSampleRate,
+  applyServerSampler,
+  publicFromResolved,
+  injectOtelBoot,
+} from "../src/otel-config.js";
 import { scrubOutboundText } from "../src/report/redact.js";
 
 describe("otlpBase", () => {

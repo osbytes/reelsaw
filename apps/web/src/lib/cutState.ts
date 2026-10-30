@@ -27,7 +27,13 @@ export function cutState(flag: { start: number; end: number }, clips: CutClip[])
     if (!d || flag.start < c.startSec - 0.01 || flag.end > c.endSec + 0.05) continue;
     const hit = d.cuts.applied.find((a) => a.start < flag.end + 0.15 && a.end > flag.start - 0.15);
     const sk = d.cuts.skipped.find((s) => Math.abs(s.start - flag.start) < 0.35);
-    const s: CutState | null = hit ? (hit.verified === false ? { state: "unverified", reason: hit.reason ?? "" } : { state: "applied" }) : sk ? { state: "skipped", reason: sk.reason } : null;
+    const s: CutState | null = hit
+      ? hit.verified === false
+        ? { state: "unverified", reason: hit.reason ?? "" }
+        : { state: "applied" }
+      : sk
+        ? { state: "skipped", reason: sk.reason }
+        : null;
     if (s && (!worst || SEVERITY[s.state] > SEVERITY[worst.state])) worst = s;
   }
   return worst;
@@ -40,6 +46,7 @@ export function cutStateLabel(s: CutState): string {
 
 export function cutStateTitle(s: CutState): string {
   if (s.state === "applied") return "Removed from the audio at a verified seam.";
-  if (s.state === "unverified") return `Applied where you set it, without a seam check: the audio around it couldn’t be matched.${s.reason ? `\n${s.reason}` : ""}`;
+  if (s.state === "unverified")
+    return `Applied where you set it, without a seam check: the audio around it couldn’t be matched.${s.reason ? `\n${s.reason}` : ""}`;
   return `The removal couldn’t be verified, so the audio was kept. Captions still drop the word.${s.reason ? `\n${s.reason}` : ""}`;
 }

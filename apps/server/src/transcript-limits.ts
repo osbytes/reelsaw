@@ -30,7 +30,13 @@ export async function takeArchivedFlag<T extends { id: string }>(db: Db, project
   const [row] = await db
     .select({ id: schema.stageArtifacts.id, data: schema.stageArtifacts.data })
     .from(schema.stageArtifacts)
-    .where(and(eq(schema.stageArtifacts.projectId, projectId), eq(schema.stageArtifacts.kind, ARCHIVE_KIND), sql`${schema.stageArtifacts.data} @> ${JSON.stringify([{ id: flagId }])}::jsonb`))
+    .where(
+      and(
+        eq(schema.stageArtifacts.projectId, projectId),
+        eq(schema.stageArtifacts.kind, ARCHIVE_KIND),
+        sql`${schema.stageArtifacts.data} @> ${JSON.stringify([{ id: flagId }])}::jsonb`,
+      ),
+    )
     .orderBy(desc(schema.stageArtifacts.id))
     .limit(1)
     .for("update");

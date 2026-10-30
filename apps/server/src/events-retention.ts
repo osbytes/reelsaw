@@ -66,7 +66,13 @@ interface PruneState {
 }
 
 /** Prune one table until done or the deadline. Returns rows deleted and whether the pass finished. */
-async function pruneTable(svc: Services, which: Which, cutoff: Date, startCursor: number, deadline: number): Promise<{ deleted: number; cursor: number; done: boolean }> {
+async function pruneTable(
+  svc: Services,
+  which: Which,
+  cutoff: Date,
+  startCursor: number,
+  deadline: number,
+): Promise<{ deleted: number; cursor: number; done: boolean }> {
   const { table, typed } = TABLES[which];
   const pool = svc.database.pool;
   let cursor = startCursor;

@@ -58,7 +58,12 @@ export async function withSessionLock<T>(pool: Pick<Pool, "connect">, key: strin
     return { ran: true, value: await fn() };
   } finally {
     // a failed unlock (broken connection) destroys the client instead of returning it to the pool with the lock still held
-    const released = held ? await client.query("select pg_advisory_unlock(hashtext($1))", [key]).then(() => true, () => false) : true;
+    const released = held
+      ? await client.query("select pg_advisory_unlock(hashtext($1))", [key]).then(
+          () => true,
+          () => false,
+        )
+      : true;
     client.release(released ? undefined : true);
   }
 }

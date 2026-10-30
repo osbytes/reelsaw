@@ -83,7 +83,10 @@ describe("mcp stdio bridge", () => {
         [mine, owner.userId, "Mine"],
         [theirs, other.userId, "Theirs"],
       ] as const)
-        await pool.query(`insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}')`, [id, uid, title]);
+        await pool.query(
+          `insert into projects (id, user_id, title, source_type, source_url, duration_sec, status, settings) values ($1, $2, $3, 'url', 'https://example.com/v.mp4', 61, 'done', '{}')`,
+          [id, uid, title],
+        );
     });
 
     after(async () => {
@@ -96,7 +99,10 @@ describe("mcp stdio bridge", () => {
       await http.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", BASE), { requestInit: { headers: { authorization: `Bearer ${apiKey.key}` } } }));
       const { client, bridge } = await inMemory({ REELSAW_URL: BASE, REELSAW_API_KEY: apiKey.key });
       try {
-        const strip = (tools: Array<Record<string, unknown>>) => tools.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        const strip = (tools: Array<Record<string, unknown>>) =>
+          tools
+            .map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations }))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name)));
         assert.deepEqual(strip((await client.listTools()).tools), strip((await http.listTools()).tools));
       } finally {
         await client.close();
@@ -118,7 +124,10 @@ describe("mcp stdio bridge", () => {
         const r = await client.callTool({ name: "list_projects", arguments: {} });
         assert.ok(!r.isError, textOf(r));
         const page = JSON.parse(textOf(r)) as { projects: Array<{ id: string }>; total: number };
-        assert.deepEqual(page.projects.map((p) => p.id), [mine]);
+        assert.deepEqual(
+          page.projects.map((p) => p.id),
+          [mine],
+        );
         const denied = await client.callTool({ name: "get_project", arguments: { id: theirs } });
         assert.equal(denied.isError, true);
         assert.match(textOf(denied), /NOT_FOUND/);

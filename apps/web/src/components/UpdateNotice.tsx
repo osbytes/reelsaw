@@ -26,7 +26,13 @@ export function useUpdateStatus() {
 export function UpdateDot() {
   const u = useUpdateStatus().data;
   if (!u?.available || !u.latest) return null;
-  return <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-acc ring-2 ring-panel" role="img" aria-label={`Reelsaw ${u.latest.version} is available`} />;
+  return (
+    <span
+      className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-acc ring-2 ring-panel"
+      role="img"
+      aria-label={`Reelsaw ${u.latest.version} is available`}
+    />
+  );
 }
 
 /** Account menu, next to "Settings": the version waiting (admins). */
@@ -46,7 +52,15 @@ export function UpdateStatusLine({ version }: { version: string | null }) {
     trpc.admin.updates.check.mutationOptions({
       onSuccess: (st) => {
         qc.setQueryData(trpc.admin.updates.get.queryKey(), st);
-        toast(st.error ? `Could not check: ${st.error}` : st.available ? `Reelsaw ${st.latest?.version} is available` : st.available === false ? "Up to date" : `Latest release: ${st.latest?.version}`);
+        toast(
+          st.error
+            ? `Could not check: ${st.error}`
+            : st.available
+              ? `Reelsaw ${st.latest?.version} is available`
+              : st.available === false
+                ? "Up to date"
+                : `Latest release: ${st.latest?.version}`,
+        );
       },
       onError: (e) => toast.error(e.message),
     }),
@@ -88,7 +102,12 @@ export function UpdateBanner() {
       <div className="flex flex-wrap items-baseline gap-x-2">
         <b>Reelsaw {u.latest.version} is available</b>
         <span className="text-ink2">you run {u.current}</span>
-        <a href={`${CHANGELOG_URL}#${u.latest.version.startsWith("v") ? u.latest.version : `v${u.latest.version}`}`} target="_blank" rel="noreferrer" className="text-acc-text">
+        <a
+          href={`${CHANGELOG_URL}#${u.latest.version.startsWith("v") ? u.latest.version : `v${u.latest.version}`}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-acc-text"
+        >
           What's new
         </a>
         <a href={u.latest.url} target="_blank" rel="noreferrer" className="text-acc-text">

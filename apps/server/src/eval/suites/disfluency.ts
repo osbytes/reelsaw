@@ -54,7 +54,10 @@ export const disfluencySuite: Suite = {
     const spec = JSON.parse(await fs.readFile(path.join(ctx.fixtures("disfluency"), "cases.json"), "utf8")) as { cases: Case[] };
     const only = ctx.opt("split");
     if (only && only !== "dev" && only !== "heldout") throw new Error(`--split must be dev or heldout, got ${only}`);
-    return runDisfluencyCases(ctx, spec.cases.filter((c) => !only || c.split === only));
+    return runDisfluencyCases(
+      ctx,
+      spec.cases.filter((c) => !only || c.split === only),
+    );
   },
   summarize: summarizeDisfluency,
 };
@@ -94,7 +97,16 @@ export async function runDisfluencyCases(ctx: EvalContext, cases: Case[]): Promi
           split: c.split,
           otherFlags: others,
         },
-        notes: `${c.kind} · ${c.label} · “…${c.words.slice(Math.max(0, a - 5), a).map((w) => w.text).join(" ")} [${c.words.slice(a, b + 1).map((w) => w.text).join(" ")}] ${c.words.slice(b + 1, b + 6).map((w) => w.text).join(" ")}…”`,
+        notes: `${c.kind} · ${c.label} · “…${c.words
+          .slice(Math.max(0, a - 5), a)
+          .map((w) => w.text)
+          .join(" ")} [${c.words
+          .slice(a, b + 1)
+          .map((w) => w.text)
+          .join(" ")}] ${c.words
+          .slice(b + 1, b + 6)
+          .map((w) => w.text)
+          .join(" ")}…”`,
       });
     } catch (err) {
       if (isUnavailable(err)) out.push({ id: c.id, pass: false, skipped: `model unavailable: ${(err as Error).message.slice(0, 100)}` });

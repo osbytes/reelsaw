@@ -9,7 +9,10 @@ import { BASE, db, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data, error: body.error };
@@ -55,7 +58,19 @@ describe("settings", () => {
     assert.equal(one.status, 200);
     assert.equal(one.data, null);
     const pub = (await trpc("", "system.status", undefined, "GET")).data as Record<string, unknown>;
-    assert.deepEqual(Object.keys(pub).sort(), ["captcha", "emailEnabled", "emailVerification", "maxUploadMb", "otel", "paused", "privacyUrl", "signupMode", "telemetry", "termsUrl", "version"]);
+    assert.deepEqual(Object.keys(pub).sort(), [
+      "captcha",
+      "emailEnabled",
+      "emailVerification",
+      "maxUploadMb",
+      "otel",
+      "paused",
+      "privacyUrl",
+      "signupMode",
+      "telemetry",
+      "termsUrl",
+      "version",
+    ]);
   });
 
   it("shows machine numbers in /api/health to admins only", async () => {

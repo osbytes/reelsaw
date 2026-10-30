@@ -25,12 +25,16 @@ describe("render generations", { skip: notReady ?? false }, () => {
   after(() => h.cleanup());
 
   const clipRow = async () => (await h.pool.query(`select render_gen, status, output_key, thumbnail_key from clips where id = $1`, [clipId])).rows[0];
-  const liveJobs = async () => (await h.pool.query(`select data from pgboss.job where singleton_key = $1 and state in ('created','retry','active')`, [clipId])).rows;
+  const liveJobs = async () =>
+    (await h.pool.query(`select data from pgboss.job where singleton_key = $1 and state in ('created','retry','active')`, [clipId])).rows;
 
   it("requestRender twice bumps render_gen each time and leaves exactly one live job, for the newest generation", async () => {
     const g1 = await h.tx((u) => requestRender(h.svc, u, projectId, clipId));
     assert.equal(g1, 1);
-    assert.deepEqual((await liveJobs()).map((j) => j.data.gen), [1]);
+    assert.deepEqual(
+      (await liveJobs()).map((j) => j.data.gen),
+      [1],
+    );
 
     const g2 = await h.tx((u) => requestRender(h.svc, u, projectId, clipId));
     assert.equal(g2, 2);
@@ -38,7 +42,11 @@ describe("render generations", { skip: notReady ?? false }, () => {
     assert.equal(row.render_gen, 2);
     assert.equal(row.status, "pending");
     assert.equal(row.output_key, null, "the superseded output is no longer referenced");
-    assert.deepEqual((await liveJobs()).map((j) => j.data.gen), [2], "the generation-1 job was cancelled, not left alongside");
+    assert.deepEqual(
+      (await liveJobs()).map((j) => j.data.gen),
+      [2],
+      "the generation-1 job was cancelled, not left alongside",
+    );
   });
 
   it("deletes the superseded files after commit, and the project reopens once", async () => {
@@ -57,7 +65,10 @@ describe("render generations", { skip: notReady ?? false }, () => {
       }),
     );
     assert.equal((await clipRow()).render_gen, 2);
-    assert.deepEqual((await liveJobs()).map((j) => j.data.gen), [2]);
+    assert.deepEqual(
+      (await liveJobs()).map((j) => j.data.gen),
+      [2],
+    );
     assert.deepEqual(h.deletedKeys, ["projects/x/clips/old.0.mp4"]);
   });
 
@@ -82,7 +93,10 @@ describe("render generations", { skip: notReady ?? false }, () => {
     return h.tx(async (u) => {
       const [cur] = await u.db.select({ gen: schema.clips.renderGen }).from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
       if (!cur || cur.gen !== gen) return false;
-      await u.db.update(schema.clips).set({ status: "done", outputKey }).where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, gen)));
+      await u.db
+        .update(schema.clips)
+        .set({ status: "done", outputKey })
+        .where(and(eq(schema.clips.id, clipId), eq(schema.clips.renderGen, gen)));
       await u.emit(projectId, "clip.done", { clipId });
       return true;
     });

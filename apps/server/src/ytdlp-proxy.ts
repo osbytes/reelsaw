@@ -203,8 +203,13 @@ export type YtdlpErrorKind = "content" | "abort" | "proxy" | "other";
  */
 export function classifyYtdlpError(text: string): YtdlpErrorKind {
   if (/\bAbortError\b|The operation was aborted|aborted by signal/i.test(text)) return "abort";
-  if (/this video is private|video unavailable|confirm your age|age-restricted|file is larger than max-filesize|requested format is not available/i.test(text)) return "content";
-  if (/sign in to confirm|not a bot|HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/i.test(text)) {
+  if (/this video is private|video unavailable|confirm your age|age-restricted|file is larger than max-filesize|requested format is not available/i.test(text))
+    return "content";
+  if (
+    /sign in to confirm|not a bot|HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/i.test(
+      text,
+    )
+  ) {
     return "proxy";
   }
   return "other";
@@ -256,7 +261,15 @@ export function createYtdlpProxyPool(
     breaker.onFailure((ev) => {
       if (ev.handled) remember(slot, false);
     });
-    breaker.onStateChange((state) => count("reelsaw.ytdlp.proxy.circuit.changes", 1, "{change}", { proxy: candidate.id, state: circuitOf(state) }, "yt-dlp proxy circuit transitions (open = cooling after consecutive faults)"));
+    breaker.onStateChange((state) =>
+      count(
+        "reelsaw.ytdlp.proxy.circuit.changes",
+        1,
+        "{change}",
+        { proxy: candidate.id, state: circuitOf(state) },
+        "yt-dlp proxy circuit transitions (open = cooling after consecutive faults)",
+      ),
+    );
     return slot;
   });
 
@@ -275,13 +288,20 @@ export function createYtdlpProxyPool(
     try {
       return await work();
     } catch (err) {
-      outcome = isBulkheadRejectedError(err) ? "busy" : isBrokenCircuitError(err) ? "circuit_open" : isTaskCancelledError(err) ? "abort" : classifyYtdlpError(errorText(err));
+      outcome = isBulkheadRejectedError(err)
+        ? "busy"
+        : isBrokenCircuitError(err)
+          ? "circuit_open"
+          : isTaskCancelledError(err)
+            ? "abort"
+            : classifyYtdlpError(errorText(err));
       throw err;
     } finally {
       running.set(id, (running.get(id) ?? 1) - 1);
       const attrs = { proxy: id, outcome, panic };
       count("reelsaw.ytdlp.attempts", 1, "{attempt}", attrs, "yt-dlp attempts per proxy candidate, by outcome (busy and circuit_open never started a process)");
-      if (outcome !== "busy" && outcome !== "circuit_open") histogram("reelsaw.ytdlp.attempt.duration", (performance.now() - t0) / 1000, "s", attrs, "Wall time of one yt-dlp process through one proxy candidate");
+      if (outcome !== "busy" && outcome !== "circuit_open")
+        histogram("reelsaw.ytdlp.attempt.duration", (performance.now() - t0) / 1000, "s", attrs, "Wall time of one yt-dlp process through one proxy candidate");
     }
   }
 
@@ -327,12 +347,22 @@ export function createYtdlpProxyPool(
         outcome = signal?.aborted ? "abort" : classifyYtdlpError(errorText(err));
         throw err;
       } finally {
-        histogram("reelsaw.ytdlp.download.duration", (performance.now() - t0) / 1000, "s", { proxy, outcome, fallback: state.fallback }, "One yt-dlp download through the proxy pool, waits and fallbacks included; proxy is the candidate that served it");
+        histogram(
+          "reelsaw.ytdlp.download.duration",
+          (performance.now() - t0) / 1000,
+          "s",
+          { proxy, outcome, fallback: state.fallback },
+          "One yt-dlp download through the proxy pool, waits and fallbacks included; proxy is the candidate that served it",
+        );
       }
     },
   };
 
-  async function walk<T>(fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>, signal: AbortSignal | undefined, state: { fallback: boolean }): Promise<{ value: T; id: string }> {
+  async function walk<T>(
+    fn: (choice: { id: string; args: string[] }, signal: AbortSignal) => Promise<T>,
+    signal: AbortSignal | undefined,
+    state: { fallback: boolean },
+  ): Promise<{ value: T; id: string }> {
     const exclude = new Set<string>();
     let lastErr: unknown;
     let usedFallback = false;
@@ -411,9 +441,24 @@ export function createYtdlpProxyPool(
   }
 
   function registerProxyGauges(all: Slot[]) {
-    gauge("reelsaw.ytdlp.proxy.healthy", "1", () => all.map((s) => [healthy(s) ? 1 : 0, { proxy: s.candidate.id }]), "1 while the candidate's circuit is closed or half-open, 0 while it cools");
-    gauge("reelsaw.ytdlp.proxy.in_flight", "{download}", () => all.map((s) => [running.get(s.candidate.id) ?? 0, { proxy: s.candidate.id }]), "yt-dlp processes running through the candidate in this process");
-    gauge("reelsaw.ytdlp.proxy.success_rate", "1", () => all.filter((s) => s.results.length).map((s) => [s.results.filter(Boolean).length / s.results.length, { proxy: s.candidate.id }]), `Successes over the candidate's last ${PROXY_RESULT_WINDOW} proxy results`);
+    gauge(
+      "reelsaw.ytdlp.proxy.healthy",
+      "1",
+      () => all.map((s) => [healthy(s) ? 1 : 0, { proxy: s.candidate.id }]),
+      "1 while the candidate's circuit is closed or half-open, 0 while it cools",
+    );
+    gauge(
+      "reelsaw.ytdlp.proxy.in_flight",
+      "{download}",
+      () => all.map((s) => [running.get(s.candidate.id) ?? 0, { proxy: s.candidate.id }]),
+      "yt-dlp processes running through the candidate in this process",
+    );
+    gauge(
+      "reelsaw.ytdlp.proxy.success_rate",
+      "1",
+      () => all.filter((s) => s.results.length).map((s) => [s.results.filter(Boolean).length / s.results.length, { proxy: s.candidate.id }]),
+      `Successes over the candidate's last ${PROXY_RESULT_WINDOW} proxy results`,
+    );
   }
 }
 

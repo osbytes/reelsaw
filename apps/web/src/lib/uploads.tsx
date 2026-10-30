@@ -264,7 +264,11 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed inset-0 z-[90] grid place-items-center bg-acc/15 p-6 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-2 rounded-[20px] border-2 border-dashed border-acc bg-panel px-10 py-8 text-center shadow-pop">
             <b className="text-lg">{inLibrary.current ? "Drop to add to the library" : "Drop videos to start projects"}</b>
-            <span className="text-sm text-ink2">{inLibrary.current ? "Videos and images (PNG, JPG, WebP, GIF, SVG) are added to the library." : "One video opens New project. Several start a project each with the default settings."}</span>
+            <span className="text-sm text-ink2">
+              {inLibrary.current
+                ? "Videos and images (PNG, JPG, WebP, GIF, SVG) are added to the library."
+                : "One video opens New project. Several start a project each with the default settings."}
+            </span>
           </div>
         </div>
       )}
@@ -286,7 +290,11 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
           {jobs.map((j) => (
             <div key={j.key} className="flex flex-col gap-1 text-xs">
               <div className="flex items-center gap-2">
-                {j.state === "uploading" || j.state === "creating" ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" /> : <span className={`font-mono ${j.state === "done" ? "text-ok" : "text-err"}`}>{j.state === "done" ? "●" : "▲"}</span>}
+                {j.state === "uploading" || j.state === "creating" ? (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-acc-text" />
+                ) : (
+                  <span className={`font-mono ${j.state === "done" ? "text-ok" : "text-err"}`}>{j.state === "done" ? "●" : "▲"}</span>
+                )}
                 <span className="min-w-0 flex-1 truncate">{j.name}</span>
                 {j.state === "uploading" && (
                   <button className="text-ink3 hover:text-ink" onClick={() => cancel(j.key)} aria-label={`Cancel upload of ${j.name}`} title="Cancel upload">
@@ -303,7 +311,9 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
                     Open
                   </Link>
                 ) : (
-                  <span className="font-mono text-ink3">{j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "creating" ? "starting" : "failed"}</span>
+                  <span className="font-mono text-ink3">
+                    {j.state === "uploading" ? `${Math.round(j.pct * 100)}%` : j.state === "creating" ? "starting" : "failed"}
+                  </span>
                 )}
               </div>
               {j.state === "uploading" && (

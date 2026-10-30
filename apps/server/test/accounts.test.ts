@@ -13,7 +13,10 @@ type U = Awaited<ReturnType<typeof signUp>>;
 const json = { "content-type": "application/json", origin: BASE };
 
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data, error: body.error };
@@ -34,7 +37,10 @@ describe("accounts", () => {
     victim = await signUp();
     await pool.query(`update "user" set role = 'admin' where id = $1`, [admin.userId]);
     await pool.query(`update "user" set approved_at = null where id = $1`, [pending.userId]);
-    await pool.query(`insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Victim', 'url', 'https://example.com/v.mp4', 'done', '{}')`, [victimProject, victim.userId]);
+    await pool.query(
+      `insert into projects (id, user_id, title, source_type, source_url, status, settings) values ($1, $2, 'Victim', 'url', 'https://example.com/v.mp4', 'done', '{}')`,
+      [victimProject, victim.userId],
+    );
   });
 
   after(async () => {
@@ -51,7 +57,16 @@ describe("accounts", () => {
     assert.equal(list.error?.data.code, "FORBIDDEN");
     assert.match(list.error!.message, /waiting for an admin/);
     assert.equal((await fetch(`${BASE}/media/source/${victimProject}`, { headers: { cookie: pending.cookie } })).status, 401);
-    const mcp = await fetch(`${BASE}/api/mcp`, { method: "POST", headers: { ...json, cookie: pending.cookie, accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } } }) });
+    const mcp = await fetch(`${BASE}/api/mcp`, {
+      method: "POST",
+      headers: { ...json, cookie: pending.cookie, accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } },
+      }),
+    });
     assert.equal(mcp.status, 403);
   });
 
@@ -74,7 +89,10 @@ describe("accounts", () => {
     const list2 = await trpc(pending.cookie, "projects.list", undefined, "GET");
     assert.equal(list2.status, 200);
     const ev = await pool.query(`select type from admin_events where user_id = $1 order by id`, [pending.userId]);
-    assert.deepEqual(ev.rows.map((e) => e.type), ["user.signed_up", "user.approved"]);
+    assert.deepEqual(
+      ev.rows.map((e) => e.type),
+      ["user.signed_up", "user.approved"],
+    );
   });
 
   it("suspends: sessions end, keys stop, reinstating works", async () => {
@@ -82,7 +100,10 @@ describe("accounts", () => {
     assert.equal(r.status, 200);
     // the session row is gone; within the 60 s cookie cache the request still resolves the user, who is then refused with the reason
     const refused = await trpc(user.cookie, "projects.list", undefined, "GET");
-    assert.ok(refused.error?.data.code === "UNAUTHORIZED" || (refused.error?.data.code === "FORBIDDEN" && /suspended: spam/.test(refused.error.message)), JSON.stringify(refused.error));
+    assert.ok(
+      refused.error?.data.code === "UNAUTHORIZED" || (refused.error?.data.code === "FORBIDDEN" && /suspended: spam/.test(refused.error.message)),
+      JSON.stringify(refused.error),
+    );
     await trpc(admin.cookie, "admin.users.unban", { id: user.userId });
     const row = await pool.query(`select banned, ban_reason from "user" where id = $1`, [user.userId]);
     assert.deepEqual(row.rows[0], { banned: false, ban_reason: null });
@@ -108,7 +129,16 @@ describe("accounts", () => {
     assert.equal(list.error?.data.code, "FORBIDDEN");
     assert.equal(list.error?.message, MUST_CHANGE_PASSWORD_MESSAGE);
     assert.equal((await fetch(`${BASE}/media/source/${victimProject}`, { headers: { cookie: locked.cookie } })).status, 401);
-    const mcp = await fetch(`${BASE}/api/mcp`, { method: "POST", headers: { ...json, cookie: locked.cookie, accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } } }) });
+    const mcp = await fetch(`${BASE}/api/mcp`, {
+      method: "POST",
+      headers: { ...json, cookie: locked.cookie, accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } },
+      }),
+    });
     assert.equal(mcp.status, 403);
     const viaKey = await fetch(`${BASE}/api/trpc/projects.list`, { method: "GET", headers: { ...json, authorization: `Bearer ${key.key}` } });
     assert.equal(viaKey.status, 200);

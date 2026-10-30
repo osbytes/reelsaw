@@ -38,7 +38,20 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
       handle: async (rows) => {
         for (const p of rows) {
           await svc.tx(async (u) => {
-            const [cur] = await u.db.update(schema.projects).set({ sourceExpiredAt: new Date(), sourceBytes: null }).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.sourceExpiredAt), isNull(schema.projects.deletedAt), eq(schema.projects.sourceKey, p.sourceKey), inArray(schema.projects.status, ["done", "failed"]), lt(schema.projects.updatedAt, cutoff))).returning({ id: schema.projects.id });
+            const [cur] = await u.db
+              .update(schema.projects)
+              .set({ sourceExpiredAt: new Date(), sourceBytes: null })
+              .where(
+                and(
+                  eq(schema.projects.id, p.id),
+                  isNull(schema.projects.sourceExpiredAt),
+                  isNull(schema.projects.deletedAt),
+                  eq(schema.projects.sourceKey, p.sourceKey),
+                  inArray(schema.projects.status, ["done", "failed"]),
+                  lt(schema.projects.updatedAt, cutoff),
+                ),
+              )
+              .returning({ id: schema.projects.id });
             if (!cur) return;
             await u.emit(p.id, "source.expired", { days: config.SOURCE_RETENTION_DAYS });
             u.afterCommit(async () => {
@@ -72,7 +85,11 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
         for (const [projectId, list] of byProject) {
           await svc.tx(async (u) => {
             for (const c of list) {
-              const [cur] = await u.db.update(schema.clips).set({ outputKey: null, thumbnailKey: null, updatedAt: new Date() }).where(and(eq(schema.clips.id, c.id), eq(schema.clips.outputKey, c.outputKey))).returning({ id: schema.clips.id });
+              const [cur] = await u.db
+                .update(schema.clips)
+                .set({ outputKey: null, thumbnailKey: null, updatedAt: new Date() })
+                .where(and(eq(schema.clips.id, c.id), eq(schema.clips.outputKey, c.outputKey)))
+                .returning({ id: schema.clips.id });
               if (!cur) continue;
               // the store object and the scratch copy: the local store hardlinks them, so both must go to free disk
               u.afterCommit(async () => {

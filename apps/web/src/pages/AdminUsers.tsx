@@ -7,8 +7,31 @@ import { toast } from "sonner";
 import { ScrollArea } from "../components/scroll-area";
 import { ConfirmDialog, Modal, MoreButton, Segmented, Skeleton, Select } from "../components/ui";
 
-type Usage = { projects: number; sourceMinutes: number; clipsRendered: number; storedBytes: number; llmCalls: number; llmInputTokens: number; llmOutputTokens: number };
-type Row = { id: string; name: string; email: string; role: "user" | "admin"; status: "pending" | "active" | "suspended"; banReason: string | null; projects: number; createdAt: string; lastActive: string | null; usage: Usage; /** the plan in force (hosted); null when this instance has no plans */ plan: string | null; /** abuse flags from the hourly pass (abuse.ts) */ flags: string[]; signupIp: string | null; mustChangePassword: boolean };
+type Usage = {
+  projects: number;
+  sourceMinutes: number;
+  clipsRendered: number;
+  storedBytes: number;
+  llmCalls: number;
+  llmInputTokens: number;
+  llmOutputTokens: number;
+};
+type Row = {
+  id: string;
+  name: string;
+  email: string;
+  role: "user" | "admin";
+  status: "pending" | "active" | "suspended";
+  banReason: string | null;
+  projects: number;
+  createdAt: string;
+  lastActive: string | null;
+  usage: Usage /** the plan in force (hosted); null when this instance has no plans */;
+  plan: string | null /** abuse flags from the hourly pass (abuse.ts) */;
+  flags: string[];
+  signupIp: string | null;
+  mustChangePassword: boolean;
+};
 const FLAG_HELP: Record<string, string> = {
   shared_ip: "Three or more accounts signed up from the same address in the last 7 days",
   signup_burst: "Five or more accounts from the same address within one hour",
@@ -92,11 +115,16 @@ export function AdminUsersPage() {
     if (!sort) return base;
     const val = (r: Row): string | number => {
       switch (sort.key) {
-        case "name": return (r.name || r.email).toLowerCase();
-        case "status": return r.status;
-        case "lastActive": return r.lastActive ? new Date(r.lastActive).getTime() : 0;
-        case "projects": return r.usage.projects;
-        default: return r.usage[sort.key];
+        case "name":
+          return (r.name || r.email).toLowerCase();
+        case "status":
+          return r.status;
+        case "lastActive":
+          return r.lastActive ? new Date(r.lastActive).getTime() : 0;
+        case "projects":
+          return r.usage.projects;
+        default:
+          return r.usage[sort.key];
       }
     };
     return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
@@ -104,7 +132,11 @@ export function AdminUsersPage() {
   const pending = rows.filter((r) => r.status === "pending").length;
 
   const head = (k: SortKey, label: string, opts: { right?: boolean; className?: string; usage?: boolean } = {}) => (
-    <th scope="col" className={`${TH} ${opts.right ? "text-right" : "text-left"} ${opts.className ?? ""}`} aria-sort={sort?.key === k ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
+    <th
+      scope="col"
+      className={`${TH} ${opts.right ? "text-right" : "text-left"} ${opts.className ?? ""}`}
+      aria-sort={sort?.key === k ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+    >
       <button
         type="button"
         title={opts.usage ? "All time. Sorts the loaded rows" : "Sorts the loaded rows"}
@@ -112,7 +144,9 @@ export function AdminUsersPage() {
         onClick={() => setSort(sort?.key === k && sort.dir === -1 ? null : { key: k, dir: sort?.key === k ? -1 : k === "name" || k === "status" ? 1 : -1 })}
       >
         {label}
-        <span aria-hidden className="inline-block w-2 text-[10px] leading-none">{sort?.key === k ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
+        <span aria-hidden className="inline-block w-2 text-[10px] leading-none">
+          {sort?.key === k ? (sort.dir === 1 ? "▲" : "▼") : ""}
+        </span>
       </button>
     </th>
   );
@@ -124,20 +158,40 @@ export function AdminUsersPage() {
           <div>
             <h1 className="text-[28px] font-bold tracking-tight">Users</h1>
             <div className="mt-1 flex min-h-5 items-center text-sm text-ink2">
-              {list.isPending ? <Skeleton className="h-3.5 w-44" /> : list.data ? `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}${pending ? ` · ${pending} waiting for approval` : ""}` : ""}
+              {list.isPending ? (
+                <Skeleton className="h-3.5 w-44" />
+              ) : list.data ? (
+                `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${num.format(total)} account${total === 1 ? "" : "s"}${pending ? ` · ${pending} waiting for approval` : ""}`
+              ) : (
+                ""
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`} aria-pressed={flaggedOnly} onClick={() => setFlaggedOnly(!flaggedOnly)} title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains">
+            <button
+              type="button"
+              className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`}
+              aria-pressed={flaggedOnly}
+              onClick={() => setFlaggedOnly(!flaggedOnly)}
+              title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains"
+            >
               {flaggedOnly ? "◆ Flagged only" : "◇ Flagged only"}
             </button>
-            <input className="input w-[14rem]" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search users" />
+            <input
+              className="input w-[14rem]"
+              placeholder="Search name or email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search users"
+            />
           </div>
         </div>
 
         <div className="min-h-10 text-[13px]">
           {list.error && <span className="text-err">✕ {list.error.message}</span>}
-          {list.data && !list.isPlaceholderData && rows.length === 0 && <span className="text-ink3">{q ? `No accounts match “${q}”` : "No accounts match"}</span>}
+          {list.data && !list.isPlaceholderData && rows.length === 0 && (
+            <span className="text-ink3">{q ? `No accounts match “${q}”` : "No accounts match"}</span>
+          )}
           {(rows.length > 0 || list.isPending) && (
             <div className="rounded-[16px] border border-line bg-panel">
               <table className="w-full table-fixed border-separate border-spacing-0">
@@ -177,13 +231,23 @@ export function AdminUsersPage() {
                             <Skeleton className="mt-1.5 h-3 w-3/5" />
                             <Skeleton className="mt-1.5 h-3 w-4/5 min-[900px]:hidden" />
                           </td>
-                          <td className={`${cell} ${FULL}`}><Skeleton className="h-3.5 w-16" /></td>
+                          <td className={`${cell} ${FULL}`}>
+                            <Skeleton className="h-3.5 w-16" />
+                          </td>
                           {[0, 1, 2].map((j) => (
-                            <td key={j} className={`${cell} ${FULL}`}><Skeleton className="ml-auto h-3.5 w-8" /></td>
+                            <td key={j} className={`${cell} ${FULL}`}>
+                              <Skeleton className="ml-auto h-3.5 w-8" />
+                            </td>
                           ))}
-                          <td className={`${cell} ${FULL}`}><Skeleton className="ml-auto h-3.5 w-12" /></td>
-                          <td className={`${cell} ${FULL}`}><Skeleton className="h-3.5 w-14" /></td>
-                          <td className={cell}><Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[900px]:w-[11rem]" /></td>
+                          <td className={`${cell} ${FULL}`}>
+                            <Skeleton className="ml-auto h-3.5 w-12" />
+                          </td>
+                          <td className={`${cell} ${FULL}`}>
+                            <Skeleton className="h-3.5 w-14" />
+                          </td>
+                          <td className={cell}>
+                            <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[900px]:w-[11rem]" />
+                          </td>
                         </tr>
                       );
                     })}
@@ -211,10 +275,21 @@ export function AdminUsersPage() {
                           <div className="flex items-center gap-2">
                             <span className="min-w-0 truncate font-semibold">{r.name || r.email}</span>
                             {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
-                            {r.mustChangePassword && <span className="chip shrink-0 bg-warn-soft text-warn" title="reelsaw set-password --must-change: they pick a new password at next sign-in">must change password</span>}
+                            {r.mustChangePassword && (
+                              <span
+                                className="chip shrink-0 bg-warn-soft text-warn"
+                                title="reelsaw set-password --must-change: they pick a new password at next sign-in"
+                              >
+                                must change password
+                              </span>
+                            )}
                             {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
                             {r.flags.map((f) => (
-                              <span key={f} className="chip shrink-0 bg-warn-soft text-warn" title={`${FLAG_HELP[f] ?? f}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}`}>
+                              <span
+                                key={f}
+                                className="chip shrink-0 bg-warn-soft text-warn"
+                                title={`${FLAG_HELP[f] ?? f}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}`}
+                              >
                                 ⚑ {f.replace(/_/g, " ")}
                               </span>
                             ))}
@@ -238,7 +313,12 @@ export function AdminUsersPage() {
                         <td className={`${cell} ${FULL} text-xs text-ink3`}>{ago(r.lastActive)}</td>
                         <td className={`${cell} text-right`}>
                           <div className="flex items-center justify-end gap-1.5">
-                            <button className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} hidden h-8 w-[5.5rem] text-xs min-[900px]:inline-flex`} disabled={stateOff} title={stateWhy} onClick={stateRun}>
+                            <button
+                              className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} hidden h-8 w-[5.5rem] text-xs min-[900px]:inline-flex`}
+                              disabled={stateOff}
+                              title={stateWhy}
+                              onClick={stateRun}
+                            >
                               {stateLabel}
                             </button>
                             <button className="btn-ghost hidden h-8 w-[4.25rem] text-xs min-[900px]:inline-flex" onClick={() => setLimitsFor(r)}>
@@ -269,11 +349,19 @@ export function AdminUsersPage() {
                                       Suspend
                                     </DropdownMenu.Item>
                                   )}
-                                  <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setRole.mutate({ id: r.id, role: r.role === "admin" ? "user" : "admin" })}>
+                                  <DropdownMenu.Item
+                                    className="menu-item"
+                                    disabled={busy || self}
+                                    onSelect={() => setRole.mutate({ id: r.id, role: r.role === "admin" ? "user" : "admin" })}
+                                  >
                                     {r.role === "admin" ? "Make user" : "Make admin"}
                                     {self && <span className="menu-hint">not your own</span>}
                                   </DropdownMenu.Item>
-                                  <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
+                                  <DropdownMenu.Item
+                                    className="menu-item-danger"
+                                    disabled={busy || self}
+                                    onSelect={() => setConfirm({ kind: "delete", row: r })}
+                                  >
                                     Delete account…
                                     {self && <span className="menu-hint">not your own</span>}
                                   </DropdownMenu.Item>
@@ -305,7 +393,12 @@ export function AdminUsersPage() {
           open={confirm?.kind === "delete"}
           onOpenChange={(o) => !o && setConfirm(null)}
           title={`Delete ${confirm?.row.email ?? "this account"} forever?`}
-          body={<>Their {confirm?.row.projects ?? 0} project{confirm?.row.projects === 1 ? "" : "s"}, clips and files are deleted permanently. This cannot be undone.</>}
+          body={
+            <>
+              Their {confirm?.row.projects ?? 0} project{confirm?.row.projects === 1 ? "" : "s"}, clips and files are deleted permanently. This cannot be
+              undone.
+            </>
+          }
           confirm="Delete account forever"
           danger
           onConfirm={() => {
@@ -320,7 +413,14 @@ export function AdminUsersPage() {
           body={
             <>
               They are signed out now and cannot use the app, their API keys or MCP until reinstated. Their projects stay.
-              <input className="input mt-3" placeholder="Reason (shown to them, optional)" value={banReason} onChange={(e) => setBanReason(e.target.value)} maxLength={300} aria-label="Reason" />
+              <input
+                className="input mt-3"
+                placeholder="Reason (shown to them, optional)"
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                maxLength={300}
+                aria-label="Reason"
+              />
             </>
           }
           confirm="Suspend"
@@ -335,7 +435,16 @@ export function AdminUsersPage() {
   );
 }
 
-type LimitKey = "MAX_PROJECTS_PER_USER" | "MAX_SOURCE_MINUTES_PER_DAY" | "MAX_SOURCE_MINUTES_PER_MONTH" | "MAX_NEW_PROJECTS_PER_HOUR" | "MAX_LIVE_JOBS_PER_USER" | "MAX_RERENDERS_PER_HOUR" | "MAX_STORAGE_MB" | "MAX_REQUESTS_PER_MINUTE" | "MAX_REQUESTS_PER_HOUR";
+type LimitKey =
+  | "MAX_PROJECTS_PER_USER"
+  | "MAX_SOURCE_MINUTES_PER_DAY"
+  | "MAX_SOURCE_MINUTES_PER_MONTH"
+  | "MAX_NEW_PROJECTS_PER_HOUR"
+  | "MAX_LIVE_JOBS_PER_USER"
+  | "MAX_RERENDERS_PER_HOUR"
+  | "MAX_STORAGE_MB"
+  | "MAX_REQUESTS_PER_MINUTE"
+  | "MAX_REQUESTS_PER_HOUR";
 const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string }> = [
   { key: "MAX_PROJECTS_PER_USER", label: "Projects kept", window: "all projects the account has now", unit: "projects" },
   { key: "MAX_SOURCE_MINUTES_PER_DAY", label: "Minutes of video per day", window: "since 00:00 UTC today", unit: "minutes" },
@@ -381,7 +490,8 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
   const saveWm = useMutation({ ...trpc.admin.users.setWatermark.mutationOptions(), onError: fail });
   const savePlan = useMutation({ ...trpc.admin.billing.setPlan.mutationOptions(), onError: fail });
   const busy = save.isPending || saveWm.isPending || savePlan.isPending;
-  const sourceWord = (k: LimitKey) => (q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance");
+  const sourceWord = (k: LimitKey) =>
+    q.data?.source[k] === "plan" ? `${q.data.plan ?? "plan"} plan` : q.data?.source[k] === "override" ? "override" : "instance";
   const wmHint =
     wm === "on"
       ? "Next render: watermark on (always)."
@@ -398,7 +508,10 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
         className="flex min-h-0 flex-col gap-3"
         onSubmit={async (e) => {
           e.preventDefault();
-          const limits = Object.fromEntries(LIMITS.map(({ key }) => [key, values[key]?.trim() ? Number(values[key]) : null])) as Record<LimitKey, number | null>;
+          const limits = Object.fromEntries(LIMITS.map(({ key }) => [key, values[key]?.trim() ? Number(values[key]) : null])) as Record<
+            LimitKey,
+            number | null
+          >;
           try {
             if (draft) await save.mutateAsync({ id: row.id, limits });
             if (wmDraft !== null && wm !== wmCurrent) await saveWm.mutateAsync({ id: row.id, watermark: wm === "default" ? null : wm === "on" });
@@ -433,7 +546,13 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                     ]}
                   />
                 )}
-                <span className="min-h-4 text-xs text-ink3">{q.data ? (q.data.plan && q.data.plan !== "free" ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.` : "Free. A complimentary grant gives a plan without Stripe.") : ""}</span>
+                <span className="min-h-4 text-xs text-ink3">
+                  {q.data
+                    ? q.data.plan && q.data.plan !== "free"
+                      ? `In force: ${q.data.plan}. A complimentary grant is refused while the account pays through Stripe.`
+                      : "Free. A complimentary grant gives a plan without Stripe."
+                    : ""}
+                </span>
               </div>
             )}
             <div className="flex flex-col gap-1.5">
@@ -441,7 +560,13 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               {q.isPending ? (
                 <Skeleton className="h-[38px] w-full rounded-[10px]" />
               ) : (
-                <Segmented ariaLabel="Watermark" value={wm} onChange={setWmDraft} className="w-full" options={WATERMARK_OPTIONS.map((o) => ({ value: o.value, label: o.label, title: o.title }))} />
+                <Segmented
+                  ariaLabel="Watermark"
+                  value={wm}
+                  onChange={setWmDraft}
+                  className="w-full"
+                  options={WATERMARK_OPTIONS.map((o) => ({ value: o.value, label: o.label, title: o.title }))}
+                />
               )}
               <span className="min-h-4 text-xs text-ink3">{wmHint}</span>
             </div>
@@ -450,7 +575,12 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
               const typed = values[key]?.trim();
               const cap = typed ? Number(typed) : (q.data?.effective?.[key] ?? 0);
               const ratio = used === undefined || !cap ? 0 : used / cap;
-              const state = ratio >= 1 ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" } : ratio >= 0.8 ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" } : null;
+              const state =
+                ratio >= 1
+                  ? { glyph: "✕", word: "Over the limit", tone: "text-err", bar: "bg-err" }
+                  : ratio >= 0.8
+                    ? { glyph: "◷", word: "Near the limit", tone: "text-warn", bar: "bg-warn" }
+                    : null;
               return (
                 <div key={key} className="flex flex-col gap-1.5">
                   <label htmlFor={`limit-${key}`} className="flex items-baseline justify-between text-xs font-semibold text-ink2">
@@ -460,26 +590,37 @@ function LimitsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
                   {q.isPending ? (
                     <Skeleton className="h-[38px] w-full rounded-[10px]" />
                   ) : (
-                  <input
-                    id={`limit-${key}`}
-                    className="input"
-                    type="number"
-                    min={0}
-                    value={values[key] ?? ""}
-                    placeholder={q.data ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}` : ""}
-                    onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
-                  />
+                    <input
+                      id={`limit-${key}`}
+                      className="input"
+                      type="number"
+                      min={0}
+                      value={values[key] ?? ""}
+                      placeholder={
+                        q.data
+                          ? `${q.data.source[key] === "plan" ? "plan" : "instance"}: ${q.data.effective[key] === 0 && !q.data.overrides[key] ? "unlimited" : q.data.source[key] === "override" ? (q.data.instance[key] === 0 ? "unlimited" : q.data.instance[key]) : q.data.effective[key]}`
+                          : ""
+                      }
+                      onChange={(e) => setDraft({ ...values, [key]: e.target.value })}
+                    />
                   )}
                   {q.isPending ? (
                     <Skeleton className="h-1 w-full rounded-full" />
                   ) : (
-                  <div className="h-1 w-full overflow-hidden rounded-full bg-sunk" aria-hidden>
-                    <div className={`h-full rounded-full ${state?.bar ?? "bg-acc"}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
-                  </div>
+                    <div className="h-1 w-full overflow-hidden rounded-full bg-sunk" aria-hidden>
+                      <div className={`h-full rounded-full ${state?.bar ?? "bg-acc"}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
+                    </div>
                   )}
                   <div className="flex min-h-4 items-center justify-between gap-2 text-xs tabular-nums text-ink3">
                     <span>
-                      {used === undefined ? <Skeleton className="inline-block h-3 w-32 align-middle" /> : cap ? `${num.format(used)} of ${num.format(cap)} ${unit}` : `${num.format(used)} ${unit}, no cap`} · {window}
+                      {used === undefined ? (
+                        <Skeleton className="inline-block h-3 w-32 align-middle" />
+                      ) : cap ? (
+                        `${num.format(used)} of ${num.format(cap)} ${unit}`
+                      ) : (
+                        `${num.format(used)} ${unit}, no cap`
+                      )}{" "}
+                      · {window}
                     </span>
                     <span className={`shrink-0 ${state?.tone ?? ""}`}>{state ? `${state.glyph} ${state.word}` : ""}</span>
                   </div>

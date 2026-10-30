@@ -86,7 +86,8 @@ export function ReportDialog() {
       });
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => null);
-        const msg = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn’t build the report (${res.status})`;
+        const msg =
+          body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `Couldn’t build the report (${res.status})`;
         throw new Error(msg);
       }
       const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "reelsaw-report.zip";
@@ -106,7 +107,12 @@ export function ReportDialog() {
           message: text.trim(),
           name: me.data?.name,
           email: me.data?.email,
-          tags: { source: target?.tags?.source ?? "report-dialog", ...target?.tags, ...(projectId ? { projectId } : {}), ...(client.route ? { route: client.route } : {}) },
+          tags: {
+            source: target?.tags?.source ?? "report-dialog",
+            ...target?.tags,
+            ...(projectId ? { projectId } : {}),
+            ...(client.route ? { route: client.route } : {}),
+          },
           properties: { project_id: projectId ?? null, clip_count: clipIds.length, route: client.route ?? null, via: "zip" },
         }).catch(() => {});
       }
@@ -184,7 +190,11 @@ export function ReportDialog() {
       <ScrollArea className="max-h-[min(60dvh,calc(90dvh-8rem))]">
         <div className="flex flex-col gap-3 pr-3">
           <Dialog.Description className="-mt-1 text-sm text-ink2">
-            {projectId ? <>About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>. </> : null}
+            {projectId ? (
+              <>
+                About <b className="text-ink">{project.data?.title ?? target?.projectTitle ?? "this project"}</b>.{" "}
+              </>
+            ) : null}
             {feedbackOnly
               ? "Sends your description to the Reelsaw team. API keys and passwords are never included."
               : "Saves a zip you can send to the Reelsaw team. API keys and passwords are never included."}
@@ -223,7 +233,12 @@ export function ReportDialog() {
                 footerHint="Pick any that show the problem"
                 value={clipIds}
                 onChange={setClipIds}
-                options={clips.map((c) => ({ value: c.id, prefix: String(c.index + 1), label: c.title, hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined }))}
+                options={clips.map((c) => ({
+                  value: c.id,
+                  prefix: String(c.index + 1),
+                  label: c.title,
+                  hint: c.status === "failed" ? <span className="text-err">failed</span> : undefined,
+                }))}
               />
             </div>
           )}
@@ -249,13 +264,44 @@ export function ReportDialog() {
                 row(
                   "system",
                   "System info and recent errors",
-                  inc.instance ? "Included with instance-wide diagnostics" : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren’t tied to another account",
+                  inc.instance
+                    ? "Included with instance-wide diagnostics"
+                    : "Versions, CPU/memory/disk, job counts, your usage, and error lines that aren’t tied to another account",
                   inc.instance,
                 )}
-              {projectId && row("logs", "Logs for this project", preview && !preview.logs ? "This instance doesn’t keep a log file" : "Pipeline log lines, including model calls when they’re recorded", !!preview && !preview.logs)}
-              {projectId && row("previews", "Thumbnails and the selected clips' videos", clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips")}
-              {projectId && row("allClips", "All rendered clips", preview ? `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}` : <Skeleton className="mt-0.5 inline-block h-3 w-28" />)}
-              {projectId && row("source", "Source video", preview ? `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}` : <Skeleton className="mt-0.5 inline-block h-3 w-40" />)}
+              {projectId &&
+                row(
+                  "logs",
+                  "Logs for this project",
+                  preview && !preview.logs ? "This instance doesn’t keep a log file" : "Pipeline log lines, including model calls when they’re recorded",
+                  !!preview && !preview.logs,
+                )}
+              {projectId &&
+                row(
+                  "previews",
+                  "Thumbnails and the selected clips' videos",
+                  clipIds.length ? "So we can see what you saw" : "Thumbnails only until you pick clips",
+                )}
+              {projectId &&
+                row(
+                  "allClips",
+                  "All rendered clips",
+                  preview ? (
+                    `${preview.clips} clip${preview.clips === 1 ? "" : "s"} · ${mb(preview.clipsBytes)}`
+                  ) : (
+                    <Skeleton className="mt-0.5 inline-block h-3 w-28" />
+                  ),
+                )}
+              {projectId &&
+                row(
+                  "source",
+                  "Source video",
+                  preview ? (
+                    `${mb(preview.sourceBytes)}${preview.sourceType === "url" ? " · not needed when the link still works" : " · needed to reproduce problems with uploads"}`
+                  ) : (
+                    <Skeleton className="mt-0.5 inline-block h-3 w-40" />
+                  ),
+                )}
             </fieldset>
           )}
         </div>

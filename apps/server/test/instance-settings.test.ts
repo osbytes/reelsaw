@@ -17,7 +17,10 @@ function fakeDb() {
           events.push(v);
           return Promise.resolve();
         }
-        return { onConflictDoUpdate: () => Promise.resolve(void rows.set(v.key, { key: v.key, value: v.value, updatedBy: v.updatedBy ?? null, updatedAt: new Date() })) };
+        return {
+          onConflictDoUpdate: () =>
+            Promise.resolve(void rows.set(v.key, { key: v.key, value: v.value, updatedBy: v.updatedBy ?? null, updatedAt: new Date() })),
+        };
       },
     }),
     delete: () => ({ where: () => Promise.resolve(void rows.clear()) }),
@@ -74,9 +77,15 @@ describe("resolveSettings / problemsOf", () => {
   });
   it("names the setting that lost its precondition", () => {
     assert.deepEqual(problemsOf(resolveSettings(config, {}), { emailEnabled: false }), {});
-    assert.match(problemsOf(resolveSettings(config, { REQUIRE_EMAIL_VERIFICATION: true }), { emailEnabled: false }).REQUIRE_EMAIL_VERIFICATION!, /email driver/);
+    assert.match(
+      problemsOf(resolveSettings(config, { REQUIRE_EMAIL_VERIFICATION: true }), { emailEnabled: false }).REQUIRE_EMAIL_VERIFICATION!,
+      /email driver/,
+    );
     assert.deepEqual(problemsOf(resolveSettings(config, { REQUIRE_EMAIL_VERIFICATION: true }), { emailEnabled: true }), {});
-    assert.match(problemsOf(resolveSettings(config, { CAPTCHA_PROVIDER: "hcaptcha", CAPTCHA_SITE_KEY: "site" }), { emailEnabled: false }).CAPTCHA_PROVIDER!, /both/);
+    assert.match(
+      problemsOf(resolveSettings(config, { CAPTCHA_PROVIDER: "hcaptcha", CAPTCHA_SITE_KEY: "site" }), { emailEnabled: false }).CAPTCHA_PROVIDER!,
+      /both/,
+    );
   });
   it("the patch schema takes every runtime key, nullable", () => {
     const r = settingsPatchSchema.safeParse({ SIGNUP_MODE: null, MAX_UPLOAD_MB: 10, HEALTH_DETAILS: true });
@@ -128,7 +137,10 @@ describe("createInstanceSettings", () => {
     const s = createInstanceSettings(config, log, { emailEnabled: false, pollMs: 0 });
     await s.attach(db);
     await assert.rejects(s.set({ REQUIRE_EMAIL_VERIFICATION: true }, actor), (e: Error) => e instanceof SettingsError && /email driver/.test(e.message));
-    await assert.rejects(s.set({ CAPTCHA_PROVIDER: "hcaptcha" }, actor), (e: Error) => e instanceof SettingsError && /both the site key and the secret key/.test(e.message));
+    await assert.rejects(
+      s.set({ CAPTCHA_PROVIDER: "hcaptcha" }, actor),
+      (e: Error) => e instanceof SettingsError && /both the site key and the secret key/.test(e.message),
+    );
     const st = await s.set({ CAPTCHA_PROVIDER: "hcaptcha", CAPTCHA_SITE_KEY: "site-1234", CAPTCHA_SECRET_KEY: "secret-abcd" }, actor);
     assert.equal(s.get().CAPTCHA_PROVIDER, "hcaptcha");
     assert.equal(s.get().CAPTCHA_SECRET_KEY, "secret-abcd", "the server sees the secret");
@@ -147,7 +159,10 @@ describe("createInstanceSettings", () => {
     assert.ok(!JSON.stringify(rows.get("runtime")!.value).includes("secret-abcd"));
 
     // another process with a different BETTER_AUTH_SECRET: the secret is unreadable, so the captcha cannot apply either
-    const other = createInstanceSettings({ ...config, BETTER_AUTH_SECRET: "another-secret-that-is-long-enough" } as Config, log, { emailEnabled: false, pollMs: 0 });
+    const other = createInstanceSettings({ ...config, BETTER_AUTH_SECRET: "another-secret-that-is-long-enough" } as Config, log, {
+      emailEnabled: false,
+      pollMs: 0,
+    });
     await other.attach(db);
     assert.equal(other.get().CAPTCHA_SECRET_KEY, undefined);
     assert.equal(other.get().CAPTCHA_PROVIDER, undefined, "provider override dropped: its keys are missing");

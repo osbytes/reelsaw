@@ -47,7 +47,17 @@ describe("tripod", () => {
   });
 
   it("keeps both ends of a hard cut in the crop expression", () => {
-    const expr = piecewiseExpr([{ t: 0, v: 100 }, { t: 1, v: 100 }, { t: 1.998, v: 100 }, { t: 2, v: 600 }, { t: 3, v: 600 }, { t: 4, v: 600 }], 2);
+    const expr = piecewiseExpr(
+      [
+        { t: 0, v: 100 },
+        { t: 1, v: 100 },
+        { t: 1.998, v: 100 },
+        { t: 2, v: 600 },
+        { t: 3, v: 600 },
+        { t: 4, v: 600 },
+      ],
+      2,
+    );
     assert.match(expr, /600/);
     assert.match(expr, /1\.99/);
   });

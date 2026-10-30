@@ -64,7 +64,12 @@ export async function learningOn(db: Db, userId: string): Promise<boolean> {
  * nothing. Writes nothing when the owner turned learning off; `build` (the transcript and model reads behind the rows)
  * only runs when it is on. Returns how many rows were written.
  */
-export async function recordDecisions(svc: Pick<Services, "config">, db: Db, project: ProjectRef, build: () => Promise<DecisionInput[]> | DecisionInput[]): Promise<number> {
+export async function recordDecisions(
+  svc: Pick<Services, "config">,
+  db: Db,
+  project: ProjectRef,
+  build: () => Promise<DecisionInput[]> | DecisionInput[],
+): Promise<number> {
   if (!(await learningOn(db, project.userId))) return 0;
   const rows = await build();
   if (!rows.length) return 0;
@@ -94,7 +99,11 @@ export async function recordDecisions(svc: Pick<Services, "config">, db: Db, pro
 export function fixContext(raw: ReadonlyArray<Word>, f: Pick<TranscriptFlag, "wordIndex" | "span">) {
   const from = Math.max(0, f.wordIndex - FIX_CONTEXT_WORDS);
   const to = Math.min(raw.length, f.wordIndex + f.span + FIX_CONTEXT_WORDS);
-  return { words: raw.slice(from, to).map((w) => ({ text: w.text, start: w.start, end: w.end })), target: { index: f.wordIndex - from, span: f.span }, offset: from };
+  return {
+    words: raw.slice(from, to).map((w) => ({ text: w.text, start: w.start, end: w.end })),
+    target: { index: f.wordIndex - from, span: f.span },
+    offset: from,
+  };
 }
 
 /**
@@ -126,7 +135,20 @@ export async function stageModels(db: Db, projectId: string, stage: string, kind
 }
 
 /** Decision rows for fixes: context from the raw words, models from the stage that proposed each (none for manual ones). */
-export async function fixDecisions(db: Db, projectId: string, raw: ReadonlyArray<Word>, items: Array<{ kind: DecisionKind; flag: TranscriptFlag; before: TranscriptFlag | null; after: TranscriptFlag | null; createdAt?: Date; backfilled?: boolean; explicit?: boolean }>): Promise<DecisionInput[]> {
+export async function fixDecisions(
+  db: Db,
+  projectId: string,
+  raw: ReadonlyArray<Word>,
+  items: Array<{
+    kind: DecisionKind;
+    flag: TranscriptFlag;
+    before: TranscriptFlag | null;
+    after: TranscriptFlag | null;
+    createdAt?: Date;
+    backfilled?: boolean;
+    explicit?: boolean;
+  }>,
+): Promise<DecisionInput[]> {
   const models = new Map<string, Record<string, string>>();
   const out: DecisionInput[] = [];
   for (const it of items) {
@@ -142,7 +164,13 @@ export async function fixDecisions(db: Db, projectId: string, raw: ReadonlyArray
       ...(it.explicit === false ? { explicit: false } : {}),
       before: it.before ? flagSnapshot(it.before) : null,
       after: it.after ? flagSnapshot(it.after) : null,
-      context: { flagId: it.flag.id, flagKind: it.flag.kind, subkind: it.flag.subkind ?? null, ...fixContext(raw, it.flag), ...(it.backfilled ? { backfilled: true } : {}) },
+      context: {
+        flagId: it.flag.id,
+        flagKind: it.flag.kind,
+        subkind: it.flag.subkind ?? null,
+        ...fixContext(raw, it.flag),
+        ...(it.backfilled ? { backfilled: true } : {}),
+      },
       models: m,
       ...(it.createdAt ? { createdAt: it.createdAt } : {}),
     });
@@ -191,7 +219,13 @@ export async function rangeTexts(db: Db, projectId: string, ranges: Array<{ star
 }
 
 /** Decision rows for whole clips (delete, restore, create, replaced): the clip as it was, its text and the analyze models. */
-export async function clipDecisions(db: Db, projectId: string, kind: DecisionKind, clips: ClipRow[], o: { explicit?: boolean; side?: "before" | "after" } = {}): Promise<DecisionInput[]> {
+export async function clipDecisions(
+  db: Db,
+  projectId: string,
+  kind: DecisionKind,
+  clips: ClipRow[],
+  o: { explicit?: boolean; side?: "before" | "after" } = {},
+): Promise<DecisionInput[]> {
   if (!clips.length) return [];
   const texts = await rangeTexts(db, projectId, clips);
   const models = clips.some((c) => c.origin !== "manual") ? await stageModels(db, projectId, "analyze", "candidates") : {};
@@ -233,7 +267,15 @@ export async function clipEditDecision(db: Db, projectId: string, before: ClipRo
     clipId: before.id,
     before: pick(b),
     after: pick(a),
-    context: { fields: changed, text: text ?? "", startSec: before.startSec, endSec: before.endSec, origin: before.origin, score: before.score, reasoning: before.reasoning },
+    context: {
+      fields: changed,
+      text: text ?? "",
+      startSec: before.startSec,
+      endSec: before.endSec,
+      origin: before.origin,
+      score: before.score,
+      reasoning: before.reasoning,
+    },
     models: before.origin === "manual" ? {} : await stageModels(db, projectId, "analyze", "candidates"),
   };
 }
@@ -257,7 +299,11 @@ export interface ListDecisionsInput {
 /** One user's decisions, newest first, keyset-paginated. */
 export async function listDecisions(db: Db, userId: string, input: ListDecisionsInput = {}) {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), LIST_MAX);
-  const scope = and(eq(schema.userDecisions.userId, userId), input.kind ? eq(schema.userDecisions.kind, input.kind) : undefined, input.projectId ? eq(schema.userDecisions.projectId, input.projectId) : undefined);
+  const scope = and(
+    eq(schema.userDecisions.userId, userId),
+    input.kind ? eq(schema.userDecisions.kind, input.kind) : undefined,
+    input.projectId ? eq(schema.userDecisions.projectId, input.projectId) : undefined,
+  );
   const rows = await db
     .select()
     .from(schema.userDecisions)
@@ -337,7 +383,11 @@ export const EXPORT_MAX = 1000;
  * A page of a user's decisions in export form (oldest first, so an export can resume from `nextCursor`), plus the
  * eval cases they stand for (`decisions/cases.ts`). `reelsaw decisions export` writes the items as JSON lines.
  */
-export async function exportDecisions(db: Db, userId: string, input: { cursor?: number | undefined; limit?: number; since?: Date | undefined; kind?: DecisionKind | undefined } = {}) {
+export async function exportDecisions(
+  db: Db,
+  userId: string,
+  input: { cursor?: number | undefined; limit?: number; since?: Date | undefined; kind?: DecisionKind | undefined } = {},
+) {
   const limit = Math.min(Math.max(input.limit ?? 200, 1), EXPORT_MAX);
   const rows = await db
     .select()
@@ -379,7 +429,13 @@ export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; bu
     size: BACKFILL_BATCH,
     deadline: deadlineIn(o.budgetMs),
     start: null,
-    fetch: (cursor, size) => db.select({ id: schema.projects.id }).from(schema.projects).where(cursor ? gt(schema.projects.id, cursor) : undefined).orderBy(asc(schema.projects.id)).limit(size),
+    fetch: (cursor, size) =>
+      db
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(cursor ? gt(schema.projects.id, cursor) : undefined)
+        .orderBy(asc(schema.projects.id))
+        .limit(size),
     cursorOf: (r) => r.id,
     handle: async (page) => {
       for (const { id } of page) {
@@ -388,16 +444,31 @@ export async function backfillDecisions(svc: Services, o: { dryRun?: boolean; bu
           if (!p) return 0;
           // fixes decided since the log started already have rows; a rerun finds every fix logged and adds nothing
           const logged = new Set(
-            (await u.db.selectDistinct({ flagId: sql<string | null>`${schema.userDecisions.context}->>'flagId'` }).from(schema.userDecisions).where(eq(schema.userDecisions.projectId, id))).map((r) => r.flagId),
+            (
+              await u.db
+                .selectDistinct({ flagId: sql<string | null>`${schema.userDecisions.context}->>'flagId'` })
+                .from(schema.userDecisions)
+                .where(eq(schema.userDecisions.projectId, id))
+            ).map((r) => r.flagId),
           );
-          const [t] = await u.db.select({ flags: schema.transcripts.flags, deletedFlags: schema.transcripts.deletedFlags, rawWords: schema.transcripts.rawWords, words: schema.transcripts.words }).from(schema.transcripts).where(eq(schema.transcripts.projectId, id));
+          const [t] = await u.db
+            .select({
+              flags: schema.transcripts.flags,
+              deletedFlags: schema.transcripts.deletedFlags,
+              rawWords: schema.transcripts.rawWords,
+              words: schema.transcripts.words,
+            })
+            .from(schema.transcripts)
+            .where(eq(schema.transcripts.projectId, id));
           if (!t) return 0;
           const at = p.updatedAt;
           const items: Parameters<typeof fixDecisions>[3] = [];
           for (const f of t.flags) {
             if (f.subkind === "manual") items.push({ kind: "fix.manual", flag: f, before: null, after: f, createdAt: at, backfilled: true });
-            else if (f.status === "accepted") items.push({ kind: "fix.accept", flag: f, before: { ...f, status: "pending" }, after: f, createdAt: at, backfilled: true });
-            else if (f.status === "rejected") items.push({ kind: "fix.reject", flag: f, before: { ...f, status: "pending" }, after: f, createdAt: at, backfilled: true });
+            else if (f.status === "accepted")
+              items.push({ kind: "fix.accept", flag: f, before: { ...f, status: "pending" }, after: f, createdAt: at, backfilled: true });
+            else if (f.status === "rejected")
+              items.push({ kind: "fix.reject", flag: f, before: { ...f, status: "pending" }, after: f, createdAt: at, backfilled: true });
           }
           for (const d of t.deletedFlags ?? []) {
             const { deletedAt, ...f } = d;

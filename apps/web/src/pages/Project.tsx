@@ -34,7 +34,13 @@ import { useDeletedToast } from "../lib/deletedToast";
 import { useRestoreWindow } from "../lib/retention";
 import { describeStageDetail, type StageDetail } from "../lib/stage-detail";
 
-const STAGE_LABEL: Record<string, string> = { ingest: "Preparing source", transcribe: "Transcribe", refine: "Refine", analyze: "Find moments", render: "Render" };
+const STAGE_LABEL: Record<string, string> = {
+  ingest: "Preparing source",
+  transcribe: "Transcribe",
+  refine: "Refine",
+  analyze: "Find moments",
+  render: "Render",
+};
 /** How far a live status has got. On failure, prefer `p.stage` via STAGE_REACHED so we don't treat every failure as "past transcription". */
 const STAGE_INDEX: Record<string, number> = { queued: -1, ingesting: 0, transcribing: 1, refining: 2, analyzing: 3, rendering: 4, done: 5, failed: 99 };
 const STAGE_REACHED: Record<string, number> = { ingest: 0, transcribe: 1, refine: 2, analyze: 3, render: 4 };
@@ -66,7 +72,8 @@ function useWidth() {
 }
 
 /** A click that starts a mutation and isn't awaited by anything: a refusal (quota, already running, 5xx) becomes a toast, not a silent unhandled rejection. */
-const orToast = (p: Promise<unknown>, what: string) => p.catch((e: unknown) => void toast.error(`${what}: ${e instanceof Error ? e.message : "something went wrong"}`));
+const orToast = (p: Promise<unknown>, what: string) =>
+  p.catch((e: unknown) => void toast.error(`${what}: ${e instanceof Error ? e.message : "something went wrong"}`));
 
 export function ProjectPage() {
   const { id = "" } = useParams();
@@ -178,11 +185,7 @@ export function ProjectPage() {
   }, [id]);
 
   const p = q.data;
-  const stageIdx = p
-    ? p.status === "failed" && p.stage
-      ? (STAGE_REACHED[p.stage] ?? -1)
-      : (STAGE_INDEX[p.status] ?? -1)
-    : -1;
+  const stageIdx = p ? (p.status === "failed" && p.stage ? (STAGE_REACHED[p.stage] ?? -1) : (STAGE_INDEX[p.status] ?? -1)) : -1;
   const active = !!p && ACTIVE.has(p.status);
   const sortedClips = useMemo(() => (p?.clips ?? []).slice().sort((a, b) => a.index - b.index), [p]);
   const readyCount = sortedClips.filter((c) => c.status === "done").length;
@@ -195,12 +198,7 @@ export function ProjectPage() {
   const now = useNow(active);
   // the log grouped by run (newest first); each finished event carries its own duration from the server
   const runGroups = useMemo(
-    () =>
-      groupByRun(
-        log,
-        (e) => describeEvent(e, { expectedSec: (stage) => expectedFor(stage)?.expectedSec ?? null, admin: isAdmin }),
-        hasOlder,
-      ),
+    () => groupByRun(log, (e) => describeEvent(e, { expectedSec: (stage) => expectedFor(stage)?.expectedSec ?? null, admin: isAdmin }), hasOlder),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [log, estimates, hasOlder, isAdmin],
   );
@@ -372,9 +370,21 @@ export function ProjectPage() {
       {!activityLoading && runGroups.length === 0 && <p className="text-ink3">Nothing yet.</p>}
       {runGroups.map((g, i) => {
         const open = openRuns[g.seq] ?? i === 0;
-        const dur = g.outcome === "running" ? `running ${formatTime(Math.max(0, (now - g.startedAt) / 1000))}` : g.runSec !== null ? `${g.outcome === "failed" ? "failed after" : "done in"} ${fmtRun(g.runSec)}` : g.outcome;
+        const dur =
+          g.outcome === "running"
+            ? `running ${formatTime(Math.max(0, (now - g.startedAt) / 1000))}`
+            : g.runSec !== null
+              ? `${g.outcome === "failed" ? "failed after" : "done in"} ${fmtRun(g.runSec)}`
+              : g.outcome;
         const why = reasonLabel(g.reason);
-        const label = [g.continued ? `… Run ${g.seq || ""}`.trim() : `Run ${g.seq}`, why ? why[0]!.toUpperCase() + why.slice(1) : null, dur, new Date(g.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" · ");
+        const label = [
+          g.continued ? `… Run ${g.seq || ""}`.trim() : `Run ${g.seq}`,
+          why ? why[0]!.toUpperCase() + why.slice(1) : null,
+          dur,
+          new Date(g.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const tone: Tone = g.outcome === "running" ? "run" : g.outcome === "failed" ? "err" : "ok";
         return (
           <section key={g.seq} id={`run-${g.seq}`}>
@@ -403,7 +413,9 @@ export function ProjectPage() {
                   const target = cid && sortedClips.some((c) => c.id === cid) ? cid : null;
                   return (
                     <li key={e.id} className="grid h-5 grid-cols-[64px_14px_minmax(0,1fr)] items-center gap-2" title={d.text}>
-                      <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">{new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                      <span className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums leading-5 text-ink3">
+                        {new Date(e.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      </span>
                       <ToneGlyph tone={d.tone} />
                       {target ? (
                         <button
@@ -492,7 +504,9 @@ export function ProjectPage() {
   );
 
   const header = (
-    <div className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}>
+    <div
+      className={`flex shrink-0 items-center border-b border-line px-4 sm:px-5 ${compact ? "flex-nowrap gap-3 py-2.5" : "flex-wrap gap-x-5 gap-y-3 py-3.5"}`}
+    >
       <div className="min-w-0 flex-[1_1_320px]">
         {/* the breadcrumb is the heading: its last crumb is the title, so the name is not printed twice */}
         <div className={`flex min-w-0 items-baseline gap-1.5 ${compact ? "" : "text-sm"}`}>
@@ -504,7 +518,9 @@ export function ProjectPage() {
               <span className="shrink-0 text-ink3">/</span>
             </>
           )}
-          <h1 className={`min-w-0 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "truncate text-xl"}`}>{p.title}</h1>
+          <h1 className={`min-w-0 font-bold leading-tight tracking-tight [text-wrap:pretty] ${compact ? "line-clamp-2 text-base" : "truncate text-xl"}`}>
+            {p.title}
+          </h1>
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 text-[13px] text-ink2">
           {dur ? <span className="font-mono text-xs leading-5">{formatTime(dur)}</span> : null}
@@ -535,7 +551,12 @@ export function ProjectPage() {
       </div>
       <div className="flex items-center gap-2">
         {readyCount > 0 ? (
-          <a className="btn-primary py-2 no-underline" href={`/api/projects/${p.id}/export.zip`} download title="Zip of every rendered clip with YouTube / TikTok metadata, paste-ready text and a manifest">
+          <a
+            className="btn-primary py-2 no-underline"
+            href={`/api/projects/${p.id}/export.zip`}
+            download
+            title="Zip of every rendered clip with YouTube / TikTok metadata, paste-ready text and a manifest"
+          >
             Export{compact ? "" : ` ${readyCount} clip${readyCount === 1 ? "" : "s"}`}
           </a>
         ) : (
@@ -550,12 +571,26 @@ export function ProjectPage() {
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">
               {failedClips.length > 0 && (
-                <DropdownMenu.Item className="menu-item block" onSelect={() => orToast(rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }).then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`))), "Couldn’t retry the failed clips")}>
+                <DropdownMenu.Item
+                  className="menu-item block"
+                  onSelect={() =>
+                    orToast(
+                      rerenderMany
+                        .mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) })
+                        .then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`))),
+                      "Couldn’t retry the failed clips",
+                    )
+                  }
+                >
                   Retry failed clips <span className="text-ink3">({failedClips.length})</span>
                 </DropdownMenu.Item>
               )}
               {(p.status === "failed" || p.status === "done") && (
-                <DropdownMenu.Item className="menu-item block" disabled={retry.isPending} onSelect={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t restart")}>
+                <DropdownMenu.Item
+                  className="menu-item block"
+                  disabled={retry.isPending}
+                  onSelect={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t restart")}
+                >
                   Resume pipeline
                   <div className="text-xs text-ink3">From the last stage that didn’t finish</div>
                 </DropdownMenu.Item>
@@ -584,7 +619,10 @@ export function ProjectPage() {
                 Transcript files…
                 <div className="text-xs text-ink3">Download or import SRT / VTT</div>
               </DropdownMenu.Item>
-              <DropdownMenu.Item className="menu-item block" onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}>
+              <DropdownMenu.Item
+                className="menu-item block"
+                onSelect={() => openReport({ projectId: p.id, projectTitle: p.title, clipId: activeClip ?? undefined })}
+              >
                 Report an issue…
                 <div className="text-xs text-ink3">Send the project’s data and logs</div>
               </DropdownMenu.Item>
@@ -601,75 +639,83 @@ export function ProjectPage() {
 
   const fail = p.status === "failed" && p.error ? summarizeError(p.error, { admin: isAdmin }) : null;
   const failStage = STAGE_LABEL[p.stage ?? ""] ?? "Processing";
-  const alert =
-    fail ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err/50 bg-err-soft px-4 py-3 sm:mx-5">
-        <span className="mt-0.5 font-mono text-sm leading-none text-err" aria-hidden>
-          ▲
-        </span>
-        <div className="min-w-0 flex-[1_1_280px]">
-          <b className="text-[15px]">{failStage} failed</b>
-          <p className="mt-0.5 text-[13px] leading-snug text-ink2">{fail.summary}</p>
-          {fail.detail && (
-            <details className="mt-1.5">
-              <summary className="cursor-pointer select-none text-xs font-semibold text-ink3 hover:text-ink">Technical details</summary>
-              <pre className="mt-1.5 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-sunk/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink3">{fail.detail}</pre>
-            </details>
-          )}
-          <p className="mt-1.5 text-xs text-ink3">Earlier results are kept. Retry picks up from this step.</p>
-        </div>
-        <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
-          ↻ Retry
-        </button>
+  const alert = fail ? (
+    <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-err/50 bg-err-soft px-4 py-3 sm:mx-5">
+      <span className="mt-0.5 font-mono text-sm leading-none text-err" aria-hidden>
+        ▲
+      </span>
+      <div className="min-w-0 flex-[1_1_280px]">
+        <b className="text-[15px]">{failStage} failed</b>
+        <p className="mt-0.5 text-[13px] leading-snug text-ink2">{fail.summary}</p>
+        {fail.detail && (
+          <details className="mt-1.5">
+            <summary className="cursor-pointer select-none text-xs font-semibold text-ink3 hover:text-ink">Technical details</summary>
+            <pre className="mt-1.5 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-sunk/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink3">
+              {fail.detail}
+            </pre>
+          </details>
+        )}
+        <p className="mt-1.5 text-xs text-ink3">Earlier results are kept. Retry picks up from this step.</p>
       </div>
-    ) : stalled ? (
-      <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn/50 bg-warn-soft px-4 py-3 sm:mx-5">
-        <span className="mt-0.5 font-mono text-sm leading-none text-warn" aria-hidden>
-          ◷
-        </span>
-        <div className="min-w-0 flex-[1_1_280px] text-[13px]">
-          {typeof (stalled.payload as { message?: unknown }).message === "string" ? (
-            <b>{String((stalled.payload as { message?: string }).message)}</b>
-          ) : (
-            <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b>
-          )}{" "}
-          {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
-        </div>
-        <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
-          Keep waiting
-        </button>
-        <button className="btn-ink shrink-0" onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
-          ↻ Restart this step
-        </button>
+      <button className="btn-ink shrink-0" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
+        ↻ Retry
+      </button>
+    </div>
+  ) : stalled ? (
+    <div role="alert" className="mx-4 mt-3 flex shrink-0 flex-wrap items-start gap-3 rounded-[14px] border border-warn/50 bg-warn-soft px-4 py-3 sm:mx-5">
+      <span className="mt-0.5 font-mono text-sm leading-none text-warn" aria-hidden>
+        ◷
+      </span>
+      <div className="min-w-0 flex-[1_1_280px] text-[13px]">
+        {typeof (stalled.payload as { message?: unknown }).message === "string" ? (
+          <b>{String((stalled.payload as { message?: string }).message)}</b>
+        ) : (
+          <b>No progress for {String((stalled.payload as { idleMinutes?: number }).idleMinutes ?? "a while")} min.</b>
+        )}{" "}
+        {String((stalled.payload as { hint?: string }).hint ?? "Slow local models can do this on long videos, or the worker may have stopped.")}
       </div>
-    ) : null;
+      <button className="btn-ghost" onClick={() => setStallDismissed(stalled.id)}>
+        Keep waiting
+      </button>
+      <button className="btn-ink shrink-0" onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}>
+        ↻ Restart this step
+      </button>
+    </div>
+  ) : null;
 
   // burned-in / slide text notice: beside the source on desktop, in the Activity tab on phones
   const textNotice = (overlays.length > 0 || presentation) && (
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-acc-soft px-2.5 py-1.5 text-xs text-ink2">
-            <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{presentation ? "SLIDES" : hasCaptions ? "CC" : "TXT"}</span>
-            <span className={`min-w-0 flex-[1_1_160px] text-ink ${compact ? "truncate" : ""}`}>
-              {presentation && p.settings.sourceText !== "always"
-                ? "Looks like a slide presentation, so on-screen text is kept and slides are shown whole."
-                : presentation && p.settings.sourceText === "always"
-                  ? "Burned-in text is hidden, even though this looks like a slide presentation."
-                  : `Burned-in ${hasCaptions ? "captions" : "text"}${overlays.length > 1 ? " and logos" : ""} ${masking ? "are hidden in clips." : "are shown in clips."}`}
-            </span>
-            {(presentation ? overlays.length > 0 || p.settings.sourceText === "always" : true) && (
-              <button
-                className="text-xs font-semibold text-acc-text disabled:opacity-50"
-                disabled={setSourceText.isPending}
-                onClick={() => orToast(setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate), "Couldn’t change burned-in text")}
-              >
-                {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
-              </button>
-            )}
-          </div>
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-acc-soft px-2.5 py-1.5 text-xs text-ink2">
+      <span className="rounded-[4px] bg-panel px-1.5 py-px font-mono text-[10px] text-ink">{presentation ? "SLIDES" : hasCaptions ? "CC" : "TXT"}</span>
+      <span className={`min-w-0 flex-[1_1_160px] text-ink ${compact ? "truncate" : ""}`}>
+        {presentation && p.settings.sourceText !== "always"
+          ? "Looks like a slide presentation, so on-screen text is kept and slides are shown whole."
+          : presentation && p.settings.sourceText === "always"
+            ? "Burned-in text is hidden, even though this looks like a slide presentation."
+            : `Burned-in ${hasCaptions ? "captions" : "text"}${overlays.length > 1 ? " and logos" : ""} ${masking ? "are hidden in clips." : "are shown in clips."}`}
+      </span>
+      {(presentation ? overlays.length > 0 || p.settings.sourceText === "always" : true) && (
+        <button
+          className="text-xs font-semibold text-acc-text disabled:opacity-50"
+          disabled={setSourceText.isPending}
+          onClick={() =>
+            orToast(
+              setSourceText.mutateAsync({ id, sourceText: masking ? "keep" : presentation ? "always" : "hide" }).then(invalidate),
+              "Couldn’t change burned-in text",
+            )
+          }
+        >
+          {masking ? "Show it" : presentation ? "Hide it anyway" : "Hide it"} (re-renders)
+        </button>
+      )}
+    </div>
   );
   const pct = (t: number) => `${dur ? (t / dur) * 100 : 0}%`;
   const source = (
     <div className={`flex shrink-0 px-4 sm:px-5 ${compact ? "items-center gap-3 py-2.5" : "flex-wrap items-center gap-4 py-3.5"}`}>
-      <div className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video w-[44%]" : "aspect-video h-[clamp(110px,24dvh,214px)]"}`}>
+      <div
+        className={`film relative shrink-0 overflow-hidden rounded-[12px] ${compact ? "aspect-video w-[44%]" : "aspect-video h-[clamp(110px,24dvh,214px)]"}`}
+      >
         {p.sourceVideoUrl && (
           <video
             ref={sourceRef}
@@ -685,16 +731,26 @@ export function ProjectPage() {
         )}
         {p.sourceVideoUrl ? (
           !playing && (
-            <button onClick={togglePlay} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop">
+            <button
+              onClick={togglePlay}
+              aria-label="Play"
+              className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-film-ink shadow-pop"
+            >
               ▶
             </button>
           )
         ) : (
           <span className="absolute inset-0 grid place-items-center px-3 text-center font-mono text-[11px] text-film-text">
             {active ? (
-              progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…")
+              (progress?.message ?? (p.sourceType === "upload" ? "preparing upload…" : "downloading…"))
             ) : p.sourceExpiredAt ? (
-              <button type="button" className="btn-ghost text-xs" disabled={retry.isPending} onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")} title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space. Fetch it again, then re-render the clips you need.`}>
+              <button
+                type="button"
+                className="btn-ghost text-xs"
+                disabled={retry.isPending}
+                onClick={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t retry")}
+                title={`Removed on ${new Date(p.sourceExpiredAt).toLocaleDateString()} to free space. Fetch it again, then re-render the clips you need.`}
+              >
                 Source removed · fetch again
               </button>
             ) : p.status === "failed" ? (
@@ -719,7 +775,12 @@ export function ProjectPage() {
           <span className="ml-auto whitespace-nowrap font-mono text-xs text-ink2">
             {formatTime(srcTime)} / {formatTime(dur)}
           </span>
-          <button className="btn-quiet px-1.5 py-1 text-ink3" onClick={() => copyLink({ t: fmtSec(srcTime) })} title="Copy link to this moment" aria-label="Copy link to this moment">
+          <button
+            className="btn-quiet px-1.5 py-1 text-ink3"
+            onClick={() => copyLink({ t: fmtSec(srcTime) })}
+            title="Copy link to this moment"
+            aria-label="Copy link to this moment"
+          >
             <Link2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -733,7 +794,12 @@ export function ProjectPage() {
         >
           <div className="absolute inset-x-0 top-[11px] h-1 rounded-full bg-line" />
           {sortedClips.map((c) => (
-            <div key={c.id} title={`Clip ${c.index + 1}`} className={`absolute top-2 h-2.5 rounded-[2px] ${activeClip === c.id ? "bg-ink" : "bg-acc opacity-85"}`} style={{ left: pct(c.startSec), width: `max(3px, ${pct(c.endSec - c.startSec)})` }} />
+            <div
+              key={c.id}
+              title={`Clip ${c.index + 1}`}
+              className={`absolute top-2 h-2.5 rounded-[2px] ${activeClip === c.id ? "bg-ink" : "bg-acc opacity-85"}`}
+              style={{ left: pct(c.startSec), width: `max(3px, ${pct(c.endSec - c.startSec)})` }}
+            />
           ))}
           <div className="absolute top-0.5 h-[22px] w-0.5 rounded-[1px] bg-ink" style={{ left: pct(srcTime) }} />
         </div>
@@ -774,7 +840,13 @@ export function ProjectPage() {
             <ProgressBar value={progress?.value ?? p.stageProgress ?? 0} />
             <div className="flex h-5 justify-between font-mono text-xs tabular-nums leading-5 text-ink3">
               <span>{eta?.elapsedSec !== null && eta?.elapsedSec !== undefined ? `${formatTime(eta.elapsedSec)} elapsed` : ""}</span>
-              <span>{eta?.expectedSec !== null && eta?.expectedSec !== undefined ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}` : stageIdx <= 0 ? "" : "expected time known after the source is ready"}</span>
+              <span>
+                {eta?.expectedSec !== null && eta?.expectedSec !== undefined
+                  ? `~${formatTime(eta.expectedSec)} expected${eta.source === "history" ? ` · from ${eta.samples} project${eta.samples === 1 ? "" : "s"}` : " · estimate"}`
+                  : stageIdx <= 0
+                    ? ""
+                    : "expected time known after the source is ready"}
+              </span>
             </div>
             {[92, 78, 85, 60, 88, 70].map((w, i) => (
               <div key={i} className="flex gap-2.5">
@@ -788,8 +860,30 @@ export function ProjectPage() {
     </div>
   );
   // built once: the phone and desktop layouts share one element
-  const transcriptBody = transcriptStage ? tq.isLoading ? transcriptSkeleton : (
-    <TranscriptPanel className="flex-1" projectId={p.id} language={transcript?.language ?? p.transcript?.language ?? null} segments={transcript?.segments ?? []} words={transcript?.rawWords ?? transcript?.words ?? []} flags={transcript?.flags ?? []} currentTime={srcTime} clips={sortedClips} onSeek={(t) => seekSource(t)} playback={playback} deletedFlags={transcript?.deletedFlags ?? []} activeClipId={activeClip} onFocusClip={focusClipFromTranscript} onPlayClip={(cid) => { const c = sortedClips.find((x) => x.id === cid); if (c) setPreview(c as ClipView); }} />
+  const transcriptBody = transcriptStage ? (
+    tq.isLoading ? (
+      transcriptSkeleton
+    ) : (
+      <TranscriptPanel
+        className="flex-1"
+        projectId={p.id}
+        language={transcript?.language ?? p.transcript?.language ?? null}
+        segments={transcript?.segments ?? []}
+        words={transcript?.rawWords ?? transcript?.words ?? []}
+        flags={transcript?.flags ?? []}
+        currentTime={srcTime}
+        clips={sortedClips}
+        onSeek={(t) => seekSource(t)}
+        playback={playback}
+        deletedFlags={transcript?.deletedFlags ?? []}
+        activeClipId={activeClip}
+        onFocusClip={focusClipFromTranscript}
+        onPlayClip={(cid) => {
+          const c = sortedClips.find((x) => x.id === cid);
+          if (c) setPreview(c as ClipView);
+        }}
+      />
+    )
   ) : (
     waiting
   );
@@ -867,13 +961,21 @@ export function ProjectPage() {
       <div className="flex-1" />
       {sortedClips.length > 1 && (
         <div className="flex items-center gap-2.5 text-xs">
-          <button className="font-semibold text-acc-text disabled:opacity-50" disabled={sel.length === sortedClips.length} onClick={() => setSel(sortedClips.map((c) => c.id))}>
+          <button
+            className="font-semibold text-acc-text disabled:opacity-50"
+            disabled={sel.length === sortedClips.length}
+            onClick={() => setSel(sortedClips.map((c) => c.id))}
+          >
             Select all
           </button>
           <button className="font-semibold text-acc-text disabled:opacity-50" disabled={!sel.length} onClick={() => setSel([])}>
             Clear
           </button>
-          <span className={`inline-flex h-6 w-[3.25rem] items-center justify-center gap-1 rounded-full bg-acc-soft font-mono tabular-nums text-acc-text ${sel.length ? "" : "invisible"}`} title={`${sel.length} selected`} aria-label={`${sel.length} selected`}>
+          <span
+            className={`inline-flex h-6 w-[3.25rem] items-center justify-center gap-1 rounded-full bg-acc-soft font-mono tabular-nums text-acc-text ${sel.length ? "" : "invisible"}`}
+            title={`${sel.length} selected`}
+            aria-label={`${sel.length} selected`}
+          >
             <Check className="h-3 w-3" aria-hidden />
             {sel.length}
           </span>
@@ -898,19 +1000,23 @@ export function ProjectPage() {
       {compact ? (
         <>
           <ScrollArea className="shrink-0 border-b border-line">
-          <div className="flex w-max gap-1 px-3 py-2">
-            {(
-              [
-                ["transcript", "Transcript"],
-                ["clips", `Clips ${sortedClips.length}`],
-                ["activity", "Activity"],
-              ] as const
-            ).map(([k, l]) => (
-              <button key={k} onClick={() => setMtab(k)} className={`rounded-full px-3 py-1.5 text-[13px] font-semibold whitespace-nowrap ${mtab === k ? "bg-ink text-bg" : "text-ink2"}`}>
-                {l}
-              </button>
-            ))}
-          </div>
+            <div className="flex w-max gap-1 px-3 py-2">
+              {(
+                [
+                  ["transcript", "Transcript"],
+                  ["clips", `Clips ${sortedClips.length}`],
+                  ["activity", "Activity"],
+                ] as const
+              ).map(([k, l]) => (
+                <button
+                  key={k}
+                  onClick={() => setMtab(k)}
+                  className={`rounded-full px-3 py-1.5 text-[13px] font-semibold whitespace-nowrap ${mtab === k ? "bg-ink text-bg" : "text-ink2"}`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
           </ScrollArea>
           {mtab === "transcript" && (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -932,7 +1038,10 @@ export function ProjectPage() {
           )}
         </>
       ) : (
-        <main className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `minmax(0,1fr) ${drawer ? (width < 1100 ? 320 : width < 1280 ? 360 : 400) : 56}px` }}>
+        <main
+          className="grid min-h-0 flex-1"
+          style={{ gridTemplateColumns: `minmax(0,1fr) ${drawer ? (width < 1100 ? 320 : width < 1280 ? 360 : 400) : 56}px` }}
+        >
           <section className="flex min-h-0 min-w-0 flex-col">
             {source}
             {transcriptBody}
@@ -944,7 +1053,11 @@ export function ProjectPage() {
                 <ScrollArea className="min-h-0 flex-1">{clipsList}</ScrollArea>
               </>
             ) : (
-              <button className="flex flex-col items-center gap-2 py-4 text-xs font-semibold text-ink2 hover:text-ink" onClick={() => setDrawer(true)} title="Show clips">
+              <button
+                className="flex flex-col items-center gap-2 py-4 text-xs font-semibold text-ink2 hover:text-ink"
+                onClick={() => setDrawer(true)}
+                title="Show clips"
+              >
                 <PanelRightOpen className="h-4 w-4" />
                 <span className="[writing-mode:vertical-rl]">Clips {sortedClips.length}</span>
               </button>
@@ -963,11 +1076,19 @@ export function ProjectPage() {
                 <X className="h-4 w-4" />
               </Dialog.Close>
             </div>
-            {preview?.videoUrl && <video ref={previewRef} src={preview.videoUrl} poster={preview.thumbnailUrl ?? undefined} controls autoPlay playsInline className="aspect-[9/16] max-h-[70dvh] w-full rounded-[12px] bg-black object-contain" />}
+            {preview?.videoUrl && (
+              <video
+                ref={previewRef}
+                src={preview.videoUrl}
+                poster={preview.thumbnailUrl ?? undefined}
+                controls
+                autoPlay
+                playsInline
+                className="aspect-[9/16] max-h-[70dvh] w-full rounded-[12px] bg-black object-contain"
+              />
+            )}
             <div className="flex items-center justify-between text-xs text-ink2">
-              <span className="font-mono">
-                {preview && `${formatTime(preview.startSec)}–${formatTime(preview.endSec)}`}
-              </span>
+              <span className="font-mono">{preview && `${formatTime(preview.startSec)}–${formatTime(preview.endSec)}`}</span>
               {preview && (
                 <Link to={`/p/${p.id}/clips/${preview.id}`} className="font-semibold text-acc-text no-underline">
                   Edit clip
@@ -1035,7 +1156,16 @@ export function ProjectPage() {
         whyNot={`The project is ${p.status} right now. Import a transcript when it is done or failed, or right after you create it.`}
       />
       <ProjectTemplateModal open={templateOpen} onOpenChange={setTemplateOpen} projectId={p.id} templateId={p.settings.layerTemplateId} />
-      <ProjectBumpersModal open={bumpersOpen} onOpenChange={setBumpersOpen} projectId={p.id} clipCount={readyCount} introId={p.settings.introAssetId} outroId={p.settings.outroAssetId} introSec={p.settings.introSec} outroSec={p.settings.outroSec} />
+      <ProjectBumpersModal
+        open={bumpersOpen}
+        onOpenChange={setBumpersOpen}
+        projectId={p.id}
+        clipCount={readyCount}
+        introId={p.settings.introAssetId}
+        outroId={p.settings.outroAssetId}
+        introSec={p.settings.introSec}
+        outroSec={p.settings.outroSec}
+      />
     </div>
   );
 }

@@ -1,11 +1,4 @@
-import {
-  defaultOgAlt,
-  defaultOgDescription,
-  defaultOgTitle,
-  ogContentType,
-  ogSize,
-  renderOgImage,
-} from "@/lib/og";
+import { defaultOgAlt, defaultOgDescription, defaultOgTitle, ogContentType, ogSize, renderOgImage } from "@/lib/og";
 
 export const alt = defaultOgAlt;
 export const size = ogSize;

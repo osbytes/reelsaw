@@ -5,7 +5,8 @@ import { Agent, fetch as undiciFetch } from "undici";
 /** Thrown with a sentence a user can act on. */
 export class UnsafeUrlError extends Error {}
 
-const INSIDE = "That address points inside this server's network, so it was not fetched. Use a public link, or ask the admin to set ALLOW_PRIVATE_SOURCE_URLS=true.";
+const INSIDE =
+  "That address points inside this server's network, so it was not fetched. Use a public link, or ask the admin to set ALLOW_PRIVATE_SOURCE_URLS=true.";
 
 /** Names that are internal by convention, whatever they resolve to. */
 export function isInternalHostname(host: string): boolean {
@@ -159,7 +160,9 @@ export interface FetchPublicOptions extends SafeUrlOptions {
   signal?: AbortSignal;
   headers?: Record<string, string>;
   /** Injectable for tests: called instead of the network with the validated URL (and the pinned address). */
-  fetch?: ((url: URL, init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string> }, pinned: string | null) => Promise<PublicResponse>) | undefined;
+  fetch?:
+    | ((url: URL, init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string> }, pinned: string | null) => Promise<PublicResponse>)
+    | undefined;
 }
 
 /** A dispatcher that connects to `address` whatever the hostname resolves to now; TLS still checks the certificate against the hostname. */

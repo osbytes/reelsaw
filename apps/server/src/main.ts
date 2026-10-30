@@ -30,7 +30,10 @@ async function main() {
 
   if (config.SHUTDOWN_GRACE_SECONDS > 300) {
     // docker kills the container at stop_grace_period (330 s unless STOP_GRACE_PERIOD is set), whatever this says
-    log.warn({ graceSeconds: config.SHUTDOWN_GRACE_SECONDS, minStopGracePeriodSeconds: config.SHUTDOWN_GRACE_SECONDS + 30 }, "SHUTDOWN_GRACE_SECONDS is above 300: set STOP_GRACE_PERIOD to at least SHUTDOWN_GRACE_SECONDS + 30s in the compose file's environment, or docker kills running jobs early");
+    log.warn(
+      { graceSeconds: config.SHUTDOWN_GRACE_SECONDS, minStopGracePeriodSeconds: config.SHUTDOWN_GRACE_SECONDS + 30 },
+      "SHUTDOWN_GRACE_SECONDS is above 300: set STOP_GRACE_PERIOD to at least SHUTDOWN_GRACE_SECONDS + 30s in the compose file's environment, or docker kills running jobs early",
+    );
   }
 
   // a rejection nobody awaited is a bug worth a line (and a stack); an uncaught exception leaves unknown state
@@ -54,7 +57,9 @@ async function main() {
     const app = createApp(svc);
     // requestTimeout 0: Node's default (300 s) cuts off a multi-GB upload on an ordinary connection;
     // headersTimeout and keep-alive still close idle sockets
-    server = serve({ fetch: app.fetch, port: config.PORT, serverOptions: { requestTimeout: 0 } }, (info) => log.info({ port: info.port, appUrl: config.APP_URL }, "http listening"));
+    server = serve({ fetch: app.fetch, port: config.PORT, serverOptions: { requestTimeout: 0 } }, (info) =>
+      log.info({ port: info.port, appUrl: config.APP_URL }, "http listening"),
+    );
     // Node closes an idle keep-alive socket after 5 s, which is shorter than what clients (undici, browsers, proxies)
     // keep theirs for: a request reusing a socket the server just closed fails with "other side closed". Outlive
     // them (65 s, the usual load-balancer figure); headersTimeout must stay above it, and shutdown closes idle sockets.
@@ -75,7 +80,10 @@ async function main() {
     if (svc.ee) await svc.ee.startWorkers();
     stopReconciler = startReconciler(svc);
   } else {
-    log.warn({ module: "boot", runHttp: config.RUN_HTTP }, "this process runs no workers: projects stay queued until a `worker` container (or an app with RUN_WORKERS=true) is running");
+    log.warn(
+      { module: "boot", runHttp: config.RUN_HTTP },
+      "this process runs no workers: projects stay queued until a `worker` container (or an app with RUN_WORKERS=true) is running",
+    );
     stopReconciler = startStallWatch(svc); // so a queue nobody serves is reported, not silent
   }
   if (config.RUN_HTTP || config.RUN_WORKERS) {
@@ -93,7 +101,8 @@ async function main() {
     stopReconciler?.();
     stopDiskGate?.();
     // stop accepting and end SSE streams now; a request still running gets 10 s, then the job drain below goes on
-    if (httpCloser && !(await httpCloser.close(10_000))) log.warn({ timeoutSeconds: 10 }, "http connections still open after the close cap; continuing shutdown");
+    if (httpCloser && !(await httpCloser.close(10_000)))
+      log.warn({ timeoutSeconds: 10 }, "http connections still open after the close cap; continuing shutdown");
     // the heartbeat (and the disk leases it vouches for) stays until the jobs have finished: a job still writing
     // during the grace keeps its claim, so another process on the volume cannot start on the same bytes
     await shutdownServices(svc, { afterQueueStop: () => stopHeartbeat?.() ?? Promise.resolve() });
@@ -105,11 +114,22 @@ async function main() {
 
 main().catch((err) => {
   // services may not exist yet: log with a standalone logger so the failure is still structured
-  const log = createLogger({ LOG_LEVEL: process.env.LOG_LEVEL || "info", LOG_FORMAT: process.env.LOG_FORMAT === "json" || process.env.LOG_FORMAT === "pretty" ? process.env.LOG_FORMAT : "auto" }, { module: "boot" });
+  const log = createLogger(
+    {
+      LOG_LEVEL: process.env.LOG_LEVEL || "info",
+      LOG_FORMAT: process.env.LOG_FORMAT === "json" || process.env.LOG_FORMAT === "pretty" ? process.env.LOG_FORMAT : "auto",
+    },
+    { module: "boot" },
+  );
   if (err instanceof StartupError) {
     log.fatal({ step: err.step, reason: err.message }, `startup failed at step "${err.step}"`);
     // also a plain, readable line for humans reading `docker compose logs`
-    process.stderr.write(`\nstartup failed at step "${err.step}":\n${err.message.split("\n").map((l) => "  " + l).join("\n")}\n\n`);
+    process.stderr.write(
+      `\nstartup failed at step "${err.step}":\n${err.message
+        .split("\n")
+        .map((l) => "  " + l)
+        .join("\n")}\n\n`,
+    );
     setTimeout(() => process.exit(78), 50); // EX_CONFIG; let pino flush
     return;
   }

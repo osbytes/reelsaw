@@ -118,7 +118,26 @@ export async function sampleFaces(det: FaceDetector, opts: LayoutOptions): Promi
   };
   const ff = spawn(
     opts.ffmpegPath,
-    ["-hide_banner", "-loglevel", "error", "-nostdin", ...ffmpegPipeThreads, "-ss", opts.startSec.toFixed(3), "-t", opts.durationSec.toFixed(3), "-i", opts.source, "-vf", `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      ...ffmpegPipeThreads,
+      "-ss",
+      opts.startSec.toFixed(3),
+      "-t",
+      opts.durationSec.toFixed(3),
+      "-i",
+      opts.source,
+      "-vf",
+      `fps=${fps},scale=${FACE_INPUT_W}:${FACE_INPUT_H}`,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1",
+    ],
     { signal: opts.signal, stdio: ["ignore", "pipe", "pipe"] },
   );
   let stderr = "";
@@ -171,12 +190,7 @@ function median(xs: number[]) {
  *  - a big face beside an app screen or title card (side-by-side composite) → "stack" with a `content` region: just that region on top, the speaker below (see content-region.ts)
  *  - no face → "fit": whole frame over a blurred background (graphics, b-roll, screencasts without a webcam)
  */
-export function decideLayout(
-  samples: FaceSample[],
-  config: LayoutConfig,
-  sceneCuts: number[] = [],
-  opts: { content?: boolean } = {},
-): LayoutDecision {
+export function decideLayout(samples: FaceSample[], config: LayoutConfig, sceneCuts: number[] = [], opts: { content?: boolean } = {}): LayoutDecision {
   const withFace = samples.filter((s) => s.box);
   const faceRatio = samples.length ? withFace.length / samples.length : 0;
   const faceCount = Number((samples.reduce((n, s) => n + s.boxes.length, 0) / Math.max(1, samples.length)).toFixed(2));
@@ -200,9 +214,11 @@ export function decideLayout(
   }
   // three or more people most of the time (a couch, a panel): the whole frame, not two of them
   const crowd = samples.filter((s) => isCrowd(s, config)).length / Math.max(1, samples.length);
-  if (crowd >= 0.5) return { ...base, layout: "fit", reason: `${Math.round(faceCount)} people across the frame in ${Math.round(crowd * 100)}% of frames, shown whole` };
+  if (crowd >= 0.5)
+    return { ...base, layout: "fit", reason: `${Math.round(faceCount)} people across the frame in ${Math.round(crowd * 100)}% of frames, shown whole` };
   // two people on screen most of the time (interview / podcast wide shot) → one crop per speaker
-  const twoFaces = samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config)).length / Math.max(1, samples.length);
+  const twoFaces =
+    samples.filter((s) => s.boxes.length >= 2 && s.boxes[1]!.y2 - s.boxes[1]!.y1 >= faceFloor(MIN_SECOND_FACE, config)).length / Math.max(1, samples.length);
   if (twoFaces >= 0.5) {
     const pair = assignPair(samples);
     const t1 = tripodTrack(pair.a, sceneCuts);
@@ -211,10 +227,15 @@ export function decideLayout(
   }
   if (faceSize < faceFloor(config.LAYOUT_MIN_FACE_SIZE, config) || inCorner) {
     const { reasonSuffix, ...stack } = webcamStack(samples);
-    return { ...base, ...stack, reason: `${inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)`}${reasonSuffix}` };
+    return {
+      ...base,
+      ...stack,
+      reason: `${inCorner ? "small webcam in a corner over screen content" : `face too small (${Math.round(faceSize * 100)}% of frame height)`}${reasonSuffix}`,
+    };
   }
   // a big speaker beside an app screen / title card (a side-by-side composite): stack that region on top
-  if (opts.content === false) return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
+  if (opts.content === false)
+    return { ...base, layout: "face", reason: `face in ${Math.round(faceRatio * 100)}% of frames, ${Math.round(faceSize * 100)}% tall` };
   const found = detectContentRegion(samples);
   if (found.content) {
     const { content, ...signals } = found;
@@ -252,7 +273,10 @@ export function assignPair(samples: FaceSample[]): { a: FaceSample[]; b: FaceSam
   // that crop onto the wrong person for a few frames, then back (a "lazy eye" pan).
   const cx = (bx: FaceBox) => (bx.x1 + bx.x2) / 2;
   const seeds = samples.flatMap((s) => {
-    const xs = s.boxes.slice(0, 2).map(cx).sort((p, q) => p - q);
+    const xs = s.boxes
+      .slice(0, 2)
+      .map(cx)
+      .sort((p, q) => p - q);
     return xs.length === 2 && xs[1]! - xs[0]! > 0.2 ? [xs as [number, number]] : [];
   });
   let la = seeds.length ? median(seeds.map((x) => x[0])) : 0.33;
@@ -384,7 +408,11 @@ export function smoothTrack(samples: FaceSample[], window = 5): Array<{ t: numbe
   const half = Math.floor(window / 2);
   return pts.map((p, i) => {
     const slice = pts.slice(Math.max(0, i - half), Math.min(pts.length, i + half + 1));
-    return { t: p.t, x: Number((slice.reduce((a, q) => a + q.x, 0) / slice.length).toFixed(4)), y: Number((slice.reduce((a, q) => a + q.y, 0) / slice.length).toFixed(4)) };
+    return {
+      t: p.t,
+      x: Number((slice.reduce((a, q) => a + q.x, 0) / slice.length).toFixed(4)),
+      y: Number((slice.reduce((a, q) => a + q.y, 0) / slice.length).toFixed(4)),
+    };
   });
 }
 
@@ -404,7 +432,8 @@ export function piecewiseExpr(points: Array<{ t: number; v: number }>, step = 1,
     const p = pts[i]!;
     const prev = collapsed[collapsed.length - 1];
     const prev2 = collapsed[collapsed.length - 2];
-    if (prev && prev2 && Math.abs(prev.v - p.v) < 0.5 && Math.abs(prev2.v - prev.v) < 0.5) collapsed[collapsed.length - 1] = p; // extend the run
+    if (prev && prev2 && Math.abs(prev.v - p.v) < 0.5 && Math.abs(prev2.v - prev.v) < 0.5)
+      collapsed[collapsed.length - 1] = p; // extend the run
     else collapsed.push(p);
   }
   pts = collapsed;
@@ -426,7 +455,6 @@ export function piecewiseExpr(points: Array<{ t: number; v: number }>, step = 1,
   }
   return expr;
 }
-
 
 // ---------- per-segment layouts ----------
 
@@ -475,7 +503,7 @@ export function segmentLayouts(
     if (wide.filter((w) => w === "split").length / wide.length >= 0.35 && !wide.some((w) => w === "crowd")) return "split" as const;
     const counts: Record<State, number> = { face: 0, split: 0, none: 0, crowd: 0 };
     for (const w of window(i, 2)) counts[w]++;
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0]) as State;
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0] as State;
   });
   const bounds = new Set<number>([0, duration, ...cuts]);
   for (let i = 1; i < state.length; i++) {
@@ -527,8 +555,13 @@ export function segmentLayouts(
       const near = inside.length ? inside : [samples.reduce((best, s) => (Math.abs(s.t - p.a) < Math.abs(best.t - p.a) ? s : best))];
       const cutsIn = cuts.filter((c) => c > p.a && c < p.b);
       if (p.run) {
-        const d = contentDecision(samples.filter((s) => s.t >= p.run!.start && s.t < p.run!.end), config, cuts.filter((c) => c > p.run!.start && c < p.run!.end));
-        if (diag) diag.decisions.push({ start: Number(p.run.start.toFixed(2)), end: Number(p.run.end.toFixed(2)), content: !!d.content, signals: d.contentSignals });
+        const d = contentDecision(
+          samples.filter((s) => s.t >= p.run!.start && s.t < p.run!.end),
+          config,
+          cuts.filter((c) => c > p.run!.start && c < p.run!.end),
+        );
+        if (diag)
+          diag.decisions.push({ start: Number(p.run.start.toFixed(2)), end: Number(p.run.end.toFixed(2)), content: !!d.content, signals: d.contentSignals });
         if (d.content) {
           const track = d.track.filter((pt) => pt.t >= p.a - 1e-6 && pt.t < p.b);
           segs.push({ start: p.a, end: p.b, decision: { ...d, track: track.length ? track : d.track.slice(0, 1) } });
@@ -545,15 +578,21 @@ export function segmentLayouts(
     const sg = segs[i]!;
     if (sg.decision.layout !== "face" || sg.end - sg.start > 8 || !sg.decision.track.length) continue;
     // a neighbour across a scene cut is another shot, not the same shot with a face missing
-    const nb = [segs[i - 1], segs[i + 1]].find((n) => n?.decision.layout === "split" && n.decision.track2?.length && !isCut.has(n.start === sg.end ? sg.end : sg.start));
+    const nb = [segs[i - 1], segs[i + 1]].find(
+      (n) => n?.decision.layout === "split" && n.decision.track2?.length && !isCut.has(n.start === sg.end ? sg.end : sg.start),
+    );
     if (!nb) continue;
     const me = trackCenter(sg.decision.track);
     const a = trackCenter(nb.decision.track);
     const b = trackCenter(nb.decision.track2);
     const [sa, sb] = nb.decision.speakerSizes ?? [nb.decision.faceSize, nb.decision.faceSize];
-    const same = (c: { x: number }, size: number) => Math.abs(c.x - me.x) < 0.08 && Math.abs(size - sg.decision.faceSize) <= 0.4 * Math.max(size, sg.decision.faceSize);
+    const same = (c: { x: number }, size: number) =>
+      Math.abs(c.x - me.x) < 0.08 && Math.abs(size - sg.decision.faceSize) <= 0.4 * Math.max(size, sg.decision.faceSize);
     if (!same(a, sa) && !same(b, sb)) continue;
-    segs[i] = { ...sg, decision: { ...nb.decision, reason: `${nb.decision.reason}; held through ${Math.round(sg.end - sg.start)}s with one speaker undetected` } };
+    segs[i] = {
+      ...sg,
+      decision: { ...nb.decision, reason: `${nb.decision.reason}; held through ${Math.round(sg.end - sg.start)}s with one speaker undetected` },
+    };
   }
   // merge neighbours with the same layout
   const merged: LayoutSegment[] = [];
@@ -561,7 +600,11 @@ export function segmentLayouts(
     const last = merged[merged.length - 1];
     if (last && sameFraming(last.decision, seg.decision)) {
       last.end = seg.end;
-      last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
+      last.decision = {
+        ...last.decision,
+        track: [...last.decision.track, ...seg.decision.track],
+        track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2,
+      };
     } else merged.push({ ...seg, decision: { ...seg.decision } });
   }
   // a merged stack keeps its first piece's decision; when that piece alone had too few tile probes
@@ -598,7 +641,10 @@ export function localTrack(track: LayoutDecision["track"], start: number, end: n
   // the piece's own clock starts at 0: hold the first position back to it (no extrapolating before the first sample)
   if (pts.length && pts[0]!.t > 0.001) pts.unshift({ t: 0, x: pts[0]!.x, y: pts[0]!.y });
   if (!pts.length) {
-    const nearest = track.reduce<LayoutDecision["track"][number] | undefined>((best, p) => (!best || Math.abs(p.t - start) < Math.abs(best.t - start) ? p : best), undefined);
+    const nearest = track.reduce<LayoutDecision["track"][number] | undefined>(
+      (best, p) => (!best || Math.abs(p.t - start) < Math.abs(best.t - start) ? p : best),
+      undefined,
+    );
     return nearest ? [{ t: 0, x: nearest.x, y: nearest.y }] : [];
   }
   return pts;
@@ -647,7 +693,8 @@ export function cleanAdjust(a: SectionAdjust | undefined): SectionAdjust | undef
   }
   return Object.keys(out).length ? out : undefined;
 }
-const sameAdjust = (a: SectionAdjust | undefined, b: SectionAdjust | undefined) => JSON.stringify(cleanAdjust(a) ?? null) === JSON.stringify(cleanAdjust(b) ?? null);
+const sameAdjust = (a: SectionAdjust | undefined, b: SectionAdjust | undefined) =>
+  JSON.stringify(cleanAdjust(a) ?? null) === JSON.stringify(cleanAdjust(b) ?? null);
 
 /** A clip-relative stretch of time with the framing mode that applies to it. */
 export interface TimelinePiece {
@@ -662,7 +709,12 @@ export interface TimelinePiece {
  * Cover [0, duration] with the user's sections (clip-relative) and the default mode in the gaps.
  * Later sections win where they overlap; slivers under 0.1 s are dropped.
  */
-export function coverTimeline(duration: number, sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>, defaultMode: TimelineMode, defaultAdjust?: SectionAdjust): TimelinePiece[] {
+export function coverTimeline(
+  duration: number,
+  sections: Array<{ start: number; end: number; mode: TimelineMode } & SectionAdjust>,
+  defaultMode: TimelineMode,
+  defaultAdjust?: SectionAdjust,
+): TimelinePiece[] {
   const clean = sections
     .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), mode: s.mode, adjust: cleanAdjust(s) }))
     .filter((s) => s.end - s.start >= 0.1);
@@ -692,7 +744,13 @@ export function coverTimeline(duration: number, sections: Array<{ start: number;
  * or the detector cannot see them) the pane becomes a fixed crop at `subjectX` instead of drifting
  * to whoever the detector found elsewhere.
  */
-export function subjectTrack(samples: FaceSample[], subjectX: number, sceneCuts: number[], start: number, opts = { reach: 0.15, minSeen: 0.3 }): { track: LayoutDecision["track"]; size: number; fixed: boolean } {
+export function subjectTrack(
+  samples: FaceSample[],
+  subjectX: number,
+  sceneCuts: number[],
+  start: number,
+  opts = { reach: 0.15, minSeen: 0.3 },
+): { track: LayoutDecision["track"]; size: number; fixed: boolean } {
   const cx = (b: FaceBox) => (b.x1 + b.x2) / 2;
   let at = subjectX;
   const picked: FaceSample[] = [];
@@ -730,7 +788,8 @@ function webcamStack(samples: FaceSample[]): Pick<LayoutDecision, "layout" | "co
 
 /** Use the detector's tracks but force the layout the user asked for. */
 export function forcedDecision(samples: FaceSample[], layout: Layout, config: LayoutConfig, sceneCuts: number[]): LayoutDecision {
-  if (!samples.length || !samples.some((s) => s.box)) return staticDecision(layout === "face" || layout === "split" || layout === "stack" ? "center" : layout, "manual (no face found, centre crop)");
+  if (!samples.length || !samples.some((s) => s.box))
+    return staticDecision(layout === "face" || layout === "split" || layout === "stack" ? "center" : layout, "manual (no face found, centre crop)");
   const base = decideLayout(samples, config, sceneCuts);
   if (layout === "split" && !base.track2) {
     const pair = assignPair(samples);
@@ -765,7 +824,13 @@ export interface ResolvedSegment extends LayoutSegment {
  * offset moot (the renderer shows the crop itself, `FrameGeometry.crop`); a stack's `contentCrop`
  * replaces the content region. Whole-frame layouts take only a crop.
  */
-export function adjustDecision(d: LayoutDecision, adjust: SectionAdjust | undefined, samples: FaceSample[], sceneCuts: number[], start: number): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
+export function adjustDecision(
+  d: LayoutDecision,
+  adjust: SectionAdjust | undefined,
+  samples: FaceSample[],
+  sceneCuts: number[],
+  start: number,
+): { decision: LayoutDecision; subject?: "followed" | "fixed"; subject2?: "followed" | "fixed" } {
   const a = cleanAdjust(adjust);
   if (!a || d.layout === "none" || (d.layout === "fit" && !a.crop)) return { decision: d };
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -790,23 +855,35 @@ export function adjustDecision(d: LayoutDecision, adjust: SectionAdjust | undefi
   if (a.subjectX !== undefined && !a.crop) {
     const s = subjectTrack(samples, a.subjectX, sceneCuts, start);
     subject = s.fixed ? "fixed" : "followed";
-    out = { ...out, track: s.track, ...(s.size ? { faceSize: s.size, ...(out.speakerSizes ? { speakerSizes: [s.size, out.speakerSizes[1]] as [number, number] } : {}) } : {}) };
+    out = {
+      ...out,
+      track: s.track,
+      ...(s.size ? { faceSize: s.size, ...(out.speakerSizes ? { speakerSizes: [s.size, out.speakerSizes[1]] as [number, number] } : {}) } : {}),
+    };
     notes.push(s.fixed ? `no face at ${Math.round(a.subjectX * 100)}%, fixed crop` : `following the person at ${Math.round(a.subjectX * 100)}%`);
   }
   if (a.subjectX2 !== undefined && d.layout === "split" && !a.crop2) {
     const s = subjectTrack(samples, a.subjectX2, sceneCuts, start);
     subject2 = s.fixed ? "fixed" : "followed";
     out = { ...out, track2: s.track, ...(s.size ? { speakerSizes: [out.speakerSizes?.[0] ?? out.faceSize, s.size] as [number, number] } : {}) };
-    notes.push(s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`);
+    notes.push(
+      s.fixed ? `bottom: no face at ${Math.round(a.subjectX2 * 100)}%, fixed crop` : `bottom: following the person at ${Math.round(a.subjectX2 * 100)}%`,
+    );
   }
   const shift = (tr: LayoutDecision["track"], dx = 0, dy = 0) => (dx || dy ? tr.map((p) => ({ ...p, x: clamp(p.x + dx), y: clamp(p.y + dy) })) : tr);
   if ((a.offsetX || a.offsetY) && !a.crop) {
-    out = { ...out, track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }] };
+    out = {
+      ...out,
+      track: out.track.length ? shift(out.track, a.offsetX, a.offsetY) : [{ t: start, x: clamp(0.5 + (a.offsetX ?? 0)), y: clamp(0.45 + (a.offsetY ?? 0)) }],
+    };
     // a webcam tile stays as detected: the renderer and the preview move its window by the pane's offset (`shiftRegion`)
   }
   if ((a.offsetX2 || a.offsetY2) && d.layout === "split" && !a.crop2) {
     const base = out.track2?.length ? out.track2 : out.track;
-    out = { ...out, track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }] };
+    out = {
+      ...out,
+      track2: base.length ? shift(base, a.offsetX2, a.offsetY2) : [{ t: start, x: clamp(0.5 + (a.offsetX2 ?? 0)), y: clamp(0.45 + (a.offsetY2 ?? 0)) }],
+    };
   }
   if (notes.length) out = { ...out, reason: `${out.reason}; ${notes.join("; ")}` };
   return { decision: out, ...(subject ? { subject } : {}), ...(subject2 ? { subject2 } : {}) };
@@ -834,11 +911,32 @@ export function resolveSegments(
         continue;
       }
       const local = inside.map((s) => ({ ...s, t: s.t - pc.start }));
-      const segs = segmentLayouts(local, config, cutsIn.map((c) => c - pc.start), pc.end - pc.start, undefined, diag);
+      const segs = segmentLayouts(
+        local,
+        config,
+        cutsIn.map((c) => c - pc.start),
+        pc.end - pc.start,
+        undefined,
+        diag,
+      );
       const push = (start: number, end: number, decision: LayoutDecision) => {
         const within = samples.filter((s) => s.t >= start && s.t < end);
-        const adj = adjustDecision(decision, pc.adjust, within, sceneCuts.filter((c) => c > start && c < end), start);
-        out.push({ start, end, decision: adj.decision, manual: false, adjust: pc.adjust, ...(adj.subject ? { subject: adj.subject } : {}), ...(adj.subject2 ? { subject2: adj.subject2 } : {}) });
+        const adj = adjustDecision(
+          decision,
+          pc.adjust,
+          within,
+          sceneCuts.filter((c) => c > start && c < end),
+          start,
+        );
+        out.push({
+          start,
+          end,
+          decision: adj.decision,
+          manual: false,
+          adjust: pc.adjust,
+          ...(adj.subject ? { subject: adj.subject } : {}),
+          ...(adj.subject2 ? { subject2: adj.subject2 } : {}),
+        });
       };
       if (!segs.length) push(pc.start, pc.end, inside.length ? decideLayout(inside, config, cutsIn) : staticDecision("fit", "no frames sampled"));
       for (const sg of segs) push(sg.start + pc.start, sg.end + pc.start, shiftDecision(sg.decision, pc.start));
@@ -846,16 +944,39 @@ export function resolveSegments(
     }
     const layout = pc.mode;
     const needsTrack = layout === "face" || layout === "split" || layout === "stack";
-    const decision = needsTrack ? (hasDetector ? forcedDecision(inside, layout, config, cutsIn) : staticDecision("center", "manual (no face detector)")) : staticDecision(layout, "manual");
+    const decision = needsTrack
+      ? hasDetector
+        ? forcedDecision(inside, layout, config, cutsIn)
+        : staticDecision("center", "manual (no face detector)")
+      : staticDecision(layout, "manual");
     const adj = adjustDecision(decision, pc.adjust, inside, cutsIn, pc.start);
-    out.push({ start: pc.start, end: pc.end, decision: adj.decision, manual: pc.manual, adjust: pc.adjust, ...(adj.subject ? { subject: adj.subject } : {}), ...(adj.subject2 ? { subject2: adj.subject2 } : {}) });
+    out.push({
+      start: pc.start,
+      end: pc.end,
+      decision: adj.decision,
+      manual: pc.manual,
+      adjust: pc.adjust,
+      ...(adj.subject ? { subject: adj.subject } : {}),
+      ...(adj.subject2 ? { subject2: adj.subject2 } : {}),
+    });
   }
   const merged: ResolvedSegment[] = [];
   for (const seg of out) {
     const last = merged[merged.length - 1];
-    if (last && sameFraming(last.decision, seg.decision) && last.manual === seg.manual && sameAdjust(last.adjust, seg.adjust) && last.subject === seg.subject && last.subject2 === seg.subject2) {
+    if (
+      last &&
+      sameFraming(last.decision, seg.decision) &&
+      last.manual === seg.manual &&
+      sameAdjust(last.adjust, seg.adjust) &&
+      last.subject === seg.subject &&
+      last.subject2 === seg.subject2
+    ) {
       last.end = seg.end;
-      last.decision = { ...last.decision, track: [...last.decision.track, ...seg.decision.track], track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2 };
+      last.decision = {
+        ...last.decision,
+        track: [...last.decision.track, ...seg.decision.track],
+        track2: last.decision.track2 && seg.decision.track2 ? [...last.decision.track2, ...seg.decision.track2] : last.decision.track2,
+      };
     } else merged.push({ ...seg, decision: { ...seg.decision } });
   }
   return merged;
@@ -887,11 +1008,17 @@ export function sparseTrack(track: LayoutDecision["track"], start: number, end: 
  * Boxes are clustered by centre across the clip; a cluster seen in enough frames whose centre and
  * size barely vary is treated as static and removed from every sample.
  */
-export function dropStaticFaces(samples: FaceSample[], opts: { radius?: number; minSeconds?: number; maxStd?: number } = {}): { samples: FaceSample[]; dropped: Array<{ x: number; y: number; frames: number }> } {
+export function dropStaticFaces(
+  samples: FaceSample[],
+  opts: { radius?: number; minSeconds?: number; maxStd?: number } = {},
+): { samples: FaceSample[]; dropped: Array<{ x: number; y: number; frames: number }> } {
   const radius = opts.radius ?? 0.05;
   const maxStd = opts.maxStd ?? 0.0025;
   // a static cluster must persist for `minSeconds` of footage whatever the sampling rate (8 frames at 4 fps)
-  const dts = samples.slice(1).map((s, i) => s.t - samples[i]!.t).filter((d) => d > 0);
+  const dts = samples
+    .slice(1)
+    .map((s, i) => s.t - samples[i]!.t)
+    .filter((d) => d > 0);
   const fps = dts.length ? 1 / median(dts) : 4;
   const minFrames = Math.max(2, Math.round((opts.minSeconds ?? 2) * fps));
   type Cluster = { x: number; y: number; members: FaceBox[] };
@@ -935,7 +1062,13 @@ export function dropStaticFaces(samples: FaceSample[], opts: { radius?: number; 
  * Spans where text fills the frame (slides, documents, paragraphs): runs of text-heavy frames at
  * least `minRun` long, snapped to a nearby scene cut so the switch lands on the shot change.
  */
-export function textHeavyRuns(frames: Array<{ t: number; textHeavy: boolean }>, fps: number, duration: number, sceneCuts: number[], minRun = 2): Array<[number, number]> {
+export function textHeavyRuns(
+  frames: Array<{ t: number; textHeavy: boolean }>,
+  fps: number,
+  duration: number,
+  sceneCuts: number[],
+  minRun = 2,
+): Array<[number, number]> {
   const runs: Array<[number, number]> = [];
   let start: number | null = null;
   for (const f of frames) {

@@ -53,7 +53,10 @@ export function NewProjectPage() {
     },
     onSettled: () => setUploadPct(null),
   });
-  const saveDefaults = useMutation({ ...trpc.me.updateProjectDefaults.mutationOptions(), onSuccess: () => void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }) });
+  const saveDefaults = useMutation({
+    ...trpc.me.updateProjectDefaults.mutationOptions(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: trpc.me.pathKey() }),
+  });
 
   // prefilled from ⌘K (?url=) or a single video dropped anywhere in the app
   const [search] = useSearchParams();
@@ -97,7 +100,10 @@ export function NewProjectPage() {
   }, [me.data, prefilledFor]);
   // intro / outro: "default" (the user's own, snapshotted by the server), "none", or a library asset id
   const library = useBumperLibrary();
-  const [bump, setBump] = useState<{ intro: string; outro: string; introSec?: number; outroSec?: number }>(() => ({ intro: search.get("intro") || "default", outro: search.get("outro") || "default" }));
+  const [bump, setBump] = useState<{ intro: string; outro: string; introSec?: number; outroSec?: number }>(() => ({
+    intro: search.get("intro") || "default",
+    outro: search.get("outro") || "default",
+  }));
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   useLeaveWarning(uploadPct !== null);
   const [previewAs, setPreviewAs] = useState<PreviewLayout>("face");
@@ -119,7 +125,11 @@ export function NewProjectPage() {
   useEffect(() => {
     setImgEl(null);
     if (mode !== "url") return;
-    const candidates = ytId ? [`https://i.ytimg.com/vi/${ytId}/maxresdefault.jpg`, `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`] : peek.data?.thumbnail ? [peek.data.thumbnail] : [];
+    const candidates = ytId
+      ? [`https://i.ytimg.com/vi/${ytId}/maxresdefault.jpg`, `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`]
+      : peek.data?.thumbnail
+        ? [peek.data.thumbnail]
+        : [];
     if (!candidates.length) return;
     let i = 0;
     const img = new Image();
@@ -164,7 +174,12 @@ export function NewProjectPage() {
     const tooBig = mode === "upload" && file ? uploadSizeProblem(file, maxMb) : null;
     if (tooBig) return void toast.error(tooBig);
     create.mutate(
-      { title: title || undefined, sourceUrl: mode === "url" ? url : undefined, ...(mode === "upload" && file ? { file } : {}), settings: { ...s, ...bumperSettings } },
+      {
+        title: title || undefined,
+        sourceUrl: mode === "url" ? url : undefined,
+        ...(mode === "upload" && file ? { file } : {}),
+        settings: { ...s, ...bumperSettings },
+      },
       {
         onSuccess: (p) => {
           track("project_create_submitted", { source: mode, projectId: p.id });
@@ -186,7 +201,8 @@ export function NewProjectPage() {
     const sec = bump[`${slot}Sec`];
     if (c !== "none" && sec && libAssets.find((a) => a.id === c)?.kind === "image") bumperSettings[`${slot}Sec`] = Math.min(10, Math.max(1, sec));
   }
-  const defaultName = (id: string | undefined) => (id ? ([...libAssets, ...(library.data?.deleted ?? [])].find((a) => a.id === id)?.name ?? "deleted") : "none");
+  const defaultName = (id: string | undefined) =>
+    id ? ([...libAssets, ...(library.data?.deleted ?? [])].find((a) => a.id === id)?.name ?? "deleted") : "none";
   const fixed = (id: string | undefined): FixedOption[] => [
     { value: "default", label: `Your default (${defaultName(id)})`, hint: "What Settings say now", icon: <Star className="h-4 w-4" /> },
     { value: "none", label: "None", hint: "Nothing here", icon: <Ban className="h-4 w-4" /> },
@@ -202,7 +218,8 @@ export function NewProjectPage() {
   const look = { karaoke: "Highlight", box: "Boxed", plain: "Outlined", none: "No" }[style.captions];
   const summary = `${s.maxClips ? `At most ${s.maxClips} clips` : "Every strong moment"} · ${lenLabel} · ${look} captions${s.focus ? ` · about “${s.focus}”` : ""}`;
   const canStart = mode === "url" ? /^https?:\/\/\S+\.\S+/.test(url) : !!file;
-  const chip = (on: boolean) => `rounded-full border px-3.5 py-1.5 text-[13px] font-semibold ${on ? "border-ink bg-ink text-bg" : "border-line bg-panel text-ink2 hover:text-ink"}`;
+  const chip = (on: boolean) =>
+    `rounded-full border px-3.5 py-1.5 text-[13px] font-semibold ${on ? "border-ink bg-ink text-bg" : "border-line bg-panel text-ink2 hover:text-ink"}`;
 
   return (
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
@@ -232,13 +249,32 @@ export function NewProjectPage() {
               />
               {mode === "url" ? (
                 <>
-                  <input className="input py-2.5" placeholder="https://youtube.com/watch?v=…" aria-label="Video link" value={url} onChange={(e) => setUrl(e.target.value)} required />
+                  <input
+                    className="input py-2.5"
+                    placeholder="https://youtube.com/watch?v=…"
+                    aria-label="Video link"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    required
+                  />
                   {(imgEl || peek.data?.title) && (
                     <div className="flex items-center gap-3 rounded-[12px] bg-sunk p-2">
-                      <div className="film aspect-video w-24 shrink-0 overflow-hidden rounded-[8px]">{imgEl && <img src={imgEl.src} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />}</div>
+                      <div className="film aspect-video w-24 shrink-0 overflow-hidden rounded-[8px]">
+                        {imgEl && <img src={imgEl.src} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />}
+                      </div>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{peek.data?.title ?? "YouTube video"}</div>
-                        <div className="text-xs text-ink3">{ytId ? "youtube.com" : (() => { try { return new URL(debouncedUrl).host; } catch { return ""; } })()}</div>
+                        <div className="text-xs text-ink3">
+                          {ytId
+                            ? "youtube.com"
+                            : (() => {
+                                try {
+                                  return new URL(debouncedUrl).host;
+                                } catch {
+                                  return "";
+                                }
+                              })()}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -257,7 +293,9 @@ export function NewProjectPage() {
                     className="flex cursor-pointer flex-col items-center gap-1 rounded-[12px] border-2 border-dashed border-line2 px-4 py-6 text-center text-sm text-ink2 hover:border-acc"
                   >
                     <span className="font-semibold text-ink">{file ? file.name : "Choose or drop a video file"}</span>
-                    <span className="text-xs text-ink3">{file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${status.data?.maxUploadMb ?? "—"} MB`}</span>
+                    <span className="text-xs text-ink3">
+                      {file ? `${(file.size / 1e6).toFixed(0)} MB` : `MP4, MOV, MKV or WebM · up to ${status.data?.maxUploadMb ?? "—"} MB`}
+                    </span>
                     <input className="hidden" type="file" accept="video/*,.mkv,.mov,.mp4,.webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   </label>
                   {uploadPct !== null && (
@@ -271,7 +309,13 @@ export function NewProjectPage() {
                   <video ref={hiddenVideo} src={objectUrl ?? undefined} muted playsInline preload="auto" className="hidden" />
                 </>
               )}
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional, defaults to the video title)" aria-label="Title" />
+              <input
+                className="input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Title (optional, defaults to the video title)"
+                aria-label="Title"
+              />
             </section>
 
             <section className={sec}>
@@ -289,9 +333,25 @@ export function NewProjectPage() {
               {lengthId === "custom" && (
                 <div className="flex items-center gap-2 text-[13px] text-ink2">
                   Between
-                  <input className="input w-16 px-2 py-1" type="number" min={5} max={180} value={s.minClipSeconds} onChange={(e) => patch({ minClipSeconds: Number(e.target.value) })} aria-label="Minimum seconds" />
+                  <input
+                    className="input w-16 px-2 py-1"
+                    type="number"
+                    min={5}
+                    max={180}
+                    value={s.minClipSeconds}
+                    onChange={(e) => patch({ minClipSeconds: Number(e.target.value) })}
+                    aria-label="Minimum seconds"
+                  />
                   and
-                  <input className="input w-16 px-2 py-1" type="number" min={10} max={300} value={s.maxClipSeconds} onChange={(e) => patch({ maxClipSeconds: Number(e.target.value) })} aria-label="Maximum seconds" />
+                  <input
+                    className="input w-16 px-2 py-1"
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={s.maxClipSeconds}
+                    onChange={(e) => patch({ maxClipSeconds: Number(e.target.value) })}
+                    aria-label="Maximum seconds"
+                  />
                   seconds
                 </div>
               )}
@@ -310,7 +370,16 @@ export function NewProjectPage() {
               <label className="flex cursor-pointer items-center gap-2.5 text-sm">
                 <input type="radio" name="cnt" className="accent-[var(--acc)]" checked={!!s.maxClips} onChange={() => patch({ maxClips: s.maxClips ?? 10 })} />
                 <b>At most</b>
-                <input className="input w-16 px-2 py-1" type="number" min={1} max={50} value={s.maxClips ?? 10} onFocus={() => !s.maxClips && patch({ maxClips: 10 })} onChange={(e) => patch({ maxClips: Math.max(1, Number(e.target.value)) })} aria-label="Maximum clips" />
+                <input
+                  className="input w-16 px-2 py-1"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={s.maxClips ?? 10}
+                  onFocus={() => !s.maxClips && patch({ maxClips: 10 })}
+                  onChange={(e) => patch({ maxClips: Math.max(1, Number(e.target.value)) })}
+                  aria-label="Maximum clips"
+                />
                 <span className="text-ink2">clips</span>
               </label>
             </section>
@@ -319,7 +388,14 @@ export function NewProjectPage() {
               <label htmlFor="focus" className={h2}>
                 Focus <span className="text-xs font-normal text-ink3">optional</span>
               </label>
-              <input id="focus" className="input" placeholder="Find clips about… e.g. pricing, hiring" value={s.focus ?? ""} onChange={(e) => patch({ focus: e.target.value || undefined })} maxLength={300} />
+              <input
+                id="focus"
+                className="input"
+                placeholder="Find clips about… e.g. pricing, hiring"
+                value={s.focus ?? ""}
+                onChange={(e) => patch({ focus: e.target.value || undefined })}
+                maxLength={300}
+              />
               <span className="text-xs text-ink3">Only on-topic moments are kept. Each clip also gets a relevance score.</span>
             </section>
 
@@ -356,7 +432,8 @@ export function NewProjectPage() {
                   </span>
                 )}
                 <label className="flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" className="accent-[var(--acc)]" checked={style.showHook} onChange={(e) => patch({ showHook: e.target.checked })} /> Hook text
+                  <input type="checkbox" className="accent-[var(--acc)]" checked={style.showHook} onChange={(e) => patch({ showHook: e.target.checked })} />{" "}
+                  Hook text
                 </label>
               </div>
               <span className="text-xs text-ink3">This is the project default. Fine-tune size, words on screen and key words per clip in the editor.</span>
@@ -404,7 +481,9 @@ export function NewProjectPage() {
                         <Skeleton className="h-[38px] w-full rounded-[10px]" />
                       </div>
                     ))}
-                    <span className="sr-only" role="status">Loading intros and outros…</span>
+                    <span className="sr-only" role="status">
+                      Loading intros and outros…
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -418,12 +497,23 @@ export function NewProjectPage() {
                 <div className="flex flex-col gap-4">
                   <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
                     Names and terms to spell correctly
-                    <input className="input font-normal" placeholder="e.g. Copia, La Marzocco, Priyanka" value={s.vocabulary ?? ""} onChange={(e) => patch({ vocabulary: e.target.value || undefined })} />
+                    <input
+                      className="input font-normal"
+                      placeholder="e.g. Copia, La Marzocco, Priyanka"
+                      value={s.vocabulary ?? ""}
+                      onChange={(e) => patch({ vocabulary: e.target.value || undefined })}
+                    />
                     <span className="text-xs font-normal text-ink3">Also pulled from the video title, description and tags.</span>
                   </label>
                   <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink2">
                     Extra instructions for the AI
-                    <textarea className="input font-normal" rows={3} placeholder="e.g. Prefer stories over tips. Avoid sponsor reads." value={s.instructions ?? ""} onChange={(e) => patch({ instructions: e.target.value || undefined })} />
+                    <textarea
+                      className="input font-normal"
+                      rows={3}
+                      placeholder="e.g. Prefer stories over tips. Avoid sponsor reads."
+                      value={s.instructions ?? ""}
+                      onChange={(e) => patch({ instructions: e.target.value || undefined })}
+                    />
                   </label>
                   <div className="flex flex-col gap-1.5">
                     <span className="text-[13px] font-semibold text-ink2">Pauses</span>
@@ -441,7 +531,12 @@ export function NewProjectPage() {
                     <span className="text-xs text-ink3">Long silences are shortened with jump cuts, like disfluencies.</span>
                   </div>
                   <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-                    <input type="checkbox" className="mt-1 accent-[var(--acc)]" checked={s.sourceText !== "keep"} onChange={(e) => patch({ sourceText: e.target.checked ? "hide" : "keep" })} />
+                    <input
+                      type="checkbox"
+                      className="mt-1 accent-[var(--acc)]"
+                      checked={s.sourceText !== "keep"}
+                      onChange={(e) => patch({ sourceText: e.target.checked ? "hide" : "keep" })}
+                    />
                     <span>
                       <b>Hide captions and logos already burned into the video</b>
                       <br />
@@ -450,7 +545,10 @@ export function NewProjectPage() {
                   </label>
                   <div className="flex flex-col gap-1.5 border-t border-line pt-4">
                     <span className="text-[13px] font-semibold text-ink2">Refine after transcription</span>
-                    <span className="text-xs text-ink3">Name fixes and the on-screen text scan run by default; filler removal is off for speed and cost (the server must allow a step under Settings → System → Pipeline).</span>
+                    <span className="text-xs text-ink3">
+                      Name fixes and the on-screen text scan run by default; filler removal is off for speed and cost (the server must allow a step under
+                      Settings → System → Pipeline).
+                    </span>
                     <RefineToggles compact value={s} onChange={patch} />
                   </div>
                 </div>
@@ -488,7 +586,9 @@ export function NewProjectPage() {
                   { value: "fit", label: "Whole" },
                 ]}
               />
-              <span className="text-center text-xs leading-snug text-ink3">Preview only. Framing is chosen automatically per section; you can override it per clip later.</span>
+              <span className="text-center text-xs leading-snug text-ink3">
+                Preview only. Framing is chosen automatically per section; you can override it per clip later.
+              </span>
               <label className="flex cursor-pointer items-center gap-2 text-[13px]">
                 <input type="checkbox" className="accent-[var(--acc)]" checked={safe} onChange={(e) => setSafe(e.target.checked)} /> Show platform safe zones
               </label>
@@ -500,14 +600,25 @@ export function NewProjectPage() {
       <div className="shrink-0 border-t border-line bg-panel px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3">
           <span className="min-w-0 flex-1 text-[13px] text-ink2">
-            {create.error ? <QuotaNotice message={create.error.message} quota={quotaFromError(create.error)} /> : uploadPct !== null ? `Uploading… ${Math.round(uploadPct * 100)}%` : <span className="truncate">{summary}</span>}
+            {create.error ? (
+              <QuotaNotice message={create.error.message} quota={quotaFromError(create.error)} />
+            ) : uploadPct !== null ? (
+              `Uploading… ${Math.round(uploadPct * 100)}%`
+            ) : (
+              <span className="truncate">{summary}</span>
+            )}
           </span>
           <button
             type="button"
             className="btn-quiet text-xs"
             title="Keep these settings for every new project"
             disabled={busy || saveDefaults.isPending}
-            onClick={() => saveDefaults.mutate(userProjectDefaultsSchema.parse(s), { onSuccess: () => toast("Saved as your defaults"), onError: (e) => toast.error(e.message) })}
+            onClick={() =>
+              saveDefaults.mutate(userProjectDefaultsSchema.parse(s), {
+                onSuccess: () => toast("Saved as your defaults"),
+                onError: (e) => toast.error(e.message),
+              })
+            }
           >
             Save as my defaults
           </button>

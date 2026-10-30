@@ -108,7 +108,10 @@ export interface StageTimeoutInfo {
 /** The sentence a person reads when a stage timed out (stored as the project's error). */
 export function stageTimeoutMessage(i: StageTimeoutInfo): string {
   const label = STAGE_LABEL[i.stage] ?? i.stage;
-  const progress = i.total > 0 ? `${i.done} of ${i.total} parts done in ${humanDuration(i.elapsedMs)} on ${i.model}${i.unitMs ? ` (~${humanDuration(i.unitMs)} per part)` : ""}` : `no part finished in ${humanDuration(i.elapsedMs)} on ${i.model}`;
+  const progress =
+    i.total > 0
+      ? `${i.done} of ${i.total} parts done in ${humanDuration(i.elapsedMs)} on ${i.model}${i.unitMs ? ` (~${humanDuration(i.unitMs)} per part)` : ""}`
+      : `no part finished in ${humanDuration(i.elapsedMs)} on ${i.model}`;
   return `${label} timed out: ${progress}. Retry continues where it stopped; a smaller or GPU-backed model is faster.`;
 }
 
@@ -151,10 +154,16 @@ export interface StepStore {
 /** The `job_steps` table of one project and stage. `seq` is the stage version the writes are guarded by. */
 export function dbStepStore(db: Db, projectId: string, stage: string, seq: number | undefined): StepStore {
   const t = schema.jobSteps;
-  const current = seq === undefined ? sql`${schema.projects.id} = ${projectId} and ${schema.projects.deletedAt} is null` : sql`${schema.projects.id} = ${projectId} and ${schema.projects.deletedAt} is null and ${schema.projects.stageSeq} = ${seq}`;
+  const current =
+    seq === undefined
+      ? sql`${schema.projects.id} = ${projectId} and ${schema.projects.deletedAt} is null`
+      : sql`${schema.projects.id} = ${projectId} and ${schema.projects.deletedAt} is null and ${schema.projects.stageSeq} = ${seq}`;
   return {
     async read(name, key) {
-      const [row] = await db.select({ status: t.status, output: t.output }).from(t).where(and(eq(t.projectId, projectId), eq(t.stage, stage), eq(t.name, name), eq(t.key, key)));
+      const [row] = await db
+        .select({ status: t.status, output: t.output })
+        .from(t)
+        .where(and(eq(t.projectId, projectId), eq(t.stage, stage), eq(t.name, name), eq(t.key, key)));
       return row;
     },
     async write(w) {
@@ -285,7 +294,14 @@ export class StepRunner {
     this.disarm();
     if (ms <= 0 || this.idled || this.queued) return;
     this.timer = setTimeout(() => {
-      const err = this.d.timeoutError({ done: this.doneInPhase, total: this.totalInPhase, model: this.model, unitMs: medianOf(this.recent), kind: "idle", elapsedMs: Date.now() - this.startedAt });
+      const err = this.d.timeoutError({
+        done: this.doneInPhase,
+        total: this.totalInPhase,
+        model: this.model,
+        unitMs: medianOf(this.recent),
+        kind: "idle",
+        elapsedMs: Date.now() - this.startedAt,
+      });
       this.idled = err;
       this.d.onIdle(err);
     }, ms);
@@ -348,9 +364,30 @@ export class StepRunner {
       if (this.idled) throw this.idled;
       if (parent.aborted) throw err;
       const timedOut = timeout.signal.aborted;
-      const failure = timedOut ? this.d.timeoutError({ done: this.doneInPhase, total: this.totalInPhase, model: this.model, unitMs: medianOf(this.recent), kind: "unit", elapsedMs: ms }) : err;
-      histogram("reelsaw.pipeline.step.duration", ms / 1000, "s", { stage: this.d.stage, outcome: timedOut ? "timeout" : "error" }, "Wall time of one pipeline step, by outcome");
-      const ok = await this.d.store.write({ name, key, ...(o.clipId ? { clipId: o.clipId } : {}), status: "failed", lastError: (failure instanceof Error ? failure.message : String(failure)).slice(0, 1000) });
+      const failure = timedOut
+        ? this.d.timeoutError({
+            done: this.doneInPhase,
+            total: this.totalInPhase,
+            model: this.model,
+            unitMs: medianOf(this.recent),
+            kind: "unit",
+            elapsedMs: ms,
+          })
+        : err;
+      histogram(
+        "reelsaw.pipeline.step.duration",
+        ms / 1000,
+        "s",
+        { stage: this.d.stage, outcome: timedOut ? "timeout" : "error" },
+        "Wall time of one pipeline step, by outcome",
+      );
+      const ok = await this.d.store.write({
+        name,
+        key,
+        ...(o.clipId ? { clipId: o.clipId } : {}),
+        status: "failed",
+        lastError: (failure instanceof Error ? failure.message : String(failure)).slice(0, 1000),
+      });
       if (!ok) throw this.d.stale();
       throw failure;
     } finally {
@@ -387,8 +424,15 @@ export class StepRunner {
           const r = await fn(item, i, signal);
           this.doneInPhase++;
           const unitMs = medianOf(this.recent);
-          const detail: StageDetail = { done: this.doneInPhase, total, etaSec: etaSeconds(total - this.doneInPhase, unitMs, o.concurrency), unitMs: unitMs === null ? null : Math.round(unitMs) };
-          await this.d.progress(o.range[0] + (o.range[1] - o.range[0]) * (this.doneInPhase / total), o.message(this.doneInPhase, total), detail).catch(() => {});
+          const detail: StageDetail = {
+            done: this.doneInPhase,
+            total,
+            etaSec: etaSeconds(total - this.doneInPhase, unitMs, o.concurrency),
+            unitMs: unitMs === null ? null : Math.round(unitMs),
+          };
+          await this.d
+            .progress(o.range[0] + (o.range[1] - o.range[0]) * (this.doneInPhase / total), o.message(this.doneInPhase, total), detail)
+            .catch(() => {});
           return r;
         } catch (err) {
           stop.abort(err);

@@ -28,7 +28,20 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
     const preview = sticker ? gif : (mp4 ?? gif);
     if (!str(g.id) || !preview) return null;
     const user = str(obj(g.user).display_name) ?? str(g.username);
-    return { provider: "giphy", externalId: `${sticker ? "sticker" : "gif"}:${g.id}`, kind: sticker ? "image" : "video", mime: sticker ? "image/gif" : "video/mp4", name: clip(str(g.title) ?? `GIF ${g.id}`, 120), previewUrl: preview, thumbUrl: sticker ? preview : (gif ?? still ?? preview), width: num(orig.width), height: num(orig.height), license: LICENSE, attribution: user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", url: httpsUrl(g.url) };
+    return {
+      provider: "giphy",
+      externalId: `${sticker ? "sticker" : "gif"}:${g.id}`,
+      kind: sticker ? "image" : "video",
+      mime: sticker ? "image/gif" : "video/mp4",
+      name: clip(str(g.title) ?? `GIF ${g.id}`, 120),
+      previewUrl: preview,
+      thumbUrl: sticker ? preview : (gif ?? still ?? preview),
+      width: num(orig.width),
+      height: num(orig.height),
+      license: LICENSE,
+      attribution: user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY",
+      url: httpsUrl(g.url),
+    };
   };
   const file = (g: Record<string, unknown>, sticker: boolean) => {
     const orig = obj(obj(g.images).original);
@@ -50,7 +63,11 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
         http.json("giphy", url(path, { q, limit: size, offset: String(offset), rating: "pg-13", lang: "en" })).then((r) => {
           const p = obj(obj(r).pagination);
           const count = num(p.count) ?? 0;
-          return { items: arr(obj(r).data).flatMap((g) => item(obj(g), sticker) ?? []), next: offset + count, more: offset + count < (num(p.total_count) ?? 0) && count > 0 };
+          return {
+            items: arr(obj(r).data).flatMap((g) => item(obj(g), sticker) ?? []),
+            next: offset + count,
+            more: offset + count < (num(p.total_count) ?? 0) && count > 0,
+          };
         });
       if (kind !== "image") calls.push(run("/gifs/search", false));
       if (kind !== "video") calls.push(run("/stickers/search", true));
@@ -60,12 +77,26 @@ export function giphy({ settings, http }: ProviderDeps): Provider {
     },
     async resolve(externalId): Promise<Resolved> {
       const [type, id] = externalId.split(":");
-      if ((type !== "gif" && type !== "sticker") || !id || !/^[A-Za-z0-9]+$/.test(id)) throw new ProviderError("That is not a Giphy id (gif:<id> or sticker:<id>).");
+      if ((type !== "gif" && type !== "sticker") || !id || !/^[A-Za-z0-9]+$/.test(id))
+        throw new ProviderError("That is not a Giphy id (gif:<id> or sticker:<id>).");
       const g = obj(obj(await http.json("giphy", url(`/${type}s/${id}`))).data);
       const f = file(g, type === "sticker");
       if (!f.url) throw new ProviderError("Giphy returned no file for that item.");
       const user = str(obj(g.user).display_name) ?? str(g.username);
-      return { url: f.url, ext: f.ext, name: clip(str(g.title) ?? `GIPHY ${id}`, 120), kind: type === "sticker" ? "image" : "video", tags: [], provenance: { provider: "giphy", externalId, url: httpsUrl(g.url), license: LICENSE, attribution: clip(user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", 300) } };
+      return {
+        url: f.url,
+        ext: f.ext,
+        name: clip(str(g.title) ?? `GIPHY ${id}`, 120),
+        kind: type === "sticker" ? "image" : "video",
+        tags: [],
+        provenance: {
+          provider: "giphy",
+          externalId,
+          url: httpsUrl(g.url),
+          license: LICENSE,
+          attribution: clip(user ? `GIF by ${user} on GIPHY` : "GIF from GIPHY", 300),
+        },
+      };
     },
   };
 }

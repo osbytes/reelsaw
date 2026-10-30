@@ -64,7 +64,12 @@ export const cutsSuite: Suite = {
         };
         const aligner = cfg.ALIGNER ? await getAligner(cfg.ALIGN_MODEL_DIR).catch(() => null) : null;
         const res = await refineCuts(
-          { ffmpegPath: cfg.FFMPEG_PATH, transcribe: hear, ...(aligner ? { align: (pcm: Float32Array, ws: string[]) => aligner.align(pcm, ws) } : {}), log: ctx.verbose ? ctx.log : undefined },
+          {
+            ffmpegPath: cfg.FFMPEG_PATH,
+            transcribe: hear,
+            ...(aligner ? { align: (pcm: Float32Array, ws: string[]) => aligner.align(pcm, ws) } : {}),
+            log: ctx.verbose ? ctx.log : undefined,
+          },
           wav,
           0,
           dur,
@@ -78,9 +83,22 @@ export const cutsSuite: Suite = {
         let heardText = "";
         if (cut) {
           const audio = await ctx.exec(cfg.FFMPEG_PATH, [
-            "-hide_banner", "-loglevel", "error", "-i", wav, "-filter_complex",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            wav,
+            "-filter_complex",
             `[0:a]atrim=end=${(cut.start + 0.02).toFixed(3)},asetpts=PTS-STARTPTS[a];[0:a]atrim=start=${cut.end.toFixed(3)},asetpts=PTS-STARTPTS[b];[a][b]acrossfade=d=0.02[o]`,
-            "-map", "[o]", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+            "-map",
+            "[o]",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "wav",
+            "pipe:1",
           ]);
           const heard = (await hear(new Uint8Array(audio))).map((w) => norm(w.text));
           heardText = heard.join(" ");
@@ -96,7 +114,14 @@ export const cutsSuite: Suite = {
         out.push({
           id: name,
           pass,
-          metrics: { verdict: c.manual ? (!cut ? "dropped" : atBounds ? "applied" : "moved") : verdict, ...(cut ? { verified: cut.verified } : {}), cut: cut ? `${cut.start.toFixed(3)}-${cut.end.toFixed(3)}` : "-", asrCalls: calls, newAsrCalls: uncached, sec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+          metrics: {
+            verdict: c.manual ? (!cut ? "dropped" : atBounds ? "applied" : "moved") : verdict,
+            ...(cut ? { verified: cut.verified } : {}),
+            cut: cut ? `${cut.start.toFixed(3)}-${cut.end.toFixed(3)}` : "-",
+            asrCalls: calls,
+            newAsrCalls: uncached,
+            sec: Number(((Date.now() - t0) / 1000).toFixed(1)),
+          },
           notes: heardText || res.skipped[0]?.reason.slice(0, 160) || "",
         });
       } catch (err) {
@@ -111,7 +136,11 @@ export const cutsSuite: Suite = {
     return {
       clean: { value: v("clean"), better: "higher" },
       broken: { value: v("broken"), better: "lower" },
-      asrCallsPerCase: { value: Number((results.reduce((a, r) => a + Number(r.metrics?.asrCalls ?? 0), 0) / (results.length || 1)).toFixed(1)), better: "lower", tolerance: 2 },
+      asrCallsPerCase: {
+        value: Number((results.reduce((a, r) => a + Number(r.metrics?.asrCalls ?? 0), 0) / (results.length || 1)).toFixed(1)),
+        better: "lower",
+        tolerance: 2,
+      },
     };
   },
 };

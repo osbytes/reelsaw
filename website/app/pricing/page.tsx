@@ -7,7 +7,8 @@ import { Header } from "@/components/header";
 import { SITE } from "@/lib/site";
 
 const title = "Pricing: self-host for free, or let us host it";
-const description = "Self-host Reelsaw for $0, or use app.reelsaw.com: a Free plan, then Starter $12, Creator $29 and Pro $59 a month, metered in minutes of source video.";
+const description =
+  "Self-host Reelsaw for $0, or use app.reelsaw.com: a Free plan, then Starter $12, Creator $29 and Pro $59 a month, metered in minutes of source video.";
 
 export const metadata: Metadata = {
   title,
@@ -25,11 +26,17 @@ export default function PricingPage() {
       <Header />
       <main id="main" className="container-page flex max-w-[980px] flex-col gap-12 py-12 sm:py-16">
         <header className="flex flex-col gap-5">
-          <Breadcrumbs items={[{ href: "/", label: SITE.name }, { href: "/pricing", label: "Pricing" }]} />
+          <Breadcrumbs
+            items={[
+              { href: "/", label: SITE.name },
+              { href: "/pricing", label: "Pricing" },
+            ]}
+          />
           <p className="eyebrow">Pricing</p>
           <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">Self-host for free, or let us host it</h1>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">
-            The software is AGPL-3.0: install it on your own machine and there is no plan, no meter and no watermark. The hosted service runs the same code on our machines with cloud models, and is priced by minutes of source video a month. Every plan has every feature, including the MCP server for agents.
+            The software is AGPL-3.0: install it on your own machine and there is no plan, no meter and no watermark. The hosted service runs the same code on
+            our machines with cloud models, and is priced by minutes of source video a month. Every plan has every feature, including the MCP server for agents.
           </p>
         </header>
 
@@ -58,14 +65,22 @@ export default function PricingPage() {
                     </li>
                   ))}
                 </ul>
-                <a href={`${SITE.app}/signup?plan=${p.name}`} className={`${p.name === "creator" ? "btn-primary" : "btn-ghost"} mt-auto h-[42px] justify-center`}>
+                <a
+                  href={`${SITE.app}/signup?plan=${p.name}`}
+                  className={`${p.name === "creator" ? "btn-primary" : "btn-ghost"} mt-auto h-[42px] justify-center`}
+                >
                   {p.price ? `Start with ${p.label}` : "Start for free"}
                 </a>
               </li>
             ))}
           </ul>
           <p className="text-sm leading-relaxed text-ink3">
-            Prices in USD; tax is added at checkout where it applies. A plan's minutes count the length of the videos you add in the billing period, never per clip; on Free, your first video is free up to 60 minutes. When minutes run out, the app says so and tells you when they reset. Storage counts sources, uploads and rendered clips, including deleted projects until you delete them forever. Plans change on Stripe's portal and are prorated. Limits: {PRICING.map((p) => `${p.label} ${p.minutes} min, ${gb(p.storageMb)}, ${p.projects ? `${p.projects} projects` : "unlimited projects"}`).join("; ")}. Same prices as OpenShorts Cloud, so the choice is the pipeline and the licence.
+            Prices in USD; tax is added at checkout where it applies. A plan's minutes count the length of the videos you add in the billing period, never per
+            clip; on Free, your first video is free up to 60 minutes. When minutes run out, the app says so and tells you when they reset. Storage counts
+            sources, uploads and rendered clips, including deleted projects until you delete them forever. Plans change on Stripe's portal and are prorated.
+            Limits:{" "}
+            {PRICING.map((p) => `${p.label} ${p.minutes} min, ${gb(p.storageMb)}, ${p.projects ? `${p.projects} projects` : "unlimited projects"}`).join("; ")}.
+            Same prices as OpenShorts Cloud, so the choice is the pipeline and the licence.
           </p>
         </section>
 
@@ -74,7 +89,10 @@ export default function PricingPage() {
             Self-hosted: $0
           </h2>
           <p className="max-w-[72ch] text-sm leading-relaxed text-ink2">
-            One command installs it on macOS, Linux or Windows. Fully local models cost nothing per minute; with cloud models you pay the vendor's metered price (roughly $0.02 to $0.04 per minute of video on Haiku-class models and Deepgram) and no Reelsaw margin. Multi-user installs get admin approval, per-user quotas and usage, and an optional watermark for accounts that are not admins. Everything in the hosted service except billing is in the open-source build.
+            One command installs it on macOS, Linux or Windows. Fully local models cost nothing per minute; with cloud models you pay the vendor's metered price
+            (roughly $0.02 to $0.04 per minute of video on Haiku-class models and Deepgram) and no Reelsaw margin. Multi-user installs get admin approval,
+            per-user quotas and usage, and an optional watermark for accounts that are not admins. Everything in the hosted service except billing is in the
+            open-source build.
           </p>
           <div className="flex flex-wrap gap-3">
             <a href="/#install" className="btn-primary h-[42px]">

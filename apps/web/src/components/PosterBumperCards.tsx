@@ -65,7 +65,9 @@ function Fan({ slot, summary }: { slot: "intro" | "outro"; summary: SlotSummary 
           </span>
         );
       })}
-      {more > 0 && <span className={`z-10 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white ${outro ? "mr-1.5" : "ml-1.5"}`}>+{more}</span>}
+      {more > 0 && (
+        <span className={`z-10 mt-1 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white ${outro ? "mr-1.5" : "ml-1.5"}`}>+{more}</span>
+      )}
     </div>
   );
 }

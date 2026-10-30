@@ -26,7 +26,8 @@ export function Captcha({ provider, siteKey, onToken }: { provider: Provider; si
       if (cancelled || el.childElementCount) return;
       const cb = (t: string) => onToken(t);
       const expired = () => onToken(null);
-      if (provider === "cloudflare-turnstile") window.turnstile?.render(el, { sitekey: siteKey, callback: cb, "expired-callback": expired, "error-callback": expired });
+      if (provider === "cloudflare-turnstile")
+        window.turnstile?.render(el, { sitekey: siteKey, callback: cb, "expired-callback": expired, "error-callback": expired });
       else if (provider === "hcaptcha") window.hcaptcha?.render(el, { sitekey: siteKey, callback: cb, "expired-callback": expired });
       else window.grecaptcha?.ready(() => window.grecaptcha?.render(el, { sitekey: siteKey, callback: cb, "expired-callback": expired }));
     };

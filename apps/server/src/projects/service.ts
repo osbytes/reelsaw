@@ -12,7 +12,22 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { REFINE_STEPS, adjustOf, bumperSecondsSchema, formatBytes, projectSettingsSchema, styleOverrideSchema, styleSchema, type ClearableSetting, type CreateProjectInput, type LayoutSection, type ProjectSettings, type ProjectSettingsPatch, type SectionAdjustFields, type SectionMode } from "@reelsaw/shared";
+import {
+  REFINE_STEPS,
+  adjustOf,
+  bumperSecondsSchema,
+  formatBytes,
+  projectSettingsSchema,
+  styleOverrideSchema,
+  styleSchema,
+  type ClearableSetting,
+  type CreateProjectInput,
+  type LayoutSection,
+  type ProjectSettings,
+  type ProjectSettingsPatch,
+  type SectionAdjustFields,
+  type SectionMode,
+} from "@reelsaw/shared";
 import { checkAnnouncedMinutes, checkProjectQuota, checkRestoreQuota, hasMinuteLimits, projectStoredBytes, recordProjectCreated } from "../quota.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
 import { takeTxLock, txLock } from "../locks.js";
@@ -57,7 +72,14 @@ export const restorableFor = (svc: Services) => (days(svc) > 0 ? `for ${days(svc
  * analyze and none of them is an AI pick: only clips the user made or kept survived a failed re-analyze, so picking
  * moments still has to run. A source that retention removed is fetched again first, whatever else exists.
  */
-export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; transcript: boolean; refineDone: boolean; stage: string | null; sourceKey: string | null; sourceExpired?: boolean }): QueueName {
+export function retryQueueFor(s: {
+  clips: ReadonlyArray<{ origin: string }>;
+  transcript: boolean;
+  refineDone: boolean;
+  stage: string | null;
+  sourceKey: string | null;
+  sourceExpired?: boolean;
+}): QueueName {
   if (s.sourceExpired) return QUEUES.ingest;
   const picked = s.clips.some((c) => c.origin === "ai");
   if (s.clips.length && !(s.stage === "analyze" && !picked)) return QUEUES.render;
@@ -74,7 +96,13 @@ export function retryQueueFor(s: { clips: ReadonlyArray<{ origin: string }>; tra
  */
 export async function retryProject(svc: Services, u: UnitOfWork, projectId: string): Promise<{ ok: true; queue: QueueName } | null> {
   const [p] = await u.db
-    .select({ id: schema.projects.id, sourceKey: schema.projects.sourceKey, sourceExpiredAt: schema.projects.sourceExpiredAt, stage: schema.projects.stage, status: schema.projects.status })
+    .select({
+      id: schema.projects.id,
+      sourceKey: schema.projects.sourceKey,
+      sourceExpiredAt: schema.projects.sourceExpiredAt,
+      stage: schema.projects.stage,
+      status: schema.projects.status,
+    })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) return null;
@@ -85,7 +113,11 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
     .for("update");
   await lockProjectClips(u, p.id);
   // deleted while we waited for the locks (deleting locks the clips first, so it is settled now): resume nothing
-  const [live] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, p.id), isNull(schema.projects.deletedAt))).for("no key update");
+  const [live] = await u.db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, p.id), isNull(schema.projects.deletedAt)))
+    .for("no key update");
   if (!live) return null;
   const clips = await listClips(u.db, p.id);
   const refineDone = !!transcript && REFINE_STEPS.every((s) => transcript.refine[s] === "done" || transcript.refine[s] === "failed");
@@ -124,7 +156,10 @@ export async function retryProject(svc: Services, u: UnitOfWork, projectId: stri
  */
 export async function deleteProject(svc: Services, u: UnitOfWork, projectId: string, opts: { forgetDecisions?: boolean } = {}): Promise<boolean> {
   await lockProjectClips(u, projectId); // clips before the project row, like a render completion
-  const [before] = await u.db.select({ status: schema.projects.status, stage: schema.projects.stage }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  const [before] = await u.db
+    .select({ status: schema.projects.status, stage: schema.projects.stage })
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!before) return false;
   for (const c of await listClips(u.db, projectId)) {
     await u.cancelLiveJobs(QUEUES.render, c.id);
@@ -141,7 +176,13 @@ export async function deleteProject(svc: Services, u: UnitOfWork, projectId: str
   // stage_seq too: a stage job still running stays stale after a restore, which resumes only through Retry
   await u.db
     .update(schema.projects)
-    .set({ deletedAt: new Date(), forgetDecisionsOnPurge: !!opts.forgetDecisions, stageSeq: sql`${schema.projects.stageSeq} + 1`, updatedAt: new Date(), ...(working ? { status: "failed" as const, error: stopped } : {}) })
+    .set({
+      deletedAt: new Date(),
+      forgetDecisionsOnPurge: !!opts.forgetDecisions,
+      stageSeq: sql`${schema.projects.stageSeq} + 1`,
+      updatedAt: new Date(),
+      ...(working ? { status: "failed" as const, error: stopped } : {}),
+    })
     .where(eq(schema.projects.id, projectId));
   // the run it interrupted ends here, so its history reads as stopped rather than running forever
   if (facts) await u.emit(projectId, "project.failed", { stage: before.stage ?? "ingest", error: stopped, ...facts });
@@ -159,7 +200,9 @@ export async function deleteOwnedProject(svc: Services, actor: Actor, projectId:
     await findProject(u.db, actor, projectId, { deleted: false });
     const stored = await projectStoredBytes(u.db, projectId);
     const changed = await deleteProject(svc, u, projectId, opts);
-    const base = stored ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.` : `Deleted. It can be restored ${restorableFor(svc)}.`;
+    const base = stored
+      ? `Deleted. It can be restored ${restorableFor(svc)}. It still uses ${formatBytes(stored)} until you delete it forever.`
+      : `Deleted. It can be restored ${restorableFor(svc)}.`;
     return {
       ok: true,
       changed,
@@ -178,7 +221,10 @@ export async function restoreProject(svc: Services, actor: Actor, projectId: str
     if (!p.deletedAt) return { ok: true, changed: false, status: p.status };
     if (actor) await checkRestoreQuota(u.db, svc.settings.get(), p.userId, { lock: true, ent: svc.entitlements });
     else await takeTxLock(u.db, txLock.quota(p.userId));
-    await u.db.update(schema.projects).set({ deletedAt: null, forgetDecisionsOnPurge: false, updatedAt: new Date() }).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
+    await u.db
+      .update(schema.projects)
+      .set({ deletedAt: null, forgetDecisionsOnPurge: false, updatedAt: new Date() })
+      .where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)));
     await u.emit(projectId, "project.restored", {});
     return { ok: true, changed: true, status: p.status };
   });
@@ -192,7 +238,11 @@ export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: 
     // re-check under the row lock (clips first, then the project, like deleteProject): a restore that committed since
     // the read above wins, instead of this deleting a project that is live again for good
     await lockProjectClips(u, projectId);
-    const [still] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt))).for("update");
+    const [still] = await u.db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), isNotNull(schema.projects.deletedAt)))
+      .for("update");
     if (!still) throw new TRPCError({ code: "CONFLICT", message: "It was restored meanwhile, so nothing was deleted." });
     const stored = await projectStoredBytes(u.db, projectId);
     const forget = opts.forgetDecisions || p.forgetDecisionsOnPurge;
@@ -206,10 +256,21 @@ export async function purgeOwnedProject(svc: Services, actor: Actor, projectId: 
  * Hard-delete one already-deleted clip: the row first, files after commit. `before` is the sweep cutoff (ISO);
  * omitted = any deleted clip (the owner's Remove for good). Returns null if it was restored or already gone.
  */
-export async function purgeClip(svc: Services, u: UnitOfWork, clipId: string, opts: { before?: string } = {}): Promise<{ projectId: string; files: string[] } | null> {
+export async function purgeClip(
+  svc: Services,
+  u: UnitOfWork,
+  clipId: string,
+  opts: { before?: string } = {},
+): Promise<{ projectId: string; files: string[] } | null> {
   const [c] = await u.db
     .delete(schema.clips)
-    .where(and(eq(schema.clips.id, clipId), isNotNull(schema.clips.deletedAt), opts.before ? sql`${schema.clips.deletedAt} < ${opts.before}::timestamptz` : undefined))
+    .where(
+      and(
+        eq(schema.clips.id, clipId),
+        isNotNull(schema.clips.deletedAt),
+        opts.before ? sql`${schema.clips.deletedAt} < ${opts.before}::timestamptz` : undefined,
+      ),
+    )
     .returning({ projectId: schema.clips.projectId, outputKey: schema.clips.outputKey, thumbnailKey: schema.clips.thumbnailKey });
   if (!c) return null;
   const files = [c.outputKey, c.thumbnailKey].filter((k): k is string => !!k);
@@ -248,7 +309,12 @@ async function markClipDeleted(svc: Services, u: UnitOfWork, c: typeof schema.cl
   const unfinished = c.status !== "done" && c.status !== "failed";
   await u.db
     .update(schema.clips)
-    .set({ deletedAt: new Date(), renderGen: sql`${schema.clips.renderGen} + 1`, ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}), updatedAt: new Date() })
+    .set({
+      deletedAt: new Date(),
+      renderGen: sql`${schema.clips.renderGen} + 1`,
+      ...(unfinished ? { status: "failed", error: "Deleted before it finished" } : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(schema.clips.id, c.id));
   await u.emit(c.projectId, "clip.deleted", { clipId: c.id, index: c.index, title: c.title, days: days(svc) });
   return true;
@@ -292,7 +358,10 @@ export async function deleteClips(svc: Services, actor: Actor, projectId: string
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     await lockProjectClips(u, projectId);
-    const rows = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)));
+    const rows = await u.db
+      .select()
+      .from(schema.clips)
+      .where(and(eq(schema.clips.projectId, projectId), inArray(schema.clips.id, ids)));
     if (rows.length !== ids.length) throw new TRPCError({ code: "NOT_FOUND", message: "A selected clip is not on this project" });
     let deleted = 0;
     let skipped = 0;
@@ -319,9 +388,13 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
     const [c] = await u.db.select().from(schema.clips).where(eq(schema.clips.id, clipId)).for("update");
     if (!c) throw new TRPCError({ code: "NOT_FOUND", message: gone(svc, "clip") });
     const p = await findProject(u.db, actor, c.projectId, { deleted: true });
-    if (p.deletedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
+    if (p.deletedAt)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Its project is deleted. Restore the project (restore_project) to bring its clips back." });
     if (!c.deletedAt) return { ok: true, changed: false, clipId, status: c.status };
-    const [{ next } = { next: 0 }] = await u.db.select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` }).from(schema.clips).where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
+    const [{ next } = { next: 0 }] = await u.db
+      .select({ next: sql<number>`coalesce(max(${schema.clips.index}) + 1, 0)::int` })
+      .from(schema.clips)
+      .where(and(eq(schema.clips.projectId, c.projectId), isNull(schema.clips.deletedAt)));
     await u.db.update(schema.clips).set({ deletedAt: null, index: next, updatedAt: new Date() }).where(eq(schema.clips.id, clipId));
     await u.emit(c.projectId, "clip.restored", { clipId, index: next, title: c.title });
     if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.restore", [c], { side: "after" }));
@@ -332,7 +405,14 @@ export async function restoreClip(svc: Services, actor: Actor, clipId: string) {
 /** Deleted projects across the install (operator CLI), newest first, with when each is purged. */
 export async function deletedProjects(svc: Services, limit = 100) {
   const rows = await svc.database.db
-    .select({ id: schema.projects.id, title: schema.projects.title, status: schema.projects.status, userId: schema.projects.userId, email: schema.user.email, deletedAt: schema.projects.deletedAt })
+    .select({
+      id: schema.projects.id,
+      title: schema.projects.title,
+      status: schema.projects.status,
+      userId: schema.projects.userId,
+      email: schema.user.email,
+      deletedAt: schema.projects.deletedAt,
+    })
     .from(schema.projects)
     .innerJoin(schema.user, eq(schema.user.id, schema.projects.userId))
     .where(isNotNull(schema.projects.deletedAt))
@@ -344,7 +424,15 @@ export async function deletedProjects(svc: Services, limit = 100) {
 /** Clips of a project that were deleted or a re-analyze replaced and that can still be restored, newest first. */
 export async function deletedClips(db: Db, projectId: string) {
   return db
-    .select({ id: schema.clips.id, index: schema.clips.index, title: schema.clips.title, startSec: schema.clips.startSec, endSec: schema.clips.endSec, status: schema.clips.status, deletedAt: schema.clips.deletedAt })
+    .select({
+      id: schema.clips.id,
+      index: schema.clips.index,
+      title: schema.clips.title,
+      startSec: schema.clips.startSec,
+      endSec: schema.clips.endSec,
+      status: schema.clips.status,
+      deletedAt: schema.clips.deletedAt,
+    })
     .from(schema.clips)
     .where(and(eq(schema.clips.projectId, projectId), isNotNull(schema.clips.deletedAt)))
     .orderBy(sql`${schema.clips.deletedAt} desc`, schema.clips.index, schema.clips.createdAt, schema.clips.id)
@@ -384,15 +472,34 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
       await u.db
         .update(schema.clips)
         // a newer generation makes a render still running discard its output; an unfinished clip comes back failed
-        .set({ deletedAt: new Date(), renderGen: sql`${schema.clips.renderGen} + 1`, status: sql`case when ${schema.clips.status} in ('done', 'failed') then ${schema.clips.status} else 'failed' end`, error: sql`case when ${schema.clips.status} in ('done', 'failed') then ${schema.clips.error} else 'Replaced by a re-analyze before it finished' end`, updatedAt: new Date() })
-        .where(inArray(schema.clips.id, replaced.map((c) => c.id)));
+        .set({
+          deletedAt: new Date(),
+          renderGen: sql`${schema.clips.renderGen} + 1`,
+          status: sql`case when ${schema.clips.status} in ('done', 'failed') then ${schema.clips.status} else 'failed' end`,
+          error: sql`case when ${schema.clips.status} in ('done', 'failed') then ${schema.clips.error} else 'Replaced by a re-analyze before it finished' end`,
+          updatedAt: new Date(),
+        })
+        .where(
+          inArray(
+            schema.clips.id,
+            replaced.map((c) => c.id),
+          ),
+        );
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
     await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true, kept: kept.length, replaced: replaced.length });
     // the user asked for different picks: the replaced ones are weak negatives, not deletes they chose one by one
     if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
-    await u.artifact(p.id, "analyze", "kept", { kept: kept.map(({ c, why }) => ({ clipId: c.id, index: c.index, title: c.title, why })), replaced: replaced.map((c) => c.id), restorable: restorableFor(svc) });
+    await u.artifact(p.id, "analyze", "kept", {
+      kept: kept.map(({ c, why }) => ({ clipId: c.id, index: c.index, title: c.title, why })),
+      replaced: replaced.map((c) => c.id),
+      restorable: restorableFor(svc),
+    });
     await u.enqueue(QUEUES.analyze, { projectId: p.id });
-    u.afterCommit(() => svc.log.child({ module: "analyze", projectId: p.id }).info({ kept: kept.length, replaced: replaced.length }, "re-analyze keeps the clips the user made or edited"));
+    u.afterCommit(() =>
+      svc.log
+        .child({ module: "analyze", projectId: p.id })
+        .info({ kept: kept.length, replaced: replaced.length }, "re-analyze keeps the clips the user made or edited"),
+    );
     return { ok: true, kept: kept.length, replaced: replaced.length, restorable: restorableFor(svc) };
   });
 }
@@ -423,7 +530,12 @@ const BUMPER_KEYS = new Set<string>(["introAssetId", "outroAssetId", "introSec",
  * toggles on the next refine. Writes only the keys given (atomic JSON merge), validated against the whole settings
  * object. Per-clip style overrides are kept.
  */
-export async function updateProject(svc: Services, actor: Actor, projectId: string, input: { title?: string | undefined; settings?: ProjectSettingsPatch | undefined; clear?: ClearableSetting[] | undefined }) {
+export async function updateProject(
+  svc: Services,
+  actor: Actor,
+  projectId: string,
+  input: { title?: string | undefined; settings?: ProjectSettingsPatch | undefined; clear?: ClearableSetting[] | undefined },
+) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const patch = Object.fromEntries(Object.entries(input.settings ?? {}).filter(([, v]) => v !== undefined)) as ProjectSettingsPatch;
@@ -464,7 +576,14 @@ export async function updateProject(svc: Services, actor: Actor, projectId: stri
       needsRefine && "refine_project (or Retry) applies the new refine toggles on the existing transcript",
       needsRerender && "rerender_clips applies the style/framing to finished clips",
     ].filter(Boolean);
-    return { ok: true, changed, needsReanalyze, needsRefine, needsRerender, ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}) };
+    return {
+      ok: true,
+      changed,
+      needsReanalyze,
+      needsRefine,
+      needsRerender,
+      ...(followUps.length ? { hint: `Saved; nothing was re-run. ${followUps.join("; ")}.` } : {}),
+    };
   });
 }
 
@@ -478,7 +597,10 @@ export interface FramingTemplate {
  * The framing of a clip's section (the one at `at` seconds into the source, else the first section that is not plain
  * automatic, else the first), as a template for the whole project.
  */
-export function framingOfClip(clip: { startSec: number; layoutSections: LayoutSection[] | null; layoutOverride?: string | null }, at?: number): FramingTemplate {
+export function framingOfClip(
+  clip: { startSec: number; layoutSections: LayoutSection[] | null; layoutOverride?: string | null },
+  at?: number,
+): FramingTemplate {
   const sections = [...(clip.layoutSections ?? [])].sort((a, b) => a.start - b.start);
   const pick = at !== undefined ? sections.find((s) => at >= s.start && at < s.end) : (sections.find((s) => s.mode !== "auto" || adjustOf(s)) ?? sections[0]);
   if (pick) return { reframe: pick.mode, ...(adjustOf(pick) ? { adjust: adjustOf(pick) } : {}) };
@@ -491,7 +613,12 @@ export function framingOfClip(clip: { startSec: number; layoutSections: LayoutSe
  * legacy override are cleared (unless `keepOverrides`), and the finished clips are re-rendered. The same for every
  * clip the project creates from now on. One transaction: clips locked in id order, then the project row.
  */
-export async function applyProjectFraming(svc: Services, actor: Actor, projectId: string, input: FramingTemplate & { keepOverrides?: boolean | undefined; rerender?: boolean }) {
+export async function applyProjectFraming(
+  svc: Services,
+  actor: Actor,
+  projectId: string,
+  input: FramingTemplate & { keepOverrides?: boolean | undefined; rerender?: boolean },
+) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
     const adjust = input.adjust ? adjustOf(input.adjust) : undefined;
@@ -501,13 +628,20 @@ export async function applyProjectFraming(svc: Services, actor: Actor, projectId
       const rows = await u.db
         .update(schema.clips)
         .set({ layoutSections: null, layoutOverride: null, updatedAt: new Date() })
-        .where(and(eq(schema.clips.projectId, p.id), isNull(schema.clips.deletedAt), sql`(${schema.clips.layoutSections} is not null or ${schema.clips.layoutOverride} is not null)`))
+        .where(
+          and(
+            eq(schema.clips.projectId, p.id),
+            isNull(schema.clips.deletedAt),
+            sql`(${schema.clips.layoutSections} is not null or ${schema.clips.layoutOverride} is not null)`,
+          ),
+        )
         .returning({ id: schema.clips.id });
       cleared = rows.length;
     }
     let rerendered = 0;
     if (input.rerender !== false) {
-      for (const c of await listClips(u.db, p.id)) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
+      for (const c of await listClips(u.db, p.id))
+        if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
     }
     const write = { reframe: input.reframe, reframeAdjust: adjust ?? null };
     await u.db
@@ -515,7 +649,9 @@ export async function applyProjectFraming(svc: Services, actor: Actor, projectId
       .set({ settings: sql`${schema.projects.settings} || ${JSON.stringify(write)}::jsonb`, updatedAt: new Date() })
       .where(eq(schema.projects.id, p.id));
     await u.emit(p.id, "project.updated", { changed: ["reframe", "reframeAdjust"], framingCleared: cleared });
-    u.afterCommit(() => svc.log.child({ module: "projects", projectId: p.id }).info({ reframe: input.reframe, adjust, cleared, rerendered }, "framing applied to the project"));
+    u.afterCommit(() =>
+      svc.log.child({ module: "projects", projectId: p.id }).info({ reframe: input.reframe, adjust, cleared, rerendered }, "framing applied to the project"),
+    );
     return { ok: true, reframe: input.reframe, adjust: adjust ?? null, cleared, rerendered };
   });
 }
@@ -526,12 +662,20 @@ export async function applyProjectFraming(svc: Services, actor: Actor, projectId
  */
 export async function findProject(db: Db, actor: Actor, projectId: string, o: { deleted: boolean }) {
   const mine = actor && !actor.admin ? eq(schema.projects.userId, actor.id) : undefined;
-  const p = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), mine, o.deleted ? undefined : isNull(schema.projects.deletedAt)) });
+  const p = await db.query.projects.findFirst({
+    where: and(eq(schema.projects.id, projectId), mine, o.deleted ? undefined : isNull(schema.projects.deletedAt)),
+  });
   if (p) return p;
   if (o.deleted) throw new TRPCError({ code: "NOT_FOUND", message: `${NO_PROJECT} A deleted project is gone for good once its restore window has passed.` });
   // only on the failure path: tell "deleted" from "never yours / never existed"
-  const inDeleted = await db.query.projects.findFirst({ where: and(eq(schema.projects.id, projectId), mine, isNotNull(schema.projects.deletedAt)), columns: { id: true } });
-  throw new TRPCError({ code: "NOT_FOUND", message: inDeleted ? "That project is deleted; restore_project (or Deleted in the app) brings it back." : NO_PROJECT });
+  const inDeleted = await db.query.projects.findFirst({
+    where: and(eq(schema.projects.id, projectId), mine, isNotNull(schema.projects.deletedAt)),
+    columns: { id: true },
+  });
+  throw new TRPCError({
+    code: "NOT_FOUND",
+    message: inDeleted ? "That project is deleted; restore_project (or Deleted in the app) brings it back." : NO_PROJECT,
+  });
 }
 /** The sentence for a project id that is not the caller's or never existed. */
 export const NO_PROJECT = "No project with that id in your account.";
@@ -546,13 +690,21 @@ export const gone = (svc: Services, what: string) => `No such ${what}. Deleted i
  * deleted, files after commit. Its decisions go too when `forgetDecisions` or the project was deleted with that
  * choice; returns how many were forgotten.
  */
-export async function purgeProject(svc: Services, u: UnitOfWork, projectId: string, opts: { forgetDecisions?: boolean } = {}): Promise<{ forgottenDecisions: number }> {
+export async function purgeProject(
+  svc: Services,
+  u: UnitOfWork,
+  projectId: string,
+  opts: { forgetDecisions?: boolean } = {},
+): Promise<{ forgottenDecisions: number }> {
   for (const c of await u.db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, projectId))) {
     await u.cancelLiveJobs(QUEUES.render, c.id);
     await u.cancelLiveJobs(QUEUES.prepare, c.id);
   }
   for (const q of STAGE_QUEUES) await u.cancelLiveJobs(q, projectId);
-  const [gone] = await u.db.delete(schema.projects).where(eq(schema.projects.id, projectId)).returning({ sourceMeta: schema.projects.sourceMeta, userId: schema.projects.userId, forget: schema.projects.forgetDecisionsOnPurge });
+  const [gone] = await u.db
+    .delete(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .returning({ sourceMeta: schema.projects.sourceMeta, userId: schema.projects.userId, forget: schema.projects.forgetDecisionsOnPurge });
   await releaseUpload(svc, u, projectId, gone?.sourceMeta?.uploadId);
   // decisions outlive the project (docs/specs/decision-log.md) unless the owner asked to forget them, now or when deleting it
   const forgotten = gone && (gone.forget || opts.forgetDecisions) ? await forgetDecisions(u.db, gone.userId, { projectId }) : 0;
@@ -598,7 +750,11 @@ export async function purgeDeleted(svc: Services, opts: { dryRun?: boolean; now?
         }
         const done = await svc.tx(async (u) => {
           // re-check under the row lock: a restore since the batch was read wins
-          const [p] = await u.db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, r.id), isNotNull(schema.projects.deletedAt), sql`${schema.projects.deletedAt} < ${cutoff}::timestamptz`)).for("update");
+          const [p] = await u.db
+            .select({ id: schema.projects.id })
+            .from(schema.projects)
+            .where(and(eq(schema.projects.id, r.id), isNotNull(schema.projects.deletedAt), sql`${schema.projects.deletedAt} < ${cutoff}::timestamptz`))
+            .for("update");
           if (!p) return false;
           await purgeProject(svc, u, r.id);
           return true;
@@ -642,7 +798,12 @@ export async function purgeDeleted(svc: Services, opts: { dryRun?: boolean; now?
 // ── create, retry, refine and the settings that re-render ──────────────────
 
 /** Re-render the clips matching `which` (default: finished or failed ones) in this unit of work. Returns how many were queued and how many live clips were left alone (still preparing or rendering: they finish with the old settings). */
-export async function rerenderProjectClips(svc: Services, u: UnitOfWork, projectId: string, which: (c: typeof schema.clips.$inferSelect) => boolean = (c) => c.status === "done" || c.status === "failed") {
+export async function rerenderProjectClips(
+  svc: Services,
+  u: UnitOfWork,
+  projectId: string,
+  which: (c: typeof schema.clips.$inferSelect) => boolean = (c) => c.status === "done" || c.status === "failed",
+) {
   let n = 0;
   let skipped = 0;
   await lockProjectClips(u, projectId);
@@ -689,7 +850,8 @@ export async function createProject(svc: Services, userId: string, input: Create
     await checkProjectQuota(u.db, svc.settings.get(), userId, { lock: true, ent: svc.entitlements }).catch(quotaReached);
     // defaults, caller values and the intro/outro ownership + liveness check see one snapshot
     const settings = await resolveProjectSettings(u.db, userId, input.settings);
-    if (settings.minClipSeconds >= settings.maxClipSeconds) throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
+    if (settings.minClipSeconds >= settings.maxClipSeconds)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
     const [row] = await u.db
       .insert(schema.projects)
       .values({ id, userId, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
@@ -738,7 +900,12 @@ export const refineInput = {
 };
 
 /** Re-run some or all refine steps (names, disfluencies, scene cuts) on the existing transcript. */
-export async function refineProject(svc: Services, actor: Actor, projectId: string, input: { steps?: ReadonlyArray<(typeof REFINE_STEPS)[number]> | undefined; vocabulary?: string | undefined }) {
+export async function refineProject(
+  svc: Services,
+  actor: Actor,
+  projectId: string,
+  input: { steps?: ReadonlyArray<(typeof REFINE_STEPS)[number]> | undefined; vocabulary?: string | undefined },
+) {
   const steps = input.steps?.length ? [...new Set(input.steps)] : [...REFINE_STEPS];
   await svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
@@ -747,12 +914,15 @@ export async function refineProject(svc: Services, actor: Actor, projectId: stri
     if (!cur) throw new TRPCError({ code: "BAD_REQUEST", message: "Project has no transcript yet" });
     // a refine already running restarts; anything else running (renders, picking) would have its status
     // overwritten and never finalize, so wait for it
-    if (!["done", "failed", "refining"].includes(p.status)) throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
+    if (!["done", "failed", "refining"].includes(p.status))
+      throw new TRPCError({ code: "CONFLICT", message: `The project is busy (${p.status}); refine it when that finishes` });
     if (input.vocabulary !== undefined) {
       const vocabulary = input.vocabulary || undefined;
       const check = projectSettingsSchema.safeParse({ ...p.settings, vocabulary }); // validate the result; write only the key (atomic merge)
       if (!check.success) throw new TRPCError({ code: "BAD_REQUEST", message: check.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
-      const settings = vocabulary ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb` : sql`${schema.projects.settings} - 'vocabulary'`;
+      const settings = vocabulary
+        ? sql`${schema.projects.settings} || ${JSON.stringify({ vocabulary })}::jsonb`
+        : sql`${schema.projects.settings} - 'vocabulary'`;
       await u.db.update(schema.projects).set({ settings, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
     }
     // a step of the refine being restarted that is still running is superseded too, so it runs again with the rest
@@ -776,7 +946,10 @@ export async function setProjectSourceText(svc: Services, actor: Actor, projectI
     // clips first (locked in id order), the project row last; the jobs only start once this commits with the new setting
     const n = await rerenderProjectClips(svc, u, p.id);
     // atomic JSON merge: no read-modify-write, so concurrent settings edits can't drop each other
-    await u.db.update(schema.projects).set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText })}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+    await u.db
+      .update(schema.projects)
+      .set({ settings: sql`${schema.projects.settings} || ${JSON.stringify({ sourceText })}::jsonb`, updatedAt: new Date() })
+      .where(eq(schema.projects.id, p.id));
     return n;
   });
   return { ok: true as const, rerendered, skipped };
@@ -802,7 +975,10 @@ export async function setProjectBumpers(svc: Services, actor: Actor, projectId: 
     const mine = await userDefaults(u.db, p.userId);
     let expr = sql`${schema.projects.settings}`;
     const patch: Record<string, string | number | null> = {};
-    for (const [slot, key, choice, secs] of [["intro", "introAssetId", input.intro, input.introSec], ["outro", "outroAssetId", input.outro, input.outroSec]] as const) {
+    for (const [slot, key, choice, secs] of [
+      ["intro", "introAssetId", input.intro, input.introSec],
+      ["outro", "outroAssetId", input.outro, input.outroSec],
+    ] as const) {
       if (choice === undefined) continue;
       expr = sql`(${expr}) - ${key}::text - ${`${slot}Sec`}::text`;
       if (secs !== undefined && choice !== "none") patch[`${slot}Sec`] = secs;
@@ -811,14 +987,22 @@ export async function setProjectBumpers(svc: Services, actor: Actor, projectId: 
         if (mine[key]) patch[key] = mine[key]!;
       } else {
         // a library asset of this user; the one the project already uses stays valid even if it was since removed
-        const [asset] = await u.db.select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt }).from(schema.assets).where(and(eq(schema.assets.id, choice), assetVisibleTo(p.userId)));
-        if (!asset || (asset.deletedAt && p.settings[key] !== choice)) throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
+        const [asset] = await u.db
+          .select({ id: schema.assets.id, deletedAt: schema.assets.deletedAt })
+          .from(schema.assets)
+          .where(and(eq(schema.assets.id, choice), assetVisibleTo(p.userId)));
+        if (!asset || (asset.deletedAt && p.settings[key] !== choice))
+          throw new TRPCError({ code: "NOT_FOUND", message: `That ${slot} is not in your library` });
         patch[key] = choice;
       }
     }
     // clips first, the project row last (lock order clip → project)
     const n = input.rerender ? (await rerenderProjectClips(svc, u, p.id)).queued : 0;
-    const [after] = await u.db.update(schema.projects).set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() }).where(eq(schema.projects.id, p.id)).returning({ id: schema.projects.id, settings: schema.projects.settings });
+    const [after] = await u.db
+      .update(schema.projects)
+      .set({ settings: sql`(${expr}) || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() })
+      .where(eq(schema.projects.id, p.id))
+      .returning({ id: schema.projects.id, settings: schema.projects.settings });
     if (after) await syncProjectRefs(u.db, after);
     return n;
   });
@@ -844,7 +1028,10 @@ export async function updateProjectStyle(svc: Services, actor: Actor, projectId:
     await lockProjectClips(u, p.id);
     if (!input.keepOverrides) await u.db.update(schema.clips).set({ style: null }).where(eq(schema.clips.projectId, p.id));
     const n = input.rerender !== false ? await rerenderProjectClips(svc, u, p.id) : { queued: 0, skipped: 0 };
-    await u.db.update(schema.projects).set({ settings: settingsWrite(sql`${schema.projects.settings}`, patch), updatedAt: new Date() }).where(eq(schema.projects.id, p.id));
+    await u.db
+      .update(schema.projects)
+      .set({ settings: settingsWrite(sql`${schema.projects.settings}`, patch), updatedAt: new Date() })
+      .where(eq(schema.projects.id, p.id));
     return n;
   });
   return { ok: true as const, rerendered, skipped };

@@ -35,12 +35,24 @@ describe("refsForClip", () => {
   it("legacy overlays and audio rows read as layers", () => {
     const rows = refsForClip("p", {
       id: "c",
-      overlays: [{ id: "o1", assetId: "sticker", start: 0, end: 4, x: 0.5, y: 0.5 }, { id: "o2", kind: "text", text: "t", start: 0, end: 4, x: 0.5, y: 0.5 }],
+      overlays: [
+        { id: "o1", assetId: "sticker", start: 0, end: 4, x: 0.5, y: 0.5 },
+        { id: "o2", kind: "text", text: "t", start: 0, end: 4, x: 0.5, y: 0.5 },
+      ],
       audio: [{ id: "m1", assetId: "song", start: 0, end: 10 }],
     });
-    assert.deepEqual(sorted(rows).map((r) => [r.assetId, r.role]), [["song", "layer"], ["sticker", "layer"]]);
+    assert.deepEqual(
+      sorted(rows).map((r) => [r.assetId, r.role]),
+      [
+        ["song", "layer"],
+        ["sticker", "layer"],
+      ],
+    );
     // a single-object audio column from before several tracks
-    assert.deepEqual(refsForClip("p", { id: "c", audio: { assetId: "old", start: 0, end: 10 } as never }).map((r) => r.assetId), ["old"]);
+    assert.deepEqual(
+      refsForClip("p", { id: "c", audio: { assetId: "old", start: 0, end: 10 } as never }).map((r) => r.assetId),
+      ["old"],
+    );
   });
 
   it("layers win over the old columns once a clip has them", () => {
@@ -57,7 +69,10 @@ describe("refsForClip", () => {
         { kind: "asset", id: "l2", assetId: "a", start: 5, end: 9, x: 0.5, y: 0.5 },
       ],
     });
-    assert.deepEqual(sorted(rows).map((r) => r.role), ["intro", "layer"]);
+    assert.deepEqual(
+      sorted(rows).map((r) => r.role),
+      ["intro", "layer"],
+    );
   });
 });
 

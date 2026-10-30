@@ -18,7 +18,25 @@ describe("safe-url", () => {
     await rejects("not a url");
   });
   it("rejects private literals", async () => {
-    for (const h of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "[::1]", "[fe80::1]", "[fd00::1]", "[::]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[ff02::1]"]) await rejects(`http://${h}/`);
+    for (const h of [
+      "127.0.0.1",
+      "10.1.2.3",
+      "172.16.0.1",
+      "172.31.255.1",
+      "192.168.1.1",
+      "169.254.169.254",
+      "100.64.0.1",
+      "0.0.0.0",
+      "224.0.0.1",
+      "[::1]",
+      "[fe80::1]",
+      "[fd00::1]",
+      "[::]",
+      "[::ffff:127.0.0.1]",
+      "[::ffff:7f00:1]",
+      "[ff02::1]",
+    ])
+      await rejects(`http://${h}/`);
     assert.equal(isPrivateAddress("172.32.0.1"), false);
     assert.equal(isPrivateAddress("100.128.0.1"), false);
     assert.equal(isPrivateAddress("2606:4700::1111"), false);
@@ -38,7 +56,18 @@ describe("safe-url", () => {
 
 describe("safe-url: tunnels and reserved ranges", () => {
   it("blocks 6to4 and NAT64 addresses that embed a private IPv4, and the reserved IPv4 ranges", () => {
-    for (const ip of ["2002:a00:1::1", "2002:7f00:1::", "2002:a9fe:a9fe::1", "64:ff9b::a00:1", "64:ff9b::10.0.0.1", "64:ff9b::7f00:1", "64:ff9b:1::1", "198.18.0.1", "198.19.255.1", "192.0.0.8"]) {
+    for (const ip of [
+      "2002:a00:1::1",
+      "2002:7f00:1::",
+      "2002:a9fe:a9fe::1",
+      "64:ff9b::a00:1",
+      "64:ff9b::10.0.0.1",
+      "64:ff9b::7f00:1",
+      "64:ff9b:1::1",
+      "198.18.0.1",
+      "198.19.255.1",
+      "192.0.0.8",
+    ]) {
       assert.equal(isPrivateAddress(ip), true, ip);
     }
   });
@@ -63,7 +92,10 @@ describe("fetchPublic", () => {
     });
     assert.equal(res.status, 200);
     assert.equal(url.toString(), "https://a.example/next");
-    assert.deepEqual(seen, [["https://a.example/start", "93.184.216.34"], ["https://a.example/next", "93.184.216.34"]]);
+    assert.deepEqual(seen, [
+      ["https://a.example/start", "93.184.216.34"],
+      ["https://a.example/next", "93.184.216.34"],
+    ]);
   });
   it("refuses a redirect to an internal address and a loop of redirects", async () => {
     await assert.rejects(fetchPublic("https://a.example/", { lookup: pub, fetch: async () => redirect("http://169.254.169.254/latest") }), UnsafeUrlError);

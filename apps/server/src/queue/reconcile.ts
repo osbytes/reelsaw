@@ -36,7 +36,13 @@ export const MAX_RECONCILE_REQUEUES = 3;
 export const shouldGiveUp = (requeues: number): boolean => requeues > MAX_RECONCILE_REQUEUES;
 export const INTERRUPTED_MESSAGE = `Processing was interrupted ${MAX_RECONCILE_REQUEUES + 1} times (the worker crashed, ran out of memory, or was stopped). Retry to try again.`;
 
-const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = { queued: "ingest", ingesting: "ingest", transcribing: "transcribe", refining: "refine", analyzing: "analyze" };
+const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = {
+  queued: "ingest",
+  ingesting: "ingest",
+  transcribing: "transcribe",
+  refining: "refine",
+  analyzing: "analyze",
+};
 
 /**
  * pg-boss-level failures (heartbeat timeout, expiry, an OOM kill) never reach failProject / markClipFailed, so a job
@@ -46,15 +52,27 @@ const stageOfStatus: Partial<Record<ProjectStatus, PipelineStage>> = { queued: "
  * moved on (status changed, deleted) or a live job appeared since the caller looked: nothing was counted or queued.
  * The live-job check runs before the increment, so a race that finds a live job never burns a requeue.
  */
-async function countRequeue(u: UnitOfWork, target: { project: string; status: ProjectStatus } | { clip: string; status: ClipStatus }, live: QueueName[]): Promise<number | null> {
+async function countRequeue(
+  u: UnitOfWork,
+  target: { project: string; status: ProjectStatus } | { clip: string; status: ClipStatus },
+  live: QueueName[],
+): Promise<number | null> {
   const p = schema.projects;
   const c = schema.clips;
   const key = "project" in target ? target.project : target.clip;
   for (const q of live) if (await u.hasLiveJob(q, key)) return null;
   const [row] =
     "project" in target
-      ? await u.db.update(p).set({ reconcileRequeues: sql`${p.reconcileRequeues} + 1` }).where(and(eq(p.id, target.project), eq(p.status, target.status), isNull(p.deletedAt))).returning({ n: p.reconcileRequeues })
-      : await u.db.update(c).set({ reconcileRequeues: sql`${c.reconcileRequeues} + 1` }).where(and(eq(c.id, target.clip), eq(c.status, target.status), isNull(c.deletedAt))).returning({ n: c.reconcileRequeues });
+      ? await u.db
+          .update(p)
+          .set({ reconcileRequeues: sql`${p.reconcileRequeues} + 1` })
+          .where(and(eq(p.id, target.project), eq(p.status, target.status), isNull(p.deletedAt)))
+          .returning({ n: p.reconcileRequeues })
+      : await u.db
+          .update(c)
+          .set({ reconcileRequeues: sql`${c.reconcileRequeues} + 1` })
+          .where(and(eq(c.id, target.clip), eq(c.status, target.status), isNull(c.deletedAt)))
+          .returning({ n: c.reconcileRequeues });
   return row ? row.n : null;
 }
 
@@ -69,7 +87,10 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
   const log = svc.log.child({ module: "reconcile" });
   let requeued = 0;
   const active = await db.query.projects.findMany({
-    where: and(inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]), isNull(schema.projects.deletedAt)),
+    where: and(
+      inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]),
+      isNull(schema.projects.deletedAt),
+    ),
     columns: { id: true, status: true }, // not the whole row (settings etc.): only these two are read
   });
   for (const p of active) {
@@ -207,7 +228,9 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
 export function startStallWatch(svc: Services, intervalMs = 5 * 60_000) {
   const log = svc.log.child({ module: "watchdog" });
   const tick = () =>
-    withSessionLock(svc.database.pool, sessionLock.reconcile(), () => detectStalls(svc, svc.settings.get().STALL_MINUTES)).catch((err) => log.error({ err }, "stall check failed"));
+    withSessionLock(svc.database.pool, sessionLock.reconcile(), () => detectStalls(svc, svc.settings.get().STALL_MINUTES)).catch((err) =>
+      log.error({ err }, "stall check failed"),
+    );
   const timer = setInterval(() => void tick(), intervalMs);
   timer.unref();
   return () => clearInterval(timer);
@@ -229,10 +252,13 @@ export interface StallFacts {
 /** "Finding moments has made no progress for 15 min: 13 of 43 parts done, last part finished 16 min ago." */
 export function stallSentence(f: StallFacts): string {
   const label = f.stage ? (STAGE_LABEL[f.stage] ?? f.stage) : "This project";
-  const head = f.ticking && f.lastStepMinutes !== null ? `${label} is still reporting activity but no part has finished for ${f.lastStepMinutes} min` : `${label} has made no progress for ${f.idleMinutes} min`;
+  const head =
+    f.ticking && f.lastStepMinutes !== null
+      ? `${label} is still reporting activity but no part has finished for ${f.lastStepMinutes} min`
+      : `${label} has made no progress for ${f.idleMinutes} min`;
   const parts: string[] = [];
   if (f.done !== null && f.total !== null && f.total > 0) parts.push(`${f.done} of ${f.total} parts done`);
-  if (f.lastStepMinutes !== null && !(f.ticking)) parts.push(`last part finished ${f.lastStepMinutes} min ago`);
+  if (f.lastStepMinutes !== null && !f.ticking) parts.push(`last part finished ${f.lastStepMinutes} min ago`);
   return parts.length ? `${head}: ${parts.join(", ")}.` : `${head}.`;
 }
 
@@ -246,17 +272,29 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
   const log = svc.log.child({ module: "watchdog" });
   const cutoff = new Date(Date.now() - minutes * 60_000);
   // a project waiting in `queued` is normal behind a backlog, but not when no process that takes jobs has checked in lately
-  const live = await db.select({ id: schema.workerInstances.id }).from(schema.workerInstances).where(and(inArray(schema.workerInstances.role, ["worker", "app"]), gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS)))).limit(1);
+  const live = await db
+    .select({ id: schema.workerInstances.id })
+    .from(schema.workerInstances)
+    .where(and(inArray(schema.workerInstances.role, ["worker", "app"]), gt(schema.workerInstances.lastSeenAt, new Date(Date.now() - WORKER_STALE_MS))))
+    .limit(1);
   const noWorker = live.length === 0;
   const statuses: ProjectStatus[] = ["ingesting", "transcribing", "refining", "analyzing", "rendering", ...(noWorker ? (["queued"] as const) : [])];
-  const active = await db.query.projects.findMany({ where: and(inArray(schema.projects.status, statuses), isNull(schema.projects.deletedAt)), columns: { id: true, status: true, updatedAt: true, stage: true, stageSeq: true, stageDetail: true } });
+  const active = await db.query.projects.findMany({
+    where: and(inArray(schema.projects.status, statuses), isNull(schema.projects.deletedAt)),
+    columns: { id: true, status: true, updatedAt: true, stage: true, stageSeq: true, stageDetail: true },
+  });
   let stalled = 0;
   for (const p of active) {
     const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
     if (!last || last.createdAt > cutoff || last.type === "job.stalled") continue;
     // the newest saved step of this run of the stage (stages built on ctx.step); its updated_at moves only when a part finishes
     const [step] = p.stage
-      ? await db.select({ name: schema.jobSteps.name, updatedAt: schema.jobSteps.updatedAt }).from(schema.jobSteps).where(and(eq(schema.jobSteps.projectId, p.id), eq(schema.jobSteps.stage, p.stage), eq(schema.jobSteps.stageSeq, p.stageSeq))).orderBy(desc(schema.jobSteps.updatedAt)).limit(1)
+      ? await db
+          .select({ name: schema.jobSteps.name, updatedAt: schema.jobSteps.updatedAt })
+          .from(schema.jobSteps)
+          .where(and(eq(schema.jobSteps.projectId, p.id), eq(schema.jobSteps.stage, p.stage), eq(schema.jobSteps.stageSeq, p.stageSeq)))
+          .orderBy(desc(schema.jobSteps.updatedAt))
+          .limit(1)
       : [];
     // progress ticks only touch projects.updated_at (they are not stored as events), so that counts as activity too;
     // except for a stage of steps, where ticks without a finished part for STALL_MINUTES is a slow model, not progress
@@ -274,13 +312,29 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       status: p.status,
       idleMinutes: Math.round((Date.now() - Math.max(last.createdAt.getTime(), p.updatedAt.getTime())) / 60_000),
       lastEvent: { type: last.type, payload: last.payload },
-      liveJobs: jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key, runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null })),
+      liveJobs: jobs.rows.map((j) => ({
+        queue: j.name,
+        state: j.state,
+        retries: j.retry_count,
+        key: j.singleton_key,
+        runningMinutes: j.started_on ? Math.round((Date.now() - j.started_on.getTime()) / 60_000) : null,
+      })),
     };
     const lastStepMinutes = step ? Math.round((Date.now() - step.updatedAt.getTime()) / 60_000) : null;
     const detail = p.stageDetail;
-    const explain = stallSentence({ stage: p.stage, idleMinutes: info.idleMinutes, done: detail?.done ?? null, total: detail?.total ?? null, lastStepMinutes, ticking });
+    const explain = stallSentence({
+      stage: p.stage,
+      idleMinutes: info.idleMinutes,
+      done: detail?.done ?? null,
+      total: detail?.total ?? null,
+      lastStepMinutes,
+      ticking,
+    });
     const noWorkerReason = p.status === "queued" && noWorker;
-    log.warn(info, noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job");
+    log.warn(
+      info,
+      noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job",
+    );
     await svc.events.emit(p.id, "job.stalled", {
       idleMinutes: info.idleMinutes,
       lastEvent: last.type,
@@ -291,7 +345,11 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       ...(ticking ? { ticking: true } : {}),
       message: noWorkerReason ? "No worker is running, so this queued project is waiting." : explain,
       ...(noWorkerReason ? { reason: "No worker is running" } : {}),
-      hint: noWorkerReason ? "start a `worker` container (or run the app with RUN_WORKERS=true); queued projects wait for one" : jobs.rows.length ? "still running; check `reelsaw status`" : "no job; the reconciler will re-enqueue it",
+      hint: noWorkerReason
+        ? "start a `worker` container (or run the app with RUN_WORKERS=true); queued projects wait for one"
+        : jobs.rows.length
+          ? "still running; check `reelsaw status`"
+          : "no job; the reconciler will re-enqueue it",
     });
     stalled++;
   }

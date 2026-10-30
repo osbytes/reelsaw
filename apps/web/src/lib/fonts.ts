@@ -20,5 +20,6 @@ export function loadTextFonts() {
 }
 export const fontUrl = (family: string) => `/api/fonts/${encodeURIComponent(family)}`;
 /** CSS font-family for a text overlay: the chosen face, then the caption font. */
-export const textFontFamily = (family?: string | null) => (family ? `"${family}", "DejaVu Sans", Verdana, system-ui, sans-serif` : `"DejaVu Sans", Verdana, system-ui, sans-serif`);
+export const textFontFamily = (family?: string | null) =>
+  family ? `"${family}", "DejaVu Sans", Verdana, system-ui, sans-serif` : `"DejaVu Sans", Verdana, system-ui, sans-serif`;
 export const isTextFont = (v: string): v is TextFont => TEXT_FONTS.some((f) => f.family === v);

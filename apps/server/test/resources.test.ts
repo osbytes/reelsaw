@@ -1,7 +1,18 @@
 /** Render concurrency follows CPUs and free memory (pure; no stack needed). */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createResourceGovernor, diskShortReason, leaseFits, leaseShortReason, nvidiaDeviceNode, renderLimit, RENDER_MEM_MB, requiredDiskMB, ResourceExhaustedError, type DiskLeaseRequest } from "../src/resources.js";
+import {
+  createResourceGovernor,
+  diskShortReason,
+  leaseFits,
+  leaseShortReason,
+  nvidiaDeviceNode,
+  renderLimit,
+  RENDER_MEM_MB,
+  requiredDiskMB,
+  ResourceExhaustedError,
+  type DiskLeaseRequest,
+} from "../src/resources.js";
 import type { Config } from "../src/config.js";
 import type { Logger } from "../src/log.js";
 
@@ -57,7 +68,13 @@ describe("nvidiaDeviceNode", () => {
 
 describe("acquire on a disk shortfall", () => {
   // a floor no disk reaches: the governor is short of disk whatever the machine has
-  const config = { RENDER_CONCURRENCY: "auto", MAX_CPU_PERCENT: 100, MIN_FREE_MEM_MB: 0, MIN_FREE_DISK_MB: 1_000_000_000, RESOURCE_WAIT_MAX_SECONDS: 10 } as unknown as Config;
+  const config = {
+    RENDER_CONCURRENCY: "auto",
+    MAX_CPU_PERCENT: 100,
+    MIN_FREE_MEM_MB: 0,
+    MIN_FREE_DISK_MB: 1_000_000_000,
+    RESOURCE_WAIT_MAX_SECONDS: 10,
+  } as unknown as Config;
   const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
   it("asks the reclaimer once for the shortfall, then fails with what it needed and had", async () => {
     const gov = createResourceGovernor(config, process.cwd(), log);
@@ -76,7 +93,10 @@ describe("acquire on a disk shortfall", () => {
     });
     assert.equal(asked.length, 1, "eviction runs once per acquire");
     assert.ok(asked[0]! > 0 && asked[0]! <= 1_000_000_512 * 1048576);
-    assert.ok(waits.some((w) => w.startsWith("Freeing disk")), "the job's progress says what is happening");
+    assert.ok(
+      waits.some((w) => w.startsWith("Freeing disk")),
+      "the job's progress says what is happening",
+    );
   });
   it("fails at once without a reclaimer (nothing to evict)", async () => {
     const gov = createResourceGovernor(config, process.cwd(), log);
@@ -93,7 +113,10 @@ describe("acquire on a disk shortfall", () => {
     assert.ok(free >= 0);
     assert.equal(asked.length, 1);
     // the disk is sampled before and after the eviction; other processes may move free space by a few MB between the two
-    assert.ok(Math.abs(asked[0]! - (1_000_000_000 - free) * 1048576) <= 64 * 1048576, `asked for the gap to the target (${asked[0]! / 1048576} MB vs ${1_000_000_000 - free})`);
+    assert.ok(
+      Math.abs(asked[0]! - (1_000_000_000 - free) * 1048576) <= 64 * 1048576,
+      `asked for the gap to the target (${asked[0]! / 1048576} MB vs ${1_000_000_000 - free})`,
+    );
     assert.equal(await gov.reclaimTo(0), free, "already above the target: no eviction");
     assert.equal(asked.length, 1);
   });
@@ -116,10 +139,21 @@ describe("disk leases in acquire", () => {
   const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
   // a floor just under what this machine has free, so the governor has `room` MB to lease and no more
   async function governorWithRoom(room: number, extra: Partial<Config> = {}) {
-    const probe = createResourceGovernor({ RENDER_CONCURRENCY: "auto", MAX_CPU_PERCENT: 100, MIN_FREE_MEM_MB: 0, MIN_FREE_DISK_MB: 0, RESOURCE_WAIT_MAX_SECONDS: 10 } as unknown as Config, process.cwd(), log);
+    const probe = createResourceGovernor(
+      { RENDER_CONCURRENCY: "auto", MAX_CPU_PERCENT: 100, MIN_FREE_MEM_MB: 0, MIN_FREE_DISK_MB: 0, RESOURCE_WAIT_MAX_SECONDS: 10 } as unknown as Config,
+      process.cwd(),
+      log,
+    );
     const free = (await probe.snapshot()).diskFreeMB;
     if (free < room + 1) return null; // cannot stage the scenario on this disk
-    const config = { RENDER_CONCURRENCY: "auto", MAX_CPU_PERCENT: 100, MIN_FREE_MEM_MB: 0, MIN_FREE_DISK_MB: free - room, RESOURCE_WAIT_MAX_SECONDS: 0.001, ...extra } as unknown as Config;
+    const config = {
+      RENDER_CONCURRENCY: "auto",
+      MAX_CPU_PERCENT: 100,
+      MIN_FREE_MEM_MB: 0,
+      MIN_FREE_DISK_MB: free - room,
+      RESOURCE_WAIT_MAX_SECONDS: 0.001,
+      ...extra,
+    } as unknown as Config;
     return createResourceGovernor(config, process.cwd(), log);
   }
 
@@ -136,7 +170,10 @@ describe("disk leases in acquire", () => {
       assert.match((err as Error).message, /Gave up waiting .* leased to 1 job in flight/);
       return true;
     });
-    assert.ok(waits.some((w) => /leased to 1 job/.test(w)), "the job's progress says what it waits for");
+    assert.ok(
+      waits.some((w) => /leased to 1 job/.test(w)),
+      "the job's progress says what it waits for",
+    );
     await first.release();
     await first.release(); // idempotent
     assert.deepEqual(gov.leases(), { volume: null, ownMB: 0, own: 0 });

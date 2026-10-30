@@ -13,14 +13,25 @@ const r = (kind: SourceOverlay["kind"], x1: number, y1: number, x2: number, y2: 
 describe("splitInterface", () => {
   it("drops a game HUD: side panels and, with them, the edge-hugging corner boxes", () => {
     // the five regions the project scan found on the Roblox video (all game UI, no subtitles)
-    const hud = [r("caption", 0.769, 0, 1, 0.233, 0.49), r("caption", 0, 0, 0.175, 0.262, 0.59), r("caption", 0.817, 0.63, 0.998, 0.778, 0.42), r("caption", 0.899, 0.296, 1, 0.463, 0.32), r("caption", 0.847, 0.48, 0.979, 0.593, 0.49)];
+    const hud = [
+      r("caption", 0.769, 0, 1, 0.233, 0.49),
+      r("caption", 0, 0, 0.175, 0.262, 0.59),
+      r("caption", 0.817, 0.63, 0.998, 0.778, 0.42),
+      r("caption", 0.899, 0.296, 1, 0.463, 0.32),
+      r("caption", 0.847, 0.48, 0.979, 0.593, 0.49),
+    ];
     const { kept, ui } = splitInterface(hud);
     assert.deepEqual(kept, []);
     assert.equal(ui.length, 5);
   });
 
   it("drops an always-on menu in the corner of a game, and a side box clear of the edge", () => {
-    const { kept } = splitInterface([r("caption", 0.867, 0.48, 1, 0.778), r("caption", 0.76, 0.099, 1, 0.242), r("watermark", 0, 0, 0.144, 0.074, 0.9), r("caption", 0.917, 0.296, 0.958, 0.37)]);
+    const { kept } = splitInterface([
+      r("caption", 0.867, 0.48, 1, 0.778),
+      r("caption", 0.76, 0.099, 1, 0.242),
+      r("watermark", 0, 0, 0.144, 0.074, 0.9),
+      r("caption", 0.917, 0.296, 0.958, 0.37),
+    ]);
     assert.deepEqual(kept, []);
   });
 

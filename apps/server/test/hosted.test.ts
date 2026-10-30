@@ -11,7 +11,10 @@ import { BASE, cli, db, dotenv, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
 async function trpc(cookie: string, path: string, input?: unknown, method: "GET" | "POST" = "POST") {
-  const url = method === "GET" ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}` : `${BASE}/api/trpc/${path}`;
+  const url =
+    method === "GET"
+      ? `${BASE}/api/trpc/${path}${input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`
+      : `${BASE}/api/trpc/${path}`;
   const res = await fetch(url, { method, headers: { ...json, cookie }, body: method === "POST" ? JSON.stringify(input ?? {}) : undefined });
   const body = (await res.json()) as { result?: { data: unknown }; error?: { message: string; data: { code: string } } };
   return { status: res.status, data: body.result?.data, error: body.error };
@@ -32,9 +35,15 @@ describe("hosted", () => {
        values ($1, $2, 'Old', 'url', 'https://example.com/v.mp4', 'projects/none/source.mp4', 123456, 600, 'done', '{}', now() - interval '100 days', now() - interval '100 days')`,
       [projectId, user.userId],
     );
-    await pool.query(`insert into llm_usage (user_id, project_id, stage, call, model, input_tokens, output_tokens, ms) values ($1, $2, 'analyze', 'analyze.map', 'test:model', 1000, 200, 50)`, [user.userId, projectId]);
+    await pool.query(
+      `insert into llm_usage (user_id, project_id, stage, call, model, input_tokens, output_tokens, ms) values ($1, $2, 'analyze', 'analyze.map', 'test:model', 1000, 200, 50)`,
+      [user.userId, projectId],
+    );
     // projects and minutes in admin.usage come from the source_usage ledger (kept after a purge), not the project row
-    await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, 600, now() - interval '100 days')`, [user.userId, projectId]);
+    await pool.query(`insert into source_usage (user_id, project_id, duration_sec, created_at) values ($1, $2, 600, now() - interval '100 days')`, [
+      user.userId,
+      projectId,
+    ]);
   });
   after(async () => {
     await pool.query(`delete from "user" where id = any($1)`, [[admin.userId, user.userId]]);
@@ -62,7 +71,9 @@ describe("hosted", () => {
   it("lets an admin turn the watermark off for one account", async () => {
     const off = await trpc(admin.cookie, "admin.users.setWatermark", { id: user.userId, watermark: false });
     assert.deepEqual(off.data, { ok: true, watermark: false });
-    const lim = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; effective: boolean; source: string } };
+    const lim = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as {
+      watermark: { override: boolean | null; effective: boolean; source: string };
+    };
     assert.equal(lim.watermark.override, false);
     assert.equal(lim.watermark.effective, false);
     assert.equal(lim.watermark.source, "override");
@@ -73,7 +84,9 @@ describe("hosted", () => {
     assert.deepEqual(on.data, { ok: true, watermark: true });
     const follow = await trpc(admin.cookie, "admin.users.setWatermark", { id: user.userId, watermark: null });
     assert.deepEqual(follow.data, { ok: true, watermark: null });
-    const cleared = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; source: string } };
+    const cleared = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as {
+      watermark: { override: boolean | null; source: string };
+    };
     assert.equal(cleared.watermark.override, null);
     assert.notEqual(cleared.watermark.source, "override");
     const ev = await pool.query(`select count(*)::int as n from admin_events where user_id = $1 and type = 'user.watermark_changed'`, [user.userId]);
@@ -82,13 +95,17 @@ describe("hosted", () => {
     const r = cli(["limits", user.email, "--watermark", "never"]);
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /override never/);
-    const fromCli = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as { watermark: { override: boolean | null; effective: boolean } };
+    const fromCli = (await trpc(admin.cookie, "admin.users.limits", { id: user.userId }, "GET")).data as {
+      watermark: { override: boolean | null; effective: boolean };
+    };
     assert.equal(fromCli.watermark.override, false);
     assert.equal(fromCli.watermark.effective, false);
   });
 
   it("reports usage per user", async () => {
-    const r = (await trpc(admin.cookie, "admin.usage", { days: 365 }, "GET")).data as { users: Array<{ id: string; projects: number; sourceMinutes: number; llmCalls: number; llmInputTokens: number; storedBytes: number }> };
+    const r = (await trpc(admin.cookie, "admin.usage", { days: 365 }, "GET")).data as {
+      users: Array<{ id: string; projects: number; sourceMinutes: number; llmCalls: number; llmInputTokens: number; storedBytes: number }>;
+    };
     const me = r.users.find((u) => u.id === user.userId)!;
     assert.equal(me.projects, 1);
     assert.equal(me.sourceMinutes, 10);
@@ -135,16 +152,35 @@ describe("hosted", () => {
     // RFC 8414 with an issuer that has a path (/api/auth): metadata lives at /.well-known/oauth-authorization-server/api/auth
     const issuer = new URL(prm.authorization_servers[0]!);
     const asUrl = `${issuer.origin}/.well-known/oauth-authorization-server${issuer.pathname}`;
-    const as = (await (await fetch(asUrl)).json()) as { authorization_endpoint: string; token_endpoint: string; registration_endpoint?: string; code_challenge_methods_supported: string[] };
+    const as = (await (await fetch(asUrl)).json()) as {
+      authorization_endpoint: string;
+      token_endpoint: string;
+      registration_endpoint?: string;
+      code_challenge_methods_supported: string[];
+    };
     assert.match(as.authorization_endpoint, /\/api\/auth\/oauth2\/authorize$/);
     assert.ok(as.registration_endpoint, "dynamic client registration must be advertised");
     assert.ok(as.code_challenge_methods_supported.includes("S256"));
-    const reg = await fetch(as.registration_endpoint!, { method: "POST", headers: json, body: JSON.stringify({ client_name: "test connector", redirect_uris: ["https://example.com/callback"], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }) });
+    const reg = await fetch(as.registration_endpoint!, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({
+        client_name: "test connector",
+        redirect_uris: ["https://example.com/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+      }),
+    });
     const client = (await reg.json()) as { client_id?: string; error?: string; error_description?: string };
     assert.equal(reg.status, 201, JSON.stringify(client));
     assert.ok(client.client_id);
     // a made-up bearer token is refused, not treated as an API key
-    const bad = await fetch(`${BASE}/api/mcp`, { method: "POST", headers: { ...json, accept: "application/json, text/event-stream", authorization: "Bearer not-a-real-token" }, body: "{}" });
+    const bad = await fetch(`${BASE}/api/mcp`, {
+      method: "POST",
+      headers: { ...json, accept: "application/json, text/event-stream", authorization: "Bearer not-a-real-token" },
+      body: "{}",
+    });
     assert.equal(bad.status, 401);
     await pool.query(`delete from oauth_client where client_id = $1`, [client.client_id]);
   });

@@ -84,7 +84,11 @@ export function speechSegments(probs: Float32Array, opts: { on?: number; off?: n
  * keeps a natural breath of maxPause/2). Leading/trailing silence keeps `edge` seconds. Returns cut
  * ranges in the same time base as the segments.
  */
-export function pauseCuts(segments: SpeechSegment[], duration: number, opts: { maxPause: number; edge?: number; minCut?: number }): Array<{ start: number; end: number }> {
+export function pauseCuts(
+  segments: SpeechSegment[],
+  duration: number,
+  opts: { maxPause: number; edge?: number; minCut?: number },
+): Array<{ start: number; end: number }> {
   const edge = opts.edge ?? 0.15;
   const minCut = opts.minCut ?? 0.15;
   const cuts: Array<{ start: number; end: number }> = [];

@@ -17,10 +17,14 @@ const privateVideo = () => Promise.reject(new Error("ERROR: This video is privat
 
 describe("parseYtdlpProxies", () => {
   it("parses a single URL the way YTDLP_PROXY always did", () => {
-    assert.deepEqual(parseYtdlpProxies("http://user:pass@host.example:8080"), [{ id: "host.example-8080", url: "http://user:pass@host.example:8080", priority: 100, concurrency: 0 }]);
+    assert.deepEqual(parseYtdlpProxies("http://user:pass@host.example:8080"), [
+      { id: "host.example-8080", url: "http://user:pass@host.example:8080", priority: 100, concurrency: 0 },
+    ]);
   });
   it("takes id, priority and concurrency from the spec; direct means no --proxy", () => {
-    const got = parseYtdlpProxies("pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1, racknerd=http://100.64.1.20:8888;priority=10, home=direct;priority=5");
+    const got = parseYtdlpProxies(
+      "pi=socks5h://100.64.1.10:1080;priority=20;concurrency=1, racknerd=http://100.64.1.20:8888;priority=10, home=direct;priority=5",
+    );
     assert.deepEqual(got, [
       { id: "pi", url: "socks5h://100.64.1.10:1080", priority: 20, concurrency: 1 },
       { id: "racknerd", url: "http://100.64.1.20:8888", priority: 10, concurrency: 0 },
@@ -132,7 +136,13 @@ describe("proxy pool ranking", () => {
     const pi = { ...cheap, concurrency: 1 };
     const pool = createYtdlpProxyPool([pi, paid], { halfOpenAfter: 60_000, slotWaitMs: 5 });
     let release!: (v: string) => void;
-    const held = pool.run(({ id }) => new Promise<string>((r) => { release = r; void id; }));
+    const held = pool.run(
+      ({ id }) =>
+        new Promise<string>((r) => {
+          release = r;
+          void id;
+        }),
+    );
     await new Promise((r) => setTimeout(r, 10));
     const { id } = await pool.run(async ({ id: used }) => used);
     assert.equal(id, "paid");

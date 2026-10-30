@@ -40,13 +40,19 @@ async function envRows(): Promise<Row[]> {
     const doc = meta.DOCS[name];
     let description: string | undefined = field.description ?? doc?.[1];
     // a runtime setting: the variable is the default; Settings → System, `reelsaw settings` and set_instance_settings override it
-    if (description && name in RUNTIME_SETTINGS) description = `${description.replace(/\s+$/, "")} Runtime setting: admins can change it under Settings → System without a restart.`;
+    if (description && name in RUNTIME_SETTINGS)
+      description = `${description.replace(/\s+$/, "")} Runtime setting: admins can change it under Settings → System without a restart.`;
     if (!description) problems.push(`env ${name} has no description: add one to apps/server/scripts/docs-meta.ts (or .describe() in config.ts)`);
     if (!doc) problems.push(`env ${name} has no group: add it to DOCS in apps/server/scripts/docs-meta.ts`);
     const v = parsed[name];
     let def = v === undefined ? "" : String(v);
     // schema defaults use path.resolve, so Windows emits `\`; docs always show POSIX relative paths
-    def = def.split(process.cwd() + path.sep).join("./").split(process.cwd()).join(".").replace(/\\/g, "/");
+    def = def
+      .split(process.cwd() + path.sep)
+      .join("./")
+      .split(process.cwd())
+      .join(".")
+      .replace(/\\/g, "/");
     if (name === "DATA_DIR") def = "./data";
     let values: string | undefined;
     let t = field;
@@ -61,10 +67,14 @@ async function envRows(): Promise<Row[]> {
     if (!doc) problems.push(`env ${name} (EXTRA_DEFAULTS) has no entry in DOCS`);
     rows.push({ name, group: doc?.[0] ?? "compose", description: doc?.[1] ?? "TODO", def });
   }
-  for (const name of Object.keys(meta.DOCS)) if (!rows.some((r) => r.name === name)) problems.push(`docs-meta.ts documents ${name}, which is neither in config.ts nor EXTRA_DEFAULTS`);
+  for (const name of Object.keys(meta.DOCS))
+    if (!rows.some((r) => r.name === name)) problems.push(`docs-meta.ts documents ${name}, which is neither in config.ts nor EXTRA_DEFAULTS`);
   const order: string[] = meta.GROUPS.map((g) => g[0]);
   // stable: schema order inside a group
-  return rows.map((r, i) => ({ r, i })).sort((a, b) => order.indexOf(a.r.group) - order.indexOf(b.r.group) || a.i - b.i).map((x) => x.r);
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => order.indexOf(a.r.group) - order.indexOf(b.r.group) || a.i - b.i)
+    .map((x) => x.r);
 }
 
 /** Text for one markdown table cell: backslashes and pipes escaped, so the row keeps its columns. */
@@ -102,7 +112,8 @@ function envFile(which: "root" | "deploy", rows: Row[]): string {
     }
     out.push("");
   }
-  for (const k of Object.keys(active)) if (!rows.some((r) => r.name === k)) problems.push(`docs-meta.ts ENV_ACTIVE.${which} names ${k}, which is not a known variable`);
+  for (const k of Object.keys(active))
+    if (!rows.some((r) => r.name === k)) problems.push(`docs-meta.ts ENV_ACTIVE.${which} names ${k}, which is not a known variable`);
   return out.join("\n").trimEnd();
 }
 
@@ -142,7 +153,13 @@ function cliCommands(): Array<{ name: string; usage: string; description: string
 
 function cliTable(cmds: ReturnType<typeof cliCommands>): string {
   const rows = cmds.map((c) => `| \`reelsaw ${cell(c.usage)}\` | ${cell(c.description) || "see the header of apps/server/src/cli.ts"} |`);
-  return ["Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).", "", "| Command | What it does |", "| --- | --- |", ...rows].join("\n");
+  return [
+    "Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter @reelsaw/server cli <command>`).",
+    "",
+    "| Command | What it does |",
+    "| --- | --- |",
+    ...rows,
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------- eval suites

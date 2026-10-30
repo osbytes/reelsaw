@@ -3,7 +3,18 @@ import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Scissors, Undo2, Redo2, Check, Plus, Trash2, Film, Image as ImageIcon, Type, Music, LayoutTemplate } from "lucide-react";
-import { formatTime, contentLabel, hasAdjust, regionLabel, type ContentRegion, type DetectedSegment, type LayoutSection, type SectionAdjustFields, type SectionMode, type Word } from "@reelsaw/shared";
+import {
+  formatTime,
+  contentLabel,
+  hasAdjust,
+  regionLabel,
+  type ContentRegion,
+  type DetectedSegment,
+  type LayoutSection,
+  type SectionAdjustFields,
+  type SectionMode,
+  type Word,
+} from "@reelsaw/shared";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 export const SPLIT_SHORTCUT = `${MOD}B`;
@@ -60,9 +71,18 @@ export function packLayerRows(blocks: LayerBlock[]): Map<string, number> {
   return out;
 }
 
-export const MODE_LABEL: Record<string, string> = { auto: "Auto", face: "Follow speaker", split: "Two stacked", stack: "Screen + speaker", fit: "Whole frame", center: "Centre crop", none: "Original" };
+export const MODE_LABEL: Record<string, string> = {
+  auto: "Auto",
+  face: "Follow speaker",
+  split: "Two stacked",
+  stack: "Screen + speaker",
+  fit: "Whole frame",
+  center: "Centre crop",
+  none: "Original",
+};
 /** What a rendered piece looks like: a stack says what it shows on top ("Stack", "Stack · content left 50%"). */
-export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion }) => (d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[d.layout]);
+export const layoutLabel = (d: { layout: string; content?: ContentRegion; tile?: ContentRegion }) =>
+  d.layout === "stack" ? contentLabel(d.content, d.tile) : MODE_LABEL[d.layout];
 
 const MIN_SECTION = 0.3;
 const MIN_CLIP = 3;
@@ -159,7 +179,50 @@ type DragState =
  * (drag either edge or the body), and the layout track (click a section to select, drag a boundary
  * to move a transition, double-click to add one). Cmd/Ctrl+wheel zooms, wheel pans.
  */
-export function Timeline({ sourceDuration, range, onRange, current, onSeek, words, sceneCuts, sections, onSections, onSplit, onSetMode, onMerge, onResetLayout, onUndo, onRedo, canUndo, canRedo, selected, onSelect, detected, cuts = [], onResetOffset, onSetCrop, toolbar, transport, tools, snap = true, onSnap, compactHints, layers = [], selectedLayer = null, onLayerSelect, onLayerChange, onLayerAdd, onLayerTemplate, onLayerRemove, renderClipEditor, bumpers, selectedBumper = null, onBumperSelect, onBumperSeconds, renderBumperEditor }: Props) {
+export function Timeline({
+  sourceDuration,
+  range,
+  onRange,
+  current,
+  onSeek,
+  words,
+  sceneCuts,
+  sections,
+  onSections,
+  onSplit,
+  onSetMode,
+  onMerge,
+  onResetLayout,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  selected,
+  onSelect,
+  detected,
+  cuts = [],
+  onResetOffset,
+  onSetCrop,
+  toolbar,
+  transport,
+  tools,
+  snap = true,
+  onSnap,
+  compactHints,
+  layers = [],
+  selectedLayer = null,
+  onLayerSelect,
+  onLayerChange,
+  onLayerAdd,
+  onLayerTemplate,
+  onLayerRemove,
+  renderClipEditor,
+  bumpers,
+  selectedBumper = null,
+  onBumperSelect,
+  onBumperSeconds,
+  renderBumperEditor,
+}: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const lyRows = useMemo(() => packLayerRows(layers), [layers]);
@@ -380,7 +443,13 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         }}
         title={`${label}: ${b.name} · ${b.sec} s${b.source === "project" ? " (project default)" : ""} · click to change`}
       >
-        {b.thumbnailUrl ? <img src={b.thumbnailUrl} alt="" className="h-[26px] w-[15px] shrink-0 rounded-[3px] object-cover" /> : b.kind === "video" ? <Film className="h-3.5 w-3.5 shrink-0 text-ink3" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0 text-ink3" />}
+        {b.thumbnailUrl ? (
+          <img src={b.thumbnailUrl} alt="" className="h-[26px] w-[15px] shrink-0 rounded-[3px] object-cover" />
+        ) : b.kind === "video" ? (
+          <Film className="h-3.5 w-3.5 shrink-0 text-ink3" />
+        ) : (
+          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-ink3" />
+        )}
         {width > 70 && (
           <span className="min-w-0 flex-1 leading-tight">
             <span className="block truncate text-[11px] font-bold">
@@ -417,7 +486,14 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
           />
         )}
         <Popover.Portal>
-          <Popover.Content side="top" align={slot === "intro" ? "start" : "end"} sideOffset={8} collisionPadding={12} className="z-[80] w-[min(26rem,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <Popover.Content
+            side="top"
+            align={slot === "intro" ? "start" : "end"}
+            sideOffset={8}
+            collisionPadding={12}
+            className="z-[80] w-[min(26rem,calc(100vw-24px))] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
             {renderBumperEditor?.(slot)}
           </Popover.Content>
         </Popover.Portal>
@@ -485,7 +561,12 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
             {onLayerAdd && (
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
-                  <button type="button" className="grid h-5 w-5 shrink-0 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink" aria-label="Add a layer at the playhead" title="Add a layer at the playhead">
+                  <button
+                    type="button"
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-[6px] border border-line text-ink2 hover:bg-sunk hover:text-ink"
+                    aria-label="Add a layer at the playhead"
+                    title="Add a layer at the playhead"
+                  >
                     <Plus className="h-3 w-3" />
                   </button>
                 </DropdownMenu.Trigger>
@@ -515,230 +596,271 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
         </div>
 
         <ContextMenu.Root modal={false}>
-        <ContextMenu.Trigger asChild>
-        <div ref={lanesRef} className="relative mr-4 min-w-0 flex-1 overflow-hidden pb-2" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onPointerLeave={() => setHoverT(null)} onContextMenu={onContext}>
-          {/* ruler */}
-          <div data-lane="ruler" className={`${lane} h-6 cursor-ew-resize`} onPointerDown={(e) => begin(e, { kind: "scrub" })}>
-            {ticks.map((t) => (
-              <div key={t} className="absolute top-0 h-6 border-l border-line2 pl-1 font-mono text-[10px] leading-4 text-ink3" style={{ left: x(t) }}>
-                {formatTime(t)}
-              </div>
-            ))}
-          </div>
-
-          {/* words */}
-          <div data-lane="words" className={`${lane} h-[26px] cursor-grab`} onPointerDown={(e) => e.button === 0 && begin(e, { kind: "pan", grabX: e.clientX, orig: view })}>
-            {visibleWords.map((wd, i) => {
-              const inClip = wd.start >= range[0] - 0.01 && wd.end <= range[1] + 0.05;
-              const cut = isCut(wd);
-              const left = x(wd.start);
-              const width = Math.max(1, x(wd.end) - left - 1);
-              return (
-                <div
-                  key={i}
-                  className={`absolute top-0 h-[26px] overflow-hidden rounded-[4px] px-[3px] text-[10px] leading-[26px] whitespace-nowrap ${cut ? "text-ink3 line-through" : inClip ? "bg-acc-soft text-ink" : "bg-sunk text-ink"}`}
-                  style={{ left, width, ...(cut ? { background: "repeating-linear-gradient(45deg, var(--line) 0 3px, transparent 3px 6px)" } : {}) }}
-                  title={wd.text}
-                >
-                  {width > 22 ? wd.text.replace(/[,.?!]$/, "") : ""}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* layers: images, video, text and sounds in packed rows; double-click adds an image or video at that time */}
-          <div
-            data-lane="layers"
-            className={`${lane} mt-1.5 rounded-[8px] bg-sunk/60`}
-            style={{ height: lyLaneH }}
-            onPointerDown={(e) => {
-              if (e.button !== 0 || (e.target as HTMLElement).closest("[data-ly]")) return;
-              onLayerSelect?.(null);
-              begin(e, { kind: "pan", grabX: e.clientX, orig: view });
-            }}
-            onDoubleClick={(e) => {
-              if ((e.target as HTMLElement).closest("[data-ly]")) return;
-              const t = tAt(e.clientX);
-              if (inClip(t)) onLayerAdd?.(Number(t.toFixed(2)), "asset");
-            }}
-            title={onLayerAdd ? "Double-click to add an image or video here; + for text or a sound" : undefined}
-          >
-            {layers.map((o) => {
-              const left = x(o.start);
-              const width = Math.max(6, x(o.end) - left);
-              const row = lyRows.get(o.id) ?? 0;
-              const sel = o.id === selectedLayer;
-              const min = minLayer(o.kind);
-              return (
-                <div
-                  key={o.id}
-                  data-ly={o.id}
-                  className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${sel ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
-                  style={{ left, width, top: row * OV_ROW }}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    onLayerSelect?.(o.id);
-                    begin(e, { kind: "ly-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
-                  }}
-                  title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim (min ${min} s)`}
-                >
-                  {o.kind === "text" ? <Type className="h-3 w-3 shrink-0 text-ink3" /> : o.kind === "audio" ? <Music className="h-3 w-3 shrink-0 text-ink3" /> : o.thumbnailUrl ? <img src={o.thumbnailUrl} alt="" className="h-[16px] w-[10px] shrink-0 rounded-[2px] object-cover" /> : o.kind === "video" ? <Film className="h-3 w-3 shrink-0 text-ink3" /> : <ImageIcon className="h-3 w-3 shrink-0 text-ink3" />}
-                  {width > 50 && <span className="truncate text-[10px] font-semibold leading-none">{o.name}</span>}
-                  {(["ly-start", "ly-end"] as const).map((k) => (
-                    <div
-                      key={k}
-                      className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ly-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
-                      onPointerDown={(e) => {
-                        onLayerSelect?.(o.id);
-                        begin(e, { kind: k, id: o.id });
-                      }}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* clip range, with the intro and outro it renders with on either side */}
-          <div data-lane="clip" className={`${lane} mt-1.5 h-[34px] rounded-[8px] bg-sunk`}>
-            {bumpers && bumperBlock("intro")}
-            {bumpers && bumperBlock("outro")}
+          <ContextMenu.Trigger asChild>
             <div
-              className="absolute inset-y-0 z-[2] flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
-              style={{ left: x(range[0]), width: Math.max(4, x(range[1]) - x(range[0])) }}
-              onPointerDown={(e) => begin(e, { kind: "move", grabT: tAt(e.clientX), orig: range })}
-              title="Drag to slide the whole clip"
+              ref={lanesRef}
+              className="relative mr-4 min-w-0 flex-1 overflow-hidden pb-2"
+              onPointerMove={move}
+              onPointerUp={end}
+              onPointerCancel={end}
+              onPointerLeave={() => setHoverT(null)}
+              onContextMenu={onContext}
             >
-              {renderClipEditor ? (
-                <Popover.Root open={clipEditorOpen} onOpenChange={setClipEditorOpen}>
-                  <Popover.Trigger asChild>
-                    <button
-                      type="button"
-                      className={`rounded-[6px] px-1.5 font-mono text-[11px] font-semibold text-acc-text hover:bg-acc/20 ${clipEditorOpen ? "bg-acc/20" : ""}`}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      title="Clip length · click to edit the in and out points"
-                      aria-label="Edit the in and out points"
-                    >
-                      {len.toFixed(1)}s
-                    </button>
-                  </Popover.Trigger>
-                  <Popover.Portal>
-                    <Popover.Content side="top" align="center" sideOffset={10} collisionPadding={12} className="z-[80] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop" onOpenAutoFocus={(e) => e.preventDefault()}>
-                      {renderClipEditor()}
-                    </Popover.Content>
-                  </Popover.Portal>
-                </Popover.Root>
-              ) : (
-                <span className="pointer-events-none font-mono text-[11px] font-semibold text-acc-text">{len.toFixed(1)}s</span>
-              )}
-            </div>
-            {(["start", "end"] as const).map((k) => (
-              <div
-                key={k}
-                className={`absolute inset-y-0 z-[3] grid w-3.5 -translate-x-1/2 cursor-ew-resize place-items-center rounded-[6px] bg-acc ${drag?.kind === k ? "brightness-110" : ""}`}
-                style={{ left: x(range[k === "start" ? 0 : 1]) }}
-                onPointerDown={(e) => begin(e, { kind: k })}
-                title={k === "start" ? "Drag to set the in point (I)" : "Drag to set the out point (O)"}
-              >
-                <span className="h-3.5 w-[3px] rounded-full bg-acc-ink/70" />
+              {/* ruler */}
+              <div data-lane="ruler" className={`${lane} h-6 cursor-ew-resize`} onPointerDown={(e) => begin(e, { kind: "scrub" })}>
+                {ticks.map((t) => (
+                  <div key={t} className="absolute top-0 h-6 border-l border-line2 pl-1 font-mono text-[10px] leading-4 text-ink3" style={{ left: x(t) }}>
+                    {formatTime(t)}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* framing sections */}
-          <div data-lane="layout" className="relative mt-1.5 h-[38px] cursor-pointer" onPointerEnter={() => setHoverLane("layout")} onPointerLeave={() => setHoverLane(null)}>
-            {sections.map((s, i) => {
-              const left = x(s.start);
-              const width = Math.max(2, x(s.end) - left);
-              const det = detected.filter((d) => !d.manual && d.end > s.start && d.start < s.end);
-              const auto = s.mode === "auto";
-              const chose = [...new Set(det.map(layoutLabel))].join(" / ");
-              return (
+              {/* words */}
+              <div
+                data-lane="words"
+                className={`${lane} h-[26px] cursor-grab`}
+                onPointerDown={(e) => e.button === 0 && begin(e, { kind: "pan", grabX: e.clientX, orig: view })}
+              >
+                {visibleWords.map((wd, i) => {
+                  const inClip = wd.start >= range[0] - 0.01 && wd.end <= range[1] + 0.05;
+                  const cut = isCut(wd);
+                  const left = x(wd.start);
+                  const width = Math.max(1, x(wd.end) - left - 1);
+                  return (
+                    <div
+                      key={i}
+                      className={`absolute top-0 h-[26px] overflow-hidden rounded-[4px] px-[3px] text-[10px] leading-[26px] whitespace-nowrap ${cut ? "text-ink3 line-through" : inClip ? "bg-acc-soft text-ink" : "bg-sunk text-ink"}`}
+                      style={{ left, width, ...(cut ? { background: "repeating-linear-gradient(45deg, var(--line) 0 3px, transparent 3px 6px)" } : {}) }}
+                      title={wd.text}
+                    >
+                      {width > 22 ? wd.text.replace(/[,.?!]$/, "") : ""}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* layers: images, video, text and sounds in packed rows; double-click adds an image or video at that time */}
+              <div
+                data-lane="layers"
+                className={`${lane} mt-1.5 rounded-[8px] bg-sunk/60`}
+                style={{ height: lyLaneH }}
+                onPointerDown={(e) => {
+                  if (e.button !== 0 || (e.target as HTMLElement).closest("[data-ly]")) return;
+                  onLayerSelect?.(null);
+                  begin(e, { kind: "pan", grabX: e.clientX, orig: view });
+                }}
+                onDoubleClick={(e) => {
+                  if ((e.target as HTMLElement).closest("[data-ly]")) return;
+                  const t = tAt(e.clientX);
+                  if (inClip(t)) onLayerAdd?.(Number(t.toFixed(2)), "asset");
+                }}
+                title={onLayerAdd ? "Double-click to add an image or video here; + for text or a sound" : undefined}
+              >
+                {layers.map((o) => {
+                  const left = x(o.start);
+                  const width = Math.max(6, x(o.end) - left);
+                  const row = lyRows.get(o.id) ?? 0;
+                  const sel = o.id === selectedLayer;
+                  const min = minLayer(o.kind);
+                  return (
+                    <div
+                      key={o.id}
+                      data-ly={o.id}
+                      className={`absolute flex h-[22px] cursor-grab items-center gap-1 overflow-hidden rounded-[6px] border px-1 active:cursor-grabbing ${sel ? "border-acc bg-acc-soft text-ink shadow-[0_0_0_2px_var(--acc)]" : "border-line2 bg-panel text-ink hover:bg-sunk"}`}
+                      style={{ left, width, top: row * OV_ROW }}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        onLayerSelect?.(o.id);
+                        begin(e, { kind: "ly-move", id: o.id, grabT: tAt(e.clientX), orig: [o.start, o.end] });
+                      }}
+                      title={`${o.name} ${formatTime(o.start)}–${formatTime(o.end)} · drag to move, edges to trim (min ${min} s)`}
+                    >
+                      {o.kind === "text" ? (
+                        <Type className="h-3 w-3 shrink-0 text-ink3" />
+                      ) : o.kind === "audio" ? (
+                        <Music className="h-3 w-3 shrink-0 text-ink3" />
+                      ) : o.thumbnailUrl ? (
+                        <img src={o.thumbnailUrl} alt="" className="h-[16px] w-[10px] shrink-0 rounded-[2px] object-cover" />
+                      ) : o.kind === "video" ? (
+                        <Film className="h-3 w-3 shrink-0 text-ink3" />
+                      ) : (
+                        <ImageIcon className="h-3 w-3 shrink-0 text-ink3" />
+                      )}
+                      {width > 50 && <span className="truncate text-[10px] font-semibold leading-none">{o.name}</span>}
+                      {(["ly-start", "ly-end"] as const).map((k) => (
+                        <div
+                          key={k}
+                          className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${k === "ly-start" ? "left-0" : "right-0"} ${sel ? "bg-acc/60" : "hover:bg-line"}`}
+                          onPointerDown={(e) => {
+                            onLayerSelect?.(o.id);
+                            begin(e, { kind: k, id: o.id });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* clip range, with the intro and outro it renders with on either side */}
+              <div data-lane="clip" className={`${lane} mt-1.5 h-[34px] rounded-[8px] bg-sunk`}>
+                {bumpers && bumperBlock("intro")}
+                {bumpers && bumperBlock("outro")}
                 <div
-                  key={i}
-                  className={`absolute top-0 flex h-[38px] flex-col justify-center overflow-hidden rounded-[8px] px-2.5 ${auto ? "border-[1.5px] border-dashed border-line2 bg-panel text-ink" : "border-[1.5px] border-ink bg-ink text-bg"} ${selected === i ? "shadow-[0_0_0_2px_var(--acc)]" : ""}`}
-                  style={{ left, width }}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    e.stopPropagation();
-                    onSelect(i);
-                    onSeek(Math.max(s.start, Math.min(s.end - 0.01, tAt(e.clientX))));
-                  }}
-                  title={`${MODE_LABEL[s.mode]} ${formatTime(s.start)}–${formatTime(s.end)}`}
+                  className="absolute inset-y-0 z-[2] flex cursor-grab items-center justify-center rounded-[8px] border-2 border-acc bg-acc-soft active:cursor-grabbing"
+                  style={{ left: x(range[0]), width: Math.max(4, x(range[1]) - x(range[0])) }}
+                  onPointerDown={(e) => begin(e, { kind: "move", grabT: tAt(e.clientX), orig: range })}
+                  title="Drag to slide the whole clip"
                 >
-                  {width > 44 && <span className="truncate text-[11px] font-bold leading-tight">{MODE_LABEL[s.mode]}</span>}
-                  {width > 70 && (
-                    <span className="truncate text-[10px] leading-tight opacity-75">
-                      {auto ? (chose ? `→ ${chose}` : "→ decided at render") : hasAdjust(s) ? adjustLabel(s) : "forced"}
-                      {auto && hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}
-                    </span>
+                  {renderClipEditor ? (
+                    <Popover.Root open={clipEditorOpen} onOpenChange={setClipEditorOpen}>
+                      <Popover.Trigger asChild>
+                        <button
+                          type="button"
+                          className={`rounded-[6px] px-1.5 font-mono text-[11px] font-semibold text-acc-text hover:bg-acc/20 ${clipEditorOpen ? "bg-acc/20" : ""}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          title="Clip length · click to edit the in and out points"
+                          aria-label="Edit the in and out points"
+                        >
+                          {len.toFixed(1)}s
+                        </button>
+                      </Popover.Trigger>
+                      <Popover.Portal>
+                        <Popover.Content
+                          side="top"
+                          align="center"
+                          sideOffset={10}
+                          collisionPadding={12}
+                          className="z-[80] rounded-[12px] border border-line bg-panel p-3 text-ink shadow-pop"
+                          onOpenAutoFocus={(e) => e.preventDefault()}
+                        >
+                          {renderClipEditor()}
+                        </Popover.Content>
+                      </Popover.Portal>
+                    </Popover.Root>
+                  ) : (
+                    <span className="pointer-events-none font-mono text-[11px] font-semibold text-acc-text">{len.toFixed(1)}s</span>
                   )}
                 </div>
-              );
-            })}
-            {hoverLane === "layout" && hoverT !== null && !drag && canSplitAt(hoverT) && (
-              <div className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-acc" style={{ left: x(hoverT) }} />
-            )}
-            {sections.slice(1).map((s, k) => (
-              <div
-                key={`b${k}`}
-                className="absolute top-0 z-[4] grid h-[38px] w-4 -translate-x-1/2 cursor-ew-resize place-items-center"
-                style={{ left: x(s.start) }}
-                onPointerDown={(e) => begin(e, { kind: "boundary", index: k + 1 })}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  onMerge(k + 1, "left");
-                }}
-                title="Drag to move this transition · double-click to remove it"
-              >
-                <div className={`h-6 w-1 rounded-full ${drag?.kind === "boundary" && drag.index === k + 1 ? "bg-acc" : "bg-ink"} shadow-[0_0_0_2px_var(--panel)]`} />
+                {(["start", "end"] as const).map((k) => (
+                  <div
+                    key={k}
+                    className={`absolute inset-y-0 z-[3] grid w-3.5 -translate-x-1/2 cursor-ew-resize place-items-center rounded-[6px] bg-acc ${drag?.kind === k ? "brightness-110" : ""}`}
+                    style={{ left: x(range[k === "start" ? 0 : 1]) }}
+                    onPointerDown={(e) => begin(e, { kind: k })}
+                    title={k === "start" ? "Drag to set the in point (I)" : "Drag to set the out point (O)"}
+                  >
+                    <span className="h-3.5 w-[3px] rounded-full bg-acc-ink/70" />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* scene changes */}
-          {sceneCuts
-            .filter((c) => c > view[0] && c < view[1])
-            .map((c) => (
-              <div key={c} className="pointer-events-none absolute bottom-0 top-6 border-l-2 border-dashed border-warn opacity-60" style={{ left: x(c) }} title={`Scene change ${formatTime(c)}`} />
-            ))}
-          {/* snap target while dragging */}
-          {drag && snapHit && <div className="pointer-events-none absolute bottom-0 top-6 z-[6] border-l-2 border-snap" style={{ left: x(snapHit.t) }} />}
-          {/* playhead */}
-          {playX >= -2 && playX <= w + 2 && (
-            <div className="pointer-events-none absolute inset-y-0 z-[7] -ml-px w-0.5 bg-ink" style={{ left: playX }}>
-              <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-ink" />
+              {/* framing sections */}
+              <div
+                data-lane="layout"
+                className="relative mt-1.5 h-[38px] cursor-pointer"
+                onPointerEnter={() => setHoverLane("layout")}
+                onPointerLeave={() => setHoverLane(null)}
+              >
+                {sections.map((s, i) => {
+                  const left = x(s.start);
+                  const width = Math.max(2, x(s.end) - left);
+                  const det = detected.filter((d) => !d.manual && d.end > s.start && d.start < s.end);
+                  const auto = s.mode === "auto";
+                  const chose = [...new Set(det.map(layoutLabel))].join(" / ");
+                  return (
+                    <div
+                      key={i}
+                      className={`absolute top-0 flex h-[38px] flex-col justify-center overflow-hidden rounded-[8px] px-2.5 ${auto ? "border-[1.5px] border-dashed border-line2 bg-panel text-ink" : "border-[1.5px] border-ink bg-ink text-bg"} ${selected === i ? "shadow-[0_0_0_2px_var(--acc)]" : ""}`}
+                      style={{ left, width }}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.stopPropagation();
+                        onSelect(i);
+                        onSeek(Math.max(s.start, Math.min(s.end - 0.01, tAt(e.clientX))));
+                      }}
+                      title={`${MODE_LABEL[s.mode]} ${formatTime(s.start)}–${formatTime(s.end)}`}
+                    >
+                      {width > 44 && <span className="truncate text-[11px] font-bold leading-tight">{MODE_LABEL[s.mode]}</span>}
+                      {width > 70 && (
+                        <span className="truncate text-[10px] leading-tight opacity-75">
+                          {auto ? (chose ? `→ ${chose}` : "→ decided at render") : hasAdjust(s) ? adjustLabel(s) : "forced"}
+                          {auto && hasAdjust(s) ? ` · ${adjustLabel(s)}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                {hoverLane === "layout" && hoverT !== null && !drag && canSplitAt(hoverT) && (
+                  <div className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-acc" style={{ left: x(hoverT) }} />
+                )}
+                {sections.slice(1).map((s, k) => (
+                  <div
+                    key={`b${k}`}
+                    className="absolute top-0 z-[4] grid h-[38px] w-4 -translate-x-1/2 cursor-ew-resize place-items-center"
+                    style={{ left: x(s.start) }}
+                    onPointerDown={(e) => begin(e, { kind: "boundary", index: k + 1 })}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      onMerge(k + 1, "left");
+                    }}
+                    title="Drag to move this transition · double-click to remove it"
+                  >
+                    <div
+                      className={`h-6 w-1 rounded-full ${drag?.kind === "boundary" && drag.index === k + 1 ? "bg-acc" : "bg-ink"} shadow-[0_0_0_2px_var(--panel)]`}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* scene changes */}
+              {sceneCuts
+                .filter((c) => c > view[0] && c < view[1])
+                .map((c) => (
+                  <div
+                    key={c}
+                    className="pointer-events-none absolute bottom-0 top-6 border-l-2 border-dashed border-warn opacity-60"
+                    style={{ left: x(c) }}
+                    title={`Scene change ${formatTime(c)}`}
+                  />
+                ))}
+              {/* snap target while dragging */}
+              {drag && snapHit && <div className="pointer-events-none absolute bottom-0 top-6 z-[6] border-l-2 border-snap" style={{ left: x(snapHit.t) }} />}
+              {/* playhead */}
+              {playX >= -2 && playX <= w + 2 && (
+                <div className="pointer-events-none absolute inset-y-0 z-[7] -ml-px w-0.5 bg-ink" style={{ left: playX }}>
+                  <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-ink" />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <TimelineMenu
-            at={menuAt}
-            sections={sections}
-            detected={detected}
-            range={range}
-            current={current}
-            canSplitAt={canSplitAt}
-            onSplit={onSplit}
-            onSetMode={onSetMode}
-            onMerge={onMerge}
-            onResetLayout={onResetLayout}
-            onResetOffset={onResetOffset}
-            onSetCrop={onSetCrop}
-            onSetIn={(t) => onRange([Math.min(t, range[1] - MIN_CLIP), range[1]])}
-            onSetOut={(t) => onRange([range[0], Math.max(t, range[0] + MIN_CLIP)])}
-            onSeek={onSeek}
-            onUndo={onUndo}
-            onRedo={onRedo}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            layer={menuAt?.layer ? (layers.find((o) => o.id === menuAt.layer) ?? null) : null}
-            onLayerAdd={onLayerAdd && ((t, kind) => inClip(t) && onLayerAdd(t, kind))}
-            onLayerTemplate={onLayerTemplate}
-            onLayerRemove={onLayerRemove}
-          />
-        </ContextMenu.Portal>
+          </ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <TimelineMenu
+              at={menuAt}
+              sections={sections}
+              detected={detected}
+              range={range}
+              current={current}
+              canSplitAt={canSplitAt}
+              onSplit={onSplit}
+              onSetMode={onSetMode}
+              onMerge={onMerge}
+              onResetLayout={onResetLayout}
+              onResetOffset={onResetOffset}
+              onSetCrop={onSetCrop}
+              onSetIn={(t) => onRange([Math.min(t, range[1] - MIN_CLIP), range[1]])}
+              onSetOut={(t) => onRange([range[0], Math.max(t, range[0] + MIN_CLIP)])}
+              onSeek={onSeek}
+              onUndo={onUndo}
+              onRedo={onRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              layer={menuAt?.layer ? (layers.find((o) => o.id === menuAt.layer) ?? null) : null}
+              onLayerAdd={onLayerAdd && ((t, kind) => inClip(t) && onLayerAdd(t, kind))}
+              onLayerTemplate={onLayerTemplate}
+              onLayerRemove={onLayerRemove}
+            />
+          </ContextMenu.Portal>
         </ContextMenu.Root>
       </div>
       {!compactHints && (
@@ -756,7 +878,9 @@ export function Timeline({ sourceDuration, range, onRange, current, onSeek, word
 export function adjustLabel(s: SectionAdjustFields): string {
   const pct = (v: number) => `${v > 0 ? "+" : "−"}${Math.round(Math.abs(v) * 100)}%`;
   const pane = (ox: number | undefined, oy: number | undefined, sub: number | undefined, crop: ContentRegion | undefined) =>
-    crop ? `at ${regionLabel(crop)}` : [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
+    crop
+      ? `at ${regionLabel(crop)}`
+      : [...(sub !== undefined ? [`follows ${Math.round(sub * 100)}%`] : []), ...(ox ? [`x ${pct(ox)}`] : []), ...(oy ? [`y ${pct(oy)}`] : [])].join(" ");
   const a = pane(s.offsetX, s.offsetY, s.subjectX, s.crop);
   const b = pane(s.offsetX2, s.offsetY2, s.subjectX2, s.crop2);
   return [s.contentCrop ? `top at ${regionLabel(s.contentCrop)}` : "", a, b ? `bottom ${b}` : ""].filter(Boolean).join(" · ");
@@ -846,7 +970,11 @@ function TimelineMenu(p: {
             Merge with next
           </ContextMenu.Item>
           {p.onSetCrop && (
-            <ContextMenu.Item className={item} disabled={sec.mode === "auto" && !p.detected.some((d) => d.end > sec.start && d.start < sec.end)} onSelect={() => p.onSetCrop!(at.section)}>
+            <ContextMenu.Item
+              className={item}
+              disabled={sec.mode === "auto" && !p.detected.some((d) => d.end > sec.start && d.start < sec.end)}
+              onSelect={() => p.onSetCrop!(at.section)}
+            >
               Set crop…
             </ContextMenu.Item>
           )}

@@ -14,7 +14,8 @@ export function reelsawCatalog(catalog: Catalog): Provider {
       const hit = await catalog.find(externalId);
       if (!hit) throw new ProviderError("That item is not in the Reelsaw catalog (it may have been removed in a newer version).");
       const { item, fileUrl, localPath } = hit;
-      const ext = /\.([a-z0-9]{2,5})$/i.exec(item.url)?.[1]?.toLowerCase() ?? (item.mime.split("/")[1] ?? "bin").replace("svg+xml", "svg").replace("mpeg", "mp3");
+      const ext =
+        /\.([a-z0-9]{2,5})$/i.exec(item.url)?.[1]?.toLowerCase() ?? (item.mime.split("/")[1] ?? "bin").replace("svg+xml", "svg").replace("mpeg", "mp3");
       return {
         url: fileUrl,
         ext,
@@ -23,7 +24,13 @@ export function reelsawCatalog(catalog: Catalog): Provider {
         tags: item.tags,
         sha256: item.sha256,
         ...(localPath ? { localPath } : {}),
-        provenance: { provider: "reelsaw", externalId: item.id, url: item.source.url, license: { id: item.license.id, name: item.license.name, ...(item.license.url ? { url: item.license.url } : {}) }, ...(item.attribution ? { attribution: item.attribution } : {}) },
+        provenance: {
+          provider: "reelsaw",
+          externalId: item.id,
+          url: item.source.url,
+          license: { id: item.license.id, name: item.license.name, ...(item.license.url ? { url: item.license.url } : {}) },
+          ...(item.attribution ? { attribution: item.attribution } : {}),
+        },
       };
     },
   };

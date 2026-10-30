@@ -16,7 +16,17 @@ import { chunkTranscript, type SelectContext } from "../src/pipeline/select.js";
 
 const alive = setInterval(() => {}, 1000);
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
 
 class MemoryStore implements StepStore {
   rows = new Map<string, StoredStep & { clipId?: string }>();
@@ -63,7 +73,8 @@ const WINDOWS = 5; // 600 words / 120
 function checkpoint(r: StepRunner, model: string, timeoutMs: number): DisfluencyCheckpoint {
   return {
     all: (items, _phase, fn) => r.steps(items, { concurrency: 1, range: [0, 1], message: () => "" }, fn),
-    step: (name, key, fn, schema, o) => r.step(name, { ...key, model, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, { schema, timeoutMs: timeoutMs * (o.calls ?? 1), model, signal: o.signal }),
+    step: (name, key, fn, schema, o) =>
+      r.step(name, { ...key, model, promptVersion: DISFLUENCY_PROMPT_VERSION }, fn, { schema, timeoutMs: timeoutMs * (o.calls ?? 1), model, signal: o.signal }),
   };
 }
 
@@ -84,7 +95,12 @@ describe("refine.disfluency windows as steps", () => {
       const ctl = new AbortController();
       if (abortAtThird) kill = () => ctl.abort(new Error("attempt killed"));
       const r = runner(store, ctl.signal);
-      return detectDisfluencies(model, words, { signal: ctl.signal, checkpoint: checkpoint(r, "ollama:m", 5000), concurrency: 1, isFatal: (e) => e instanceof StageTimeoutError || e instanceof StaleJobError });
+      return detectDisfluencies(model, words, {
+        signal: ctl.signal,
+        checkpoint: checkpoint(r, "ollama:m", 5000),
+        concurrency: 1,
+        isFatal: (e) => e instanceof StageTimeoutError || e instanceof StaleJobError,
+      });
     };
     await assert.rejects(attempt(true), /attempt killed/);
     const saved = store.done();
@@ -112,7 +128,12 @@ describe("refine.disfluency windows as steps", () => {
     const ctl = new AbortController();
     const r = runner(store, ctl.signal);
     await assert.rejects(
-      detectDisfluencies(model, words, { signal: ctl.signal, checkpoint: checkpoint(r, "ollama:m", 40), concurrency: 1, isFatal: (e) => e instanceof StageTimeoutError }),
+      detectDisfluencies(model, words, {
+        signal: ctl.signal,
+        checkpoint: checkpoint(r, "ollama:m", 40),
+        concurrency: 1,
+        isFatal: (e) => e instanceof StageTimeoutError,
+      }),
       (e) => e instanceof StageTimeoutError,
     );
     assert.equal(store.done(), 1); // the window before the slow one is kept for the retry
@@ -126,7 +147,12 @@ describe("refine.disfluency windows as steps", () => {
     const store = new MemoryStore();
     const ctl = new AbortController();
     const r = runner(store, ctl.signal);
-    await detectDisfluencies(model, words, { signal: ctl.signal, checkpoint: checkpoint(r, "ollama:m", 5000), concurrency: 1, isFatal: (e) => e instanceof StageTimeoutError });
+    await detectDisfluencies(model, words, {
+      signal: ctl.signal,
+      checkpoint: checkpoint(r, "ollama:m", 5000),
+      concurrency: 1,
+      isFatal: (e) => e instanceof StageTimeoutError,
+    });
     assert.equal(store.done(), WINDOWS - 1);
   });
 
@@ -170,7 +196,11 @@ describe("clip.prepare as clip-scoped steps", () => {
       const ctl = new AbortController();
       if (abort) kill = () => ctl.abort(new Error("attempt killed"));
       const r = runner(store, ctl.signal);
-      return mapSelection(stubCtx(r, ctl.signal), { model, telemetry: false }, { inside: segments, sc, clipId: "c1", modelId: "ollama:m", unitMs: 5000, concurrency: 1, log: quiet });
+      return mapSelection(
+        stubCtx(r, ctl.signal),
+        { model, telemetry: false },
+        { inside: segments, sc, clipId: "c1", modelId: "ollama:m", unitMs: 5000, concurrency: 1, log: quiet },
+      );
     };
     await assert.rejects(run(true), /attempt killed/);
     const saved = store.done();
@@ -191,7 +221,11 @@ describe("clip.prepare as clip-scoped steps", () => {
     const ctl = new AbortController();
     const r = runner(new MemoryStore(), ctl.signal);
     await assert.rejects(
-      mapSelection(stubCtx(r, ctl.signal), { model, telemetry: false }, { inside: selection(), sc, clipId: "c1", modelId: "ollama:m", unitMs: 40, concurrency: 1, log: quiet }),
+      mapSelection(
+        stubCtx(r, ctl.signal),
+        { model, telemetry: false },
+        { inside: selection(), sc, clipId: "c1", modelId: "ollama:m", unitMs: 40, concurrency: 1, log: quiet },
+      ),
       (e) => e instanceof StageTimeoutError,
     );
   });
@@ -202,7 +236,11 @@ describe("clip.prepare as clip-scoped steps", () => {
       doGenerate: async (opts) => {
         calls++;
         const text = JSON.stringify(opts.prompt);
-        return reply(text.includes("packaging") ? '{"title":"T","hook":"H","caption":"C","hashtags":["x"]}' : '{"scores":[{"id":1,"hook":7,"flow":6,"value":8,"shareability":5,"emphasis":["money"]}]}');
+        return reply(
+          text.includes("packaging")
+            ? '{"title":"T","hook":"H","caption":"C","hashtags":["x"]}'
+            : '{"scores":[{"id":1,"hook":7,"flow":6,"value":8,"shareability":5,"emphasis":["money"]}]}',
+        );
       },
     });
     const store = new MemoryStore();

@@ -60,7 +60,10 @@ export function toSeconds(v: unknown): number | undefined {
 
 /** Pull the first JSON object/array out of model text (code fences, chatter around it). */
 export function extractJson(text: string): unknown {
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const start = cleaned.indexOf("{");
   const startArr = cleaned.indexOf("[");
   const from = start === -1 ? startArr : startArr === -1 ? start : Math.min(start, startArr);
@@ -74,14 +77,18 @@ export function extractJson(text: string): unknown {
 
 function firstArray(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
-  if (parsed && typeof parsed === "object") return (Object.values(parsed as Record<string, unknown>).find((v) => Array.isArray(v)) as unknown[] | undefined) ?? [];
+  if (parsed && typeof parsed === "object")
+    return (Object.values(parsed as Record<string, unknown>).find((v) => Array.isArray(v)) as unknown[] | undefined) ?? [];
   return [];
 }
 
 /** Fix the usual small-model slips even when the schema validated: 0-1 scores, timestamps pasted into hooks. */
 export function normalizeCandidate(c: ClipCandidate): ClipCandidate {
   const score = c.score <= 1 ? c.score * 100 : c.score <= 10 && Number.isInteger(c.score) ? c.score * 10 : c.score;
-  const hook = c.hook.replace(/^\s*\[[^\]]*\]\s*/, "").replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  const hook = c.hook
+    .replace(/^\s*\[[^\]]*\]\s*/, "")
+    .replace(/^["'“”]+|["'“”]+$/g, "")
+    .trim();
   const title = c.title.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || hook.slice(0, 60) || "Clip";
   return { ...c, title, hook: (hook || title).slice(0, 80), score: Math.max(0, Math.min(100, score)) };
 }
@@ -102,11 +109,22 @@ export function parseClipsLeniently(text: string): ClipCandidate[] {
     if (startSec === undefined || endSec === undefined || endSec <= startSec) continue;
     const text = typeof r.text === "string" ? r.text : typeof r.quote === "string" ? r.quote : "";
     const title = String(r.title ?? r.headline ?? text.slice(0, 60) ?? "Clip").trim() || "Clip";
-    const hook = String(r.hook ?? r.caption ?? r.overlay ?? title).trim().slice(0, 80);
+    const hook = String(r.hook ?? r.caption ?? r.overlay ?? title)
+      .trim()
+      .slice(0, 80);
     const scoreRaw = Number(r.score ?? r.virality ?? r.rating ?? 50);
     const score = Number.isFinite(scoreRaw) ? (scoreRaw <= 1 ? scoreRaw * 100 : scoreRaw <= 10 ? scoreRaw * 10 : scoreRaw) : 50;
     const hashtags = Array.isArray(r.hashtags) ? r.hashtags.map(String) : typeof r.hashtags === "string" ? r.hashtags.split(/[\s,]+/).filter(Boolean) : [];
-    out.push({ title, hook, startSec, endSec, score: Math.max(0, Math.min(100, score)), reasoning: String(r.reasoning ?? r.reason ?? r.why ?? text).slice(0, 1000), caption: String(r.caption ?? r.description ?? "").slice(0, 300), hashtags: hashtags.slice(0, 8) });
+    out.push({
+      title,
+      hook,
+      startSec,
+      endSec,
+      score: Math.max(0, Math.min(100, score)),
+      reasoning: String(r.reasoning ?? r.reason ?? r.why ?? text).slice(0, 1000),
+      caption: String(r.caption ?? r.description ?? "").slice(0, 300),
+      hashtags: hashtags.slice(0, 8),
+    });
   }
   return out;
 }
@@ -131,14 +149,32 @@ export const SCORE_PROMPT_VERSION = "score-1";
  * Structured output with two fallbacks for weak/local models: salvage the raw text of a schema
  * failure, then one plain-text attempt for servers that reject response_format.
  */
-async function llmJson<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
+async function llmJson<T>(
+  o: LlmOpts,
+  prompt: string,
+  schema: z.ZodType<T>,
+  name: string,
+  temperature: number,
+  salvage: (text: string) => T | null,
+): Promise<T | null> {
   return withLlmContext({ call: `analyze.${name}` }, () => llmJsonInner(o, prompt, schema, name, temperature, salvage));
 }
 
-async function llmJsonInner<T>(o: LlmOpts, prompt: string, schema: z.ZodType<T>, name: string, temperature: number, salvage: (text: string) => T | null): Promise<T | null> {
+async function llmJsonInner<T>(
+  o: LlmOpts,
+  prompt: string,
+  schema: z.ZodType<T>,
+  name: string,
+  temperature: number,
+  salvage: (text: string) => T | null,
+): Promise<T | null> {
   const common = { model: o.model, prompt, ...abortOpt(callSignal(o.signal, o.timeoutMs)), maxRetries: 2, temperature } as const;
   try {
-    const { output } = await generateText({ ...common, output: Output.object({ schema, name }), telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}`, recordInputs: false, recordOutputs: false } });
+    const { output } = await generateText({
+      ...common,
+      output: Output.object({ schema, name }),
+      telemetry: { isEnabled: o.telemetry, functionId: `analyze.${name}`, recordInputs: false, recordOutputs: false },
+    });
     return output as T;
   } catch (err) {
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
@@ -283,7 +319,8 @@ export async function mapChunk(o: LlmOpts, chunk: Chunk, c: SelectContext, exclu
   if (!res) throw new Error("The model did not return usable JSON for clip candidates");
   const repaired = res.clips.map((x) => repairTimestamps(normalizeCandidate(x), chunk));
   const kept = repaired.filter((clip) => inChunk(clip, chunk));
-  if (kept.length !== repaired.length) o.log?.debug({ chunkStart: chunk.start, chunkEnd: chunk.end, dropped: repaired.length - kept.length }, "map dropped candidates outside the chunk");
+  if (kept.length !== repaired.length)
+    o.log?.debug({ chunkStart: chunk.start, chunkEnd: chunk.end, dropped: repaired.length - kept.length }, "map dropped candidates outside the chunk");
   return kept;
 }
 
@@ -418,20 +455,40 @@ export function aggregateScores(items: ScoreInput[], c: SelectContext, results: 
     if (!ss?.length) continue;
     const pick = (k: "hook" | "flow" | "value" | "shareability") => Number(median(ss.map((s) => to10(s[k]))).toFixed(1));
     const rel = c.focus ? Number(median(ss.map((s) => to10(s.relevance ?? 5))).toFixed(1)) : undefined;
-    const scores: ClipScores = { hook: pick("hook"), flow: pick("flow"), value: pick("value"), shareability: pick("shareability"), ...(rel !== undefined ? { relevance: rel } : {}), samples: ss.length };
+    const scores: ClipScores = {
+      hook: pick("hook"),
+      flow: pick("flow"),
+      value: pick("value"),
+      shareability: pick("shareability"),
+      ...(rel !== undefined ? { relevance: rel } : {}),
+      samples: ss.length,
+    };
     // emphasis: words most samples agree on, restricted to words actually in the clip
     const inText = new Set(it.text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
     const votes = new Map<string, number>();
-    for (const s of ss) for (const w of new Set(s.emphasis.map((e) => e.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "")))) if (w && inText.has(w)) votes.set(w, (votes.get(w) ?? 0) + 1);
+    for (const s of ss)
+      for (const w of new Set(s.emphasis.map((e) => e.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, ""))))
+        if (w && inText.has(w)) votes.set(w, (votes.get(w) ?? 0) + 1);
     const need = Math.ceil(ss.length / 2);
-    const emphasis = [...votes.entries()].filter(([, v]) => v >= need).sort((a, b) => b[1] - a[1]).map(([w]) => w).slice(0, 8);
+    const emphasis = [...votes.entries()]
+      .filter(([, v]) => v >= need)
+      .sort((a, b) => b[1] - a[1])
+      .map(([w]) => w)
+      .slice(0, 8);
     out.set(it.id, { scores, total: rubricTotal(scores), emphasis });
   }
   return out;
 }
 
 /** Score candidates in small batches, `samples` times each, median per criterion. */
-export async function scoreCandidates(o: LlmOpts, items: ScoreInput[], c: SelectContext, samples: number, concurrency: number, onProgress?: (done: number, total: number) => void): Promise<Map<number, ScoreResult>> {
+export async function scoreCandidates(
+  o: LlmOpts,
+  items: ScoreInput[],
+  c: SelectContext,
+  samples: number,
+  concurrency: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Map<number, ScoreResult>> {
   const batches = scoreBatches(items);
   const jobs = batches.flatMap((b) => Array.from({ length: samples }, () => b));
   let done = 0;

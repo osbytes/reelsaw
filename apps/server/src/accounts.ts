@@ -28,7 +28,10 @@ async function lockedUser(u: UnitOfWork, id: string) {
 }
 
 async function otherAdmins(u: UnitOfWork, exceptId: string) {
-  const [{ n } = { n: 0 }] = await u.db.select({ n: sql<number>`count(*)::int` }).from(schema.user).where(and(eq(schema.user.role, "admin"), ne(schema.user.id, exceptId), eq(schema.user.banned, false)));
+  const [{ n } = { n: 0 }] = await u.db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.user)
+    .where(and(eq(schema.user.role, "admin"), ne(schema.user.id, exceptId), eq(schema.user.banned, false)));
   return n;
 }
 
@@ -48,8 +51,10 @@ export async function setUserRole(svc: Services, actorId: string | null, userId:
   return svc.tx(async (u) => {
     const user = await lockedUser(u, userId);
     if (user.role === role) return { ok: true, changed: false };
-    if (role !== "admin" && userId === actorId) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own admin role. Ask another admin." });
-    if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
+    if (role !== "admin" && userId === actorId)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove your own admin role. Ask another admin." });
+    if (role !== "admin" && user.role === "admin" && (await otherAdmins(u, userId)) === 0)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This is the only admin. Make someone else an admin first." });
     await u.db.update(schema.user).set({ role, updatedAt: new Date() }).where(eq(schema.user.id, userId));
     await u.db.insert(schema.adminEvents).values({ type: "user.role_changed", actorId, userId, email: user.email, payload: { from: user.role, to: role } });
     audit(svc, u, "user.role_changed", actorId, userId);
@@ -133,7 +138,10 @@ export async function setUserLimits(svc: Services, actorId: string, userId: stri
       .values({ userId, limits: set })
       .onConflictDoUpdate({
         target: schema.userSettings.userId,
-        set: { limits: sql`(${schema.userSettings.limits} || ${JSON.stringify(set)}::jsonb) - ${sql.raw(`'{${unset.join(",")}}'::text[]`)}`, updatedAt: new Date() },
+        set: {
+          limits: sql`(${schema.userSettings.limits} || ${JSON.stringify(set)}::jsonb) - ${sql.raw(`'{${unset.join(",")}}'::text[]`)}`,
+          updatedAt: new Date(),
+        },
       })
       .returning({ limits: schema.userSettings.limits });
     await u.db.insert(schema.adminEvents).values({ type: "user.limits_changed", actorId, userId, email: user.email, payload: { limits: row!.limits } });

@@ -143,7 +143,10 @@ function parseCues(raw: string, kind: "srt" | "vtt"): ParsedCues {
   let skipped = 0;
   const flush = () => {
     if (!cur) return;
-    const text = cur.lines.map((l) => stripMarkup(l).trim()).filter(Boolean).join("\n");
+    const text = cur.lines
+      .map((l) => stripMarkup(l).trim())
+      .filter(Boolean)
+      .join("\n");
     if (!text) skipped++;
     else if (!(cur.end > cur.start)) {
       skipped++;

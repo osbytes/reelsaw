@@ -12,7 +12,14 @@ const FOR = [
   { value: "240", label: "4 hours" },
   { value: "1440", label: "24 hours" },
 ];
-const LEVEL_HINT: Record<string, string> = { fatal: "only crashes", error: "failures", warn: "problems", info: "milestones (default)", debug: "decisions and inputs", trace: "every item" };
+const LEVEL_HINT: Record<string, string> = {
+  fatal: "only crashes",
+  error: "failures",
+  warn: "problems",
+  info: "milestones (default)",
+  debug: "decisions and inputs",
+  trace: "every item",
+};
 
 /** One override: a set of modules at one level. */
 type Row = { id: number; modules: string[]; level: string };
@@ -45,7 +52,12 @@ export function LogLevelSection() {
   }, [s]);
 
   const done = () => void qc.invalidateQueries({ queryKey: trpc.admin.logLevel.pathKey() });
-  const set = useMutation(trpc.admin.logLevel.set.mutationOptions({ onSuccess: (st) => void (toast(st.override ? `Log level ${st.effective}` : "Log level back to .env"), done()), onError: (e) => toast.error(e.message) }));
+  const set = useMutation(
+    trpc.admin.logLevel.set.mutationOptions({
+      onSuccess: (st) => void (toast(st.override ? `Log level ${st.effective}` : "Log level back to .env"), done()),
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const levels = (s?.levels ?? []).map((l) => ({ value: l, label: l, hint: LEVEL_HINT[l] }));
   const shownGlobal = global ?? s?.envGlobal ?? "info";
   const valid = rows.every((r) => r.modules.length > 0);
@@ -56,7 +68,10 @@ export function LogLevelSection() {
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
       <h2 className="text-[15px] font-bold">Log level</h2>
-      <p className="text-sm text-ink2">More detail for a while, to explain a wrong result. Pick a level for everything, add a module to change just that part, then choose how long. Debug is safe for a few minutes.</p>
+      <p className="text-sm text-ink2">
+        More detail for a while, to explain a wrong result. Pick a level for everything, add a module to change just that part, then choose how long. Debug is
+        safe for a few minutes.
+      </p>
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs font-semibold text-ink2">
           Everything
@@ -66,10 +81,20 @@ export function LogLevelSection() {
           For
           <Select ariaLabel="For how long" className="w-36" value={minutes} onValueChange={setMinutes} options={FOR} />
         </label>
-        <button type="button" className="btn-primary min-w-20" disabled={!s || !valid || set.isPending} onClick={() => set.mutate({ global: shownGlobal as never, modules: flat, forMinutes: Number(minutes) as 15 })}>
+        <button
+          type="button"
+          className="btn-primary min-w-20"
+          disabled={!s || !valid || set.isPending}
+          onClick={() => set.mutate({ global: shownGlobal as never, modules: flat, forMinutes: Number(minutes) as 15 })}
+        >
           Apply
         </button>
-        <button type="button" className="btn-quiet min-w-20" disabled={!s?.override || set.isPending} onClick={() => (setRows([]), setGlobal(null), set.mutate(null))}>
+        <button
+          type="button"
+          className="btn-quiet min-w-20"
+          disabled={!s?.override || set.isPending}
+          onClick={() => (setRows([]), setGlobal(null), set.mutate(null))}
+        >
           Reset
         </button>
       </div>
@@ -105,8 +130,19 @@ export function LogLevelSection() {
                     onChange={(mods) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, modules: mods } : x)))}
                   />
                 </div>
-                <Select ariaLabel="Level" className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1" value={r.level} onValueChange={(l) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, level: l } : x)))} options={levels} />
-                <button type="button" className="btn-quiet col-start-2 row-start-1 h-[38px] w-8 px-0 sm:col-start-3" aria-label="Remove override" onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))}>
+                <Select
+                  ariaLabel="Level"
+                  className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1"
+                  value={r.level}
+                  onValueChange={(l) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, level: l } : x)))}
+                  options={levels}
+                />
+                <button
+                  type="button"
+                  className="btn-quiet col-start-2 row-start-1 h-[38px] w-8 px-0 sm:col-start-3"
+                  aria-label="Remove override"
+                  onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))}
+                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -114,7 +150,12 @@ export function LogLevelSection() {
           })}
         </div>
         <div>
-          <button type="button" className="btn-quiet text-xs" disabled={!s} onClick={() => setRows((all) => [...all, { id: nextId.current++, modules: [], level: "debug" }])}>
+          <button
+            type="button"
+            className="btn-quiet text-xs"
+            disabled={!s}
+            onClick={() => setRows((all) => [...all, { id: nextId.current++, modules: [], level: "debug" }])}
+          >
             Add override
           </button>
         </div>

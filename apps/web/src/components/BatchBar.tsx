@@ -25,7 +25,21 @@ interface BatchClip {
  * The selection's actions, one compact row at the bottom of the clips list. Re-render and Export stay
  * on the row; copy, intro/outro, template, retry and delete live in ⋯. Sticky inside the clips ScrollArea.
  */
-export function BatchBar({ projectId, selected, introId, outroId, onClear, onChanged }: { projectId: string; selected: BatchClip[]; introId?: string | null | undefined; outroId?: string | null | undefined; onClear: () => void; onChanged: () => void }) {
+export function BatchBar({
+  projectId,
+  selected,
+  introId,
+  outroId,
+  onClear,
+  onChanged,
+}: {
+  projectId: string;
+  selected: BatchClip[];
+  introId?: string | null | undefined;
+  outroId?: string | null | undefined;
+  onClear: () => void;
+  onChanged: () => void;
+}) {
   const trpc = useTRPC();
   const many = useMutation(trpc.clips.rerenderMany.mutationOptions());
   const delMany = useMutation(trpc.clips.deleteMany.mutationOptions());
@@ -59,7 +73,12 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
 
   return (
     <SelectionBar label="Selected clips" count={selected.length} onClear={onClear}>
-      <button className="btn-ghost" disabled={!renderable.length || many.isPending} title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"} onClick={() => run(renderable, "Re-rendering")}>
+      <button
+        className="btn-ghost"
+        disabled={!renderable.length || many.isPending}
+        title={renderable.length ? `Re-render ${n(renderable.length)}` : "None of the selected clips is rendered or failed"}
+        onClick={() => run(renderable, "Re-rendering")}
+      >
         Re-render
       </button>
       {done.length ? (
@@ -98,8 +117,24 @@ export function BatchBar({ projectId, selected, introId, outroId, onClear, onCha
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <BulkBumpersPopover projectId={projectId} clipIds={selected.map((c) => c.id)} rerenderable={renderable.length} projectIntroId={introId} projectOutroId={outroId} onDone={onChanged} open={bumpersOpen} onOpenChange={setBumpersOpen} />
-      <BulkTemplateButton projectId={projectId} clips={selected} rerenderable={renderable.length} onDone={onChanged} open={templateOpen} onOpenChange={setTemplateOpen} />
+      <BulkBumpersPopover
+        projectId={projectId}
+        clipIds={selected.map((c) => c.id)}
+        rerenderable={renderable.length}
+        projectIntroId={introId}
+        projectOutroId={outroId}
+        onDone={onChanged}
+        open={bumpersOpen}
+        onOpenChange={setBumpersOpen}
+      />
+      <BulkTemplateButton
+        projectId={projectId}
+        clips={selected}
+        rerenderable={renderable.length}
+        onDone={onChanged}
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+      />
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

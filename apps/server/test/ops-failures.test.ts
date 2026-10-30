@@ -35,7 +35,12 @@ describe("listFailures / retryFailures", { skip: notReady ?? false }, () => {
 
   async function failProject(stage: string, error: string, agoMs = 0) {
     const id = await h.makeProject(userId, "failed");
-    await h.pool.query(`update projects set stage = $2, error = $3, updated_at = now() - ($4::int * interval '1 millisecond') where id = $1`, [id, stage, error, agoMs]);
+    await h.pool.query(`update projects set stage = $2, error = $3, updated_at = now() - ($4::int * interval '1 millisecond') where id = $1`, [
+      id,
+      stage,
+      error,
+      agoMs,
+    ]);
     return id;
   }
   async function failClip(projectStatus: string, error: string) {

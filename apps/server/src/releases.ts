@@ -28,10 +28,9 @@ export function listReleasesResult(state: ReleaseFeedState, input: { limit?: num
   const feed = state.feed;
   const limit = input.limit ?? 20;
   const needle = input.tag?.trim().replace(/^v/i, "").toLowerCase();
-  if (!feed) return { releases: [] as const, total: 0, error: state.error ?? "GitHub has not answered yet", sourceUrl: "https://github.com/osbytes/reelsaw/releases" };
-  const matched = needle
-    ? feed.releases.filter((r) => r.version.toLowerCase() === needle || r.tag.replace(/^v/i, "").toLowerCase() === needle)
-    : feed.releases;
+  if (!feed)
+    return { releases: [] as const, total: 0, error: state.error ?? "GitHub has not answered yet", sourceUrl: "https://github.com/osbytes/reelsaw/releases" };
+  const matched = needle ? feed.releases.filter((r) => r.version.toLowerCase() === needle || r.tag.replace(/^v/i, "").toLowerCase() === needle) : feed.releases;
   const releases = matched.slice(0, limit).map((r) => ({
     tag: r.tag,
     version: r.version,
@@ -88,10 +87,7 @@ export function createReleaseFeed(
       state.feed = feed;
       state.error = null;
       lastOk = now();
-      log.debug(
-        { releases: feed.releases.length, commits: feed.commits, truncated: feed.truncated },
-        "release feed",
-      );
+      log.debug({ releases: feed.releases.length, commits: feed.commits, truncated: feed.truncated }, "release feed");
     } catch (err) {
       state.error = err instanceof Error ? (err.name === "TimeoutError" ? "GitHub did not answer in time" : err.message) : String(err);
       log.debug({ err }, "release feed failed");

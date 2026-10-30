@@ -185,7 +185,20 @@ import { toWords } from "./pipeline/transcript.js";
 import { readLogLines, LEVEL_NUM, LEVEL_LABEL } from "./log-read.js";
 import { parseDuration, mergeLogLevels, DEFAULT_LOG_OVERRIDE_MS } from "./log-level.js";
 import { templateBumpersText, templateBumpersWith } from "./library/templates.js";
-import { formatTime, timingText, templateLayerSchema, clipLayerSchema, clipLayers, audioLayerDefaultsFor, SFX_AUDIO_DEFAULTS, CLIP_AUDIO_DEFAULTS, TEXT_OVERLAY_DEFAULTS, ASSET_OVERLAY_DEFAULT_W, type ClipLayer, type TemplateBumpers } from "@reelsaw/shared";
+import {
+  formatTime,
+  timingText,
+  templateLayerSchema,
+  clipLayerSchema,
+  clipLayers,
+  audioLayerDefaultsFor,
+  SFX_AUDIO_DEFAULTS,
+  CLIP_AUDIO_DEFAULTS,
+  TEXT_OVERLAY_DEFAULTS,
+  ASSET_OVERLAY_DEFAULT_W,
+  type ClipLayer,
+  type TemplateBumpers,
+} from "@reelsaw/shared";
 import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { clipBumpersCall, libraryView, projectBumpersCall, uploadLocalFile } from "./library/service.js";
@@ -195,10 +208,37 @@ import { assetVisibleTo } from "./library/visible.js";
 import { runMcpStdio } from "./mcp-stdio.js";
 import { listReleasesResult } from "./releases.js";
 import { listDeleted } from "./deleted.js";
-import { createProject, deleteClip, deleteClips, deleteOwnedProject, deletedProjects, framingOfClip, purgeDeleted, purgeOwnedClip, purgeOwnedProject, reanalyzeProject, refineProject, restoreClip, restoreProject, retryOwnedProject, setProjectSourceText, updateProject, updateProjectStyle } from "./projects/service.js";
+import {
+  createProject,
+  deleteClip,
+  deleteClips,
+  deleteOwnedProject,
+  deletedProjects,
+  framingOfClip,
+  purgeDeleted,
+  purgeOwnedClip,
+  purgeOwnedProject,
+  reanalyzeProject,
+  refineProject,
+  restoreClip,
+  restoreProject,
+  retryOwnedProject,
+  setProjectSourceText,
+  updateProject,
+  updateProjectStyle,
+} from "./projects/service.js";
 import { createClip, readClip, rerenderClip, rerenderClips, updateClip } from "./clips/service.js";
 import { createExportZip, exportPlan } from "./export.js";
-import { DECISION_KINDS, CLEARABLE_SETTINGS, REFINE_STEPS, createProjectInputSchema, projectSettingsPatchSchema, styleOverrideSchema, type ClearableSetting, type ProjectSettingsPatch } from "@reelsaw/shared";
+import {
+  DECISION_KINDS,
+  CLEARABLE_SETTINGS,
+  REFINE_STEPS,
+  createProjectInputSchema,
+  projectSettingsPatchSchema,
+  styleOverrideSchema,
+  type ClearableSetting,
+  type ProjectSettingsPatch,
+} from "@reelsaw/shared";
 
 const [, , cmd, ...args] = process.argv;
 const flag = (name: string) => {
@@ -282,13 +322,40 @@ function table(rows: Array<Record<string, unknown>>) {
   const cols = Object.keys(rows[0]!);
   const w = cols.map((c) => Math.min(60, Math.max(c.length, ...rows.map((r) => String(r[c] ?? "").length))));
   console.log(cols.map((c, i) => c.padEnd(w[i]!)).join("  "));
-  for (const r of rows) console.log(cols.map((c, i) => String(r[c] ?? "").slice(0, 60).padEnd(w[i]!)).join("  "));
+  for (const r of rows)
+    console.log(
+      cols
+        .map((c, i) =>
+          String(r[c] ?? "")
+            .slice(0, 60)
+            .padEnd(w[i]!),
+        )
+        .join("  "),
+    );
 }
 
 function ffmpegWav(svc: Services, input: string, start: number, dur: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const p = spawn(svc.config.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-ss", start.toFixed(3), "-t", dur.toFixed(3), "-i", input, "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"]);
+    const p = spawn(svc.config.FFMPEG_PATH, [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-ss",
+      start.toFixed(3),
+      "-t",
+      dur.toFixed(3),
+      "-i",
+      input,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-f",
+      "wav",
+      "pipe:1",
+    ]);
     p.stdout.on("data", (d: Buffer) => chunks.push(d));
     p.on("close", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg exited ${code}`))));
     p.on("error", reject);
@@ -311,11 +378,14 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Running version against the latest GitHub release (updates.ts), with the upgrade command. */
   async version(svc) {
     const s = await svc.updates.check({ force: true });
-    if (args.includes("--json")) return void console.log(JSON.stringify({ ...s, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT }, null, 2));
+    if (args.includes("--json"))
+      return void console.log(JSON.stringify({ ...s, commit: svc.config.REELSAW_COMMIT, builtAt: svc.config.REELSAW_BUILT_AT }, null, 2));
     console.log(`running   ${s.current}  (${svc.config.REELSAW_COMMIT}, built ${svc.config.REELSAW_BUILT_AT})`);
     if (!s.enabled) return void console.log("latest    not checked (UPDATE_CHECK=false)");
     if (!s.latest) return void console.log(`latest    unknown: ${s.error ?? "no answer"}`);
-    console.log(`latest    ${s.latest.version}  published ${s.latest.publishedAt?.slice(0, 10) ?? "-"}  ${s.latest.url}${s.error ? `  (stale: ${s.error})` : ""}`);
+    console.log(
+      `latest    ${s.latest.version}  published ${s.latest.publishedAt?.slice(0, 10) ?? "-"}  ${s.latest.url}${s.error ? `  (stale: ${s.error})` : ""}`,
+    );
     if (s.available === null) console.log(`\nNot a release build, so the two cannot be compared. To update: ${s.upgrade.command}`);
     else if (s.available) console.log(`\nUpdate available. ${s.upgrade.note}\n  ${s.upgrade.command}\nSee ${s.upgrade.docsUrl}`);
     else console.log("\nUp to date.");
@@ -329,7 +399,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const listed = listReleasesResult(s, { limit });
     if (args.includes("--json")) return void console.log(JSON.stringify(listed, null, 2));
     if (listed.error && !listed.releases.length) return void console.log(`releases  unknown: ${listed.error}`);
-    console.log(`${listed.total} published  ·  ${listed.commits ?? 0} commits in ${listed.windowDays ?? 90} days${listed.truncated ? "  (truncated)" : ""}${listed.error ? `  (stale: ${listed.error})` : ""}`);
+    console.log(
+      `${listed.total} published  ·  ${listed.commits ?? 0} commits in ${listed.windowDays ?? 90} days${listed.truncated ? "  (truncated)" : ""}${listed.error ? `  (stale: ${listed.error})` : ""}`,
+    );
     table(
       listed.releases.map((r) => ({
         version: r.version,
@@ -342,7 +414,15 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Accounts: list, approve, promote. For when the admin locked themselves out or email is off. */
   async users(svc) {
     const rows = await svc.database.db.query.user.findMany({ orderBy: schema.user.createdAt });
-    table(rows.map((u) => ({ email: u.email, name: u.name, role: u.role, status: u.banned ? "suspended" : !u.approvedAt ? "pending" : u.mustChangePassword ? "must-change" : "active", created: u.createdAt.toISOString().slice(0, 10) })));
+    table(
+      rows.map((u) => ({
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        status: u.banned ? "suspended" : !u.approvedAt ? "pending" : u.mustChangePassword ? "must-change" : "active",
+        created: u.createdAt.toISOString().slice(0, 10),
+      })),
+    );
   },
   async approve(svc) {
     const u = await userByEmail(svc, pos[0]);
@@ -353,7 +433,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async retention(svc) {
     const r = await sweepRetention(svc);
     const s = svc.settings.get();
-    console.log(`removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${s.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${s.CLIP_RETENTION_DAYS})`);
+    console.log(
+      `removed ${r.sources} stored sources and ${r.clips} rendered clips (SOURCE_RETENTION_DAYS=${s.SOURCE_RETENTION_DAYS}, CLIP_RETENTION_DAYS=${s.CLIP_RETENTION_DAYS})`,
+    );
   },
   /** Restorable deletes. No email: every project's across the install. With email: that account (same as Deleted / list_deleted). */
   async deleted(svc) {
@@ -381,7 +463,16 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       return;
     }
     const rows = await deletedProjects(svc);
-    table(rows.map((r) => ({ id: r.id, title: r.title, owner: r.email, status: r.status, deleted: r.deletedAt!.toISOString().slice(0, 16), purged: r.purgeAt?.toISOString().slice(0, 10) ?? "never" })));
+    table(
+      rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        owner: r.email,
+        status: r.status,
+        deleted: r.deletedAt!.toISOString().slice(0, 16),
+        purged: r.purgeAt?.toISOString().slice(0, 10) ?? "never",
+      })),
+    );
   },
   /** Undo a delete: `reelsaw restore <projectId>`. Same function as projects.restore and the restore_project tool. */
   async restore(svc) {
@@ -427,7 +518,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   /** Use a subtitle file as the transcript: `reelsaw import-transcript <projectId> <file.srt|file.vtt> [--language xx]`. Same function as projects.importTranscript. */
   async "import-transcript"(svc) {
     if (pos.length < 2) throw new Error("usage: reelsaw import-transcript <projectId> <file.srt|file.vtt> [--language xx]");
-    const r = await importTranscript(svc, null, pos[0]!, { text: await readFile(pos[1]!, "utf8"), format: pos[1]!.toLowerCase().endsWith(".vtt") ? "vtt" : "auto", language: flag("language") });
+    const r = await importTranscript(svc, null, pos[0]!, {
+      text: await readFile(pos[1]!, "utf8"),
+      format: pos[1]!.toLowerCase().endsWith(".vtt") ? "vtt" : "auto",
+      language: flag("language"),
+    });
     console.log(`${r.message}\n  ${r.format.toUpperCase()}: ${r.cues} cues, ${r.words} words${r.language ? `, language ${r.language}` : ""}`);
     for (const w of r.warnings) console.log(`  warning: ${w}`);
   },
@@ -444,7 +539,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const mode = z.enum(["hide", "keep", "always"]).safeParse(pos[1]);
     if (!pos[0] || !mode.success) throw new Error("usage: reelsaw source-text <projectId> <hide|keep|always>");
     const r = await setProjectSourceText(svc, null, pos[0], mode.data);
-    console.log(`source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`);
+    console.log(
+      `source text ${mode.data}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old text (re-render them when done)` : ""}`,
+    );
   },
   /** Project-wide caption style: `reelsaw update-style <projectId> [--set key=value]… [--keep-overrides] [--no-rerender]`. Same function as projects.updateStyle and the update_project_style tool. */
   async "update-style"(svc) {
@@ -454,15 +551,25 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const style = styleOverrideSchema.safeParse(settings);
     if (!style.success) throw new Error(`${style.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}\n${usage}`);
     if (!Object.keys(style.data).length) throw new Error(usage);
-    const r = await updateProjectStyle(svc, null, pos[0], { style: style.data, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
-    console.log(`changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`);
+    const r = await updateProjectStyle(svc, null, pos[0], {
+      style: style.data,
+      keepOverrides: args.includes("--keep-overrides"),
+      rerender: !args.includes("--no-rerender"),
+    });
+    console.log(
+      `changed ${Object.keys(style.data).join(", ")}; ${r.rerendered} clip(s) queued to re-render${r.skipped ? `; ${r.skipped} still preparing or rendering keep the old style (re-render them when done)` : ""}`,
+    );
   },
   /** Start a project from a link: `reelsaw create-project <url> [--user email|id] [--title t] [--set key=value]…`. Same function as projects.create and the create_project tool. */
   async "create-project"(svc) {
     const usage = "usage: reelsaw create-project <url> [--user <email|id>] [--title t] [--set key=value]…";
     if (!pos[0]) throw new Error(usage);
     const { settings } = settingsFlags(usage);
-    const input = createProjectInputSchema.safeParse({ sourceUrl: pos[0], title: flag("title"), settings: Object.keys(settings).length ? settings : undefined });
+    const input = createProjectInputSchema.safeParse({
+      sourceUrl: pos[0],
+      title: flag("title"),
+      settings: Object.keys(settings).length ? settings : undefined,
+    });
     if (!input.success) throw new Error(input.error.issues.map((i) => `${i.path.join(".") || "url"}: ${i.message}`).join("; "));
     const user = await actingUser(svc, flag("user"));
     const p = await createProject(svc, user.id, input.data);
@@ -486,11 +593,15 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async refine(svc) {
     const usage = "usage: reelsaw refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]";
     if (!pos[0]) throw new Error(usage);
-    const steps = (flag("steps") ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
-      const step = REFINE_STEPS.find((x) => x === s);
-      if (!step) throw new Error(`--steps takes ${REFINE_STEPS.join(", ")}\n${usage}`);
-      return step;
-    });
+    const steps = (flag("steps") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => {
+        const step = REFINE_STEPS.find((x) => x === s);
+        if (!step) throw new Error(`--steps takes ${REFINE_STEPS.join(", ")}\n${usage}`);
+        return step;
+      });
     const r = await refineProject(svc, null, pos[0], { steps: steps.length ? steps : undefined, vocabulary: flag("vocabulary") });
     console.log(`refining ${pos[0]}: ${r.steps.join(", ")}; clips re-render afterwards`);
   },
@@ -509,7 +620,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const plan = await exportPlan(svc, null, projectId, clipIds);
     const { createWriteStream } = await import("node:fs");
     const { pipeline } = await import("node:stream/promises");
-    const { stream } = await createExportZip({ storage: svc.storage, paths: svc.paths, log: svc.log }, { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset });
+    const { stream } = await createExportZip(
+      { storage: svc.storage, paths: svc.paths, log: svc.log },
+      { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },
+    );
     await pipeline(stream, createWriteStream(out));
     console.log(`${out}: ${plan.rendered} clip(s)${plan.notRendered ? `; ${plan.notRendered} picked clip(s) are not rendered and were left out` : ""}`);
   },
@@ -521,7 +635,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const mode = flag("mode") ?? "exact";
     if (mode !== "exact" && mode !== "ai") throw new Error(`--mode is exact or ai\n${usage}`);
     const r = await createClip(svc, null, { projectId, startSec: seconds(start, "startSec"), endSec: seconds(end, "endSec"), mode });
-    console.log(`created clip ${r.clip.id} (${formatTime(r.clip.startSec)}-${formatTime(r.clip.endSec)}); it is ${r.queued === "prepare" ? "being prepared and renders afterwards" : "queued"}`);
+    console.log(
+      `created clip ${r.clip.id} (${formatTime(r.clip.startSec)}-${formatTime(r.clip.endSec)}); it is ${r.queued === "prepare" ? "being prepared and renders afterwards" : "queued"}`,
+    );
   },
   /** Edit one clip: `reelsaw update-clip <clipId> [--title t] [--hook t] [--caption t] [--start s] [--end s] [--rerender|--no-rerender]`. Same function as clips.update and the update_clip tool. */
   async "update-clip"(svc) {
@@ -539,13 +655,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       rerender: args.includes("--no-rerender") ? false : args.includes("--rerender") ? true : undefined,
     });
     if (!r.changed.length) return void console.log("nothing changed");
-    console.log(`changed ${r.changed.join(", ")}; ${!r.needsRerender ? "nothing burned into the video changed, no re-render needed" : r.rerendered ? "re-rendering" : "the video still shows the old version: reelsaw rerender " + pos[0]}`);
+    console.log(
+      `changed ${r.changed.join(", ")}; ${!r.needsRerender ? "nothing burned into the video changed, no re-render needed" : r.rerendered ? "re-rendering" : "the video still shows the old version: reelsaw rerender " + pos[0]}`,
+    );
   },
   /** Remove deleted projects and replaced clips past DELETED_RETENTION_DAYS now (the storage sweep does this hourly). */
   async purge(svc) {
     const dry = args.includes("--dry-run");
     const r = await purgeDeleted(svc, { dryRun: dry });
-    console.log(`${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`);
+    console.log(
+      `${dry ? "would purge" : "purged"} ${r.projects.length} project(s) and ${r.clips.length} replaced clip(s) deleted over ${svc.config.DELETED_RETENTION_DAYS} days ago (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS}; 0 keeps them)`,
+    );
   },
   /** Delete one already-deleted project forever: `reelsaw purge-project <projectId>`. Same as projects.purge and the purge_project tool. */
   async "purge-project"(svc) {
@@ -564,14 +684,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async decisions(svc) {
     const db = svc.database.db;
     const sub = ["export", "forget", "learning", "backfill"].includes(pos[0] ?? "") ? pos[0] : undefined;
-    const usage = "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | learning <email> on|off | backfill [--dry-run]";
+    const usage =
+      "usage: reelsaw decisions <email> | export <email> [--out f.jsonl] | forget <email> [--project id] | learning <email> on|off | backfill [--dry-run]";
     const kindArg = flag("kind");
     const kind = kindArg ? DECISION_KINDS.find((k) => k === kindArg) : undefined;
     if (kindArg && !kind) throw new Error(`--kind must be one of ${DECISION_KINDS.join(", ")}`);
     if (sub === "backfill") {
       const dry = args.includes("--dry-run");
       const r = await backfillDecisions(svc, { dryRun: dry });
-      console.log(`${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`);
+      console.log(
+        `${dry ? "would write" : "wrote"} ${r.decisions} decision(s) from ${r.projects} project(s)${r.complete ? "" : " (stopped early; run again to continue)"}; fixes already in the log were skipped`,
+      );
       return;
     }
     const email = sub ? pos[1] : pos[0];
@@ -607,21 +730,52 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         return;
       }
       await writeFile(out, lines.length ? lines.join("\n") + "\n" : "");
-      console.log(`wrote ${lines.length} decision(s) of ${u.email} to ${out} (${cases} disfluency case(s)); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`);
+      console.log(
+        `wrote ${lines.length} decision(s) of ${u.email} to ${out} (${cases} disfluency case(s)); harvest with src/eval/tools/harvest-decisions.ts, replay with EVAL_DECISIONS=${out} pnpm eval decisions`,
+      );
       return;
     }
     const s = await decisionSummary(db, u.id);
-    console.log(`${u.email}: learning ${s.enabled ? "on" : "off"}; ${s.total} decision(s) about ${s.projects} project(s)${s.total ? ` (${Object.entries(s.byKind).map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`);
+    console.log(
+      `${u.email}: learning ${s.enabled ? "on" : "off"}; ${s.total} decision(s) about ${s.projects} project(s)${
+        s.total
+          ? ` (${Object.entries(s.byKind)
+              .map(([k, n]) => `${k} ${n}`)
+              .join(", ")})`
+          : ""
+      }`,
+    );
     const page = await listDecisions(db, u.id, { kind, projectId: flag("project"), limit: Number(flag("limit") ?? 50) || 50 });
     if (!page.items.length) return;
     const what = (d: (typeof page.items)[number]) => {
       const c = d.context;
-      if (Array.isArray(c.words) && c.target && typeof c.target === "object" && "index" in c.target && "span" in c.target && typeof c.target.index === "number" && typeof c.target.span === "number") {
-        return c.words.slice(c.target.index, c.target.index + c.target.span).map((w: { text?: string }) => w.text ?? "").join(" ").slice(0, 40);
+      if (
+        Array.isArray(c.words) &&
+        c.target &&
+        typeof c.target === "object" &&
+        "index" in c.target &&
+        "span" in c.target &&
+        typeof c.target.index === "number" &&
+        typeof c.target.span === "number"
+      ) {
+        return c.words
+          .slice(c.target.index, c.target.index + c.target.span)
+          .map((w: { text?: string }) => w.text ?? "")
+          .join(" ")
+          .slice(0, 40);
       }
       return Array.isArray(c.fields) ? c.fields.join(",") : String(d.before?.title ?? d.after?.title ?? "").slice(0, 40);
     };
-    table(page.items.map((d) => ({ id: d.id, at: d.createdAt.slice(0, 16), kind: d.kind, explicit: d.explicit ? "yes" : "no", project: d.projectId.slice(0, 8), what: what(d) })));
+    table(
+      page.items.map((d) => ({
+        id: d.id,
+        at: d.createdAt.slice(0, 16),
+        kind: d.kind,
+        explicit: d.explicit ? "yes" : "no",
+        project: d.projectId.slice(0, 8),
+        what: what(d),
+      })),
+    );
     if (page.nextCursor) console.log(`showing ${page.items.length} of ${page.total}; --limit raises it (max 200)`);
   },
   abuse: async (svc) => {
@@ -629,9 +783,34 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const r = await flagAccounts(svc);
       console.log(`checked ${r.checked} recent accounts: ${r.flagged} flagged, ${r.changed} changed`);
     }
-    const rows = await svc.database.db.select({ email: schema.user.email, flags: schema.user.flags, signupIp: schema.user.signupIp, banned: schema.user.banned, createdAt: schema.user.createdAt }).from(schema.user).where(sql`jsonb_array_length(${schema.user.flags}) > 0`).orderBy(desc(schema.user.createdAt)).limit(200);
-    table(rows.map((r) => ({ email: r.email, flags: r.flags.join(","), signupIp: r.signupIp ?? "", status: r.banned ? "suspended" : "active", created: r.createdAt.toISOString().slice(0, 10) })));
-    if (rows.length) console.log("\nflags: " + Object.entries(FLAG_HELP).map(([k, v]) => `${k} = ${v}`).join("; "));
+    const rows = await svc.database.db
+      .select({
+        email: schema.user.email,
+        flags: schema.user.flags,
+        signupIp: schema.user.signupIp,
+        banned: schema.user.banned,
+        createdAt: schema.user.createdAt,
+      })
+      .from(schema.user)
+      .where(sql`jsonb_array_length(${schema.user.flags}) > 0`)
+      .orderBy(desc(schema.user.createdAt))
+      .limit(200);
+    table(
+      rows.map((r) => ({
+        email: r.email,
+        flags: r.flags.join(","),
+        signupIp: r.signupIp ?? "",
+        status: r.banned ? "suspended" : "active",
+        created: r.createdAt.toISOString().slice(0, 10),
+      })),
+    );
+    if (rows.length)
+      console.log(
+        "\nflags: " +
+          Object.entries(FLAG_HELP)
+            .map(([k, v]) => `${k} = ${v}`)
+            .join("; "),
+      );
   },
   billing: async (svc) => {
     if (!svc.ee) throw new Error("billing is not enabled on this instance (REELSAW_EE is off)");
@@ -640,7 +819,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (sub === "sync") {
       const user = pos[1] ? await userByEmail(svc, pos[1]) : null;
       const r = await b.reconcile(user ? { userId: user.id } : {});
-      console.log(`checked ${r.checked} subscription(s), synced ${r.synced}, pending events retried ${r.pendingEvents}${r.orphans.length ? `, orphans (no account): ${r.orphans.join(", ")}` : ""}`);
+      console.log(
+        `checked ${r.checked} subscription(s), synced ${r.synced}, pending events retried ${r.pendingEvents}${r.orphans.length ? `, orphans (no account): ${r.orphans.join(", ")}` : ""}`,
+      );
       return;
     }
     if (sub === "set-plan") {
@@ -655,12 +836,26 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const i = await b.inspect(user.id);
     console.log(`${user.email}: ${i.effective.plan.label} (${i.effective.reason})`);
     console.log(`customer: ${i.customer ?? "none"}`);
-    if (i.row) table([{ subscription: i.row.stripeSubscriptionId ?? "(complimentary)", plan: i.row.plan, status: i.row.status, interval: i.row.interval ?? "", periodEnd: i.row.periodEnd?.toISOString() ?? "", cancelAtPeriodEnd: i.row.cancelAtPeriodEnd, pastDueSince: i.row.pastDueSince?.toISOString() ?? "", syncedAt: i.row.syncedAt.toISOString() }]);
+    if (i.row)
+      table([
+        {
+          subscription: i.row.stripeSubscriptionId ?? "(complimentary)",
+          plan: i.row.plan,
+          status: i.row.status,
+          interval: i.row.interval ?? "",
+          periodEnd: i.row.periodEnd?.toISOString() ?? "",
+          cancelAtPeriodEnd: i.row.cancelAtPeriodEnd,
+          pastDueSince: i.row.pastDueSince?.toISOString() ?? "",
+          syncedAt: i.row.syncedAt.toISOString(),
+        },
+      ]);
     else console.log("no subscription row (Free)");
     console.log("\nStripe:");
     table(i.stripe.map((s) => ({ id: s.id, status: s.status, price: s.price ?? "", cancelAtPeriodEnd: s.cancelAtPeriodEnd })));
     console.log("\nwebhook events:");
-    table(i.events.map((e) => ({ id: e.id, type: e.type, created: e.created.toISOString(), processed: e.processedAt ? "yes" : "PENDING", error: e.error ?? "" })));
+    table(
+      i.events.map((e) => ({ id: e.id, type: e.type, created: e.created.toISOString(), processed: e.processedAt ? "yes" : "PENDING", error: e.error ?? "" })),
+    );
   },
   "make-admin": async (svc) => {
     const u = await userByEmail(svc, pos[0]);
@@ -711,22 +906,51 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await svc.resources.snapshot();
     const gpu = svc.resources.gpu();
     const enc = svc.media.encoder();
-    const onDevice = { requested: svc.config.ONNX_EXECUTION_PROVIDER, faces: svc.faces?.provider ?? null, text: svc.text?.provider ?? null, vad: svc.vad ? "cpu" : null, aligner: svc.aligner?.provider ?? null };
+    const onDevice = {
+      requested: svc.config.ONNX_EXECUTION_PROVIDER,
+      faces: svc.faces?.provider ?? null,
+      text: svc.text?.provider ?? null,
+      vad: svc.vad ? "cpu" : null,
+      aligner: svc.aligner?.provider ?? null,
+    };
     const renders = { ...svc.resources.renders(), max: svc.resources.maxRenders() };
-    if (args.includes("--json")) return void console.log(JSON.stringify({ resources: r, gpu, videoEncoder: enc, onDevice, renders, models: svc.models.get(), ytdlpProxies: svc.media.ytdlpProxies() }, null, 2));
+    if (args.includes("--json"))
+      return void console.log(
+        JSON.stringify({ resources: r, gpu, videoEncoder: enc, onDevice, renders, models: svc.models.get(), ytdlpProxies: svc.media.ytdlpProxies() }, null, 2),
+      );
     const line = (k: string, v: string) => console.log(`${k.padEnd(16)} ${v}`);
     line("platform", `${r.platform} ${process.arch}, node ${process.version}`);
     line("cpu", `${r.cpus} cores, ${r.cpuPercent}% busy${r.load1 !== null ? `, load ${r.load1}` : ""}`);
     line("memory", `${r.memAvailableMB} MB free of ${r.memTotalMB} MB`);
     line("disk", r.diskFreeMB >= 0 ? `${r.diskFreeMB} MB free of ${r.diskTotalMB} MB` : "not measurable on this filesystem");
-    line("gpu", gpu ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device present, no driver tools"}\n${"".padEnd(17)}${gpu.note}` : "none visible to this process (Docker: start with docker-compose.gpu.yml to hand an NVIDIA card over)");
+    line(
+      "gpu",
+      gpu
+        ? `${gpu.vendor}: ${gpu.devices.join(", ") || "device present, no driver tools"}\n${"".padEnd(17)}${gpu.note}`
+        : "none visible to this process (Docker: start with docker-compose.gpu.yml to hand an NVIDIA card over)",
+    );
     line("video encoder", `${enc.name} (FFMPEG_ENCODER=${enc.requested}): ${enc.reason}`);
-    line("renders", renders.mode === "auto" ? `${renders.running} running, up to ${renders.max} (RENDER_CONCURRENCY=auto)` : `${renders.running} running, fixed ${renders.max}`);
-    line("on-device", `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`);
+    line(
+      "renders",
+      renders.mode === "auto"
+        ? `${renders.running} running, up to ${renders.max} (RENDER_CONCURRENCY=auto)`
+        : `${renders.running} running, fixed ${renders.max}`,
+    );
+    line(
+      "on-device",
+      `ONNX_EXECUTION_PROVIDER=${onDevice.requested}; faces ${onDevice.faces ?? "off"}, text ${onDevice.text ?? "off"}, alignment ${onDevice.aligner ?? "off"}, vad ${onDevice.vad ?? "off"} (the vad is always cpu)`,
+    );
     line("models", `${svc.models.get().language}, ${svc.models.get().transcription}${svc.models.get().align ? `, align ${svc.models.get().align}` : ""}`);
     const proxies = svc.media.ytdlpProxies();
-    line("ytdlp proxies", proxies.candidates.length ? `${proxies.candidates.map((c) => `${c.id} p${c.priority}`).join(", ")}${proxies.next ? ` (next ${proxies.next})` : ""}` : "this server's IP (set YTDLP_PROXY)");
-    console.log("\nSpeech-to-text and the language model run in their own containers: Speaches uses the GPU with SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda, Ollama when its container has the device (docker-compose.gpu.yml).");
+    line(
+      "ytdlp proxies",
+      proxies.candidates.length
+        ? `${proxies.candidates.map((c) => `${c.id} p${c.priority}`).join(", ")}${proxies.next ? ` (next ${proxies.next})` : ""}`
+        : "this server's IP (set YTDLP_PROXY)",
+    );
+    console.log(
+      "\nSpeech-to-text and the language model run in their own containers: Speaches uses the GPU with SPEACHES_IMAGE=ghcr.io/speaches-ai/speaches:latest-cuda, Ollama when its container has the device (docker-compose.gpu.yml).",
+    );
   },
   /**
    * Operator-ranked yt-dlp egress candidates and the circuit breaker on each. Priority is what you
@@ -738,16 +962,18 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (args.includes("--json")) return void console.log(JSON.stringify(snap, null, 2));
     if (!snap.candidates.length) return void console.log("none: yt-dlp uses this server's IP. Set YTDLP_PROXY.");
     console.log(`next  ${snap.next ?? "-"}`);
-    table(snap.candidates.map((c) => ({
-      id: c.id,
-      host: c.host,
-      priority: c.priority,
-      circuit: c.circuit,
-      inflight: c.concurrency ? `${c.inFlight}/${c.concurrency}` : c.inFlight,
-      ok: c.successes,
-      faults: c.faults,
-      rate: c.successRate === null ? "-" : `${Math.round(c.successRate * 100)}%`,
-    })));
+    table(
+      snap.candidates.map((c) => ({
+        id: c.id,
+        host: c.host,
+        priority: c.priority,
+        circuit: c.circuit,
+        inflight: c.concurrency ? `${c.inFlight}/${c.concurrency}` : c.inFlight,
+        ok: c.successes,
+        faults: c.faults,
+        rate: c.successRate === null ? "-" : `${Math.round(c.successRate * 100)}%`,
+      })),
+    );
   },
   /**
    * Every process that has checked in (API, worker, combined app): specs and what it last reported
@@ -769,7 +995,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         status: w.live ? "online" : `gone ${ago(w.lastSeenAgoSec)}`,
         cpus: w.cpus,
         mem: `${w.memTotalMB} MB`,
-        disk: w.diskFreeMB < 0 ? "n/a" : `${w.diskFreeMB} MB free of ${w.diskTotalMB} MB${w.diskLeasedMB ? `, ${w.diskLeasedMB} MB leased to jobs in flight` : ""}`,
+        disk:
+          w.diskFreeMB < 0 ? "n/a" : `${w.diskFreeMB} MB free of ${w.diskTotalMB} MB${w.diskLeasedMB ? `, ${w.diskLeasedMB} MB leased to jobs in flight` : ""}`,
         gpu: gpu(w),
         renders: `${w.renders.running}/${w.renders.max}`,
         processing: jobs(w),
@@ -853,14 +1080,33 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const u = await userByEmail(svc, pos[0]);
     const wmArg = flag("watermark");
     if (wmArg !== undefined) {
-      const parsed = wmArg === "always" || wmArg === "on" ? true : wmArg === "never" || wmArg === "off" ? false : wmArg === "follow" || wmArg === "default" ? null : undefined;
+      const parsed =
+        wmArg === "always" || wmArg === "on"
+          ? true
+          : wmArg === "never" || wmArg === "off"
+            ? false
+            : wmArg === "follow" || wmArg === "default"
+              ? null
+              : undefined;
       if (parsed === undefined) throw new Error("usage: reelsaw limits <email> [--watermark always|never|follow]");
       await setUserWatermark(svc, null, u.id, parsed);
       console.log(`watermark ${parsed === true ? "always" : parsed === false ? "never" : "follow"} for ${u.email}; next render uses it`);
     }
     const row = await svc.database.db.query.userSettings.findFirst({ where: eq(schema.userSettings.userId, u.id), columns: { limits: true, watermark: true } });
-    const [effective, used, wm] = await Promise.all([limitsFor(svc.database.db, svc.settings.get(), u.id, svc.entitlements), limitUsage(svc.database.db, u.id), watermarkFor(svc.database.db, svc.settings.get(), u, svc.entitlements)]);
-    table(LIMIT_KEYS.map((k) => ({ limit: k, instance: svc.settings.get()[k], override: row?.limits?.[k] ?? "-", "in force": effective[k] || "unlimited", "in use": used[k] })));
+    const [effective, used, wm] = await Promise.all([
+      limitsFor(svc.database.db, svc.settings.get(), u.id, svc.entitlements),
+      limitUsage(svc.database.db, u.id),
+      watermarkFor(svc.database.db, svc.settings.get(), u, svc.entitlements),
+    ]);
+    table(
+      LIMIT_KEYS.map((k) => ({
+        limit: k,
+        instance: svc.settings.get()[k],
+        override: row?.limits?.[k] ?? "-",
+        "in force": effective[k] || "unlimited",
+        "in use": used[k],
+      })),
+    );
     const override = row?.watermark === true ? "always" : row?.watermark === false ? "never" : "follow";
     console.log(`watermark next render: ${wm.on ? "on" : "off"} (${override === "follow" ? wm.source : `override ${override}`})`);
   },
@@ -883,7 +1129,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!parsed.success) throw new Error(parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("\n"));
       try {
         await svc.settings.set(parsed.data, { id: "cli", email: "cli" });
-        console.log(`saved ${[...sets.map((s) => s.split("=")[0]), ...clears.map((k) => `${k} (back to .env)`)].join(", ")}; every process applies it within ~5 s`);
+        console.log(
+          `saved ${[...sets.map((s) => s.split("=")[0]), ...clears.map((k) => `${k} (back to .env)`)].join(", ")}; every process applies it within ~5 s`,
+        );
       } catch (err) {
         if (err instanceof SettingsError) throw new Error(err.message);
         throw err;
@@ -891,22 +1139,43 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     }
     const st = svc.settings.state();
     const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "-" : String(v));
-    table(RUNTIME_KEYS.map((k) => ({ setting: k, "in force": fmt(st.values[k]), source: st.source[k] === "db" ? `set by ${st.updatedBy ?? "?"}` : ".env", ".env": fmt(st.env[k]), note: st.ignored[k] ?? "" })));
+    table(
+      RUNTIME_KEYS.map((k) => ({
+        setting: k,
+        "in force": fmt(st.values[k]),
+        source: st.source[k] === "db" ? `set by ${st.updatedBy ?? "?"}` : ".env",
+        ".env": fmt(st.env[k]),
+        note: st.ignored[k] ?? "",
+      })),
+    );
   },
   async status(svc) {
     const db = svc.database.db;
     const id = pos[0]!;
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!p) throw new Error("project not found");
-    console.log(`${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`);
-    if (p.stageDetail) console.log(`  parts: ${p.stageDetail.done} of ${p.stageDetail.total}${p.stageDetail.etaSec !== null ? `, about ${formatTime(p.stageDetail.etaSec)} left` : ""}`);
+    console.log(
+      `${p.title}\n  status=${p.status} stage=${p.stage ?? "-"} progress=${p.stageProgress ?? "-"} duration=${p.durationSec ? formatTime(p.durationSec) : "-"}`,
+    );
+    if (p.stageDetail)
+      console.log(
+        `  parts: ${p.stageDetail.done} of ${p.stageDetail.total}${p.stageDetail.etaSec !== null ? `, about ${formatTime(p.stageDetail.etaSec)} left` : ""}`,
+      );
     if (p.error) console.log(`  error: ${p.error}`);
     if (p.deletedAt) console.log(`  DELETED ${p.deletedAt.toISOString()} (reelsaw restore ${p.id})`);
-    const ev = await svc.database.pool.query<{ total: string; progress: string }>(`select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`, [id]);
-    console.log(`  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.settings.get().EVENT_RETENTION_DAYS})`);
+    const ev = await svc.database.pool.query<{ total: string; progress: string }>(
+      `select count(*) as total, count(*) filter (where type = 'stage.progress') as progress from project_events where project_id = $1`,
+      [id],
+    );
+    console.log(
+      `  events: ${ev.rows[0]!.total} stored (progress ticks are live-only and never stored; ${ev.rows[0]!.progress} refine step updates; EVENT_RETENTION_DAYS=${svc.settings.get().EVENT_RETENTION_DAYS})`,
+    );
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { refine: true, flags: true, language: true } });
     if (t) console.log(`  transcript: lang=${t.language} flags=${t.flags.length} refine=${JSON.stringify(t.refine)}`);
-    const clips = await db.query.clips.findMany({ where: eq(schema.clips.projectId, id), orderBy: [schema.clips.index, schema.clips.createdAt, schema.clips.id] });
+    const clips = await db.query.clips.findMany({
+      where: eq(schema.clips.projectId, id),
+      orderBy: [schema.clips.index, schema.clips.createdAt, schema.clips.id],
+    });
     console.log("\nclips");
     table(
       clips.map((c) => ({
@@ -936,11 +1205,23 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       [keys],
     );
     console.log("\nlive jobs");
-    table(jobs.rows.map((j) => ({ queue: j.name, state: j.state, retries: j.retry_count, key: j.singleton_key.slice(0, 8), started: j.started_on?.toISOString() ?? "" })));
+    table(
+      jobs.rows.map((j) => ({
+        queue: j.name,
+        state: j.state,
+        retries: j.retry_count,
+        key: j.singleton_key.slice(0, 8),
+        started: j.started_on?.toISOString() ?? "",
+      })),
+    );
   },
 
   async events(svc) {
-    const rows = await svc.database.db.query.projectEvents.findMany({ where: eq(schema.projectEvents.projectId, pos[0]!), orderBy: desc(schema.projectEvents.id), limit: Number(pos[1] ?? 30) });
+    const rows = await svc.database.db.query.projectEvents.findMany({
+      where: eq(schema.projectEvents.projectId, pos[0]!),
+      orderBy: desc(schema.projectEvents.id),
+      limit: Number(pos[1] ?? 30),
+    });
     for (const e of rows.reverse()) console.log(`${e.createdAt.toISOString().slice(11, 19)} ${e.type.padEnd(16)} ${JSON.stringify(e.payload).slice(0, 200)}`);
   },
 
@@ -950,7 +1231,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { diagnostics, layoutSegments, ...rest } = c;
     console.log(JSON.stringify(rest, null, 2));
     console.log("\nlayout segments");
-    table((layoutSegments ?? []).map((s) => ({ range: `${s.start}-${s.end}`, layout: s.layout, manual: s.manual, cx: s.cx, offsets: offsetsLabel(s), subject: subjectLabel(s), reason: s.reason })));
+    table(
+      (layoutSegments ?? []).map((s) => ({
+        range: `${s.start}-${s.end}`,
+        layout: s.layout,
+        manual: s.manual,
+        cx: s.cx,
+        offsets: offsetsLabel(s),
+        subject: subjectLabel(s),
+        reason: s.reason,
+      })),
+    );
     console.log("\nlast render");
     if (!diagnostics) return console.log("(no diagnostics; rendered before diagnostics existed)");
     console.log(`  at ${diagnostics.renderedAt} in ${diagnostics.renderMs} ms, ${diagnostics.outDurationSec}s out, layout ${diagnostics.layout}`);
@@ -970,17 +1261,41 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     // exactly what a render feeds the layout: static faces dropped, the per-clip text scan (2 fps) attached
     // to the nearest face sample, the divider probe (`divider.s` is its strength, 0..1) and the webcam tile
     // rectangles (`tiles`) from the same frames
-    let samples = dropStaticFaces(await sampleFaces(svc.faces, { ffmpegPath: svc.config.FFMPEG_PATH, source, startSec: c.startSec + from, durationSec: to - from, sampleFps: 4, srcAspect: (project?.width ?? 1920) / (project?.height ?? 1080) })).samples;
+    let samples = dropStaticFaces(
+      await sampleFaces(svc.faces, {
+        ffmpegPath: svc.config.FFMPEG_PATH,
+        source,
+        startSec: c.startSec + from,
+        durationSec: to - from,
+        sampleFps: 4,
+        srcAspect: (project?.width ?? 1920) / (project?.height ?? 1080),
+      }),
+    ).samples;
     if (svc.text) {
       const frames = await sampleClipText({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH }, source, c.startSec + from, to - from);
-      samples = attachText(samples, frames.map((f) => ({ t: f.t, all: f.all })));
+      samples = attachText(
+        samples,
+        frames.map((f) => ({ t: f.t, all: f.all })),
+      );
     }
     if (args.includes("--json")) return console.log(JSON.stringify(samples)); // eval fixture (samples.json)
     if (args.includes("--votes")) {
       // the content-region vote per frame and the runs it forms (what `render=trace` / `content runs` log in a render)
       const diag = newLayoutDiag();
       const segs = segmentLayouts(samples, svc.config, [], to - from, undefined, diag);
-      console.log(JSON.stringify({ segments: segs.map((sg) => ({ start: sg.start, end: sg.end, layout: sg.decision.layout, reason: sg.decision.reason })), frames: diag.frames, voting: diag.voting, candidates: diag.candidates, decisions: diag.decisions }, null, 1));
+      console.log(
+        JSON.stringify(
+          {
+            segments: segs.map((sg) => ({ start: sg.start, end: sg.end, layout: sg.decision.layout, reason: sg.decision.reason })),
+            frames: diag.frames,
+            voting: diag.voting,
+            candidates: diag.candidates,
+            decisions: diag.decisions,
+          },
+          null,
+          1,
+        ),
+      );
       return table(samples.map((sm) => voteTrace(sm)));
     }
     const d = decideLayout(samples, svc.config);
@@ -1073,7 +1388,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       console.log(`clip ${c.id.slice(0, 8)} was never prepared: queued ${r.step} (it renders afterwards)`);
     }
     for (const projectId of new Set(rows.filter((c) => !unprepared.includes(c)).map((c) => c.projectId))) {
-      const r = await rerenderClips(svc, null, { projectId, clipIds: rows.filter((c) => c.projectId === projectId && !unprepared.includes(c)).map((c) => c.id) });
+      const r = await rerenderClips(svc, null, {
+        projectId,
+        clipIds: rows.filter((c) => c.projectId === projectId && !unprepared.includes(c)).map((c) => c.id),
+      });
       console.log(`${projectId}: queued ${r.rerendered} render(s)${r.skipped ? `, skipped ${r.skipped} (still rendering)` : ""}`);
     }
   },
@@ -1086,7 +1404,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const src = await sourcePath(svc, c.projectId);
     const t0 = Date.now();
     const plan = await planClipCuts(svc, c, t ?? null, src);
-    console.log(`${plan.requested.length} flagged span(s) in clip ${c.id.slice(0, 8)} (${formatTime(c.startSec)}-${formatTime(c.endSec)}), ${Date.now() - t0} ms\n`);
+    console.log(
+      `${plan.requested.length} flagged span(s) in clip ${c.id.slice(0, 8)} (${formatTime(c.startSec)}-${formatTime(c.endSec)}), ${Date.now() - t0} ms\n`,
+    );
     const save = flag("save");
     const fixture = flag("fixture");
     for (const [i, r] of plan.requested.entries()) {
@@ -1105,11 +1425,23 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         await fs.mkdir(dir, { recursive: true });
         await fs.writeFile(`${dir}/audio.wav`, await ffmpegWav(svc, src, c.startSec + w0, w1 - w0));
         const local = (t: number) => Number((t - w0).toFixed(3));
-        const ws = (t?.rawWords ?? t?.words ?? []).filter((w) => w.end - c.startSec > w0 && w.start - c.startSec < w1).map((w) => ({ text: w.text, start: local(w.start - c.startSec), end: local(w.end - c.startSec) }));
+        const ws = (t?.rawWords ?? t?.words ?? [])
+          .filter((w) => w.end - c.startSec > w0 && w.start - c.startSec < w1)
+          .map((w) => ({ text: w.text, start: local(w.start - c.startSec), end: local(w.end - c.startSec) }));
         const deleted = ws.filter((w) => w.start >= local(r.start) - 0.02 && w.end <= local(r.end) + 0.02).map((w) => w.text);
         await fs.writeFile(
           `${dir}/case.json`,
-          JSON.stringify({ source: { projectId: c.projectId, clipId: c.id, at: c.startSec + r.start }, range: { start: local(r.start), end: local(r.end) }, deleted, words: ws, note: "" }, null, 2),
+          JSON.stringify(
+            {
+              source: { projectId: c.projectId, clipId: c.id, at: c.startSec + r.start },
+              range: { start: local(r.start), end: local(r.end) },
+              deleted,
+              words: ws,
+              note: "",
+            },
+            null,
+            2,
+          ),
         );
         console.log(`    fixture ${dir}`);
       }
@@ -1146,12 +1478,23 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (pos[0] === "sweep") {
       const dry = args.includes("--dry-run");
       const r = await sweepScratch(svc, { dryRun: dry });
-      table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "", gen: x.gen ?? "" })));
+      table(
+        r.removals.map((x) => ({
+          kind: x.kind,
+          path: x.path,
+          size: formatBytes(x.bytes),
+          project: x.projectId?.slice(0, 8) ?? "",
+          clip: x.clipId?.slice(0, 8) ?? "",
+          gen: x.gen ?? "",
+        })),
+      );
       console.log(`${dry ? "would remove" : "removed"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}`);
       const gone = await purgeBumperAssets(svc, { dryRun: dry });
       console.log(`${dry ? "would purge" : "purged"} ${gone.length} library asset(s) (removed over 30 days ago, or shared and unused) and used nowhere`);
       const del = await purgeDeleted(svc, { dryRun: dry });
-      console.log(`${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`);
+      console.log(
+        `${dry ? "would purge" : "purged"} ${del.projects.length} deleted project(s) and ${del.clips.length} replaced clip(s) (DELETED_RETENTION_DAYS=${svc.config.DELETED_RETENTION_DAYS})`,
+      );
       return;
     }
     if (pos[0] === "reclaim") {
@@ -1160,9 +1503,20 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!Number.isFinite(mb) || mb <= 0) throw new Error("usage: reelsaw storage reclaim <MB> [--dry-run]");
       const dry = args.includes("--dry-run");
       const r = await reclaimScratch(svc, mb * 1048576, { dryRun: dry });
-      table(r.removals.map((x) => ({ kind: x.kind, path: x.path, size: formatBytes(x.bytes), project: x.projectId?.slice(0, 8) ?? "", clip: x.clipId?.slice(0, 8) ?? "" })));
-      console.log(`${dry ? "would evict" : "evicted"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}${r.enough ? "" : " (not enough: nothing else is evictable)"}`);
-      if (svc.storage.driver !== "s3") console.log("the local store hardlinks scratch and store: nothing to evict (set SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS to free disk)");
+      table(
+        r.removals.map((x) => ({
+          kind: x.kind,
+          path: x.path,
+          size: formatBytes(x.bytes),
+          project: x.projectId?.slice(0, 8) ?? "",
+          clip: x.clipId?.slice(0, 8) ?? "",
+        })),
+      );
+      console.log(
+        `${dry ? "would evict" : "evicted"} ${r.removals.length} file(s), ${formatBytes(r.bytes)}${r.enough ? "" : " (not enough: nothing else is evictable)"}`,
+      );
+      if (svc.storage.driver !== "s3")
+        console.log("the local store hardlinks scratch and store: nothing to evict (set SOURCE_RETENTION_DAYS / CLIP_RETENTION_DAYS to free disk)");
       return;
     }
     const r = await storageReport(svc);
@@ -1173,9 +1527,13 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
         ? `scratch copies of stored files                       not evictable (${svc.storage.driver === "s3" ? "SCRATCH_CACHE_HOURS=0" : "local store: scratch and store are one file"})`
         : `scratch copies of stored files (S3 has them)         ${formatBytes(r.cacheBytes)} in ${r.cacheFiles} file(s); evicted after ${r.cacheIdleHours}h idle (SCRATCH_CACHE_HOURS), sooner when a job is short of disk`,
     );
-    console.log(`leased to jobs in flight on this volume              ${r.leasedMB} MB by ${r.leasedJobs} job(s) (claimed before the bytes land; free space minus this is what a new job may take)`);
+    console.log(
+      `leased to jobs in flight on this volume              ${r.leasedMB} MB by ${r.leasedJobs} job(s) (claimed before the bytes land; free space minus this is what a new job may take)`,
+    );
     console.log(`duplicate sources (same video, several projects)     ${formatBytes(r.duplicateSourceBytes)} in ${r.duplicateSourceGroups} video(s)`);
-    console.log(`expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`);
+    console.log(
+      `expired but still on disk (SOURCE_RETENTION_DAYS=${svc.config.SOURCE_RETENTION_DAYS})   ${formatBytes(r.expiredButPresentBytes)} in ${r.expiredButPresentProjects} project(s)`,
+    );
     if (r.scratchOrphanFiles) console.log("run `reelsaw storage sweep` to remove the leftovers");
     const sw = await readSweepState(svc);
     console.log(
@@ -1187,12 +1545,21 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
 
   async stuck(svc) {
     const db = svc.database.db;
-    const projects = await db.query.projects.findMany({ where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]) });
+    const projects = await db.query.projects.findMany({
+      where: inArray(schema.projects.status, ["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]),
+    });
     if (!projects.length) return console.log("nothing in progress");
     const ago = (d?: Date | null) => (d ? `${Math.round((Date.now() - d.getTime()) / 60_000)}m` : "-");
     for (const p of projects) {
       const last = await db.query.projectEvents.findFirst({ where: eq(schema.projectEvents.projectId, p.id), orderBy: desc(schema.projectEvents.id) });
-      const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; singleton_key: string; started_on: Date | null; output: unknown }>(
+      const jobs = await svc.database.pool.query<{
+        name: string;
+        state: string;
+        retry_count: number;
+        singleton_key: string;
+        started_on: Date | null;
+        output: unknown;
+      }>(
         `select name, state, retry_count, singleton_key, started_on, output from pgboss.job where data->>'projectId' = $1 and state in ('created','retry','active') order by created_on`,
         [p.id],
       );
@@ -1202,11 +1569,25 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       table(
         clips.map((c) => {
           const js = jobFor(c.id);
-          const problems = [needsPrepare(c) && c.status !== "preparing" ? "unprepared" : "", !js.length ? "NO JOB" : "", js.some((j) => j.retry_count > 0) ? "retried" : ""].filter(Boolean).join(",");
-          return { clip: c.id.slice(0, 8), status: c.status, origin: c.origin, jobs: js.map((j) => `${j.name}:${j.state}#${j.retry_count}`).join(" "), running: js[0] ? ago(js[0].started_on) : "", problems };
+          const problems = [
+            needsPrepare(c) && c.status !== "preparing" ? "unprepared" : "",
+            !js.length ? "NO JOB" : "",
+            js.some((j) => j.retry_count > 0) ? "retried" : "",
+          ]
+            .filter(Boolean)
+            .join(",");
+          return {
+            clip: c.id.slice(0, 8),
+            status: c.status,
+            origin: c.origin,
+            jobs: js.map((j) => `${j.name}:${j.state}#${j.retry_count}`).join(" "),
+            running: js[0] ? ago(js[0].started_on) : "",
+            problems,
+          };
         }),
       );
-      for (const j of jobs.rows.filter((j) => j.retry_count > 0)) console.log(`  ${j.name} ${j.singleton_key.slice(0, 8)} previous attempt: ${JSON.stringify(j.output).slice(0, 160)}`);
+      for (const j of jobs.rows.filter((j) => j.retry_count > 0))
+        console.log(`  ${j.name} ${j.singleton_key.slice(0, 8)} previous attempt: ${JSON.stringify(j.output).slice(0, 160)}`);
     }
     console.log("\nfix: reelsaw recover <clipId|projectId>");
   },
@@ -1218,7 +1599,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const c = await db.query.clips.findFirst({ where: eq(schema.clips.id, id), columns: { id: true } });
     if (c) {
       const r = await rerenderClip(svc, null, c.id);
-      return console.log(r.step === "prepare" ? `clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)` : `queued render for clip ${c.id.slice(0, 8)}`);
+      return console.log(
+        r.step === "prepare"
+          ? `clip ${c.id.slice(0, 8)} was never prepared: queued clip.prepare (renders afterwards)`
+          : `queued render for clip ${c.id.slice(0, 8)}`,
+      );
     }
     const p = await db.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!p) throw new Error("no clip or project with that id");
@@ -1241,7 +1626,13 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (flag("since") && sinceMs === undefined) throw new Error("--since takes a duration like 90s, 15m, 2h");
     const level = flag("level");
     if (level && !(level in LEVEL_NUM)) throw new Error(`--level is one of ${Object.keys(LEVEL_NUM).join(", ")}`);
-    const { lines, files } = await readLogLines(file, { ids: [id], since: sinceMs ? new Date(Date.now() - sinceMs) : undefined, minLevel: level as keyof typeof LEVEL_NUM | undefined, module: flag("module"), limit: n });
+    const { lines, files } = await readLogLines(file, {
+      ids: [id],
+      since: sinceMs ? new Date(Date.now() - sinceMs) : undefined,
+      minLevel: level as keyof typeof LEVEL_NUM | undefined,
+      module: flag("module"),
+      limit: n,
+    });
     for (const line of lines) {
       if (args.includes("--raw")) {
         console.log(line);
@@ -1250,7 +1641,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       try {
         const d = JSON.parse(line) as Record<string, unknown> & { time: string; level: number; msg: string; module?: string; err?: { message?: string } };
         const { time, level: lv, msg, app: _a, role: _r, pid: _p, hostname: _h, err, module: mod, projectId: _pid, ...rest } = d;
-        console.log(`${time.slice(5, 23).replace("T", " ")} ${LEVEL_LABEL[lv] ?? String(lv)} ${mod ? `[${mod}] ` : ""}${msg} ${JSON.stringify(rest).slice(0, 260)}${err?.message ? `\n    err: ${err.message.slice(0, 300)}` : ""}`);
+        console.log(
+          `${time.slice(5, 23).replace("T", " ")} ${LEVEL_LABEL[lv] ?? String(lv)} ${mod ? `[${mod}] ` : ""}${msg} ${JSON.stringify(rest).slice(0, 260)}${err?.message ? `\n    err: ${err.message.slice(0, 300)}` : ""}`,
+        );
       } catch {
         console.log(line.slice(0, 300));
       }
@@ -1262,11 +1655,18 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const { parseLogLevels, formatLogLevels } = await import("./log.js");
     const env = parseLogLevels(process.env.LOG_LEVEL || "info");
     const show = (st: Awaited<ReturnType<typeof svc.logLevel.refresh>> & { acks?: number | undefined }) => {
-      if (st.acks !== undefined) console.log(st.acks > 0 ? `applied by ${st.acks} process(es)` : "no running process answered within 2 s (they will pick it up within ~5 s, or none is running)");
+      if (st.acks !== undefined)
+        console.log(
+          st.acks > 0 ? `applied by ${st.acks} process(es)` : "no running process answered within 2 s (they will pick it up within ~5 s, or none is running)",
+        );
       const effective = st.override ? mergeLogLevels(env, st.override.spec) : env;
       console.log(`effective   ${formatLogLevels(effective)}`);
       console.log(`environment ${formatLogLevels(env)}  (LOG_LEVEL)`);
-      console.log(st.override ? `override    ${st.override.spec} until ${st.override.until} (set by ${st.override.by ?? "?"}); every process applies it within ~5 s` : "override    none");
+      console.log(
+        st.override
+          ? `override    ${st.override.spec} until ${st.override.until} (set by ${st.override.by ?? "?"}); every process applies it within ~5 s`
+          : "override    none",
+      );
     };
     const spec = pos[0];
     if (!spec) return show(await svc.logLevel.refresh());
@@ -1283,7 +1683,12 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const cuts = await svc.media.detectScenes(await sourcePath(svc, id));
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { sceneCuts: true } });
     console.log(`${cuts.length} shot cuts in ${Date.now() - t0} ms (stored: ${t?.sceneCuts?.length ?? 0})`);
-    console.log(cuts.slice(0, 40).map((c) => formatTime(c)).join(" ") + (cuts.length > 40 ? " …" : ""));
+    console.log(
+      cuts
+        .slice(0, 40)
+        .map((c) => formatTime(c))
+        .join(" ") + (cuts.length > 40 ? " …" : ""),
+    );
     if (args.includes("--store")) {
       await db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, id));
       console.log("stored; re-run `reelsaw overlays <id> --store` and re-render clips to use them");
@@ -1294,19 +1699,40 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async library(svc) {
     const o = bumperArgs();
     const [sub, a, b] = o.pos;
-    const usage = "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
+    const usage =
+      "usage: reelsaw library list [--kind video|image|audio] [--q text] | search <q…> [--source library|catalog|<provider>] [--kind k] [--license cc0|by] | add <file|url|provider:externalId> [--name n] [--tags a,b] [--color #hex] | update <id> --tags a,b | rename <id> <name…> | delete <id> | restore <id> | purge <id> | usage <id> | default <intro|outro> <id|none> | reindex   [--user <email>]";
     if (sub === "reindex") {
       const r = await backfillAssetRefs(svc, { all: true });
       console.log(`reindexed ${r.projects} project(s), ${r.clips} clip(s), ${r.refs} reference(s)`);
       return;
     }
     const { api, user } = await bumperApi(svc, undefined);
-    const tagList = o.tags === undefined ? undefined : o.tags.split(",").map((t) => t.trim()).filter(Boolean);
+    const tagList =
+      o.tags === undefined
+        ? undefined
+        : o.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
     if (sub === "list") {
       const lib = await libraryView(svc, api, user.id);
       const q = o.q?.toLowerCase();
-      const keep = (x: (typeof lib.assets)[number]) => (!o.kind || x.kind === o.kind) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
-      const row = (x: (typeof lib.assets)[number]) => ({ id: x.id, name: x.name, kind: x.kind, type: x.mime ?? "", owner: x.owner, tags: x.tags.join(","), sec: x.durationSec, size: `${x.width}x${x.height}`, default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"), usedBy: x.usedBy, clips: x.usedByClips, templates: x.usedByTemplates });
+      const keep = (x: (typeof lib.assets)[number]) =>
+        (!o.kind || x.kind === o.kind) && (!q || x.name.toLowerCase().includes(q) || x.tags.some((t) => t.includes(q)));
+      const row = (x: (typeof lib.assets)[number]) => ({
+        id: x.id,
+        name: x.name,
+        kind: x.kind,
+        type: x.mime ?? "",
+        owner: x.owner,
+        tags: x.tags.join(","),
+        sec: x.durationSec,
+        size: `${x.width}x${x.height}`,
+        default: [x.isDefaultIntro && "intro", x.isDefaultOutro && "outro"].filter(Boolean).join("+"),
+        usedBy: x.usedBy,
+        clips: x.usedByClips,
+        templates: x.usedByTemplates,
+      });
       table(lib.assets.filter(keep).map(row));
       const removed = lib.deleted.filter(keep);
       if (removed.length) {
@@ -1326,7 +1752,10 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (!u.projects.length && !u.templates.length) console.log("(not used)");
       for (const p of u.projects) {
         console.log(`${p.title}  ${p.id}  project slots: ${p.slots.join(",") || "-"}`);
-        for (const c of p.clips) console.log(`  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay×${c.overlays}` : s === "music" && c.music > 1 ? `music×${c.music}` : s)).join(",")} via ${c.via}`);
+        for (const c of p.clips)
+          console.log(
+            `  clip #${c.index + 1} ${c.id.slice(0, 8)} ${c.title}  ${c.slots.map((s) => (s === "overlay" && c.overlays > 1 ? `overlay×${c.overlays}` : s === "music" && c.music > 1 ? `music×${c.music}` : s)).join(",")} via ${c.via}`,
+          );
       }
       for (const t of u.templates) console.log(`template ${t.name}  ${t.id}  (${t.layers} layer(s))`);
     } else if (sub === "default" && (a === "intro" || a === "outro") && b) {
@@ -1352,7 +1781,17 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const kind = o.kind as "video" | "image" | "audio" | undefined;
       const r = await api.library.search({ source: o.source, q: o.pos.slice(1).join(" "), kind, license: o.license as "cc0" | "by" | undefined, limit: 24 });
       if (r.unavailable) console.log(r.unavailable);
-      table(r.items.map((i) => ({ provider: i.provider, externalId: i.externalId, kind: i.kind, name: i.name, license: i.license.name, sec: i.durationSec ?? "", attribution: i.attribution ?? "" })));
+      table(
+        r.items.map((i) => ({
+          provider: i.provider,
+          externalId: i.externalId,
+          kind: i.kind,
+          name: i.name,
+          license: i.license.name,
+          sec: i.durationSec ?? "",
+          attribution: i.attribution ?? "",
+        })),
+      );
       if (r.nextCursor) console.log(`more results exist: narrow the query (the web Browse panel pages through them)`);
     } else throw new Error(usage);
   },
@@ -1364,29 +1803,69 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const st = sub === "refresh" ? (await catalog.refresh({ force: true })).status : await catalog.status();
     console.log(`catalog v${st.version} (${st.items} items, ${st.source}; bundled v${st.bundledVersion}) generated ${st.generatedAt}`);
     console.log(`source ${st.url}  etag ${st.etag ?? "-"}  last checked ${st.lastCheckedAt ?? "never"}${st.lastError ? `  last error: ${st.lastError}` : ""}`);
-    console.log(`providers: ${registry.list().map((p) => `${p.id}${p.available ? "" : " (rate limited)"}`).join(", ")}`);
+    console.log(
+      `providers: ${registry
+        .list()
+        .map((p) => `${p.id}${p.available ? "" : " (rate limited)"}`)
+        .join(", ")}`,
+    );
   },
   async "project-bumpers"(svc) {
     const { pos: p, rerender, ...o } = bumperArgs();
-    if (!p[0]) throw new Error("usage: reelsaw project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
+    if (!p[0])
+      throw new Error("usage: reelsaw project-bumpers <projectId> [--intro default|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
     const { api } = await bumperApi(svc, p[0]);
-    const r = await api.projects.setBumpers(projectBumpersCall({ projectId: p[0], intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
+    const r = await api.projects.setBumpers(
+      projectBumpersCall({ projectId: p[0], intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }),
+    );
     console.log(`updated; ${r.rerendered} clip(s) queued for re-render${rerender ? "" : " (pass --rerender to apply to finished clips now)"}`);
   },
   async "clip-bumpers"(svc) {
     const { pos: p, rerender, ...o } = bumperArgs();
-    if (p.length < 2) throw new Error("usage: reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
+    if (p.length < 2)
+      throw new Error("usage: reelsaw clip-bumpers <projectId> <clipId…> [--intro inherit|none|<id>] [--outro …] [--intro-sec n] [--outro-sec n] [--rerender]");
     const { api } = await bumperApi(svc, p[0]);
-    const r = await api.clips.setBumpersMany(clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }));
+    const r = await api.clips.setBumpersMany(
+      clipBumpersCall({ projectId: p[0]!, clipIds: p.slice(1), intro: o.intro, outro: o.outro, introSec: o.introSec, outroSec: o.outroSec, rerender }),
+    );
     console.log(`updated ${r.updated} clip(s); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
   },
   async "clip-layers"(svc) {
-    const { pos: p, rerender, set, add, addText, addSound, remove, clear, from, to, x, y, w, size, color, box, font, opacity, volume, offset, fade, duck, noDuck, loop, noLoop } = bumperArgs();
+    const {
+      pos: p,
+      rerender,
+      set,
+      add,
+      addText,
+      addSound,
+      remove,
+      clear,
+      from,
+      to,
+      x,
+      y,
+      w,
+      size,
+      color,
+      box,
+      font,
+      opacity,
+      volume,
+      offset,
+      fade,
+      duck,
+      noDuck,
+      loop,
+      noLoop,
+    } = bumperArgs();
     const usage =
       "usage: reelsaw clip-layers <projectId> <clipId> [--set '<json array>' | --add <assetId> --from <sec> --to <sec> [--x f] [--y f] [--w f] [--opacity f] [--loop|--no-loop] | --add-text <text> --from <sec> --to <sec> [--x f] [--y f] [--size f] [--color #RRGGBB] [--font <family>] [--box] [--opacity f] | --add-sound <assetId> --from <sec> --to <sec> [--volume 0-1] [--offset <sec>] [--fade <sec>] [--duck|--no-duck] [--loop|--no-loop] | --remove <layerId> | --clear] [--rerender]";
     if (p.length < 2) throw new Error(usage);
     const { api, user } = await bumperApi(svc, p[0]);
-    const clip = await svc.database.db.query.clips.findFirst({ where: and(eq(schema.clips.id, p[1]!), eq(schema.clips.projectId, p[0]!)), columns: { id: true, startSec: true, endSec: true, layers: true, overlays: true, audio: true } });
+    const clip = await svc.database.db.query.clips.findFirst({
+      where: and(eq(schema.clips.id, p[1]!), eq(schema.clips.projectId, p[0]!)),
+      columns: { id: true, startSec: true, endSec: true, layers: true, overlays: true, audio: true },
+    });
     if (!clip) throw new Error("clip not found in this project");
     const current = clipLayers(clip);
     const modes = [set !== undefined, add !== undefined, addText !== undefined, addSound !== undefined, remove !== undefined, clear].filter(Boolean).length;
@@ -1403,14 +1882,25 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const common = { id: newId(), start: from, end: to, x: x ?? 0.5, y: y ?? 0.5, ...(opacity !== undefined ? { opacity } : {}) };
       const parsed = clipLayerSchema.safeParse(
         addText !== undefined
-          ? { ...common, kind: "text", text: addText, ...(size !== undefined ? { size } : {}), ...(color ? { color } : {}), ...(box ? { box: true } : {}), ...(font ? { font } : {}) }
+          ? {
+              ...common,
+              kind: "text",
+              text: addText,
+              ...(size !== undefined ? { size } : {}),
+              ...(color ? { color } : {}),
+              ...(box ? { box: true } : {}),
+              ...(font ? { font } : {}),
+            }
           : { ...common, kind: "asset", assetId: add, w: w ?? ASSET_OVERLAY_DEFAULT_W, ...(loop ? { loop: true } : noLoop ? { loop: false } : {}) },
       );
       if (!parsed.success) throw fail(parsed.error.issues);
       next = [...current, parsed.data];
     } else if (addSound !== undefined) {
       if (from === undefined) throw new Error(`--add-sound needs --from (and --to; a sound effect defaults to its own length)\n${usage}`);
-      const asset = await svc.database.db.query.assets.findFirst({ where: and(eq(schema.assets.id, addSound), assetVisibleTo(user.id)), columns: { kind: true, durationSec: true } });
+      const asset = await svc.database.db.query.assets.findFirst({
+        where: and(eq(schema.assets.id, addSound), assetVisibleTo(user.id)),
+        columns: { kind: true, durationSec: true },
+      });
       if (!asset) throw new Error(`no library item ${addSound}`);
       if (asset.kind !== "audio") throw new Error(`${addSound} is a ${asset.kind}, not a sound: use --add`);
       // a short file is a one-shot at full level; anything else is music (ducked, faded, looped)
@@ -1437,7 +1927,11 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       if (next.length === current.length) throw new Error(`no layer ${remove} on this clip`);
     } else if (clear) next = [];
     if (modes) await api.clips.update({ id: clip.id, layers: next, rerender });
-    const shown = modes ? clipLayers((await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, clip.id), columns: { layers: true, overlays: true, audio: true } })) ?? {}) : next;
+    const shown = modes
+      ? clipLayers(
+          (await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, clip.id), columns: { layers: true, overlays: true, audio: true } })) ?? {},
+        )
+      : next;
     if (!shown.length) console.log("no layers on this clip");
     else
       table(
@@ -1446,8 +1940,14 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
           kind: l.kind,
           what: l.kind === "text" ? `“${l.text}”` : l.assetId,
           source: `${l.start}-${l.end}`,
-          position: l.kind === "audio" ? "" : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
-          sound: l.kind === "audio" ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}` : "",
+          position:
+            l.kind === "audio"
+              ? ""
+              : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
+          sound:
+            l.kind === "audio"
+              ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}`
+              : "",
         })),
       );
     if (!modes) return;
@@ -1458,14 +1958,24 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   async "apply-framing"(svc) {
     const usage = "usage: reelsaw apply-framing <clipId> [--at <sec>] [--keep-overrides] [--no-rerender]   [--user <email>]";
     if (!pos[0]) throw new Error(usage);
-    const c = await svc.database.db.query.clips.findFirst({ where: eq(schema.clips.id, pos[0]), columns: { id: true, projectId: true, startSec: true, layoutSections: true, layoutOverride: true } });
+    const c = await svc.database.db.query.clips.findFirst({
+      where: eq(schema.clips.id, pos[0]),
+      columns: { id: true, projectId: true, startSec: true, layoutSections: true, layoutOverride: true },
+    });
     if (!c) throw new Error("clip not found");
     const at = flag("at") !== undefined ? Number(flag("at")) : undefined;
     if (at !== undefined && !Number.isFinite(at)) throw new Error(`--at needs seconds\n${usage}`);
     const { api } = await bumperApi(svc, c.projectId);
     const t = framingOfClip(c, at);
-    const r = await api.projects.applyFraming({ id: c.projectId, ...t, keepOverrides: args.includes("--keep-overrides"), rerender: !args.includes("--no-rerender") });
-    console.log(`${c.projectId}: framing ${r.reframe}${r.adjust ? ` ${JSON.stringify(r.adjust)}` : ""}; ${r.cleared} clip(s) lost their own sections; queued ${r.rerendered} render(s)`);
+    const r = await api.projects.applyFraming({
+      id: c.projectId,
+      ...t,
+      keepOverrides: args.includes("--keep-overrides"),
+      rerender: !args.includes("--no-rerender"),
+    });
+    console.log(
+      `${c.projectId}: framing ${r.reframe}${r.adjust ? ` ${JSON.stringify(r.adjust)}` : ""}; ${r.cleared} clip(s) lost their own sections; queued ${r.rerendered} render(s)`,
+    );
   },
 
   async templates(svc) {
@@ -1475,11 +1985,21 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const [sub, a, b] = p;
     if (!sub) throw new Error(usage);
     const { api } = await bumperApi(svc, sub === "save" ? a : sub === "apply" ? b : undefined);
-    const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) => console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s)${templateBumpersText(t.bumpers)})`);
+    const show = (t: { id: string; name: string; layerCount: number; bumpers: TemplateBumpers | null }) =>
+      console.log(`${t.id}  ${t.name}  (${t.layerCount} layer(s)${templateBumpersText(t.bumpers)})`);
     if (sub === "list") {
       const r = await api.layerTemplates.list({ limit: 500 });
       if (!r.items.length) console.log("no layer templates");
-      else table(r.items.map((t) => ({ id: t.id, name: t.name, layers: t.layerCount, "intro/outro": templateBumpersText(t.bumpers).replace(/^; /, ""), updated: t.updatedAt })));
+      else
+        table(
+          r.items.map((t) => ({
+            id: t.id,
+            name: t.name,
+            layers: t.layerCount,
+            "intro/outro": templateBumpersText(t.bumpers).replace(/^; /, ""),
+            updated: t.updatedAt,
+          })),
+        );
       if (r.nextCursor) console.log(`showing the newest ${r.items.length} of ${r.total}`);
       if (r.deleted.length) {
         console.log("removed in the last 30 days (reelsaw templates restore <id>):");
@@ -1497,8 +2017,14 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
             kind: l.kind,
             what: l.kind === "text" ? `“${l.text}”` : l.assetId,
             timing: timingText(l.timing),
-            position: l.kind === "audio" ? "" : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
-            sound: l.kind === "audio" ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}` : "",
+            position:
+              l.kind === "audio"
+                ? ""
+                : `${l.x ?? 0.5},${l.y ?? 0.5}${l.kind === "asset" ? ` w ${l.w ?? ASSET_OVERLAY_DEFAULT_W}` : ` size ${l.size ?? TEXT_OVERLAY_DEFAULTS.size}${l.box ? " box" : ""}`}`,
+            sound:
+              l.kind === "audio"
+                ? `vol ${l.volume ?? CLIP_AUDIO_DEFAULTS.volume} duck ${l.duck ?? CLIP_AUDIO_DEFAULTS.duck} fade ${l.fade ?? CLIP_AUDIO_DEFAULTS.fade} loop ${l.loop ?? CLIP_AUDIO_DEFAULTS.loop}${l.offset ? ` offset ${l.offset}` : ""}`
+                : "",
           })),
         );
     } else if (sub === "save") {
@@ -1515,7 +2041,8 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
       const slots = slot.intro !== undefined || slot.outro !== undefined || slot.introSec !== undefined || slot.outroSec !== undefined;
       if (!a || (layers === undefined && !slots)) throw new Error(usage);
       const parsed = layers === undefined ? undefined : z.array(templateLayerSchema).safeParse(JSON.parse(layers));
-      if (parsed && !parsed.success) throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      if (parsed && !parsed.success)
+        throw new Error(`--layers needs a JSON array of template layers: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       const bumpers = slots ? templateBumpersWith((await api.layerTemplates.get({ id: a })).bumpers, slot) : undefined;
       const t = await api.layerTemplates.update({ id: a, ...(parsed ? { layers: parsed.data } : {}), ...(bumpers !== undefined ? { bumpers } : {}) });
       console.log("updated:");
@@ -1523,7 +2050,9 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "delete") {
       if (!a) throw new Error(usage);
       const r = await api.layerTemplates.delete({ id: a });
-      console.log(`deleted (restore with: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`);
+      console.log(
+        `deleted (restore with: reelsaw templates restore ${a})${r.clearedDefault ? "; it was your default for new projects, which is cleared" : ""}`,
+      );
     } else if (sub === "restore") {
       if (!a) throw new Error(usage);
       console.log("restored:");
@@ -1535,8 +2064,16 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     } else if (sub === "apply") {
       if (!a || !b) throw new Error(usage);
       const clipIds = p.slice(3);
-      const r = await api.layerTemplates.applyToClips({ templateId: a, projectId: b, ...(clipIds.length ? { clipIds } : {}), mode: addMode ? "add" : "replace", rerender });
-      console.log(`updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`);
+      const r = await api.layerTemplates.applyToClips({
+        templateId: a,
+        projectId: b,
+        ...(clipIds.length ? { clipIds } : {}),
+        mode: addMode ? "add" : "replace",
+        rerender,
+      });
+      console.log(
+        `updated ${r.updated} clip(s) (${addMode ? "added to their layers" : "replacing their layers"}${r.bumpers.length ? `, setting their ${r.bumpers.join(" and ")}` : ""}); ${r.rerendered} queued for re-render${rerender ? "" : " (pass --rerender to apply now)"}`,
+      );
       if (r.layersSkipped) console.log(`${r.layersSkipped} template layer(s) had no room on their clip and were left out`);
       for (const s of r.skipped) console.log(`skipped clip ${s.clipId}: ${s.reason}`);
     } else throw new Error(usage);
@@ -1550,12 +2087,28 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!p?.durationSec) throw new Error("project not ingested");
     const t = await db.query.transcripts.findFirst({ where: eq(schema.transcripts.projectId, id), columns: { sceneCuts: true } });
     const t0 = Date.now();
-    const scan = await detectOverlays({ detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, faces: svc.faces }, await sourcePath(svc, id), p.durationSec, t?.sceneCuts ?? []);
+    const scan = await detectOverlays(
+      { detector: svc.text, ffmpegPath: svc.config.FFMPEG_PATH, faces: svc.faces },
+      await sourcePath(svc, id),
+      p.durationSec,
+      t?.sceneCuts ?? [],
+    );
     console.log(`${scan.frames} frames across ${scan.scenes} shots in ${Date.now() - t0} ms (${scan.slides} slide frames skipped)`);
-    console.log(`text-heavy frames: ${scan.textProfile.textHeavy}/${scan.textProfile.frames}${scan.textProfile.presentation ? " → presentation: on-screen text is kept unless the project says \"always\"" : ""}`);
-    if (scan.moving.length) console.log(`dropped ${scan.moving.length} region(s) whose text drifts (scene text): ${scan.moving.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
-    if (scan.ui.length) console.log(`dropped ${scan.ui.length} region(s) of game or app interface (scores, player lists, menus): ${scan.ui.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
-    if (scan.faceDropped.length) console.log(`dropped ${scan.faceDropped.length} region(s) that kept landing on faces: ${scan.faceDropped.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`);
+    console.log(
+      `text-heavy frames: ${scan.textProfile.textHeavy}/${scan.textProfile.frames}${scan.textProfile.presentation ? ' → presentation: on-screen text is kept unless the project says "always"' : ""}`,
+    );
+    if (scan.moving.length)
+      console.log(
+        `dropped ${scan.moving.length} region(s) whose text drifts (scene text): ${scan.moving.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+      );
+    if (scan.ui.length)
+      console.log(
+        `dropped ${scan.ui.length} region(s) of game or app interface (scores, player lists, menus): ${scan.ui.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+      );
+    if (scan.faceDropped.length)
+      console.log(
+        `dropped ${scan.faceDropped.length} region(s) that kept landing on faces: ${scan.faceDropped.map((o) => `${o.x1}-${o.x2} × ${o.y1}-${o.y2}`).join(", ")}`,
+      );
     table(scan.overlays.map((o) => ({ kind: o.kind, x: `${o.x1}-${o.x2}`, y: `${o.y1}-${o.y2}`, coverage: o.coverage })));
     if (flag("store") !== undefined || args.includes("--store")) {
       await db.update(schema.transcripts).set({ overlays: scan.overlays, textProfile: scan.textProfile }).where(eq(schema.transcripts.projectId, id));
@@ -1570,7 +2123,15 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     table(
       (t?.flags ?? [])
         .filter((f) => f.start >= from && f.end <= to)
-        .map((f) => ({ at: formatTime(f.start), kind: f.kind, sub: f.subkind ?? "", heard: f.heard, fix: f.replacement ?? "", status: f.status, conf: Math.round(f.confidence * 100) })),
+        .map((f) => ({
+          at: formatTime(f.start),
+          kind: f.kind,
+          sub: f.subkind ?? "",
+          heard: f.heard,
+          fix: f.replacement ?? "",
+          status: f.status,
+          conf: Math.round(f.confidence * 100),
+        })),
     );
   },
 };
@@ -1695,7 +2256,16 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
   if (!user) throw new Error("user not found");
   console.error(`acting as ${user.email}`);
   const req = new Request(svc.config.APP_URL);
-  return { user, api: appRouter.createCaller({ svc, who: { user, via: "apikey", canAdminister: true, session: null, blocked: null }, req, requestId: "cli", log: svc.log.child({ module: "cli", userId: user.id }) }) };
+  return {
+    user,
+    api: appRouter.createCaller({
+      svc,
+      who: { user, via: "apikey", canAdminister: true, session: null, blocked: null },
+      req,
+      requestId: "cli",
+      log: svc.log.child({ module: "cli", userId: user.id }),
+    }),
+  };
 }
 
 async function userByEmail(svc: Services, email: string | undefined) {
@@ -1762,10 +2332,19 @@ async function run() {
   if (cmd === "mcp") return runMcpStdio(process.env);
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
-    console.log("usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)");
+    console.log(
+      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+    );
     process.exit(cmd ? 2 : 0);
   }
-  const svc = await createServices({ ...process.env, RUN_HTTP: "false", RUN_WORKERS: "false", OTEL_ENABLED: "false", REELSAW_CLI: "1", LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn" });
+  const svc = await createServices({
+    ...process.env,
+    RUN_HTTP: "false",
+    RUN_WORKERS: "false",
+    OTEL_ENABLED: "false",
+    REELSAW_CLI: "1",
+    LOG_LEVEL: process.env.CLI_LOG_LEVEL ?? "warn",
+  });
   try {
     await fn(svc);
   } finally {

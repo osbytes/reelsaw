@@ -84,7 +84,8 @@ export function alignWords(ref: string[], hyp: string[]): { wer: number; matched
   for (let j = 0; j <= hyp.length; j++) d[j] = j;
   for (let i = 1; i <= ref.length; i++) {
     d[i * w] = i;
-    for (let j = 1; j <= hyp.length; j++) d[i * w + j] = Math.min(d[(i - 1) * w + j]! + 1, d[i * w + j - 1]! + 1, d[(i - 1) * w + j - 1]! + (ref[i - 1] === hyp[j - 1] ? 0 : 1));
+    for (let j = 1; j <= hyp.length; j++)
+      d[i * w + j] = Math.min(d[(i - 1) * w + j]! + 1, d[i * w + j - 1]! + 1, d[(i - 1) * w + j - 1]! + (ref[i - 1] === hyp[j - 1] ? 0 : 1));
   }
   const matched = new Array<boolean>(ref.length).fill(false);
   let i = ref.length;
@@ -155,7 +156,24 @@ async function audioFor(ctx: Parameters<Suite["run"]>[0], c: Case, audioDir: str
     } catch (err) {
       return { skipped: `media unavailable: ${(err as Error).message.slice(0, 140)}` };
     }
-    await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-y", "-i", media, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", file]);
+    await ctx.exec(cfg.FFMPEG_PATH, [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      media,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-b:a",
+      "48k",
+      "-f",
+      "mp3",
+      file,
+    ]);
     return file;
   }
   if (process.platform !== "darwin") return { skipped: "audio missing; generate on macOS with eval/generate-audio.sh" };
@@ -210,7 +228,12 @@ export const transcriptionSuite: Suite = {
           const e = c.expect ?? {};
           if (synthetic) {
             const pass = raw <= (e.maxWer ?? 0.12) && recall >= (e.minRecall ?? 0.8) && es.extra <= (e.maxFalseInsertions ?? 0);
-            out.push({ id, pass, metrics: { synthetic, wer: r3(raw), recall: Number(recall.toFixed(2)), entities: `${es.hit}/${es.refN}`, falseIns: es.extra, autoFixed: applied }, notes: pass ? "" : hyp.join(" ").slice(0, 160) });
+            out.push({
+              id,
+              pass,
+              metrics: { synthetic, wer: r3(raw), recall: Number(recall.toFixed(2)), entities: `${es.hit}/${es.refN}`, falseIns: es.extra, autoFixed: applied },
+              notes: pass ? "" : hyp.join(" ").slice(0, 160),
+            });
             continue;
           }
           const cleanRef = cleanVerbatim(ref);
@@ -225,7 +248,19 @@ export const transcriptionSuite: Suite = {
           out.push({
             id,
             pass,
-            metrics: { synthetic, wer: r3(raw), werNorm: r3(al.wer), nameErr: `${nameErr}/${nameIdx.length}`, nameErrN: nameErr, nameN: nameIdx.length, recall: Number(recall.toFixed(2)), entities: `${es.hit}/${es.refN}`, falseIns: es.extra, misheard, autoFixed: applied },
+            metrics: {
+              synthetic,
+              wer: r3(raw),
+              werNorm: r3(al.wer),
+              nameErr: `${nameErr}/${nameIdx.length}`,
+              nameErrN: nameErr,
+              nameN: nameIdx.length,
+              recall: Number(recall.toFixed(2)),
+              entities: `${es.hit}/${es.refN}`,
+              falseIns: es.extra,
+              misheard,
+              autoFixed: applied,
+            },
             notes: missedNames ? `names missed: ${missedNames}` : "",
           });
         } catch (err) {

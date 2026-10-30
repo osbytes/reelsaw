@@ -17,7 +17,6 @@ import { useLoadMoreSentinel } from "../lib/useLoadMore";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
-
 /** New project plus a chevron menu for the other ways to add things. Both parts have fixed widths. */
 function NewProjectMenu() {
   const nav = useNavigate();
@@ -32,7 +31,12 @@ function NewProjectMenu() {
       </Link>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className="btn-primary w-10 justify-center rounded-l-none border-l border-white/30 px-0 py-2.5" aria-label="More ways to add" title="More ways to add">
+          <button
+            type="button"
+            className="btn-primary w-10 justify-center rounded-l-none border-l border-white/30 px-0 py-2.5"
+            aria-label="More ways to add"
+            title="More ways to add"
+          >
             <ChevronDown className="h-4 w-4" />
           </button>
         </DropdownMenu.Trigger>
@@ -112,10 +116,7 @@ export function ProjectsPage() {
   const qc = useQueryClient();
   const isAdmin = useMe().data?.role === "admin";
   const q = useInfiniteQuery(
-    trpc.projects.list.infiniteQueryOptions(
-      { limit: PAGE },
-      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
-    ),
+    trpc.projects.list.infiniteQueryOptions({ limit: PAGE }, { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData }),
   );
   // header numbers cover all projects, not the loaded pages; fetched once, refreshed when something finishes
   const stats = useQuery({ ...trpc.projects.stats.queryOptions(), placeholderData: keepPreviousData });
@@ -142,10 +143,11 @@ export function ProjectsPage() {
   }, [active.data, qc, trpc]);
 
   const projects = useMemo(
-    () => loaded.map((p) => {
-      const a = activeById.get(p.id);
-      return a ? { ...p, status: a.status, stage: a.stage, stageProgress: a.stageProgress } : p;
-    }),
+    () =>
+      loaded.map((p) => {
+        const a = activeById.get(p.id);
+        return a ? { ...p, status: a.status, stage: a.stage, stageProgress: a.stageProgress } : p;
+      }),
     [loaded, activeById],
   );
   const running = active.data ? active.data.length : (stats.data?.running ?? 0);
@@ -181,7 +183,9 @@ export function ProjectsPage() {
           <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-[18px] border border-dashed border-line2 bg-panel px-8 py-12 text-center">
             <span className="film h-[72px] w-[42px] rounded-[8px]" />
             <h2 className="text-xl font-bold">Turn your first long video into clips</h2>
-            <p className="text-sm leading-relaxed text-ink2">Paste a YouTube link or upload a file. We’ll transcribe it, find the strongest moments and frame them for 9:16.</p>
+            <p className="text-sm leading-relaxed text-ink2">
+              Paste a YouTube link or upload a file. We’ll transcribe it, find the strongest moments and frame them for 9:16.
+            </p>
             <Link to="/new" className="btn-primary mt-2 py-2.5 text-sm no-underline">
               <Plus className="h-4 w-4" /> New project
             </Link>
@@ -207,50 +211,68 @@ export function ProjectsPage() {
                   : `Added ${ago(p.createdAt)}`;
             return (
               <div key={p.id} className="group relative">
-              <Link to={`/p/${p.id}`} className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop">
-                <div className="film relative aspect-video">
-                  {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
-                    <img src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!} alt="" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
-                  )}
-                  {p.clipThumbs.length > 0 && (
-                    // the first few clips as a little fanned stack of 9:16 cards over the source thumbnail
-                    <div className="absolute bottom-2 left-2 flex h-[62%] items-end">
-                      {p.clipThumbs.map((src, i) => (
-                        <img
-                          key={src}
-                          src={src}
-                          alt=""
-                          loading="lazy"
-                          className="h-full rounded-[6px] object-cover shadow-[0_4px_12px_rgba(0,0,0,.45)] ring-2 ring-white/90 transition-transform duration-200 group-hover:translate-y-[-2px]"
-                          style={{ aspectRatio: "9 / 16", marginLeft: i ? "-14%" : 0, zIndex: 10 - i, transform: `rotate(${(i - (p.clipThumbs.length - 1) / 2) * 4}deg)` }}
-                        />
-                      ))}
-                      {p.clipsDone > p.clipThumbs.length && (
-                        <span className="z-10 mb-1 ml-1.5 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">+{p.clipsDone - p.clipThumbs.length}</span>
-                      )}
-                    </div>
-                  )}
-                  {/* intro (left) and outro (right) assets, fanned like the clips */}
-                  <PosterBumperCards bumpers={p.bumpers} />
-                  {p.durationSec ? <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">{formatTime(p.durationSec)}</span> : null}
-                  {active && (
-                    <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
-                      <div className="h-full bg-acc transition-all" style={{ width: `${Math.round((p.stageProgress ?? 0) * 100)}%` }} />
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5 p-3.5">
-                  {/* always two lines tall so every card in the row ends at the same height, whatever the title length */}
-                  <h3 className="line-clamp-2 min-h-[2.75em] text-[15px] font-semibold leading-snug">{p.title}</h3>
-                  <StatusText status={p.status} />
-                  <div className="truncate text-xs text-ink3">{detail}</div>
-                </div>
-              </Link>
+                <Link
+                  to={`/p/${p.id}`}
+                  className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop"
+                >
+                  <div className="film relative aspect-video">
+                    {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
+                      <img
+                        src={(p.sourceThumbnailUrl ?? p.thumbnailUrl)!}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    )}
+                    {p.clipThumbs.length > 0 && (
+                      // the first few clips as a little fanned stack of 9:16 cards over the source thumbnail
+                      <div className="absolute bottom-2 left-2 flex h-[62%] items-end">
+                        {p.clipThumbs.map((src, i) => (
+                          <img
+                            key={src}
+                            src={src}
+                            alt=""
+                            loading="lazy"
+                            className="h-full rounded-[6px] object-cover shadow-[0_4px_12px_rgba(0,0,0,.45)] ring-2 ring-white/90 transition-transform duration-200 group-hover:translate-y-[-2px]"
+                            style={{
+                              aspectRatio: "9 / 16",
+                              marginLeft: i ? "-14%" : 0,
+                              zIndex: 10 - i,
+                              transform: `rotate(${(i - (p.clipThumbs.length - 1) / 2) * 4}deg)`,
+                            }}
+                          />
+                        ))}
+                        {p.clipsDone > p.clipThumbs.length && (
+                          <span className="z-10 mb-1 ml-1.5 rounded-full bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
+                            +{p.clipsDone - p.clipThumbs.length}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* intro (left) and outro (right) assets, fanned like the clips */}
+                    <PosterBumperCards bumpers={p.bumpers} />
+                    {p.durationSec ? (
+                      <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/65 px-1.5 py-0.5 font-mono text-[11px] text-white">
+                        {formatTime(p.durationSec)}
+                      </span>
+                    ) : null}
+                    {active && (
+                      <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/30">
+                        <div className="h-full bg-acc transition-all" style={{ width: `${Math.round((p.stageProgress ?? 0) * 100)}%` }} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5 p-3.5">
+                    {/* always two lines tall so every card in the row ends at the same height, whatever the title length */}
+                    <h3 className="line-clamp-2 min-h-[2.75em] text-[15px] font-semibold leading-snug">{p.title}</h3>
+                    <StatusText status={p.status} />
+                    <div className="truncate text-xs text-ink3">{detail}</div>
+                  </div>
+                </Link>
               </div>
             );
           })}
-          {q.isFetchingNextPage &&
-            Array.from({ length: Math.min(remaining, PAGE) }, (_, i) => <CardSkeleton key={`next-${i}`} i={i} />)}
+          {q.isFetchingNextPage && Array.from({ length: Math.min(remaining, PAGE) }, (_, i) => <CardSkeleton key={`next-${i}`} i={i} />)}
         </div>
 
         {/* fixed-height footer: the button, or the count once everything is loaded, never moves the page */}
@@ -261,7 +283,9 @@ export function ProjectsPage() {
                 {q.isFetchingNextPage ? "Loading…" : "Load more"}
               </button>
             ) : null}
-            <span className="tabular-nums">Showing {num.format(projects.length)} of {num.format(total)}</span>
+            <span className="tabular-nums">
+              Showing {num.format(projects.length)} of {num.format(total)}
+            </span>
           </div>
         )}
       </main>

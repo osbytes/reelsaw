@@ -68,10 +68,15 @@ export function createStdioBridge(env: StdioEnv, log: Logger, connect: RemoteFac
 
   let remote: Promise<Client> | undefined;
   const client = () => {
-    if (!apiKey) throw new Error(`REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${url.origin} and pass it in the environment of this command.`);
+    if (!apiKey)
+      throw new Error(
+        `REELSAW_API_KEY is not set. Create a key in Settings → API keys and MCP of ${url.origin} and pass it in the environment of this command.`,
+      );
     remote ??= connect(url, apiKey).catch((err) => {
       remote = undefined; // the next call tries again (the instance may still be starting)
-      throw new Error(`Cannot reach Reelsaw at ${url} (${err instanceof Error ? err.message : String(err)}). Set REELSAW_URL to the address of a running instance.`);
+      throw new Error(
+        `Cannot reach Reelsaw at ${url} (${err instanceof Error ? err.message : String(err)}). Set REELSAW_URL to the address of a running instance.`,
+      );
     });
     return remote;
   };

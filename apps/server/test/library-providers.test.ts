@@ -11,7 +11,8 @@ import { createProviderHttp, createProviderRegistry, ProviderError, SEARCH_CACHE
 import { freesoundLicense } from "../src/library/providers/freesound.js";
 
 const log = { info() {}, warn() {}, error() {}, debug() {}, child: () => log } as unknown as Logger;
-const json = (body: unknown, init: ResponseInit = {}) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" }, ...init });
+const json = (body: unknown, init: ResponseInit = {}) =>
+  new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" }, ...init });
 
 type Call = { url: URL; headers: Record<string, string> };
 function mockFetch(handler: (u: URL, headers: Record<string, string>) => Response | Promise<Response>) {
@@ -25,7 +26,15 @@ function mockFetch(handler: (u: URL, headers: Record<string, string>) => Respons
   return { f, calls };
 }
 
-const KEYS = { PEXELS_API_KEY: "pex-key", PIXABAY_API_KEY: "pix-key", FREESOUND_API_KEY: "fs-key", GIPHY_API_KEY: "gi-key", KLIPY_API_KEY: "kl-key", ICONIFY_API_URL: "https://api.iconify.design", OPENVERSE_ENABLED: true } as const;
+const KEYS = {
+  PEXELS_API_KEY: "pex-key",
+  PIXABAY_API_KEY: "pix-key",
+  FREESOUND_API_KEY: "fs-key",
+  GIPHY_API_KEY: "gi-key",
+  KLIPY_API_KEY: "kl-key",
+  ICONIFY_API_URL: "https://api.iconify.design",
+  OPENVERSE_ENABLED: true,
+} as const;
 const catalogStub = { search: async () => ({ items: [] }), find: async () => undefined } as unknown as Catalog;
 
 function setup(handler: Parameters<typeof mockFetch>[0], settings: Partial<RuntimeSettings> = KEYS, clock = { t: 1_000_000 }) {
@@ -38,9 +47,15 @@ function setup(handler: Parameters<typeof mockFetch>[0], settings: Partial<Runti
 describe("provider listing", () => {
   it("hides providers whose key is empty and Openverse until enabled", () => {
     const { registry } = setup(() => json({}), { ICONIFY_API_URL: "https://api.iconify.design", OPENVERSE_ENABLED: false });
-    assert.deepEqual(registry.list().map((p) => p.id), ["reelsaw", "iconify"]);
+    assert.deepEqual(
+      registry.list().map((p) => p.id),
+      ["reelsaw", "iconify"],
+    );
     const all = setup(() => json({})).registry.list();
-    assert.deepEqual(all.map((p) => p.id), ["reelsaw", "pexels", "pixabay", "freesound", "iconify", "giphy", "klipy", "openverse"]);
+    assert.deepEqual(
+      all.map((p) => p.id),
+      ["reelsaw", "pexels", "pixabay", "freesound", "iconify", "giphy", "klipy", "openverse"],
+    );
     assert.equal(all.find((p) => p.id === "giphy")!.attributionLine, "Powered by GIPHY");
     assert.equal(all.find((p) => p.id === "klipy")!.experimental, true);
   });
@@ -51,8 +66,36 @@ describe("provider listing", () => {
 });
 
 describe("pexels", () => {
-  const photos = { photos: [{ id: 7, width: 4000, height: 6000, url: "https://www.pexels.com/photo/7/", photographer: "Ann", alt: "A cat", src: { large: "https://images.pexels.com/7-large.jpg", small: "https://images.pexels.com/7-small.jpg", large2x: "https://images.pexels.com/7-2x.jpg" } }], next_page: "https://api.pexels.com/v1/search?page=2" };
-  const videos = { videos: [{ id: 9, duration: 12, url: "https://www.pexels.com/video/9/", image: "https://images.pexels.com/9.jpg", user: { name: "Bo" }, video_files: [{ file_type: "video/mp4", width: 2160, height: 3840, link: "https://videos.pexels.com/uhd.mp4" }, { file_type: "video/mp4", width: 1080, height: 1920, link: "https://videos.pexels.com/hd.mp4" }, { file_type: "video/webm", width: 540, height: 960, link: "https://videos.pexels.com/x.webm" }] }] };
+  const photos = {
+    photos: [
+      {
+        id: 7,
+        width: 4000,
+        height: 6000,
+        url: "https://www.pexels.com/photo/7/",
+        photographer: "Ann",
+        alt: "A cat",
+        src: { large: "https://images.pexels.com/7-large.jpg", small: "https://images.pexels.com/7-small.jpg", large2x: "https://images.pexels.com/7-2x.jpg" },
+      },
+    ],
+    next_page: "https://api.pexels.com/v1/search?page=2",
+  };
+  const videos = {
+    videos: [
+      {
+        id: 9,
+        duration: 12,
+        url: "https://www.pexels.com/video/9/",
+        image: "https://images.pexels.com/9.jpg",
+        user: { name: "Bo" },
+        video_files: [
+          { file_type: "video/mp4", width: 2160, height: 3840, link: "https://videos.pexels.com/uhd.mp4" },
+          { file_type: "video/mp4", width: 1080, height: 1920, link: "https://videos.pexels.com/hd.mp4" },
+          { file_type: "video/webm", width: 540, height: 960, link: "https://videos.pexels.com/x.webm" },
+        ],
+      },
+    ],
+  };
 
   it("searches photos and portrait videos with the key in Authorization", async () => {
     const { registry, calls } = setup((u) => (u.pathname === "/v1/search" ? json(photos) : json(videos)));
@@ -63,7 +106,13 @@ describe("pexels", () => {
     const v = calls.find((c) => c.url.pathname === "/v1/videos/search")!;
     assert.equal(v.url.searchParams.get("orientation"), "portrait");
     assert.equal(v.url.searchParams.get("size"), "medium");
-    assert.deepEqual(r.items.map((i) => [i.externalId, i.kind]), [["photo:7", "image"], ["video:9", "video"]]);
+    assert.deepEqual(
+      r.items.map((i) => [i.externalId, i.kind]),
+      [
+        ["photo:7", "image"],
+        ["video:9", "video"],
+      ],
+    );
     assert.equal(r.items[0]!.attribution, "Photo by Ann on Pexels");
     assert.equal(r.items[1]!.previewUrl, "https://videos.pexels.com/hd.mp4", "the mp4 up to 1080 wide");
     assert.equal(r.nextCursor, "2");
@@ -90,17 +139,53 @@ describe("pixabay", () => {
   it("passes the key and q, never logs it, and maps images and videos", async () => {
     const { registry, calls } = setup((u) =>
       u.pathname.startsWith("/api/videos")
-        ? json({ totalHits: 1, hits: [{ id: 3, pageURL: "https://pixabay.com/videos/3/", tags: "sea, waves", duration: 8, user: "Cy", videos: { medium: { url: "https://cdn.pixabay.com/v.mp4", width: 1080, height: 1920, thumbnail: "https://cdn.pixabay.com/t.jpg" } } }] })
-        : json({ totalHits: 100, hits: [{ id: 5, pageURL: "https://pixabay.com/p/5/", tags: "cat, pet", webformatURL: "https://pixabay.com/w.jpg", previewURL: "https://pixabay.com/p.jpg", largeImageURL: "https://pixabay.com/l.jpg", user: "Di", type: "photo" }] }),
+        ? json({
+            totalHits: 1,
+            hits: [
+              {
+                id: 3,
+                pageURL: "https://pixabay.com/videos/3/",
+                tags: "sea, waves",
+                duration: 8,
+                user: "Cy",
+                videos: { medium: { url: "https://cdn.pixabay.com/v.mp4", width: 1080, height: 1920, thumbnail: "https://cdn.pixabay.com/t.jpg" } },
+              },
+            ],
+          })
+        : json({
+            totalHits: 100,
+            hits: [
+              {
+                id: 5,
+                pageURL: "https://pixabay.com/p/5/",
+                tags: "cat, pet",
+                webformatURL: "https://pixabay.com/w.jpg",
+                previewURL: "https://pixabay.com/p.jpg",
+                largeImageURL: "https://pixabay.com/l.jpg",
+                user: "Di",
+                type: "photo",
+              },
+            ],
+          }),
     );
     const r = await registry.search("pixabay", "sea", { limit: 20 });
     assert.equal(calls[0]!.url.searchParams.get("key"), "pix-key");
-    assert.deepEqual(r.items.map((i) => i.externalId), ["photo:5", "video:3"]);
+    assert.deepEqual(
+      r.items.map((i) => i.externalId),
+      ["photo:5", "video:3"],
+    );
     assert.equal(r.items[0]!.attribution, "Image by Di on Pixabay");
     assert.equal(r.nextCursor, "2");
   });
   it("resolves to the downloadable file (largeImageURL; vectors prefer vectorURL when approved)", async () => {
-    const hit = { id: 5, pageURL: "https://pixabay.com/p/5/", tags: "cat", largeImageURL: "https://pixabay.com/l.png", vectorURL: "https://pixabay.com/v.svg", user: "Di" };
+    const hit = {
+      id: 5,
+      pageURL: "https://pixabay.com/p/5/",
+      tags: "cat",
+      largeImageURL: "https://pixabay.com/l.png",
+      vectorURL: "https://pixabay.com/v.svg",
+      user: "Di",
+    };
     const { registry, calls } = setup(() => json({ hits: [hit] }));
     const photo = await registry.resolve("pixabay", "photo:5");
     assert.deepEqual([photo.url, photo.ext], ["https://pixabay.com/l.png", "png"]);
@@ -112,16 +197,42 @@ describe("pixabay", () => {
 });
 
 describe("freesound", () => {
-  const sound = (over: Record<string, unknown> = {}) => ({ id: 1, name: "boom.wav", username: "zed", license: "http://creativecommons.org/publicdomain/zero/1.0/", duration: 2.5, previews: { "preview-hq-mp3": "https://cdn.freesound.org/previews/1/1_1-hq.mp3" }, url: "https://freesound.org/s/1/", tags: ["Boom", "hit"], ...over });
+  const sound = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    name: "boom.wav",
+    username: "zed",
+    license: "http://creativecommons.org/publicdomain/zero/1.0/",
+    duration: 2.5,
+    previews: { "preview-hq-mp3": "https://cdn.freesound.org/previews/1/1_1-hq.mp3" },
+    url: "https://freesound.org/s/1/",
+    tags: ["Boom", "hit"],
+    ...over,
+  });
   it("filters CC0 by default, asks for the fields and imports the HQ mp3 preview", async () => {
-    const { registry, calls } = setup(() => json({ next: "https://freesound.org/apiv2/search/text/?page=2", results: [sound(), sound({ id: 2, license: "http://creativecommons.org/licenses/by-nc/4.0/" }), sound({ id: 3, license: "http://creativecommons.org/licenses/by/4.0/" })] }));
+    const { registry, calls } = setup(() =>
+      json({
+        next: "https://freesound.org/apiv2/search/text/?page=2",
+        results: [
+          sound(),
+          sound({ id: 2, license: "http://creativecommons.org/licenses/by-nc/4.0/" }),
+          sound({ id: 3, license: "http://creativecommons.org/licenses/by/4.0/" }),
+        ],
+      }),
+    );
     const r = await registry.search("freesound", "boom");
     const u = calls[0]!.url;
     assert.equal(u.pathname, "/apiv2/search/text/");
     assert.equal(u.searchParams.get("filter"), 'license:"Creative Commons 0"');
     assert.equal(u.searchParams.get("token"), "fs-key");
     assert.match(u.searchParams.get("fields")!, /previews/);
-    assert.deepEqual(r.items.map((i) => [i.externalId, i.license.id]), [["1", "cc0"], ["3", "cc-by"]], "NC is dropped");
+    assert.deepEqual(
+      r.items.map((i) => [i.externalId, i.license.id]),
+      [
+        ["1", "cc0"],
+        ["3", "cc-by"],
+      ],
+      "NC is dropped",
+    );
     assert.equal(r.items[1]!.attribution, "boom.wav by zed (Freesound)");
     assert.equal(r.nextCursor, "2");
     const by = setup(() => json({ results: [] }));
@@ -134,7 +245,10 @@ describe("freesound", () => {
     assert.deepEqual([r.url, r.ext, r.kind], ["https://cdn.freesound.org/previews/1/1_1-hq.mp3", "mp3", "audio"]);
     assert.equal(r.provenance.attribution, "boom.wav by zed (Freesound)");
     assert.equal(r.provenance.license?.id, "cc-by");
-    await assert.rejects(setup(() => json(sound({ license: "http://creativecommons.org/licenses/by-nc/4.0/" }))).registry.resolve("freesound", "1"), /cannot be imported/);
+    await assert.rejects(
+      setup(() => json(sound({ license: "http://creativecommons.org/licenses/by-nc/4.0/" }))).registry.resolve("freesound", "1"),
+      /cannot be imported/,
+    );
   });
   it("maps license strings", () => {
     assert.equal(freesoundLicense("Creative Commons 0")?.id, "cc0");
@@ -154,7 +268,14 @@ describe("iconify", () => {
     const { registry, calls } = setup(handler);
     const r = await registry.search("iconify", "star");
     assert.equal(calls.find((c) => c.url.pathname === "/search")!.url.searchParams.get("prefixes"), "lucide,tabler,mdi,ph,heroicons,ri,solar");
-    assert.deepEqual(r.items.map((i) => [i.externalId, i.license.id, i.mime]), [["lucide:star", "isc", "image/svg+xml"], ["tabler:star", "mit", "image/svg+xml"]], "a set outside the list is dropped");
+    assert.deepEqual(
+      r.items.map((i) => [i.externalId, i.license.id, i.mime]),
+      [
+        ["lucide:star", "isc", "image/svg+xml"],
+        ["tabler:star", "mit", "image/svg+xml"],
+      ],
+      "a set outside the list is dropped",
+    );
   });
   it("resolves to a coloured 512 px svg sticker, and refuses a bad colour or set", async () => {
     const { registry } = setup(handler);
@@ -174,21 +295,49 @@ describe("openverse", () => {
   it("asks for commercial CC0 / BY and drops other licenses", async () => {
     const { registry, calls } = setup((u) =>
       u.pathname === "/v1/images/"
-        ? json({ page_count: 3, results: [{ id: "11111111-1111-1111-1111-111111111111", title: "Pic", url: "https://o.example/a.jpg", thumbnail: "https://o.example/t.jpg", license: "by", license_version: "4.0", creator: "Eve", foreign_landing_url: "https://o.example/p" }, { id: "22222222-2222-2222-2222-222222222222", title: "Bad", url: "https://o.example/b.jpg", license: "by-nc" }] })
+        ? json({
+            page_count: 3,
+            results: [
+              {
+                id: "11111111-1111-1111-1111-111111111111",
+                title: "Pic",
+                url: "https://o.example/a.jpg",
+                thumbnail: "https://o.example/t.jpg",
+                license: "by",
+                license_version: "4.0",
+                creator: "Eve",
+                foreign_landing_url: "https://o.example/p",
+              },
+              { id: "22222222-2222-2222-2222-222222222222", title: "Bad", url: "https://o.example/b.jpg", license: "by-nc" },
+            ],
+          })
         : json({ results: [] }),
     );
     const r = await registry.search("openverse", "pic", { kind: "image" });
     const u = calls[0]!.url;
     assert.equal(u.searchParams.get("license"), "cc0,by");
     assert.equal(u.searchParams.get("license_type"), "commercial");
-    assert.deepEqual(r.items.map((i) => i.license.id), ["cc-by-4.0"]);
+    assert.deepEqual(
+      r.items.map((i) => i.license.id),
+      ["cc-by-4.0"],
+    );
     assert.match(r.items[0]!.attribution!, /Pic|Eve/);
     assert.equal(r.nextCursor, "2");
   });
 });
 
 describe("giphy", () => {
-  const gif = { id: "abc", title: "wow", url: "https://giphy.com/gifs/abc", username: "u", images: { original: { url: "https://media.giphy.com/o.gif", mp4: "https://media.giphy.com/o.mp4", width: "480", height: "270" }, fixed_width: { url: "https://media.giphy.com/fw.gif", mp4: "https://media.giphy.com/fw.mp4" }, fixed_width_small_still: { url: "https://media.giphy.com/still.gif" } } };
+  const gif = {
+    id: "abc",
+    title: "wow",
+    url: "https://giphy.com/gifs/abc",
+    username: "u",
+    images: {
+      original: { url: "https://media.giphy.com/o.gif", mp4: "https://media.giphy.com/o.mp4", width: "480", height: "270" },
+      fixed_width: { url: "https://media.giphy.com/fw.gif", mp4: "https://media.giphy.com/fw.mp4" },
+      fixed_width_small_still: { url: "https://media.giphy.com/still.gif" },
+    },
+  };
   it("imports gifs as mp4 video and stickers as the transparent gif", async () => {
     const { registry } = setup(() => json({ data: gif }));
     const g = await registry.resolve("giphy", "gif:abc");
@@ -213,10 +362,27 @@ describe("giphy", () => {
 
 describe("klipy (experimental)", () => {
   it("follows the Tenor v2 shape with the key in the path", async () => {
-    const { registry, calls } = setup(() => json({ results: [{ id: "k1", title: "hey", media_formats: { mp4: { url: "https://static.klipy.com/a.mp4" }, tinygif: { url: "https://static.klipy.com/t.gif" }, gif: { url: "https://static.klipy.com/a.gif", dims: [320, 240] } } }] }));
+    const { registry, calls } = setup(() =>
+      json({
+        results: [
+          {
+            id: "k1",
+            title: "hey",
+            media_formats: {
+              mp4: { url: "https://static.klipy.com/a.mp4" },
+              tinygif: { url: "https://static.klipy.com/t.gif" },
+              gif: { url: "https://static.klipy.com/a.gif", dims: [320, 240] },
+            },
+          },
+        ],
+      }),
+    );
     const r = await registry.search("klipy", "hey");
     assert.equal(calls[0]!.url.pathname, "/api/v1/kl-key/gifs/search");
-    assert.deepEqual(r.items.map((i) => [i.externalId, i.kind]), [["k1", "video"]]);
+    assert.deepEqual(
+      r.items.map((i) => [i.externalId, i.kind]),
+      [["k1", "video"]],
+    );
     assert.equal(r.items[0]!.previewUrl, "https://static.klipy.com/a.mp4", "the panel plays the mp4, not the tinygif thumb");
     assert.equal(r.items[0]!.thumbUrl, "https://static.klipy.com/t.gif");
     const res = await registry.resolve("klipy", "k1");

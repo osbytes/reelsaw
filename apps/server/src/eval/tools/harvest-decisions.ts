@@ -19,9 +19,14 @@ import { caseKey, disfluencyCases, parseExport, type DisfluencyCase } from "../.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const COMMITTED = path.resolve(here, "../../../../../eval/fixtures/disfluency/cases.json");
 
-export async function harvest(exportFile: string, committedFile = COMMITTED): Promise<{ cases: DisfluencyCase[]; rows: number; bad: number; skippedCommitted: number }> {
+export async function harvest(
+  exportFile: string,
+  committedFile = COMMITTED,
+): Promise<{ cases: DisfluencyCase[]; rows: number; bad: number; skippedCommitted: number }> {
   const { rows, bad } = parseExport(await fs.readFile(exportFile, "utf8"));
-  const committed: Array<Pick<DisfluencyCase, "words" | "target">> = existsSync(committedFile) ? (JSON.parse(await fs.readFile(committedFile, "utf8")) as { cases: Array<Pick<DisfluencyCase, "words" | "target">> }).cases : [];
+  const committed: Array<Pick<DisfluencyCase, "words" | "target">> = existsSync(committedFile)
+    ? (JSON.parse(await fs.readFile(committedFile, "utf8")) as { cases: Array<Pick<DisfluencyCase, "words" | "target">> }).cases
+    : [];
   const exclude = committed.map(caseKey);
   const all = disfluencyCases(rows);
   const cases = disfluencyCases(rows, exclude);
@@ -40,13 +45,24 @@ async function main() {
   const r = await harvest(file);
   const cases = r.cases.slice(0, max);
   const count = (f: (c: DisfluencyCase) => boolean) => cases.filter(f).length;
-  console.log(`${r.rows} decisions${r.bad ? ` (${r.bad} unreadable lines)` : ""} → ${r.cases.length} new cut/keep cases (${r.skippedCommitted} already committed or duplicated)`);
-  console.log(`  cut ${count((c) => c.expect === "cut")} · keep ${count((c) => c.expect === "keep")} · dev ${count((c) => c.split === "dev")} · heldout ${count((c) => c.split === "heldout")}${cases.length < r.cases.length ? ` (first ${cases.length})` : ""}`);
+  console.log(
+    `${r.rows} decisions${r.bad ? ` (${r.bad} unreadable lines)` : ""} → ${r.cases.length} new cut/keep cases (${r.skippedCommitted} already committed or duplicated)`,
+  );
+  console.log(
+    `  cut ${count((c) => c.expect === "cut")} · keep ${count((c) => c.expect === "keep")} · dev ${count((c) => c.split === "dev")} · heldout ${count((c) => c.split === "heldout")}${cases.length < r.cases.length ? ` (first ${cases.length})` : ""}`,
+  );
   const out = opt("out");
   if (!out) return;
   await fs.writeFile(
     out,
-    JSON.stringify({ note: `Candidates harvested from user decisions on ${new Date().toISOString().slice(0, 10)}. Read each one before moving it into cases.json; never commit user data you were not given to share.`, cases }, null, 1) + "\n",
+    JSON.stringify(
+      {
+        note: `Candidates harvested from user decisions on ${new Date().toISOString().slice(0, 10)}. Read each one before moving it into cases.json; never commit user data you were not given to share.`,
+        cases,
+      },
+      null,
+      1,
+    ) + "\n",
   );
   console.log(`  wrote ${out}`);
 }

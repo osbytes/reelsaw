@@ -18,7 +18,13 @@ const COALESCE_MS = 1500;
  * pointer gesture) coalesce regardless of time.
  */
 export function useHistory<T>(initial: T | (() => T)) {
-  const [h, setH] = useState<H<T>>(() => ({ past: [], present: typeof initial === "function" ? (initial as () => T)() : initial, future: [], key: null, at: 0 }));
+  const [h, setH] = useState<H<T>>(() => ({
+    past: [],
+    present: typeof initial === "function" ? (initial as () => T)() : initial,
+    future: [],
+    key: null,
+    at: 0,
+  }));
 
   const set = useCallback((updater: T | ((prev: T) => T), key?: string) => {
     setH((s) => {
@@ -30,8 +36,15 @@ export function useHistory<T>(initial: T | (() => T)) {
     });
   }, []);
 
-  const undo = useCallback(() => setH((s) => (s.past.length ? { past: s.past.slice(0, -1), present: s.past[s.past.length - 1]!, future: [s.present, ...s.future], key: null, at: 0 } : s)), []);
-  const redo = useCallback(() => setH((s) => (s.future.length ? { past: [...s.past, s.present], present: s.future[0]!, future: s.future.slice(1), key: null, at: 0 } : s)), []);
+  const undo = useCallback(
+    () =>
+      setH((s) => (s.past.length ? { past: s.past.slice(0, -1), present: s.past[s.past.length - 1]!, future: [s.present, ...s.future], key: null, at: 0 } : s)),
+    [],
+  );
+  const redo = useCallback(
+    () => setH((s) => (s.future.length ? { past: [...s.past, s.present], present: s.future[0]!, future: s.future.slice(1), key: null, at: 0 } : s)),
+    [],
+  );
 
   return { state: h.present, set, undo, redo, canUndo: h.past.length > 0, canRedo: h.future.length > 0 };
 }

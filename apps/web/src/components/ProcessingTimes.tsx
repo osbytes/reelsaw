@@ -44,7 +44,9 @@ export function ProcessingTimes() {
         </span>
       </div>
       <p className="text-[13px] text-ink2">
-        A 10-minute video takes about <b className="font-mono text-xs tabular-nums">{formatTime(total * TEN_MIN)}</b> end to end with <span className="font-mono text-xs">{d.models.language}</span> and <span className="font-mono text-xs">{d.models.transcription}</span>. Refine runs alongside finding moments, so stages don’t add up exactly.
+        A 10-minute video takes about <b className="font-mono text-xs tabular-nums">{formatTime(total * TEN_MIN)}</b> end to end with{" "}
+        <span className="font-mono text-xs">{d.models.language}</span> and <span className="font-mono text-xs">{d.models.transcription}</span>. Refine runs
+        alongside finding moments, so stages don’t add up exactly.
       </p>
       <table className="w-full text-[13px]">
         <thead>
@@ -63,7 +65,9 @@ export function ProcessingTimes() {
               <td className="py-1.5 text-right">~{formatTime(s.factor * TEN_MIN)}</td>
               <td className="py-1.5 text-right">{s.actualAvgSec !== null ? formatTime(s.actualAvgSec) : "—"}</td>
               <td className="py-1.5 text-right">{s.expectedAvgSec !== null ? formatTime(s.expectedAvgSec) : "—"}</td>
-              <td className="py-1.5 text-right font-sans text-xs text-ink3">{s.source === "history" ? `${s.samples} project${s.samples === 1 ? "" : "s"}` : "default"}</td>
+              <td className="py-1.5 text-right font-sans text-xs text-ink3">
+                {s.source === "history" ? `${s.samples} project${s.samples === 1 ? "" : "s"}` : "default"}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -96,7 +100,8 @@ export function ProcessingTimes() {
                     const v = r.stages[s.stage];
                     return (
                       <td key={s.stage} className={`py-1.5 text-right ${v && v.actualSec > v.expectedSec * 1.5 ? "text-warn" : ""}`}>
-                        {v && v.actualSec > v.expectedSec * 1.5 ? "▲ " : ""}{v ? `${formatTime(v.actualSec)} / ~${formatTime(v.expectedSec)}` : "—"}
+                        {v && v.actualSec > v.expectedSec * 1.5 ? "▲ " : ""}
+                        {v ? `${formatTime(v.actualSec)} / ~${formatTime(v.expectedSec)}` : "—"}
                       </td>
                     );
                   })}

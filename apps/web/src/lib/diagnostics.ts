@@ -6,7 +6,12 @@ const buf: Entry[] = [];
 
 function push(kind: string, message: unknown, stack?: string) {
   const text = message instanceof Error ? message.message : typeof message === "string" ? message : safeJson(message);
-  buf.push({ at: new Date().toISOString(), kind, message: text.slice(0, 4000), stack: (stack ?? (message instanceof Error ? message.stack : undefined))?.slice(0, 8000) });
+  buf.push({
+    at: new Date().toISOString(),
+    kind,
+    message: text.slice(0, 4000),
+    stack: (stack ?? (message instanceof Error ? message.stack : undefined))?.slice(0, 8000),
+  });
   if (buf.length > MAX) buf.shift();
 }
 
@@ -36,7 +41,12 @@ export function reportClientError(kind: "render" | "error" | "unhandledrejection
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, message: message.slice(0, 500), stack: err instanceof Error ? err.stack?.slice(0, 2048) : undefined, route: location.pathname }),
+    body: JSON.stringify({
+      kind,
+      message: message.slice(0, 500),
+      stack: err instanceof Error ? err.stack?.slice(0, 2048) : undefined,
+      route: location.pathname,
+    }),
     keepalive: true,
   }).catch(() => {});
 }
@@ -50,7 +60,11 @@ export function installDiagnostics() {
   for (const level of ["error", "warn"] as const) {
     const orig = console[level].bind(console);
     console[level] = (...args: unknown[]) => {
-      push(`console.${level}`, args.map((a) => (a instanceof Error ? `${a.message}` : typeof a === "string" ? a : safeJson(a))).join(" "), args.find((a): a is Error => a instanceof Error)?.stack);
+      push(
+        `console.${level}`,
+        args.map((a) => (a instanceof Error ? `${a.message}` : typeof a === "string" ? a : safeJson(a))).join(" "),
+        args.find((a): a is Error => a instanceof Error)?.stack,
+      );
       orig(...args);
     };
   }

@@ -6,7 +6,23 @@ import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
 import { ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
-import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, excludeRanges, mapChunk, needsSecondLook, pairwiseRank, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import {
+  MAP_PROMPT_VERSION,
+  SCORE_PROMPT_VERSION,
+  aggregateScores,
+  chunkTranscript,
+  excludeRanges,
+  mapChunk,
+  needsSecondLook,
+  pairwiseRank,
+  scoreBatches,
+  scoreItem,
+  scoreSample,
+  type LlmOpts,
+  type ScoreInput,
+  type ScoreResult,
+  type SelectContext,
+} from "./select.js";
 import { isAbortError } from "./steps.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
 import { clipCandidateSchema } from "@reelsaw/shared";
@@ -73,7 +89,17 @@ export function scoreGate(totals: number[], o: ScoreGateOpts): ScoreGate {
   const n = totals.length;
   const best = n ? Math.max(...totals) : 0;
   const leader = totals.indexOf(best);
-  if (o.rule === "absolute") return { rule: "absolute", threshold: AUTO_MIN_SCORE, n, median: null, mad: null, floor: o.floor, k: o.k, keep: totals.map((t, i) => i === leader || t >= AUTO_MIN_SCORE) };
+  if (o.rule === "absolute")
+    return {
+      rule: "absolute",
+      threshold: AUTO_MIN_SCORE,
+      n,
+      median: null,
+      mad: null,
+      floor: o.floor,
+      k: o.k,
+      keep: totals.map((t, i) => i === leader || t >= AUTO_MIN_SCORE),
+    };
   const med = median(totals);
   // Rubric totals cluster on a few values (a local judge gives most candidates the same total), so the
   // MAD can be 0 and the threshold would collapse to the median, dropping half of an evenly good
@@ -181,7 +207,17 @@ export function snapCandidate(
       bounds: thought.bounds ? [thought.bounds[0] + PAD_START, thought.bounds[1] - PAD_END] : undefined,
     });
     for (const ch of done.changes) {
-      thought.log?.debug({ edge: ch.edge, from: Number(ch.from.toFixed(2)), to: ch.to === undefined ? null : Number(ch.to.toFixed(2)), action: ch.action, reason: ch.reason, title: c.title.slice(0, 60) }, ch.action === "left" ? `clip ${ch.edge} left inside a sentence` : `clip ${ch.edge} moved to finish the sentence`);
+      thought.log?.debug(
+        {
+          edge: ch.edge,
+          from: Number(ch.from.toFixed(2)),
+          to: ch.to === undefined ? null : Number(ch.to.toFixed(2)),
+          action: ch.action,
+          reason: ch.reason,
+          title: c.title.slice(0, 60),
+        },
+        ch.action === "left" ? `clip ${ch.edge} left inside a sentence` : `clip ${ch.edge} moved to finish the sentence`,
+      );
     }
     if (done.changes.some((ch) => ch.action !== "left")) {
       start = Math.max(0, done.start - PAD_START);
@@ -244,7 +280,11 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
     signal.throwIfAborted(); // detectScenes answers [] when it was stopped: that is not "no cuts"
     // saved the moment they are found, in a unit of their own: a later step of this stage timing out loses nothing
     await ctx.svc.tx(async (u) => {
-      const [t] = await u.db.select({ id: schema.transcripts.projectId }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId)).for("update"); // transcript, then project
+      const [t] = await u.db
+        .select({ id: schema.transcripts.projectId })
+        .from(schema.transcripts)
+        .where(eq(schema.transcripts.projectId, ctx.projectId))
+        .for("update"); // transcript, then project
       if (!t) return;
       if (!(await lockCurrentStage(u.db, ctx.projectId, ctx.seq))) throw new StaleJobError(ctx.projectId, ctx.seq);
       await u.db.update(schema.transcripts).set({ sceneCuts: cuts }).where(eq(schema.transcripts.projectId, ctx.projectId));
@@ -254,7 +294,12 @@ export async function ensureSceneCuts(ctx: StageContext, project: Project, store
   };
   // a decode is bounded by the video's own length on any machine that can play it in real time; never less than 30 min
   const timeoutMs = Math.max(30 * 60_000, Math.round((project.durationSec ?? 0) * 1000));
-  await ctx.step("scene-cuts", { input: project.sourceKey, model: "ffmpeg-scene", promptVersion: SCENE_CUTS_VERSION, params: { floor: 0.1, width: 320 } }, detect, { schema: z.number(), timeoutMs, model: "ffmpeg-scene" });
+  await ctx.step(
+    "scene-cuts",
+    { input: project.sourceKey, model: "ffmpeg-scene", promptVersion: SCENE_CUTS_VERSION, params: { floor: 0.1, width: 320 } },
+    detect,
+    { schema: z.number(), timeoutMs, model: "ffmpeg-scene" },
+  );
   // the step may have been reused while the transcript was replaced (cuts reset to null): then detect again
   const [row] = await ctx.db.select({ cuts: schema.transcripts.sceneCuts }).from(schema.transcripts).where(eq(schema.transcripts.projectId, ctx.projectId));
   if (row?.cuts) return row.cuts;
@@ -278,7 +323,10 @@ export async function analyze(ctx: StageContext) {
   const existingClips = live.filter((c) => !keepReason(c));
   const kept = live.filter((c) => keepReason(c));
   if (existingClips.length) {
-    log.info({ clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length }, "analyze skipped: clips exist, re-queueing renders");
+    log.info(
+      { clips: existingClips.length, pending: existingClips.filter((c) => c.status !== "done").length },
+      "analyze skipped: clips exist, re-queueing renders",
+    );
     await svc.tx(async (u) => {
       await lockProjectClips(u, projectId);
       if (!(await lockCurrentStage(u.db, projectId, ctx.seq))) throw new StaleJobError(projectId, ctx.seq); // a newer re-analyze owns these clips now
@@ -305,7 +353,15 @@ export async function analyze(ctx: StageContext) {
   const gateOpts: ScoreGateOpts = { rule: svc.config.ANALYZE_SCORE_RULE, floor: svc.config.ANALYZE_MIN_SCORE_FLOOR, k: svc.config.ANALYZE_SCORE_MAD_K };
   const auto = !settings.maxClips;
   const cap = clipCap(settings, durationSec);
-  const sc: SelectContext = { title: project.title, durationSec, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds, maxClips: settings.maxClips, focus: settings.focus, instructions: settings.instructions };
+  const sc: SelectContext = {
+    title: project.title,
+    durationSec,
+    minSec: settings.minClipSeconds,
+    maxSec: settings.maxClipSeconds,
+    maxClips: settings.maxClips,
+    focus: settings.focus,
+    instructions: settings.instructions,
+  };
   const o: LlmOpts = { model: await svc.ai.languageModel(), signal: ctx.signal, telemetry: svc.otel.enabled, log: ctx.log };
   const judge: LlmOpts = judgeId ? { ...o, model: await svc.ai.languageModel(judgeId) } : o;
   const judgeModelId = judgeId ?? languageId;
@@ -314,7 +370,26 @@ export async function analyze(ctx: StageContext) {
   // the pairwise pass is not checkpointed; each of its calls still has a limit
   judge.timeoutMs = scoreUnitMs;
   const segments = transcript.segments;
-  log.info({ durationSec, segments: segments.length, model: languageId, judge: judgeId ?? null, selfHosted, concurrency, samples, pairwise, passes, scoreRule: gateOpts.rule, auto, cap, focus: settings.focus ?? null, minSec: settings.minClipSeconds, maxSec: settings.maxClipSeconds }, "analyze start");
+  log.info(
+    {
+      durationSec,
+      segments: segments.length,
+      model: languageId,
+      judge: judgeId ?? null,
+      selfHosted,
+      concurrency,
+      samples,
+      pairwise,
+      passes,
+      scoreRule: gateOpts.rule,
+      auto,
+      cap,
+      focus: settings.focus ?? null,
+      minSec: settings.minClipSeconds,
+      maxSec: settings.maxClipSeconds,
+    },
+    "analyze start",
+  );
 
   // 1-2. chunk + map. Every window is a checkpointed step keyed on its lines, the model, the prompt version and the
   // selection settings (sc): a retry, or a re-analyze with nothing changed, reuses the windows already mapped.
@@ -322,7 +397,12 @@ export async function analyze(ctx: StageContext) {
   const candidatesSchema = z.array(clipCandidateSchema);
   await ctx.progress(0.03, `Finding moments in ${chunks.length} part(s) of the transcript`);
   const perChunk = await ctx.steps(chunks, { concurrency, range: [0.05, 0.4], message: (d, t) => `Found candidates in part ${d}/${t}` }, (ch, i, signal) =>
-    ctx.step(`map:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal }),
+    ctx.step(
+      `map:${i}`,
+      { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc },
+      (sig) => mapChunk({ ...o, signal: sig }, ch, sc),
+      { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal },
+    ),
   );
   // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1). A window whose
   // extra pass fails (the model answered nonsense) just keeps its first picks; a timeout or a cancel is never skipped.
@@ -331,9 +411,15 @@ export async function analyze(ctx: StageContext) {
     const ch = chunks[i]!;
     const exclude = excludeRanges(perChunk[i]!);
     const more = await ctx
-      .step(`glean:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end, exclude }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc }, (sig) => mapChunk({ ...o, signal: sig }, ch, sc, exclude), { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal })
+      .step(
+        `glean:${i}`,
+        { input: { lines: ch.lines, start: ch.start, end: ch.end, exclude }, model: languageId, promptVersion: MAP_PROMPT_VERSION, params: sc },
+        (sig) => mapChunk({ ...o, signal: sig }, ch, sc, exclude),
+        { schema: candidatesSchema, timeoutMs: mapUnitMs, model: languageId, signal },
+      )
       .catch((err: unknown) => {
-        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted) throw err;
+        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted)
+          throw err;
         log.warn({ err, chunk: i }, "second map pass failed; keeping the first picks of this window");
         return [];
       });
@@ -344,7 +430,15 @@ export async function analyze(ctx: StageContext) {
   log.debug({ chunks: chunks.length, perChunk: perChunk.map((l) => l.length), candidates: candidates.length }, "moments proposed by the model");
   // what happened to every candidate the model proposed (stage artifact for diagnosis / reports)
   const chunkOf = perChunk.flatMap((list, i) => list.map(() => i));
-  const fate: CandidateFate[] = candidates.map((c, i) => ({ i, chunk: chunkOf[i]!, title: c.title, proposed: [c.startSec, c.endSec], modelScore: c.score, reasoning: c.reasoning, outcome: "unusable" }));
+  const fate: CandidateFate[] = candidates.map((c, i) => ({
+    i,
+    chunk: chunkOf[i]!,
+    title: c.title,
+    proposed: [c.startSec, c.endSec],
+    modelScore: c.score,
+    reasoning: c.reasoning,
+    outcome: "unusable",
+  }));
 
   // 3. pool: snap to sentences/scene cuts, enforce length, drop overlaps (keep the better first guess)
   const snappedIdx = candidates
@@ -372,12 +466,38 @@ export async function analyze(ctx: StageContext) {
     poolIdx.push(i);
   }
   const pooled = pool.slice(0, Math.min(40, Math.max(cap * 3, 12)));
-  log.debug({ proposed: candidates.length, snapped: snapped.length, unusable: candidates.length - snapped.length, overlapDropped: snapped.length - pool.length, pooled: pooled.length, poolCapDropped: pool.length - pooled.length }, "candidate pool built");
+  log.debug(
+    {
+      proposed: candidates.length,
+      snapped: snapped.length,
+      unusable: candidates.length - snapped.length,
+      overlapDropped: snapped.length - pool.length,
+      pooled: pooled.length,
+      poolCapDropped: pool.length - pooled.length,
+    },
+    "candidate pool built",
+  );
   for (const i of poolIdx.slice(pooled.length)) fate[i]!.outcome = "pool-cap";
   // the candidates matter most when nothing survives ("no clips found"): keep them on failure too
   let gate: (Omit<ScoreGate, "keep"> & { kept: number; dropped: number; unscored: number; unscoredKept: number }) | null = null;
   // settings.minScore is the effective threshold of this run; settings.gate says how it was derived
-  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({ settings: { cap, auto, minScore: gate?.threshold ?? null, gate, focus: settings.focus ?? null, samples, pairwise, pairwisePasses: pairwise ? passes : 0, judge: judgeId ?? null }, chunks: chunks.map((c) => [c.start, c.end]), ...(kept.length ? { kept: kept.map((k) => ({ clipId: k.id, index: k.index, origin: k.origin, bounds: [k.startSec, k.endSec] })) } : {}), candidates: fate, ...extra });
+  const candidatesArtifact = (extra: Record<string, unknown> = {}) => ({
+    settings: {
+      cap,
+      auto,
+      minScore: gate?.threshold ?? null,
+      gate,
+      focus: settings.focus ?? null,
+      samples,
+      pairwise,
+      pairwisePasses: pairwise ? passes : 0,
+      judge: judgeId ?? null,
+    },
+    chunks: chunks.map((c) => [c.start, c.end]),
+    ...(kept.length ? { kept: kept.map((k) => ({ clipId: k.id, index: k.index, origin: k.origin, bounds: [k.startSec, k.endSec] })) } : {}),
+    candidates: fate,
+    ...extra,
+  });
   const artifactModels = () => ({ ...modelsUsed(svc, "language"), ...(judgeId ? { judge: judgeId } : {}) });
   const failWithCandidates = async (message: string): Promise<never> => {
     await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), artifactModels())).catch(() => {});
@@ -390,24 +510,32 @@ export async function analyze(ctx: StageContext) {
   const inputs: ScoreInput[] = pooled.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: textFor(c, segments) }));
   await ctx.progress(0.45, `Scoring ${pooled.length} candidate(s)${samples > 1 ? ` × ${samples} samples` : ""}`);
   // one step per batch of candidates (all its samples): keyed on the candidates' texts, the judge, the prompt and the settings
-  const scoreResults = await ctx.steps(scoreBatches(inputs), { concurrency, range: [0.45, 0.8], message: (d, t) => `Scoring candidates (${d}/${t})` }, (batch, i, signal) =>
-    ctx.step(
-      `score:${i}`,
-      { input: batch, model: judgeModelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples } },
-      async (sig) => {
-        const out: z.infer<typeof samplesSchema> = [];
-        for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples));
-        return out;
-      },
-      { schema: samplesSchema, timeoutMs: scoreUnitMs * samples, model: judgeModelId, signal },
-    ),
+  const scoreResults = await ctx.steps(
+    scoreBatches(inputs),
+    { concurrency, range: [0.45, 0.8], message: (d, t) => `Scoring candidates (${d}/${t})` },
+    (batch, i, signal) =>
+      ctx.step(
+        `score:${i}`,
+        { input: batch, model: judgeModelId, promptVersion: SCORE_PROMPT_VERSION, params: { sc, samples } },
+        async (sig) => {
+          const out: z.infer<typeof samplesSchema> = [];
+          for (let k = 0; k < samples; k++) out.push(await scoreSample({ ...judge, signal: sig, timeoutMs: undefined }, batch, sc, samples));
+          return out;
+        },
+        { schema: samplesSchema, timeoutMs: scoreUnitMs * samples, model: judgeModelId, signal },
+      ),
   );
   const scored = aggregateScores(inputs, sc, scoreResults.flat());
   // unscored (scoring failed) keep their map-pass guess only to order them among themselves
   type Ranked = { c: ClipCandidate; id: number; r: ScoreResult | undefined; total: number };
   let ranked: Ranked[] = pooled.map((c, id) => ({ c, id, r: scored.get(id), total: scored.get(id)?.total ?? Math.round(c.score) }));
   const offTopic = settings.focus ? ranked.filter((x) => (x.r?.scores.relevance ?? 10) < 4).length : 0;
-  for (const x of ranked) Object.assign(fate[poolIdx[x.id]!]!, { total: x.r ? x.total : undefined, scores: x.r?.scores ?? null, outcome: settings.focus && (x.r?.scores.relevance ?? 10) < 4 ? "off-topic" : "clip-cap" });
+  for (const x of ranked)
+    Object.assign(fate[poolIdx[x.id]!]!, {
+      total: x.r ? x.total : undefined,
+      scores: x.r?.scores ?? null,
+      outcome: settings.focus && (x.r?.scores.relevance ?? 10) < 4 ? "off-topic" : "clip-cap",
+    });
   if (settings.focus) ranked = ranked.filter((x) => (x.r?.scores.relevance ?? 10) >= 4);
   const byTotal = (a: Ranked, b: Ranked) => b.total - a.total;
   const rated = ranked.filter((x) => x.r).sort(byTotal);
@@ -417,9 +545,15 @@ export async function analyze(ctx: StageContext) {
   if (auto) {
     // the gate runs on rubric totals only; unscored candidates are gated among themselves (same
     // rule on their map guesses) and fill in only when the scored pool is tiny
-    const g = scoreGate(rated.map((x) => x.total), gateOpts);
+    const g = scoreGate(
+      rated.map((x) => x.total),
+      gateOpts,
+    );
     const keptRated = rated.filter((_, i) => g.keep[i]);
-    const gu = scoreGate(unrated.map((x) => x.total), gateOpts);
+    const gu = scoreGate(
+      unrated.map((x) => x.total),
+      gateOpts,
+    );
     const keptUnrated = keptRated.length < TINY_POOL ? unrated.filter((_, i) => gu.keep[i]).slice(0, TINY_POOL - keptRated.length) : [];
     const keptIds = new Set([...keptRated, ...keptUnrated].map((x) => x.id));
     for (const x of [...rated, ...unrated]) if (!keptIds.has(x.id)) fate[poolIdx[x.id]!]!.outcome = "weak";
@@ -428,8 +562,24 @@ export async function analyze(ctx: StageContext) {
     gate = { ...stats, kept: keptRated.length, dropped: rated.length - keptRated.length, unscored: unrated.length, unscoredKept: keptUnrated.length };
     chosen = [...keptRated, ...keptUnrated].slice(0, cap);
   } else chosen = [...rated, ...unrated].slice(0, cap);
-  log.debug({ scored: scored.size, pooled: pooled.length, offTopic, weak, kept: chosen.length, cap, gate, top: rated.slice(0, 10).map((x) => ({ start: x.c.startSec, end: x.c.endSec, total: x.total, title: x.c.title.slice(0, 60) })) }, "candidates scored");
-  if (gate) log.info({ rule: gate.rule, threshold: gate.threshold, n: gate.n, median: gate.median, mad: gate.mad, dropped: gate.dropped, unscored: gate.unscored }, `score gate: dropped ${gate.dropped} below ${gate.threshold} (${gate.rule})`);
+  log.debug(
+    {
+      scored: scored.size,
+      pooled: pooled.length,
+      offTopic,
+      weak,
+      kept: chosen.length,
+      cap,
+      gate,
+      top: rated.slice(0, 10).map((x) => ({ start: x.c.startSec, end: x.c.endSec, total: x.total, title: x.c.title.slice(0, 60) })),
+    },
+    "candidates scored",
+  );
+  if (gate)
+    log.info(
+      { rule: gate.rule, threshold: gate.threshold, n: gate.n, median: gate.median, mad: gate.mad, dropped: gate.dropped, unscored: gate.unscored },
+      `score gate: dropped ${gate.dropped} below ${gate.threshold} (${gate.rule})`,
+    );
   if (!chosen.length) await failWithCandidates(settings.focus ? `No moments about "${settings.focus}" were found.` : "No usable clips were found.");
 
   // 5. pairwise re-rank of the top
@@ -439,14 +589,24 @@ export async function analyze(ctx: StageContext) {
     // only scored clips are compared; an unscored fill-in keeps its place after them
     const top = chosen.filter((x) => x.r).slice(0, 10);
     await ctx.progress(0.82, `Comparing the top ${top.length} clips head to head`);
-    const order = await pairwiseRank(judge, top.map((x) => inputs[x.id]!), sc, (d, t) => void ctx.progress(0.82 + 0.15 * (d / t), `Comparing clips (${d}/${t})`).catch(() => {}), passes);
+    const order = await pairwiseRank(
+      judge,
+      top.map((x) => inputs[x.id]!),
+      sc,
+      (d, t) => void ctx.progress(0.82 + 0.15 * (d / t), `Comparing clips (${d}/${t})`).catch(() => {}),
+      passes,
+    );
     const byId = new Map(top.map((x) => [x.id, x]));
     chosen = [...order.map((id) => byId.get(id)!), ...chosen.filter((x) => !byId.has(x.id))];
     ranks = new Map(order.map((id, i) => [id, i + 1]));
     log.debug({ compared: top.length, passes, order }, "pairwise re-rank");
   }
 
-  if (kept.length) log.debug({ kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length }, "new picks avoid the clips the user kept");
+  if (kept.length)
+    log.debug(
+      { kept: kept.map((k) => ({ clipId: k.id, start: k.startSec, end: k.endSec })), droppedForKept: fate.filter((f) => f.outcome === "kept-overlap").length },
+      "new picks avoid the clips the user kept",
+    );
   // the project's layer template (brand overlays, music bed, CTA, intro / outro), materialised on every new clip against its own length
   const template = await templateForNewClips(db, project.userId, settings.layerTemplateId, log);
   const rows = chosen.map(({ c, id, r, total }, index) => ({
@@ -472,30 +632,49 @@ export async function analyze(ctx: StageContext) {
   // render job: one commit
   let converged = false;
   let liveNow: schema.Clip[] = [];
-  const stageExtra = { chunks: chunks.length, candidates: candidates.length, pooled: pooled.length, samples, pairwise: !!ranks, dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic }, gate: gate && { rule: gate.rule, threshold: gate.threshold } };
-  await ctx.complete(async (u) => {
-    // the project row is locked by now (lockCurrentStage), so what we read here is what the insert sees
-    liveNow = await u.db.select().from(schema.clips).where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
-    converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
-    // when we converge, another run's picks stand and this run inserted none
-    return { clips: converged ? 0 : rows.length, ...stageExtra };
-  }, async (u) => {
-    if (converged) {
-      // another run of this analysis committed its picks while we scored: converge on them instead of adding a second set
-      log.info({ clips: liveNow.length }, "clips already exist, converging");
-      await convergeOnExistingClips(svc, u, projectId); // the clips are locked by lockCurrentStage in ctx.complete
-      return;
-    }
-    const firstIndex = liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0);
-    const placed = rows.map((r) => ({ ...r, index: firstIndex + r.index }));
-    placed.forEach((r, index) => Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }));
-    if (placed.length) await u.db.insert(schema.clips).values(placed);
-    if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
-    await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
-    for (const r of placed) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
-    await u.db.update(schema.projects).set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
-  });
+  const stageExtra = {
+    chunks: chunks.length,
+    candidates: candidates.length,
+    pooled: pooled.length,
+    samples,
+    pairwise: !!ranks,
+    dropped: { unusable: candidates.length - snapped.length, overlap: snapped.length - pool.length, weak, offTopic },
+    gate: gate && { rule: gate.rule, threshold: gate.threshold },
+  };
+  await ctx.complete(
+    async (u) => {
+      // the project row is locked by now (lockCurrentStage), so what we read here is what the insert sees
+      liveNow = await u.db
+        .select()
+        .from(schema.clips)
+        .where(and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)));
+      converged = liveNow.some((c) => c.origin === "ai" && !keepReason(c));
+      // when we converge, another run's picks stand and this run inserted none
+      return { clips: converged ? 0 : rows.length, ...stageExtra };
+    },
+    async (u) => {
+      if (converged) {
+        // another run of this analysis committed its picks while we scored: converge on them instead of adding a second set
+        log.info({ clips: liveNow.length }, "clips already exist, converging");
+        await convergeOnExistingClips(svc, u, projectId); // the clips are locked by lockCurrentStage in ctx.complete
+        return;
+      }
+      const firstIndex = liveNow.reduce((m, k) => Math.max(m, k.index + 1), 0);
+      const placed = rows.map((r) => ({ ...r, index: firstIndex + r.index }));
+      placed.forEach((r, index) =>
+        Object.assign(fate[poolIdx[chosen[index]!.id]!]!, { outcome: "chosen", clipId: r.id, clipIndex: r.index, rank: ranks?.get(chosen[index]!.id) }),
+      );
+      if (placed.length) await u.db.insert(schema.clips).values(placed);
+      if (template && placed.length) await syncClipsRefs(u.db, projectId, placed);
+      await u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ pairwiseRanked: !!ranks }), artifactModels());
+      for (const r of placed) await u.emit(projectId, "clip.created", { clipId: r.id, index: r.index, title: r.title });
+      await u.db
+        .update(schema.projects)
+        .set({ status: "rendering", stage: "render", stageProgress: 0, stageStartedAt: sql`now()`, updatedAt: new Date() })
+        .where(eq(schema.projects.id, projectId));
+      for (const r of placed) await u.enqueue(QUEUES.render, { projectId, clipId: r.id, gen: 0 });
+    },
+  );
   void db;
 }
 
@@ -525,7 +704,9 @@ async function convergeOnExistingClips(svc: Services, u: UnitOfWork, projectId: 
  * Why a re-analyze keeps a clip instead of replacing it: the user made it ("manual"), or changed it in any way
  * ("edited": text, bounds, framing, style, intro/outro). Null = an untouched AI pick, which is replaced.
  */
-export function keepReason(c: Pick<schema.Clip, "origin" | "editedAt" | "layoutOverride" | "layoutSections" | "style" | "bumpers">): "manual" | "edited" | null {
+export function keepReason(
+  c: Pick<schema.Clip, "origin" | "editedAt" | "layoutOverride" | "layoutSections" | "style" | "bumpers">,
+): "manual" | "edited" | null {
   if (c.origin !== "ai") return "manual";
   if (c.editedAt || c.layoutOverride || c.layoutSections?.length || (c.style && Object.keys(c.style).length) || c.bumpers) return "edited";
   return null;
@@ -533,5 +714,8 @@ export function keepReason(c: Pick<schema.Clip, "origin" | "editedAt" | "layoutO
 
 /** A project's live clips (not soft-deleted), in order. */
 export async function listClips(db: Db, projectId: string) {
-  return db.query.clips.findMany({ where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)), orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)] });
+  return db.query.clips.findMany({
+    where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt)),
+    orderBy: [asc(schema.clips.index), asc(schema.clips.createdAt), asc(schema.clips.id)],
+  });
 }

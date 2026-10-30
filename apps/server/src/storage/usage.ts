@@ -102,7 +102,9 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const cache = planned.filter((r) => CACHE_KINDS.has(r.kind));
   const idleMs = cacheIdleMs(svc);
   const lease = svc.resources.leases();
-  const leased = lease.volume ? await volumeLeases(db, { volume: lease.volume, selfId: workerIdOf(svc.config), staleMs: LEASE_STALE_MS }) : { mb: lease.ownMB, jobs: lease.own };
+  const leased = lease.volume
+    ? await volumeLeases(db, { volume: lease.volume, selfId: workerIdOf(svc.config), staleMs: LEASE_STALE_MS })
+    : { mb: lease.ownMB, jobs: lease.own };
 
   const live = await db
     .select({ url: schema.projects.sourceUrl, bytes: schema.projects.sourceBytes })
@@ -111,7 +113,10 @@ export async function storageReport(svc: Services): Promise<StorageReport> {
   const dup = duplicateSourceBytes(live.map((p) => ({ identity: videoIdentity(p.url), bytes: p.bytes ?? 0 })));
 
   // retention marked these expired, yet a source file is still on disk (scratch copy or store object)
-  const expired = await db.select({ id: schema.projects.id, key: schema.projects.sourceKey }).from(schema.projects).where(isNotNull(schema.projects.sourceExpiredAt));
+  const expired = await db
+    .select({ id: schema.projects.id, key: schema.projects.sourceKey })
+    .from(schema.projects)
+    .where(isNotNull(schema.projects.sourceExpiredAt));
   let expiredBytes = 0;
   let expiredProjects = 0;
   for (const p of expired) {

@@ -45,14 +45,21 @@ export async function signUp(opts?: { password?: string }): Promise<{ email: str
     await new Promise((r) => setTimeout(r, 2500 + Math.random() * 1500));
   }
   if (!res.ok) throw new Error(`sign-up failed: ${res.status} ${await res.text()}`);
-  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const cookie = res.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
   const body = (await res.json()) as { user: { id: string } };
   return { email, cookie, userId: body.user.id, password };
 }
 
 /** Create an API key for a signed-in account (the same call Settings → API keys makes). */
 export async function createKey(cookie: string, name: string): Promise<{ id: string; key: string }> {
-  const res = await fetch(`${BASE}/api/auth/api-key/create`, { method: "POST", headers: { "content-type": "application/json", origin: BASE, cookie }, body: JSON.stringify({ name }) });
+  const res = await fetch(`${BASE}/api/auth/api-key/create`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE, cookie },
+    body: JSON.stringify({ name }),
+  });
   const body = await res.text();
   if (res.status !== 200) throw new Error(`api-key/create ${res.status}: ${body}`);
   return JSON.parse(body) as { id: string; key: string };
@@ -66,10 +73,12 @@ export async function readZip(buf: Buffer): Promise<Map<string, Buffer>> {
       zip.openReadStream(entry, (err, stream) => {
         if (err) return reject(err);
         const chunks: Buffer[] = [];
-        stream!.on("data", (c: Buffer) => chunks.push(c)).on("end", () => {
-          out.set(entry.fileName, Buffer.concat(chunks));
-          zip.readEntry();
-        });
+        stream!
+          .on("data", (c: Buffer) => chunks.push(c))
+          .on("end", () => {
+            out.set(entry.fileName, Buffer.concat(chunks));
+            zip.readEntry();
+          });
       });
     });
     zip.on("end", resolve).on("error", reject);

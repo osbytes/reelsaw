@@ -97,4 +97,13 @@ export function planByLookupKey(key: string | null | undefined): { plan: Plan; i
 export const ALL_LOOKUP_KEYS = PAID_PLANS.flatMap((p) => [p.lookupKeys!.month, p.lookupKeys!.year]);
 
 /** What the pricing page and the Billing page show (no Stripe ids). */
-export const publicPlan = (p: Plan) => ({ name: p.name, label: p.label, price: p.price, limits: p.limits, watermark: p.watermark !== false, firstVideoFreeMinutes: p.firstVideoFreeMinutes, priority: p.queuePriority > 0, blurb: p.blurb });
+export const publicPlan = (p: Plan) => ({
+  name: p.name,
+  label: p.label,
+  price: p.price,
+  limits: p.limits,
+  watermark: p.watermark !== false,
+  firstVideoFreeMinutes: p.firstVideoFreeMinutes,
+  priority: p.queuePriority > 0,
+  blurb: p.blurb,
+});

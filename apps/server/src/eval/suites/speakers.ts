@@ -12,7 +12,15 @@ import { activeSpeakers, speechAt, envelopeAt } from "../../pipeline/speaker.js"
 import { materialize, MediaDriftError, type CaseResult, type MediaSource, type Suite } from "../framework.js";
 
 interface Spec {
-  cases: Array<{ id: string; source: MediaSource; segment: [number, number]; speakers: [number, number]; truth: Array<{ start: number; end: number; who: 0 | 1 }>; minAgreement: number; expectUnsure?: boolean }>;
+  cases: Array<{
+    id: string;
+    source: MediaSource;
+    segment: [number, number];
+    speakers: [number, number];
+    truth: Array<{ start: number; end: number; who: 0 | 1 }>;
+    minAgreement: number;
+    expectUnsure?: boolean;
+  }>;
 }
 
 export const speakersSuite: Suite = {
@@ -36,11 +44,33 @@ export const speakersSuite: Suite = {
         try {
           media = await materialize(ctx, { ...c.source, strictSha: true }); // speaking turns are sub-second labels
         } catch (err) {
-          out.push(err instanceof MediaDriftError ? { id: c.id, pass: false, notes: (err as Error).message } : { id: c.id, pass: false, skipped: (err as Error).message });
+          out.push(
+            err instanceof MediaDriftError
+              ? { id: c.id, pass: false, notes: (err as Error).message }
+              : { id: c.id, pass: false, skipped: (err as Error).message },
+          );
           continue;
         }
         const [s0, s1] = c.segment;
-        const raw = await ctx.exec(cfg.FFMPEG_PATH, ["-hide_banner", "-loglevel", "error", "-ss", String(s0), "-t", String(s1 - s0), "-i", media, "-vn", "-ac", "1", "-ar", String(VAD_SR), "-f", "f32le", "pipe:1"]);
+        const raw = await ctx.exec(cfg.FFMPEG_PATH, [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-ss",
+          String(s0),
+          "-t",
+          String(s1 - s0),
+          "-i",
+          media,
+          "-vn",
+          "-ac",
+          "1",
+          "-ar",
+          String(VAD_SR),
+          "-f",
+          "f32le",
+          "pipe:1",
+        ]);
         const pcm = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
         const probs = await vad.probabilities(pcm);
         const t0 = Date.now();
@@ -61,7 +91,13 @@ export const speakersSuite: Suite = {
         out.push({
           id: c.id,
           pass: c.expectUnsure ? unsure : agreement >= c.minAgreement,
-          metrics: { agreement: Number(agreement.toFixed(2)), confidence: tl.confidence, switches: Math.max(0, tl.runs.length - 1), unsure: unsure ? 1 : 0, ms },
+          metrics: {
+            agreement: Number(agreement.toFixed(2)),
+            confidence: tl.confidence,
+            switches: Math.max(0, tl.runs.length - 1),
+            unsure: unsure ? 1 : 0,
+            ms,
+          },
           notes: unsure ? "unsure (no runs)" : tl.runs.map((r) => `${r.who === 0 ? "A" : "B"} ${r.start}-${r.end}`).join(", "),
         });
       }

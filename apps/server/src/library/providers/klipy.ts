@@ -14,16 +14,34 @@ const API = "https://api.klipy.com/api/v1";
 const LICENSE = { id: "klipy", name: "Klipy terms", url: "https://klipy.com/terms" };
 
 /** Tenor-style `media_formats`, or Klipy's `file` map (hd/md/sm → gif/mp4/webp), whichever the answer has. */
-function formats(g: Record<string, unknown>): { mp4?: string | undefined; gif?: string | undefined; thumb?: string | undefined; width?: number | undefined; height?: number | undefined } {
+function formats(g: Record<string, unknown>): {
+  mp4?: string | undefined;
+  gif?: string | undefined;
+  thumb?: string | undefined;
+  width?: number | undefined;
+  height?: number | undefined;
+} {
   const mf = obj(g.media_formats);
   if (Object.keys(mf).length) {
     const dims = arr(obj(mf.gif).dims);
-    return { mp4: httpsUrl(obj(mf.mp4).url), gif: httpsUrl(obj(mf.gif).url), thumb: httpsUrl(obj(mf.tinygif).url) ?? httpsUrl(obj(mf.gif).url), width: num(dims[0]), height: num(dims[1]) };
+    return {
+      mp4: httpsUrl(obj(mf.mp4).url),
+      gif: httpsUrl(obj(mf.gif).url),
+      thumb: httpsUrl(obj(mf.tinygif).url) ?? httpsUrl(obj(mf.gif).url),
+      width: num(dims[0]),
+      height: num(dims[1]),
+    };
   }
   const f = obj(g.file);
   const size = obj(f.md ?? f.hd ?? f.sm);
   const sm = obj(f.sm ?? f.md);
-  return { mp4: httpsUrl(obj(size.mp4).url), gif: httpsUrl(obj(size.gif).url), thumb: httpsUrl(obj(sm.gif).url) ?? httpsUrl(obj(sm.webp).url), width: num(obj(size.gif).width), height: num(obj(size.gif).height) };
+  return {
+    mp4: httpsUrl(obj(size.mp4).url),
+    gif: httpsUrl(obj(size.gif).url),
+    thumb: httpsUrl(obj(sm.gif).url) ?? httpsUrl(obj(sm.webp).url),
+    width: num(obj(size.gif).width),
+    height: num(obj(size.gif).height),
+  };
 }
 
 export function klipy({ settings, http }: ProviderDeps): Provider {
@@ -41,7 +59,20 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
     const id = str(g.id) ?? str(g.slug);
     const f = formats(g);
     if (!id || !f.thumb || !(f.mp4 || f.gif)) return null;
-    return { provider: "klipy", externalId: id, kind: "video", mime: f.mp4 ? "video/mp4" : "image/gif", name: clip(str(g.title) ?? str(g.content_description) ?? `GIF ${id}`, 120), previewUrl: f.mp4 ?? f.gif ?? f.thumb, thumbUrl: f.thumb, width: f.width, height: f.height, license: LICENSE, attribution: "GIFs via Klipy", url: httpsUrl(g.itemurl) ?? httpsUrl(g.url) };
+    return {
+      provider: "klipy",
+      externalId: id,
+      kind: "video",
+      mime: f.mp4 ? "video/mp4" : "image/gif",
+      name: clip(str(g.title) ?? str(g.content_description) ?? `GIF ${id}`, 120),
+      previewUrl: f.mp4 ?? f.gif ?? f.thumb,
+      thumbUrl: f.thumb,
+      width: f.width,
+      height: f.height,
+      license: LICENSE,
+      attribution: "GIFs via Klipy",
+      url: httpsUrl(g.itemurl) ?? httpsUrl(g.url),
+    };
   };
   return {
     id: "klipy",
@@ -63,11 +94,20 @@ export function klipy({ settings, http }: ProviderDeps): Provider {
       if (!/^[A-Za-z0-9_-]{1,100}$/.test(externalId)) throw new ProviderError("That is not a Klipy id.");
       // no single-item endpoint is confirmed: search by the id and take the exact match
       const r = await http.json("klipy", url("/gifs/search", { q: externalId, per_page: "20", customer_id: "reelsaw" }));
-      const g = rows(r).map(obj).find((x) => (str(x.id) ?? str(x.slug)) === externalId);
+      const g = rows(r)
+        .map(obj)
+        .find((x) => (str(x.id) ?? str(x.slug)) === externalId);
       const f = g ? formats(g) : undefined;
       const file = f?.mp4 ?? f?.gif;
       if (!g || !f || !file) throw new ProviderError("Klipy no longer returns that item; search for it again.");
-      return { url: file, ext: f.mp4 ? "mp4" : "gif", name: clip(str(g.title) ?? `Klipy ${externalId}`, 120), kind: "video", tags: [], provenance: { provider: "klipy", externalId, url: httpsUrl(g.itemurl) ?? httpsUrl(g.url), license: LICENSE, attribution: "GIF via Klipy" } };
+      return {
+        url: file,
+        ext: f.mp4 ? "mp4" : "gif",
+        name: clip(str(g.title) ?? `Klipy ${externalId}`, 120),
+        kind: "video",
+        tags: [],
+        provenance: { provider: "klipy", externalId, url: httpsUrl(g.itemurl) ?? httpsUrl(g.url), license: LICENSE, attribution: "GIF via Klipy" },
+      };
     },
   };
 }

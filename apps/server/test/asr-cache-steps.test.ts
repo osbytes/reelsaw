@@ -15,7 +15,17 @@ import { chunkStepKey, chunkStepName, chunkStepOutput, chunkStepSchema } from ".
 import { stepKey } from "../src/pipeline/steps.js";
 import { stallSentence } from "../src/queue/reconcile.js";
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
+const quiet = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  trace() {},
+  child() {
+    return quiet;
+  },
+} as never;
 
 /** An S3-shaped store in memory: objects by key with a modified time. */
 class FakeStore implements Storage {
@@ -46,7 +56,10 @@ class FakeStore implements Storage {
   }
   async deletePrefix() {}
   async list(prefix: string, limit: number) {
-    return [...this.objects].filter(([k]) => k.startsWith(prefix)).slice(0, limit).map(([key, o]) => ({ key, modifiedAt: o.modifiedAt }));
+    return [...this.objects]
+      .filter(([k]) => k.startsWith(prefix))
+      .slice(0, limit)
+      .map(([key, o]) => ({ key, modifiedAt: o.modifiedAt }));
   }
 }
 
@@ -54,7 +67,14 @@ function fakeAi(calls: { n: number }) {
   const model = new MockTranscriptionModelV4({
     doGenerate: async () => {
       calls.n++;
-      return { text: "hello there", segments: [{ text: "hello there", startSecond: 0, endSecond: 1 }], language: "en", durationInSeconds: 1, warnings: [], response: { timestamp: new Date(), modelId: "m", headers: {} } };
+      return {
+        text: "hello there",
+        segments: [{ text: "hello there", startSecond: 0, endSecond: 1 }],
+        language: "en",
+        durationInSeconds: 1,
+        warnings: [],
+        response: { timestamp: new Date(), modelId: "m", headers: {} },
+      };
     },
   });
   return { transcriptionOptions: () => ({}), transcriptionModel: async () => model } as never;
@@ -126,13 +146,25 @@ describe("transcribe chunk steps", () => {
 
 describe("stallSentence", () => {
   it("says which stage, how many parts are done and when the last finished", () => {
-    assert.equal(stallSentence({ stage: "analyze", idleMinutes: 15, done: 13, total: 43, lastStepMinutes: 16, ticking: false }), "Finding moments has made no progress for 15 min: 13 of 43 parts done, last part finished 16 min ago.");
+    assert.equal(
+      stallSentence({ stage: "analyze", idleMinutes: 15, done: 13, total: 43, lastStepMinutes: 16, ticking: false }),
+      "Finding moments has made no progress for 15 min: 13 of 43 parts done, last part finished 16 min ago.",
+    );
   });
   it("flags a model that keeps ticking without finishing a part", () => {
-    assert.equal(stallSentence({ stage: "transcribe", idleMinutes: 5, done: 2, total: 9, lastStepMinutes: 21, ticking: true }), "Transcribing is still reporting activity but no part has finished for 21 min: 2 of 9 parts done.");
+    assert.equal(
+      stallSentence({ stage: "transcribe", idleMinutes: 5, done: 2, total: 9, lastStepMinutes: 21, ticking: true }),
+      "Transcribing is still reporting activity but no part has finished for 21 min: 2 of 9 parts done.",
+    );
   });
   it("still reads for a stage with no steps", () => {
-    assert.equal(stallSentence({ stage: "ingest", idleMinutes: 20, done: null, total: null, lastStepMinutes: null, ticking: false }), "Preparing the video has made no progress for 20 min.");
-    assert.equal(stallSentence({ stage: null, idleMinutes: 20, done: null, total: null, lastStepMinutes: null, ticking: false }), "This project has made no progress for 20 min.");
+    assert.equal(
+      stallSentence({ stage: "ingest", idleMinutes: 20, done: null, total: null, lastStepMinutes: null, ticking: false }),
+      "Preparing the video has made no progress for 20 min.",
+    );
+    assert.equal(
+      stallSentence({ stage: null, idleMinutes: 20, done: null, total: null, lastStepMinutes: null, ticking: false }),
+      "This project has made no progress for 20 min.",
+    );
   });
 });

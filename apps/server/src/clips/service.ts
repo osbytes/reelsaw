@@ -8,7 +8,19 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { MAX_CLIP_LAYERS, MAX_CLIP_SECONDS, MIN_CLIP_SECONDS, bumperSecondsSchema, clipBumpersSchema, clipLayerSchema, clipLayers, layoutSectionSchema, reframeModeSchema, styleOverrideSchema, type ClipLayer } from "@reelsaw/shared";
+import {
+  MAX_CLIP_LAYERS,
+  MAX_CLIP_SECONDS,
+  MIN_CLIP_SECONDS,
+  bumperSecondsSchema,
+  clipBumpersSchema,
+  clipLayerSchema,
+  clipLayers,
+  layoutSectionSchema,
+  reframeModeSchema,
+  styleOverrideSchema,
+  type ClipLayer,
+} from "@reelsaw/shared";
 import { schema, type Db } from "../db/index.js";
 import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
@@ -21,10 +33,19 @@ import { byOwner, findProject, NO_CLIP, type Actor } from "../projects/service.j
 import { clipEditDecision, rangeTexts, recordDecisions } from "../decisions/service.js";
 
 /** Every asset id is one of the owner's library (an id the clip already uses stays valid even if it was removed since). */
-export async function assertOwnedBumpers(db: Db, userId: string, ids: Array<string | null | undefined>, alreadyUsed: Array<string | null | undefined> = [], what = "intro or outro") {
+export async function assertOwnedBumpers(
+  db: Db,
+  userId: string,
+  ids: Array<string | null | undefined>,
+  alreadyUsed: Array<string | null | undefined> = [],
+  what = "intro or outro",
+) {
   const want = [...new Set(ids.filter((x): x is string => !!x && !alreadyUsed.includes(x)))];
   if (!want.length) return;
-  const rows = await db.select({ id: schema.assets.id }).from(schema.assets).where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
+  const rows = await db
+    .select({ id: schema.assets.id })
+    .from(schema.assets)
+    .where(and(inArray(schema.assets.id, want), assetVisibleTo(userId), isNull(schema.assets.deletedAt)));
   if (rows.length !== want.length) throw new TRPCError({ code: "NOT_FOUND", message: `That ${what} is not in your library` });
 }
 
@@ -34,8 +55,15 @@ export async function assertOwnedBumpers(db: Db, userId: string, ids: Array<stri
  * belongs to someone else.
  */
 export async function findClip(u: UnitOfWork, actor: Actor, clipId: string): Promise<{ clip: schema.Clip; project: schema.Project }> {
-  const mine = actor && !actor.admin ? sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${actor.id})` : undefined;
-  const [clip] = await u.db.select().from(schema.clips).where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt), mine)).for("update");
+  const mine =
+    actor && !actor.admin
+      ? sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${actor.id})`
+      : undefined;
+  const [clip] = await u.db
+    .select()
+    .from(schema.clips)
+    .where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt), mine))
+    .for("update");
   if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
   return { clip, project: await findProject(u.db, actor, clip.projectId, { deleted: false }) };
 }
@@ -45,8 +73,14 @@ export async function findClip(u: UnitOfWork, actor: Actor, clipId: string): Pro
  * The owner filter is part of the lookup, so a clip of someone else's project is indistinguishable from a missing one.
  */
 export async function readClip(db: Db, actor: Actor, clipId: string): Promise<schema.Clip> {
-  const mine = actor && !actor.admin ? sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${actor.id})` : undefined;
-  const [clip] = await db.select().from(schema.clips).where(and(eq(schema.clips.id, clipId), mine));
+  const mine =
+    actor && !actor.admin
+      ? sql`exists (select 1 from ${schema.projects} where ${schema.projects.id} = ${schema.clips.projectId} and ${schema.projects.userId} = ${actor.id})`
+      : undefined;
+  const [clip] = await db
+    .select()
+    .from(schema.clips)
+    .where(and(eq(schema.clips.id, clipId), mine));
   if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: NO_CLIP });
   return clip;
 }
@@ -106,19 +140,51 @@ export async function updateClip(svc: Services, actor: Actor, input: UpdateClipI
     const sectionsChanged = input.layoutSections !== undefined && !same(input.layoutSections ?? [], c.layoutSections ?? []);
     const styleChanged = input.style !== undefined && !same(input.style ?? null, c.style ?? null);
     const emphasisChanged = input.emphasis !== undefined && !same(input.emphasis, c.emphasis ?? []);
-    const cleanBumpers = input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined) ? { ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}), ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}), ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}), ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}) } : null;
+    const cleanBumpers =
+      input.bumpers && Object.values(input.bumpers).some((v) => v !== undefined)
+        ? {
+            ...(input.bumpers.intro !== undefined ? { intro: input.bumpers.intro } : {}),
+            ...(input.bumpers.introSec !== undefined ? { introSec: input.bumpers.introSec } : {}),
+            ...(input.bumpers.outro !== undefined ? { outro: input.bumpers.outro } : {}),
+            ...(input.bumpers.outroSec !== undefined ? { outroSec: input.bumpers.outroSec } : {}),
+          }
+        : null;
     const bumpersChanged = input.bumpers !== undefined && !same(cleanBumpers, c.bumpers ?? null);
     // layers replace the whole list
     const currentLayers = clipLayers(c);
     const nextLayers: ClipLayer[] | undefined = input.layers !== undefined ? (input.layers ?? []) : undefined;
     const cleanedLayers = nextLayers !== undefined ? cleanLayers(nextLayers, { startSec, endSec }) : undefined;
-    const layersChanged = cleanedLayers !== undefined && !same(cleanedLayers, currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
-    const burned = { bounds: boundsChanged, hook: hookChanged, layoutOverride: layoutChanged, layoutSections: sectionsChanged, style: styleChanged, emphasis: emphasisChanged, bumpers: bumpersChanged, layers: layersChanged };
-    const changed = [...(titleChanged ? ["title"] : []), ...(captionChanged ? ["caption"] : []), ...(hashtagsChanged ? ["hashtags"] : []), ...Object.entries(burned).filter(([, v]) => v).map(([k]) => k)];
+    const layersChanged =
+      cleanedLayers !== undefined && !same(cleanedLayers, currentLayers.length ? cleanLayers(currentLayers, { startSec: c.startSec, endSec: c.endSec }) : null);
+    const burned = {
+      bounds: boundsChanged,
+      hook: hookChanged,
+      layoutOverride: layoutChanged,
+      layoutSections: sectionsChanged,
+      style: styleChanged,
+      emphasis: emphasisChanged,
+      bumpers: bumpersChanged,
+      layers: layersChanged,
+    };
+    const changed = [
+      ...(titleChanged ? ["title"] : []),
+      ...(captionChanged ? ["caption"] : []),
+      ...(hashtagsChanged ? ["hashtags"] : []),
+      ...Object.entries(burned)
+        .filter(([, v]) => v)
+        .map(([k]) => k),
+    ];
     const needsRerender = Object.values(burned).some(Boolean); // these are burned into the video
     // ownership of the chosen assets is checked in the unit of work that writes (the project owner's library)
     if (bumpersChanged) await assertOwnedBumpers(u.db, p.userId, [cleanBumpers?.intro, cleanBumpers?.outro], [c.bumpers?.intro, c.bumpers?.outro]);
-    if (layersChanged) await assertOwnedBumpers(u.db, p.userId, (cleanedLayers ?? []).flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), currentLayers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])), "library item");
+    if (layersChanged)
+      await assertOwnedBumpers(
+        u.db,
+        p.userId,
+        (cleanedLayers ?? []).flatMap((l) => (l.kind === "text" ? [] : [l.assetId])),
+        currentLayers.flatMap((l) => (l.kind === "text" ? [] : [l.assetId])),
+        "library item",
+      );
     const [row] = await u.db
       .update(schema.clips)
       .set({
@@ -163,7 +229,11 @@ export type CreateClipInput = z.input<typeof createClipInput>;
 export async function createClip(svc: Services, actor: Actor, input: CreateClipInput) {
   const len = input.endSec - input.startSec;
   const ai = input.mode === "ai";
-  if (len < (ai ? 8 : MIN_CLIP_SECONDS)) throw new TRPCError({ code: "BAD_REQUEST", message: ai ? "Select at least 8 seconds for the AI to search" : `A clip must be at least ${MIN_CLIP_SECONDS} seconds` });
+  if (len < (ai ? 8 : MIN_CLIP_SECONDS))
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: ai ? "Select at least 8 seconds for the AI to search" : `A clip must be at least ${MIN_CLIP_SECONDS} seconds`,
+    });
   if (!ai && len > MAX_CLIP_SECONDS) throw new TRPCError({ code: "BAD_REQUEST", message: `A clip can be at most ${MAX_CLIP_SECONDS / 60} minutes` });
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
@@ -196,7 +266,15 @@ export async function createClip(svc: Services, actor: Actor, input: CreateClipI
     if (byOwner(actor, p)) {
       await recordDecisions(svc, u.db, p, async () => {
         const [text] = await rangeTexts(u.db, p.id, [inserted]);
-        return [{ kind: "clip.create", clipId: inserted.id, before: null, after: { startSec: inserted.startSec, endSec: inserted.endSec, mode: input.mode }, context: { text: text ?? "", startSec: inserted.startSec, endSec: inserted.endSec, origin: inserted.origin } }];
+        return [
+          {
+            kind: "clip.create",
+            clipId: inserted.id,
+            before: null,
+            after: { startSec: inserted.startSec, endSec: inserted.endSec, mode: input.mode },
+            context: { text: text ?? "", startSec: inserted.startSec, endSec: inserted.endSec, origin: inserted.origin },
+          },
+        ];
       });
     }
     return { clip: inserted, queued: "prepare" as const };
@@ -224,21 +302,45 @@ export type ClipBumpersManyInput = z.input<typeof clipBumpersManyInput>;
 export async function setClipBumpers(svc: Services, actor: Actor, input: ClipBumpersManyInput) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, input.projectId, { deleted: false });
-    const clips = await u.db.select({ id: schema.clips.id, status: schema.clips.status }).from(schema.clips).where(and(eq(schema.clips.projectId, p.id), inArray(schema.clips.id, input.clipIds), isNull(schema.clips.deletedAt))).orderBy(schema.clips.id).for("update"); // id order, like lockProjectClips; replaced clips are not edited
+    const clips = await u.db
+      .select({ id: schema.clips.id, status: schema.clips.status })
+      .from(schema.clips)
+      .where(and(eq(schema.clips.projectId, p.id), inArray(schema.clips.id, input.clipIds), isNull(schema.clips.deletedAt)))
+      .orderBy(schema.clips.id)
+      .for("update"); // id order, like lockProjectClips; replaced clips are not edited
     if (clips.length !== new Set(input.clipIds).size) throw new TRPCError({ code: "NOT_FOUND", message: "Some of those clips no longer exist" });
-    await assertOwnedBumpers(u.db, p.userId, [input.intro, input.outro].map((x) => (x === "none" || x === "inherit" ? null : x)));
+    await assertOwnedBumpers(
+      u.db,
+      p.userId,
+      [input.intro, input.outro].map((x) => (x === "none" || x === "inherit" ? null : x)),
+    );
     const ids = clips.map((c) => c.id);
-    for (const [slot, choice, secs] of [["intro", input.intro, input.introSec], ["outro", input.outro, input.outroSec]] as const) {
+    for (const [slot, choice, secs] of [
+      ["intro", input.intro, input.introSec],
+      ["outro", input.outro, input.outroSec],
+    ] as const) {
       if (choice === undefined) continue;
-      const patch = choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice, ...(secs !== undefined && choice !== "none" ? { [`${slot}Sec`]: secs } : {}) };
+      const patch =
+        choice === "inherit" ? {} : { [slot]: choice === "none" ? null : choice, ...(secs !== undefined && choice !== "none" ? { [`${slot}Sec`]: secs } : {}) };
       await u.db
         .update(schema.clips)
-        .set({ bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`, updatedAt: new Date() })
+        .set({
+          bumpers: sql`nullif((coalesce(${schema.clips.bumpers}, '{}'::jsonb) - ${slot}::text - ${`${slot}Sec`}::text) || ${JSON.stringify(patch)}::jsonb, '{}'::jsonb)`,
+          updatedAt: new Date(),
+        })
         .where(inArray(schema.clips.id, ids));
     }
-    await syncClipsRefs(u.db, p.id, await u.db.select({ id: schema.clips.id, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio }).from(schema.clips).where(inArray(schema.clips.id, ids)));
+    await syncClipsRefs(
+      u.db,
+      p.id,
+      await u.db
+        .select({ id: schema.clips.id, bumpers: schema.clips.bumpers, layers: schema.clips.layers, overlays: schema.clips.overlays, audio: schema.clips.audio })
+        .from(schema.clips)
+        .where(inArray(schema.clips.id, ids)),
+    );
     let rerendered = 0;
-    if (input.rerender) for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
+    if (input.rerender)
+      for (const c of clips) if ((c.status === "done" || c.status === "failed") && (await requestRender(svc, u, p.id, c.id)) !== null) rerendered++;
     return { ok: true as const, updated: ids.length, rerendered };
   });
 }

@@ -24,7 +24,8 @@ export function LearningSection() {
       <div>
         <h2 className="text-[15px] font-bold">Learning</h2>
         <p className="mt-1 text-[13px] text-ink2">
-          Reelsaw records what you accept, reject, cut, correct and edit, and uses it (for example, cuts you rejected are shown to the filler detector as examples to keep). It stays on this instance and outlives deleted projects. Turning it off stops recording; what is kept stays.
+          Reelsaw records what you accept, reject, cut, correct and edit, and uses it (for example, cuts you rejected are shown to the filler detector as
+          examples to keep). It stays on this instance and outlives deleted projects. Turning it off stops recording; what is kept stays.
         </p>
       </div>
       <label className="flex cursor-pointer items-center justify-between gap-3 text-[13px]">
@@ -41,7 +42,9 @@ export function LearningSection() {
         </button>
       </label>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-        <div className="min-h-5 text-[13px] text-ink2">{d ? `${plural(d.total, "decision")} from ${plural(d.projects, "project")}` : <Skeleton className="h-4 w-48" />}</div>
+        <div className="min-h-5 text-[13px] text-ink2">
+          {d ? `${plural(d.total, "decision")} from ${plural(d.projects, "project")}` : <Skeleton className="h-4 w-48" />}
+        </div>
         <button className="btn-danger" disabled={!d || d.total === 0} onClick={() => setConfirming(true)}>
           Forget everything
         </button>

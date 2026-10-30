@@ -150,7 +150,9 @@ export function ModelPicker({
           {m.note && <span className="block truncate text-[11px] text-ink3">{m.note}</span>}
         </span>
         {needsPull && (
-          <span className={`inline-flex shrink-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] font-semibold ${busy ? "text-ink3" : "bg-acc-soft text-acc-text"}`}>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] font-semibold ${busy ? "text-ink3" : "bg-acc-soft text-acc-text"}`}
+          >
             <Download className="h-3 w-3" />
             {busy ? "downloading…" : "download"}
           </span>
@@ -180,7 +182,12 @@ export function ModelPicker({
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={6} collisionPadding={12} className="z-[80] w-[min(640px,calc(100vw-24px))] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop">
+        <Popover.Content
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] w-[min(640px,calc(100vw-24px))] overflow-hidden rounded-[12px] border border-line bg-panel text-ink shadow-pop"
+        >
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -192,7 +199,11 @@ export function ModelPicker({
             <ScrollArea className="max-h-[min(360px,calc(var(--radix-popover-content-available-height)-60px))]">
               <div className="p-1">
                 {canUseTyped && (
-                  <button type="button" onClick={() => choose(typed)} className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk">
+                  <button
+                    type="button"
+                    onClick={() => choose(typed)}
+                    className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk"
+                  >
                     <span className="w-4" />
                     <span className="min-w-0 flex-1 truncate">
                       Use <span className="font-mono text-xs">{typed}</span>
@@ -218,7 +229,9 @@ export function ModelPicker({
                         onClick={() => setPicked(p.provider)}
                         className={`flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm hover:bg-sunk ${picked === p.provider ? "bg-sunk" : ""}`}
                       >
-                        <span className="grid h-4 w-4 shrink-0 place-items-center text-ink3">{p.selfHosted || s?.baseUrlEnv ? <Server className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}</span>
+                        <span className="grid h-4 w-4 shrink-0 place-items-center text-ink3">
+                          {p.selfHosted || s?.baseUrlEnv ? <Server className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+                        </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px]">{s?.title ?? p.title}</span>
                           <span className={`block truncate text-[11px] ${st.tone}`}>{st.text}</span>
@@ -233,11 +246,24 @@ export function ModelPicker({
               <ScrollArea className="max-h-[min(400px,calc(var(--radix-popover-content-available-height)-60px))]">
                 <div className="p-1">
                   {selected && selectedState && (!selected.available || selected.error) ? (
-                    <ProviderForm key={selected.provider} state={selectedState} catalog={selected} saving={saving} onSave={onSaveCredentials} onClear={onClearCredentials} />
+                    <ProviderForm
+                      key={selected.provider}
+                      state={selectedState}
+                      catalog={selected}
+                      saving={saving}
+                      onSave={onSaveCredentials}
+                      onClear={onClearCredentials}
+                    />
                   ) : selected ? (
                     <>
-                      {selectedState && <ProviderSummary state={selectedState} catalog={selected} onClear={onClearCredentials} saving={saving} onSave={onSaveCredentials} />}
-                      {selected.models.length ? selected.models.map((m) => modelRow(m, selected, false)) : <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No models of this kind here"}</div>}
+                      {selectedState && (
+                        <ProviderSummary state={selectedState} catalog={selected} onClear={onClearCredentials} saving={saving} onSave={onSaveCredentials} />
+                      )}
+                      {selected.models.length ? (
+                        selected.models.map((m) => modelRow(m, selected, false))
+                      ) : (
+                        <div className="px-3 py-6 text-center text-sm text-ink3">{loading ? <PickerSkeleton /> : "No models of this kind here"}</div>
+                      )}
                     </>
                   ) : (
                     <div className="px-3 py-6 text-center text-sm text-ink3">Pick a provider</div>
@@ -268,7 +294,14 @@ function ProviderSummary({
 }) {
   const [edit, setEdit] = useState(false);
   const parts: string[] = [];
-  if (state.keyEnv.length) parts.push(state.keySource === "db" ? `key entered here (…${state.keyLast4})` : state.keySource === "env" ? `key from ${state.keyEnv.find((k) => k) ?? ".env"}` : "no key");
+  if (state.keyEnv.length)
+    parts.push(
+      state.keySource === "db"
+        ? `key entered here (…${state.keyLast4})`
+        : state.keySource === "env"
+          ? `key from ${state.keyEnv.find((k) => k) ?? ".env"}`
+          : "no key",
+    );
   if (state.baseUrl) parts.push(`${state.baseUrl} (${state.baseUrlSource === "db" ? "entered here" : ".env"})`);
   if (catalog.source === "live") parts.push("live listing");
   return (
@@ -339,21 +372,46 @@ function ProviderForm({
       {!compact && (
         <div className="text-[13px]">
           <b>{state.title}</b>
-          <span className="block text-[12px] text-ink2">{catalog.error ?? state.unreadable ? "The stored key cannot be read any more (the server secret changed): enter it again." : catalog.reason ?? "Enter credentials to list its models."}</span>
+          <span className="block text-[12px] text-ink2">
+            {(catalog.error ?? state.unreadable)
+              ? "The stored key cannot be read any more (the server secret changed): enter it again."
+              : (catalog.reason ?? "Enter credentials to list its models.")}
+          </span>
         </div>
       )}
       {wantsUrl && (
         <label className="flex flex-col gap-1 text-[12px]">
           <span className="text-ink2">Base URL{state.provider === "openai" ? " (leave empty for api.openai.com)" : ""}</span>
-          <input className="input font-mono text-xs" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={state.provider === "openai" ? "http://speaches:8000/v1" : "http://host.docker.internal:11434/v1"} autoComplete="off" />
+          <input
+            className="input font-mono text-xs"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={state.provider === "openai" ? "http://speaches:8000/v1" : "http://host.docker.internal:11434/v1"}
+            autoComplete="off"
+          />
         </label>
       )}
       {wantsKey && (
         <label className="flex flex-col gap-1 text-[12px]">
           <span className="text-ink2">
-            API key{state.keySource === "env" ? ` (replaces ${state.keyEnv[0]})` : state.keyLast4 ? ` (replaces …${state.keyLast4})` : state.keyEnv.length ? "" : " (optional)"}
+            API key
+            {state.keySource === "env"
+              ? ` (replaces ${state.keyEnv[0]})`
+              : state.keyLast4
+                ? ` (replaces …${state.keyLast4})`
+                : state.keyEnv.length
+                  ? ""
+                  : " (optional)"}
           </span>
-          <input type="password" className="input font-mono text-xs" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={state.keyHint ?? "…"} autoComplete="off" spellCheck={false} />
+          <input
+            type="password"
+            className="input font-mono text-xs"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={state.keyHint ?? "…"}
+            autoComplete="off"
+            spellCheck={false}
+          />
         </label>
       )}
       {hint && <div className="text-[12px] text-warn">{hint}</div>}
@@ -376,7 +434,9 @@ function ProviderForm({
           </button>
         </span>
       </div>
-      <p className="text-[11px] text-ink3">Stored encrypted on this server; never shown again. Saving lists the provider's models first, so a wrong key is refused.</p>
+      <p className="text-[11px] text-ink3">
+        Stored encrypted on this server; never shown again. Saving lists the provider's models first, so a wrong key is refused.
+      </p>
     </form>
   );
 }

@@ -26,7 +26,10 @@ export function ResetPasswordPage() {
   const nav = useNavigate();
   const location = useLocation();
   const fromLink = resetPasswordFromSearch(location.search);
-  const routedNotice = location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string" ? location.state.notice : null;
+  const routedNotice =
+    location.state && typeof location.state === "object" && "notice" in location.state && typeof location.state.notice === "string"
+      ? location.state.notice
+      : null;
   const [email, setEmail] = useState(fromLink.email ?? "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -121,11 +124,29 @@ export function ResetPasswordPage() {
           <>
             <div>
               <label className="label">New password</label>
-              <input className="input" name="password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+              <input
+                className="input"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">Confirm password</label>
-              <input className="input" name="confirm-password" type="password" autoComplete="new-password" required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+              <input
+                className="input"
+                name="confirm-password"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
             </div>
           </>
         ) : (
@@ -135,10 +156,15 @@ export function ResetPasswordPage() {
           </div>
         )}
         {!choosing && captcha && <Captcha key={captchaEpoch} provider={captcha.provider} siteKey={captcha.siteKey} onToken={onToken} />}
-        <p className={`min-h-10 rounded-[10px] px-3 py-2 text-sm leading-relaxed ${tone === "err" ? "bg-err-soft text-ink" : tone === "warn" ? "bg-warn-soft text-ink" : "text-ink2"}`}>
+        <p
+          className={`min-h-10 rounded-[10px] px-3 py-2 text-sm leading-relaxed ${tone === "err" ? "bg-err-soft text-ink" : tone === "warn" ? "bg-warn-soft text-ink" : "text-ink2"}`}
+        >
           {banner ?? ""}
         </p>
-        <button className="btn-primary w-full min-w-[12rem] py-2.5 text-sm" disabled={busy || (!choosing && !!captcha && !captchaToken) || (choosing && (password.length < 8 || password !== confirm))}>
+        <button
+          className="btn-primary w-full min-w-[12rem] py-2.5 text-sm"
+          disabled={busy || (!choosing && !!captcha && !captchaToken) || (choosing && (password.length < 8 || password !== confirm))}
+        >
           {busy ? "…" : choosing ? "Change password" : fromLink.expired ? "Send me a new link" : "Send reset link"}
         </button>
         <Link to="/login" className="w-full text-center text-xs text-ink3 no-underline hover:text-ink">

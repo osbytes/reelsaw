@@ -20,7 +20,10 @@ describe("caption pace", () => {
     assert.ok(Math.abs(lineDisplayEnd([line(6)], 0) - 1.8) < 1e-9);
   });
   it("holds a 28-character line for 1.4 s", () => {
-    const l = [{ text: "internationalization", start: 0, end: 0.2 }, { text: "matters", start: 0.2, end: 0.4 }]; // 20 + 1 + 7 = 28
+    const l = [
+      { text: "internationalization", start: 0, end: 0.2 },
+      { text: "matters", start: 0.2, end: 0.4 },
+    ]; // 20 + 1 + 7 = 28
     assert.equal(lineMinSeconds(l), 1.4);
     assert.equal(lineDisplayEnd([l], 0), 1.4);
   });

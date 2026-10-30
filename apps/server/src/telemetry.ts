@@ -45,7 +45,9 @@ function metricIntervalMs(): number {
 
 /** OTel UCUM units as Sentry names them; anything else (`{token}`, `USD`) passes through. */
 export function sentryUnit(unit: string): string {
-  return ({ s: "second", ms: "millisecond", By: "byte", "By/s": "byte/second", "1": "ratio" } as Record<string, string>)[unit] ?? unit.replace(/^\{(.+)\}$/, "$1");
+  return (
+    ({ s: "second", ms: "millisecond", By: "byte", "By/s": "byte/second", "1": "ratio" } as Record<string, string>)[unit] ?? unit.replace(/^\{(.+)\}$/, "$1")
+  );
 }
 
 const sentryMetricSink: MetricSink = {
@@ -54,7 +56,10 @@ const sentryMetricSink: MetricSink = {
   gauge: (name, value, unit, attributes) => Sentry.metrics.gauge(name, value, { unit: sentryUnit(unit), attributes }),
 };
 
-export function createTelemetry(config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV">, log: Logger): Telemetry {
+export function createTelemetry(
+  config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "POSTHOG_KEY" | "POSTHOG_HOST" | "REELSAW_VERSION" | "NODE_ENV">,
+  log: Logger,
+): Telemetry {
   const release = `reelsaw@${config.REELSAW_VERSION}`;
   const environment = config.SENTRY_ENVIRONMENT ?? (config.NODE_ENV === "production" ? "production" : "development");
   const sentry = !!config.SENTRY_DSN;
@@ -100,7 +105,11 @@ export function createTelemetry(config: Pick<Config, "SENTRY_DSN" | "SENTRY_ENVI
     },
     captureException(err, tags) {
       if (!sentry) return;
-      const clean = Object.fromEntries(Object.entries(tags ?? {}).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]));
+      const clean = Object.fromEntries(
+        Object.entries(tags ?? {})
+          .filter(([, v]) => v !== undefined && v !== null)
+          .map(([k, v]) => [k, String(v)]),
+      );
       Sentry.captureException(err, { tags: clean });
     },
     capture(event, distinctId, properties) {

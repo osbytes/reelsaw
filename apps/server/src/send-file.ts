@@ -24,7 +24,8 @@ export async function sendFile(req: Request, file: string, downloadName?: string
     "Last-Modified": st.mtime.toUTCString(),
   };
   const inm = req.headers.get("if-none-match");
-  if (inm && inm.split(",").some((t) => t.trim() === etag)) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": headers["Cache-Control"]! } });
+  if (inm && inm.split(",").some((t) => t.trim() === etag))
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": headers["Cache-Control"]! } });
   // a range on a changed file must not be stitched onto the old one
   const ifRange = req.headers.get("if-range");
   const rangeOk = !ifRange || ifRange === etag || ifRange === headers["Last-Modified"];
@@ -47,4 +48,3 @@ export async function sendFile(req: Request, file: string, downloadName?: string
   headers["Content-Length"] = String(end - start + 1);
   return new Response(Readable.toWeb(fs.createReadStream(file, { start, end })) as ReadableStream, { status, headers });
 }
-

@@ -12,7 +12,12 @@ export function LegalPage({ slug, title, intro, sections }: { slug: string; titl
       <Header />
       <main id="main" className="container-page flex max-w-[760px] flex-col gap-10 py-12 sm:py-16">
         <header className="flex flex-col gap-4">
-          <Breadcrumbs items={[{ href: "/", label: SITE.name }, { href: `/${slug}`, label: title }]} />
+          <Breadcrumbs
+            items={[
+              { href: "/", label: SITE.name },
+              { href: `/${slug}`, label: title },
+            ]}
+          />
           <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[40px]">{title}</h1>
           <p className="text-sm text-ink3">Last updated {LEGAL_UPDATED}</p>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">{intro}</p>

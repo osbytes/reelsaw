@@ -128,7 +128,13 @@ export function DeletedPage() {
         onSuccess: (r) => {
           refresh();
           setSel([]);
-          toast(r.failed ? `Restored ${r.restored} · ${r.failed} couldn’t be restored${firstError(r.results)}` : rows.length === 1 ? `Restored “${rows[0]!.title}”` : `Restored ${rows.length} items`);
+          toast(
+            r.failed
+              ? `Restored ${r.restored} · ${r.failed} couldn’t be restored${firstError(r.results)}`
+              : rows.length === 1
+                ? `Restored “${rows[0]!.title}”`
+                : `Restored ${rows.length} items`,
+          );
         },
         onError: (err) => {
           const quota = quotaFromError(err);
@@ -152,7 +158,10 @@ export function DeletedPage() {
           <h1 className="text-[28px] font-bold tracking-tight">Deleted</h1>
           <p className="mt-1 min-h-5 text-sm text-ink2">
             Restore something, or delete it forever to free storage. Each row says when it was deleted and when it is deleted forever
-            {data && data.keepDays > 0 ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})` : ""}.
+            {data && data.keepDays > 0
+              ? ` (projects and clips after ${plural(data.keepDays, "day")}, library and templates after ${plural(data.libraryDays, "day")})`
+              : ""}
+            .
           </p>
         </div>
 
@@ -174,7 +183,9 @@ export function DeletedPage() {
           <div className="flex flex-col items-center gap-2 rounded-[16px] border border-dashed border-line2 px-5 py-10 text-center">
             <Trash2 className="h-6 w-6 text-ink3" aria-hidden />
             <b className="text-[15px]">Nothing waiting</b>
-            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.</p>
+            <p className="max-w-[440px] text-[13px] leading-relaxed text-ink2">
+              Deleted projects, clips, library items and templates show up here until you restore them or delete them forever.
+            </p>
           </div>
         )}
 
@@ -203,10 +214,22 @@ export function DeletedPage() {
                 const checked = sel.includes(k);
                 const heldWhy = whyHeld(r);
                 return (
-                  <li key={k} id={`deleted-${r.id}`} className={`group/row relative ${GRID} min-h-[3.5rem] rounded-[10px] px-3 py-2 ${on || checked ? "bg-acc-soft" : "hover:bg-sunk/60"}`}>
+                  <li
+                    key={k}
+                    id={`deleted-${r.id}`}
+                    className={`group/row relative ${GRID} min-h-[3.5rem] rounded-[10px] px-3 py-2 ${on || checked ? "bg-acc-soft" : "hover:bg-sunk/60"}`}
+                  >
                     <span className="h-8 w-8" aria-hidden />
-                    <label className={`absolute inset-y-0 left-0 z-[1] flex w-11 cursor-pointer items-center justify-center pl-3 ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}>
-                      <input type="checkbox" className="h-4 w-4 accent-[var(--acc)]" checked={checked} onChange={() => toggle(r)} aria-label={`Select ${r.title}`} />
+                    <label
+                      className={`absolute inset-y-0 left-0 z-[1] flex w-11 cursor-pointer items-center justify-center pl-3 ${checked ? "opacity-100" : "opacity-0"} ${REVEAL_ROW}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--acc)]"
+                        checked={checked}
+                        onChange={() => toggle(r)}
+                        aria-label={`Select ${r.title}`}
+                      />
                     </label>
                     <span className="hidden font-semibold text-ink3 sm:block">{KIND_LABEL[r.kind]}</span>
                     <span className="min-w-0">
@@ -227,7 +250,12 @@ export function DeletedPage() {
                           <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => onRestore([r])}>
                             Restore
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item className="menu-item-danger" disabled={!r.canPurge || busy} title={heldWhy} onSelect={() => r.canPurge && setPending([r])}>
+                          <DropdownMenu.Item
+                            className="menu-item-danger"
+                            disabled={!r.canPurge || busy}
+                            title={heldWhy}
+                            onSelect={() => r.canPurge && setPending([r])}
+                          >
                             Delete forever…
                           </DropdownMenu.Item>
                         </DropdownMenu.Content>
@@ -256,7 +284,13 @@ export function DeletedPage() {
                       <DropdownMenu.Item
                         className="menu-item-danger"
                         disabled={busy || held.length === selected.length}
-                        title={held.length === selected.length ? "None of the selected items can be deleted forever yet" : held.length ? `${plural(held.length, "item")} still in use will be skipped` : undefined}
+                        title={
+                          held.length === selected.length
+                            ? "None of the selected items can be deleted forever yet"
+                            : held.length
+                              ? `${plural(held.length, "item")} still in use will be skipped`
+                              : undefined
+                        }
                         onSelect={() => setPending(selected.filter((r) => r.canPurge))}
                       >
                         Delete forever…
@@ -280,7 +314,8 @@ export function DeletedPage() {
           pending && pending.length > 1 ? (
             <>
               {plural(pending.length, "item")} and their files are deleted permanently
-              {pending.reduce((n, r) => n + r.storedBytes, 0) ? ` (${formatBytes(pending.reduce((n, r) => n + r.storedBytes, 0))} freed)` : ""}. This cannot be undone.
+              {pending.reduce((n, r) => n + r.storedBytes, 0) ? ` (${formatBytes(pending.reduce((n, r) => n + r.storedBytes, 0))} freed)` : ""}. This cannot be
+              undone.
             </>
           ) : pending?.[0]?.kind === "project" ? (
             <>
@@ -313,7 +348,15 @@ export function DeletedPage() {
                 setPending(null);
                 setSel([]);
                 refresh();
-                toast(r.failed ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}` : r.storedBytes ? `Deleted forever · ${formatBytes(r.storedBytes)} freed` : rows.length === 1 ? `Deleted “${rows[0]!.title}” forever` : `Deleted ${rows.length} items forever`);
+                toast(
+                  r.failed
+                    ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}`
+                    : r.storedBytes
+                      ? `Deleted forever · ${formatBytes(r.storedBytes)} freed`
+                      : rows.length === 1
+                        ? `Deleted “${rows[0]!.title}” forever`
+                        : `Deleted ${rows.length} items forever`,
+                );
               },
               onError: (err) => toast.error(err.message),
             },

@@ -19,7 +19,16 @@ export type Field =
   | { key: Key; label: string; kind: "url" | "text" | "secret"; placeholder?: string };
 
 export const ACCESS_FIELDS: Field[] = [
-  { key: "SIGNUP_MODE", label: "Sign-ups", kind: "enum", options: [{ value: "open", label: "Open" }, { value: "approval", label: "Approval" }, { value: "closed", label: "Closed" }] },
+  {
+    key: "SIGNUP_MODE",
+    label: "Sign-ups",
+    kind: "enum",
+    options: [
+      { value: "open", label: "Open" },
+      { value: "approval", label: "Approval" },
+      { value: "closed", label: "Closed" },
+    ],
+  },
   { key: "REQUIRE_EMAIL_VERIFICATION", label: "Email verification", kind: "bool", on: "Required", off: "Off" },
   { key: "MAX_SIGNUPS_PER_IP_PER_DAY", label: "Sign-ups per address per day", kind: "int", unit: "accounts", zero: "unlimited" },
   { key: "BLOCK_DISPOSABLE_EMAILS", label: "Temporary email domains", kind: "bool", on: "Refused", off: "Allowed" },
@@ -118,7 +127,19 @@ const describe = (f: Field, v: unknown): string => {
  * comes from (.env or set here) and a way back to .env. Changes are drafted per group and saved together,
  * because the server validates the result as a whole (a captcha needs both keys).
  */
-export function InstanceSettingsGroup({ id, title, intro, fields, children }: { id: string; title: string; intro: string; fields: Field[]; children?: ReactNode }) {
+export function InstanceSettingsGroup({
+  id,
+  title,
+  intro,
+  fields,
+  children,
+}: {
+  id: string;
+  title: string;
+  intro: string;
+  fields: Field[];
+  children?: ReactNode;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const q = useInstanceSettings();
@@ -192,14 +213,23 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
       ) : (
         <div className="flex flex-col divide-y divide-line">
           {fields.map((f) => (
-            <FieldRow key={f.key} field={f} state={s} draft={draft[f.key]} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} disabled={save.isPending} />
+            <FieldRow
+              key={f.key}
+              field={f}
+              state={s}
+              draft={draft[f.key]}
+              onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+              disabled={save.isPending}
+            />
           ))}
         </div>
       )}
       {children}
       {/* always-present footer, so saving never shifts the rows above */}
       <div className="flex min-h-9 flex-wrap items-center justify-end gap-2">
-        <span className="mr-auto min-h-5 text-xs text-ink3">{problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}</span>
+        <span className="mr-auto min-h-5 text-xs text-ink3">
+          {problem ?? (s?.updatedAt ? `Last change ${ago(s.updatedAt)}${s.updatedBy ? ` by ${s.updatedBy}` : ""}` : "")}
+        </span>
         <button type="button" className="btn-quiet" disabled={!dirty || save.isPending} onClick={() => setDraft({})}>
           Discard
         </button>
@@ -211,7 +241,19 @@ export function InstanceSettingsGroup({ id, title, intro, fields, children }: { 
   );
 }
 
-function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Field; state: State; draft: string | null | undefined; onChange: (v: string | null) => void; disabled: boolean }) {
+function FieldRow({
+  field: f,
+  state: s,
+  draft,
+  onChange,
+  disabled,
+}: {
+  field: Field;
+  state: State;
+  draft: string | null | undefined;
+  onChange: (v: string | null) => void;
+  disabled: boolean;
+}) {
   const values = s.values as Record<string, unknown>;
   const env = s.env as Record<string, unknown>;
   const source = s.source as Record<string, "env" | "db">;
@@ -225,15 +267,44 @@ function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Fi
 
   let control: ReactNode;
   if (f.kind === "enum" && f.options.length <= 3) {
-    control = <Segmented value={value} options={f.options.map((o) => ({ value: o.value, label: o.label }))} onChange={(v) => onChange(v)} size="sm" className="w-full" />;
+    control = (
+      <Segmented
+        value={value}
+        options={f.options.map((o) => ({ value: o.value, label: o.label }))}
+        onChange={(v) => onChange(v)}
+        size="sm"
+        className="w-full"
+      />
+    );
   } else if (f.kind === "enum") {
     control = <Select ariaLabel={f.label} className="w-full" value={value} onValueChange={onChange} options={f.options} disabled={disabled} />;
   } else if (f.kind === "bool") {
-    control = <Segmented value={value === "true" ? "true" : "false"} options={[{ value: "true", label: f.on ?? "On" }, { value: "false", label: f.off ?? "Off" }]} onChange={(v) => onChange(v)} size="sm" className="w-full" />;
+    control = (
+      <Segmented
+        value={value === "true" ? "true" : "false"}
+        options={[
+          { value: "true", label: f.on ?? "On" },
+          { value: "false", label: f.off ?? "Off" },
+        ]}
+        onChange={(v) => onChange(v)}
+        size="sm"
+        className="w-full"
+      />
+    );
   } else if (f.kind === "int") {
     control = (
       <div className="flex items-center gap-2">
-        <input id={inputId} className="input tabular-nums" type="number" inputMode="numeric" min={f.min ?? 0} max={f.max} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+        <input
+          id={inputId}
+          className="input tabular-nums"
+          type="number"
+          inputMode="numeric"
+          min={f.min ?? 0}
+          max={f.max}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
         {f.unit && <span className="w-16 shrink-0 text-xs text-ink3">{f.unit}</span>}
       </div>
     );
@@ -252,7 +323,11 @@ function FieldRow({ field: f, state: s, draft, onChange, disabled }: { field: Fi
     );
   }
 
-  const sourceText = resetting ? `will go back to .env: ${describe(f, env[f.key])}` : fromDb ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""} · .env has ${describe(f, env[f.key])}` : "from .env";
+  const sourceText = resetting
+    ? `will go back to .env: ${describe(f, env[f.key])}`
+    : fromDb
+      ? `set here${s.updatedBy ? ` by ${s.updatedBy}` : ""} · .env has ${describe(f, env[f.key])}`
+      : "from .env";
 
   return (
     <div className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-start">

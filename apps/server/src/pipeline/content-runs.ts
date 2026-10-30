@@ -54,9 +54,16 @@ export interface RunCandidate {
   reason?: string;
 }
 
-export function contentRunReport(samples: RegionSample[], duration: number, sceneCuts: number[] = []): { runs: ContentRun[]; candidates: RunCandidate[]; voting: number } {
+export function contentRunReport(
+  samples: RegionSample[],
+  duration: number,
+  sceneCuts: number[] = [],
+): { runs: ContentRun[]; candidates: RunCandidate[]; voting: number } {
   if (!samples.length) return { runs: [], candidates: [], voting: 0 };
-  const dts = samples.slice(1).map((s, i) => s.t - samples[i]!.t).filter((d) => d > 0);
+  const dts = samples
+    .slice(1)
+    .map((s, i) => s.t - samples[i]!.t)
+    .filter((d) => d > 0);
   const dt = dts.length ? median(dts) : 0.25;
   const votes = samples.map((s) => frameVote(s));
   type R = { side: ContentSide; first: number; last: number };
@@ -92,7 +99,14 @@ export function contentRunReport(samples: RegionSample[], duration: number, scen
     const inRun = samples.slice(r.first, r.last + 1);
     const start = r.first === 0 ? 0 : snap(samples[r.first]!.t);
     const end = r.last === samples.length - 1 ? duration : Math.min(duration, snap(samples[r.last]!.t + dt));
-    const cand: RunCandidate = { side: r.side, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), votes: votes.slice(r.first, r.last + 1).filter(Boolean).length, frames: inRun.length, kept: false };
+    const cand: RunCandidate = {
+      side: r.side,
+      start: Number(start.toFixed(2)),
+      end: Number(end.toFixed(2)),
+      votes: votes.slice(r.first, r.last + 1).filter(Boolean).length,
+      frames: inRun.length,
+      kept: false,
+    };
     candidates.push(cand);
     if (inRun.filter((s) => s.box).length / inRun.length < RUN.minFace) {
       cand.reason = `speaker in ${Math.round((inRun.filter((s) => s.box).length / inRun.length) * 100)}% of the run's frames`;

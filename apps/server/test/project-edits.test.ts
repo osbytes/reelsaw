@@ -40,7 +40,10 @@ describe("deleteClip", { skip: notReady ?? false }, () => {
     assert.ok(row.deleted_at);
     assert.equal(row.status, "failed"); // it never finished
     assert.equal(row.render_gen, gen + 1); // a render still running discards its output
-    assert.deepEqual((await h.jobsFor([busy])).filter((j) => j.state === "created" || j.state === "active"), []);
+    assert.deepEqual(
+      (await h.jobsFor([busy])).filter((j) => j.state === "created" || j.state === "active"),
+      [],
+    );
     assert.equal((await projectRow(projectId)).status, "done"); // the remaining clip was the only one left
     assert.equal(await h.eventCount(projectId, "clip.deleted"), 1);
     assert.equal((await deleteClip(h.svc, { id: userId, admin: false }, busy)).changed, false);
@@ -129,7 +132,10 @@ describe("applyProjectFraming", { skip: notReady ?? false }, () => {
     done = await h.makeClip(projectId, 0, "done", { outputKey: "k0" });
     own = await h.makeClip(projectId, 1, "done", { outputKey: "k1" });
     rendering = await h.makeClip(projectId, 2, "rendering");
-    await h.pool.query(`update clips set layout_sections = '[{"start":0,"end":10,"mode":"face","offsetX":0.1}]'::jsonb, layout_override = 'face' where id = $1`, [own]);
+    await h.pool.query(
+      `update clips set layout_sections = '[{"start":0,"end":10,"mode":"face","offsetX":0.1}]'::jsonb, layout_override = 'face' where id = $1`,
+      [own],
+    );
   });
   const me = () => ({ id: userId, admin: false });
 

@@ -46,7 +46,17 @@ export interface Asr {
   /** The cache key `transcribe` would use for these inputs. */
   keyFor(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject> }): string;
   /** Transcribe `audio` with `modelId` (default TRANSCRIPTION_MODEL) and its word-timestamp options. */
-  transcribe(audio: Uint8Array, opts?: { modelId?: string; providerOptions?: Record<string, JSONObject>; signal?: AbortSignal | undefined; maxRetries?: number; functionId?: string; telemetry?: boolean }): Promise<AsrResult & { cached: boolean }>;
+  transcribe(
+    audio: Uint8Array,
+    opts?: {
+      modelId?: string;
+      providerOptions?: Record<string, JSONObject>;
+      signal?: AbortSignal | undefined;
+      maxRetries?: number;
+      functionId?: string;
+      telemetry?: boolean;
+    },
+  ): Promise<AsrResult & { cached: boolean }>;
   stats(): { hits: number; misses: number };
   prune(maxAgeDays: number): Promise<number>;
   /** Called after every provider call (usage accounting). Set once the database is up. */
@@ -114,13 +124,18 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
       };
       // a self-hosted whisper is one shared machine: the provider gate caps calls across every job and process
       const res = gate ? await gate.run(provider, call, opts.signal) : await call();
-      const out: AsrResult = { text: res.text, language: res.language, segments: res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })) };
+      const out: AsrResult = {
+        text: res.text,
+        language: res.language,
+        segments: res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond })),
+      };
       try {
         await fs.mkdir(path.dirname(file), { recursive: true });
         await fs.writeFile(`${file}.tmp`, JSON.stringify(out));
         await fs.rename(`${file}.tmp`, file);
         // write-through: best effort, a failure only costs another host a transcription
-        if (shared) await shared.putFile(keys.asrCache(key), file, "application/json").catch((err) => log.warn({ err, key }, "asr cache write to the store failed"));
+        if (shared)
+          await shared.putFile(keys.asrCache(key), file, "application/json").catch((err) => log.warn({ err, key }, "asr cache write to the store failed"));
       } catch (err) {
         log.warn({ err }, "asr cache write failed");
       }
@@ -141,12 +156,17 @@ export function createAsr(ai: AiService, defaultModel: () => string, dir: string
         }
       }
       if (shared) {
-        const old = (await shared.list(ASR_CACHE_PREFIX, ASR_PRUNE_LIST_LIMIT).catch((err) => {
-          log.warn({ err }, "asr cache listing on the store failed");
-          return [];
-        })).filter((o) => o.modifiedAt.getTime() < cutoff);
+        const old = (
+          await shared.list(ASR_CACHE_PREFIX, ASR_PRUNE_LIST_LIMIT).catch((err) => {
+            log.warn({ err }, "asr cache listing on the store failed");
+            return [];
+          })
+        ).filter((o) => o.modifiedAt.getTime() < cutoff);
         await mapLimit(old, 8, async (o) => {
-          await shared.delete(o.key).then(() => void removed++, (err) => log.warn({ err, key: o.key }, "asr cache delete on the store failed"));
+          await shared.delete(o.key).then(
+            () => void removed++,
+            (err) => log.warn({ err, key: o.key }, "asr cache delete on the store failed"),
+          );
         });
       }
       return removed;

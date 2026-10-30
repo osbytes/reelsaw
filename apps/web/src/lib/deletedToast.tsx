@@ -73,7 +73,12 @@ export function showDeletedToast(opts: {
               onClick={() => {
                 toast.dismiss(id);
                 void opts.onPurge().then((r) => {
-                  const msg = r && typeof r === "object" && "message" in r && typeof r.message === "string" ? r.message : items.length === 1 ? `Deleted “${items[0]!.title}” forever` : `Deleted ${items.length} items forever`;
+                  const msg =
+                    r && typeof r === "object" && "message" in r && typeof r.message === "string"
+                      ? r.message
+                      : items.length === 1
+                        ? `Deleted “${items[0]!.title}” forever`
+                        : `Deleted ${items.length} items forever`;
                   toast(msg);
                 }, failToast);
               }}

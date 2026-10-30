@@ -8,7 +8,16 @@ import type { Logger } from "../log.js";
 import type { DiskLease } from "../resources.js";
 import type { UnitOfWork } from "../uow.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
-import { StepRunner, dbStepStore, stageTimeoutMessage, type StageDetail, type StageTimeoutInfo, type StepKeyInput, type StepOptions, type StepsOptions } from "./steps.js";
+import {
+  StepRunner,
+  dbStepStore,
+  stageTimeoutMessage,
+  type StageDetail,
+  type StageTimeoutInfo,
+  type StepKeyInput,
+  type StepOptions,
+  type StepsOptions,
+} from "./steps.js";
 
 /**
  * A failure that trying again cannot fix (the source is gone, a quota refuses the video). Workers end the run at
@@ -112,8 +121,18 @@ export class StageContext {
    * A context whose logger also carries the job id and the project's current run sequence. `seq` is the stage job's
    * version; a job queued before versions existed has none and takes the current one, so a deploy strands nothing.
    */
-  static async open(svc: Services, projectId: string, stage: PipelineStage, signal: AbortSignal, ids: Record<string, string | number> = {}, seq?: number): Promise<StageContext> {
-    const [r] = await svc.database.db.select({ run: schema.projects.runSeq, stage: schema.projects.stageSeq }).from(schema.projects).where(eq(schema.projects.id, projectId));
+  static async open(
+    svc: Services,
+    projectId: string,
+    stage: PipelineStage,
+    signal: AbortSignal,
+    ids: Record<string, string | number> = {},
+    seq?: number,
+  ): Promise<StageContext> {
+    const [r] = await svc.database.db
+      .select({ run: schema.projects.runSeq, stage: schema.projects.stageSeq })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId));
     return new StageContext(svc, projectId, stage, signal, { ...(r ? { runSeq: r.run } : {}), ...ids }, seq ?? r?.stage);
   }
 
@@ -203,10 +222,20 @@ export class StageContext {
     if (pct < 1 && now - this.lastProgressAt < 1500) return; // throttle writes
     this.lastProgressAt = now;
     // a superseded job's ticks must not move the newer run's bar
-    const [row] = await this.db.update(schema.projects).set({ stageProgress: pct, ...(detail ? { stageDetail: detail } : {}), updatedAt: new Date() }).where(currentStage(this.projectId, this.seq)).returning({ id: schema.projects.id });
+    const [row] = await this.db
+      .update(schema.projects)
+      .set({ stageProgress: pct, ...(detail ? { stageDetail: detail } : {}), updatedAt: new Date() })
+      .where(currentStage(this.projectId, this.seq))
+      .returning({ id: schema.projects.id });
     if (!row) return;
     // the column above is the state a reload reads; the tick itself is live-only (NOTIFY, no event row)
-    await this.svc.events.progress(this.projectId, { stage: this.stage, progress: pct, message, ...(detail ? { detail } : {}), ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}) });
+    await this.svc.events.progress(this.projectId, {
+      stage: this.stage,
+      progress: pct,
+      message,
+      ...(detail ? { detail } : {}),
+      ...(typeof extra.clipId === "string" ? { clipId: extra.clipId } : {}),
+    });
   }
 
   /**
@@ -222,7 +251,10 @@ export class StageContext {
       const durationSec = await stageElapsed(u.db, this.projectId, this.stage);
       // reconcileRequeues counts lost jobs of the stage that just ended: the next stage starts from zero, so a project that
       // loses its job once per stage never reaches the cap that fails it
-      await u.db.update(schema.projects).set({ stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() }).where(eq(schema.projects.id, this.projectId));
+      await u.db
+        .update(schema.projects)
+        .set({ stageProgress: 1, stageDetail: null, reconcileRequeues: 0, updatedAt: new Date() })
+        .where(eq(schema.projects.id, this.projectId));
       // durationSec is the stage's wall clock by contract (docs/PRINCIPLES.md); it goes last so no stage payload can redefine it
       const payload = typeof extra === "function" ? await extra(u) : extra;
       await u.emit(this.projectId, "stage.completed", { stage: this.stage, ...payload, ...(durationSec !== undefined ? { durationSec } : {}) });
@@ -270,7 +302,11 @@ export class StageContext {
   }
 
   /** `step` over many items with bounded concurrency; reports progress, with the time left, as they finish. */
-  steps<I, R>(items: readonly I[], o: Pick<StepsOptions, "concurrency"> & Partial<StepsOptions>, fn: (item: I, index: number, signal: AbortSignal) => Promise<R>): Promise<R[]> {
+  steps<I, R>(
+    items: readonly I[],
+    o: Pick<StepsOptions, "concurrency"> & Partial<StepsOptions>,
+    fn: (item: I, index: number, signal: AbortSignal) => Promise<R>,
+  ): Promise<R[]> {
     return this.runner.steps(items, { concurrency: o.concurrency, range: o.range ?? [0, 1], message: o.message ?? ((d, t) => `${d} of ${t}`) }, fn);
   }
 
@@ -310,7 +346,10 @@ export async function exists(file: string): Promise<boolean> {
  */
 export async function stageElapsed(db: Db, projectId: string, stage: string): Promise<number | undefined> {
   const [r] = await db
-    .select({ stage: schema.projects.stage, sec: sql<number | null>`round(extract(epoch from (clock_timestamp() - ${schema.projects.stageStartedAt}))::numeric, 1)::float8` })
+    .select({
+      stage: schema.projects.stage,
+      sec: sql<number | null>`round(extract(epoch from (clock_timestamp() - ${schema.projects.stageStartedAt}))::numeric, 1)::float8`,
+    })
     .from(schema.projects)
     .where(eq(schema.projects.id, projectId));
   return r && r.stage === stage && r.sec !== null ? r.sec : undefined;
@@ -329,16 +368,25 @@ export async function runFacts(db: Db, projectId: string): Promise<{ runSeq: num
     .from(schema.projects)
     .where(eq(schema.projects.id, projectId));
   if (!r) return { runSeq: 0, runReason: null };
-  return { runSeq: r.seq, runReason: r.reason, ...(r.runSec !== null ? { runSec: r.runSec } : {}), ...(r.stage === "render" && r.stageSec !== null ? { renderSec: r.stageSec } : {}) };
+  return {
+    runSeq: r.seq,
+    runReason: r.reason,
+    ...(r.runSec !== null ? { runSec: r.runSec } : {}),
+    ...(r.stage === "render" && r.stageSec !== null ? { renderSec: r.stageSec } : {}),
+  };
 }
 
 /** Mark the run failed, unless the job that gave up was superseded (`seq` no longer current): then it was not this run's. */
 export async function failProject(svc: Services, projectId: string, stage: PipelineStage, err: unknown, seq?: number) {
   const message = err instanceof Error ? err.message : String(err);
   await svc.tx(async (u) => {
-    if (!(await lockCurrentStage(u.db, projectId, seq))) return svc.log.child({ module: stage, projectId }).info({ seq }, "stale job gave up; the newer run is left alone");
+    if (!(await lockCurrentStage(u.db, projectId, seq)))
+      return svc.log.child({ module: stage, projectId }).info({ seq }, "stale job gave up; the newer run is left alone");
     const facts = await runFacts(u.db, projectId);
-    await u.db.update(schema.projects).set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    await u.db
+      .update(schema.projects)
+      .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
+      .where(eq(schema.projects.id, projectId));
     await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), ...facts });
   });
 }
@@ -349,7 +397,13 @@ export async function stageFailedAttempt(svc: Services, projectId: string, stage
   const [cur] = await svc.database.db.select({ id: schema.projects.id }).from(schema.projects).where(currentStage(projectId, seq));
   if (!cur) return;
   const durationSec = await stageElapsed(svc.database.db, projectId, stage);
-  await svc.events.emit(projectId, "stage.failed", { stage, error: message.slice(0, 1000), attempt, max, ...(durationSec !== undefined ? { durationSec } : {}) });
+  await svc.events.emit(projectId, "stage.failed", {
+    stage,
+    error: message.slice(0, 1000),
+    attempt,
+    max,
+    ...(durationSec !== undefined ? { durationSec } : {}),
+  });
 }
 
 /** Remove intermediates (audio, chunks, subtitle files) once a project is finished. */

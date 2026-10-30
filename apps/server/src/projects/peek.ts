@@ -34,8 +34,13 @@ export async function peekUrlMeta(url: string): Promise<{ title?: string | undef
  * a failed project) and again before ingest downloads; the binding check still runs on the probed file.
  */
 export async function announcedDuration(media: Pick<MediaTools, "ytdlp">, url: string, signal?: AbortSignal): Promise<number | null> {
-  const { stdout } = await media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], { signal });
-  const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  const { stdout } = await media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], {
+    signal,
+  });
+  const jsonLine = stdout
+    .split("\n")
+    .reverse()
+    .find((l) => l.trim().startsWith("{"));
   if (!jsonLine) return null;
   const duration = z.object({ duration: z.number().positive() }).safeParse(JSON.parse(jsonLine));
   return duration.success ? duration.data.duration : null;

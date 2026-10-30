@@ -101,10 +101,15 @@ describe("proxy metrics", () => {
 
   it("a content error is the video's, not the proxy's", async () => {
     const pool = createYtdlpProxyPool([pi, paid], { faultsBeforeOpen: 2, halfOpenAfter: 60_000 });
-    await assert.rejects(() => pool.run(async () => {
-      throw new Error("ERROR: This video is private");
-    }));
-    assert.deepEqual(named("reelsaw.ytdlp.attempts").map((r) => r.attributes.outcome), ["content"]);
+    await assert.rejects(() =>
+      pool.run(async () => {
+        throw new Error("ERROR: This video is private");
+      }),
+    );
+    assert.deepEqual(
+      named("reelsaw.ytdlp.attempts").map((r) => r.attributes.outcome),
+      ["content"],
+    );
     assert.deepEqual(named("reelsaw.ytdlp.download.duration")[0]?.attributes, { proxy: "none", outcome: "content", fallback: false });
   });
 
@@ -114,11 +119,23 @@ describe("proxy metrics", () => {
       if (id === "pi") throw new Error("HTTP Error 403");
       return id;
     });
-    assert.deepEqual(named("reelsaw.ytdlp.proxy.circuit.changes").map((r) => r.attributes), [{ proxy: "pi", state: "open" }]);
+    assert.deepEqual(
+      named("reelsaw.ytdlp.proxy.circuit.changes").map((r) => r.attributes),
+      [{ proxy: "pi", state: "open" }],
+    );
     const g = Object.fromEntries(readGauges().map((x) => [x.name, x.readings]));
-    assert.deepEqual(g["reelsaw.ytdlp.proxy.healthy"], [[0, { proxy: "pi" }], [1, { proxy: "paid" }]]);
-    assert.deepEqual(g["reelsaw.ytdlp.proxy.in_flight"], [[0, { proxy: "pi" }], [0, { proxy: "paid" }]]);
-    assert.deepEqual(g["reelsaw.ytdlp.proxy.success_rate"], [[0, { proxy: "pi" }], [1, { proxy: "paid" }]]);
+    assert.deepEqual(g["reelsaw.ytdlp.proxy.healthy"], [
+      [0, { proxy: "pi" }],
+      [1, { proxy: "paid" }],
+    ]);
+    assert.deepEqual(g["reelsaw.ytdlp.proxy.in_flight"], [
+      [0, { proxy: "pi" }],
+      [0, { proxy: "paid" }],
+    ]);
+    assert.deepEqual(g["reelsaw.ytdlp.proxy.success_rate"], [
+      [0, { proxy: "pi" }],
+      [1, { proxy: "paid" }],
+    ]);
   });
 
   it("normalises a download by the video's length and size", () => {

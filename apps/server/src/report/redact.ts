@@ -38,7 +38,7 @@ export function stripUrl(value: string): string {
 export function configForReport(config: Config): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(config).sort(([a], [b]) => a.localeCompare(b))) {
-    if (value === undefined || value === null || value === "") out[key] = isSecretKey(key) ? "unset" : value ?? null;
+    if (value === undefined || value === null || value === "") out[key] = isSecretKey(key) ? "unset" : (value ?? null);
     else if (isSecretKey(key)) out[key] = "set";
     else if (typeof value === "string") out[key] = stripUrl(value);
     else out[key] = value;
@@ -85,7 +85,9 @@ const PATTERNS: Array<[RegExp, string]> = [
 
 /** Longest first, plus the JSON-escaped form, so a value inside a log line is replaced before a shorter prefix of it. */
 function secretForms(secrets: readonly string[]): string[] {
-  return [...new Set(secrets.filter((v) => v.length >= MIN_SECRET_LENGTH).flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))].sort((a, b) => b.length - a.length);
+  return [...new Set(secrets.filter((v) => v.length >= MIN_SECRET_LENGTH).flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))].sort(
+    (a, b) => b.length - a.length,
+  );
 }
 
 /**
@@ -108,6 +110,9 @@ export function makeRedactor(config: Config, extra: Iterable<string> = []): (tex
   const secrets = [...new Set([...secretValues(config), ...[...extra].filter((v) => v.length >= MIN_SECRET_LENGTH)])];
   return (text) => {
     // user ids in JSON lines (request logs, job data, events) become the same 12-char pseudonym as project.json's ownerHash
-    return scrubOutboundText(text, secrets).replace(/"(userId|user_id|actorId)":"([A-Za-z0-9_-]{8,})"/g, (_m, k: string, id: string) => `"${k}":"${createHash("sha256").update(id).digest("hex").slice(0, 12)}"`);
+    return scrubOutboundText(text, secrets).replace(
+      /"(userId|user_id|actorId)":"([A-Za-z0-9_-]{8,})"/g,
+      (_m, k: string, id: string) => `"${k}":"${createHash("sha256").update(id).digest("hex").slice(0, 12)}"`,
+    );
   };
 }

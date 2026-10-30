@@ -16,7 +16,22 @@ import { QUEUES } from "../queue/boss.js";
 import { ProjectGoneError, StageTimeoutError, StaleJobError, type StageContext } from "./common.js";
 import { snapCandidate } from "./analyze.js";
 import { abortOpt, callSignal, isAbortError } from "./steps.js";
-import { MAP_PROMPT_VERSION, SCORE_PROMPT_VERSION, aggregateScores, chunkTranscript, extractJson, mapChunk, normalizeCandidate, scoreBatches, scoreItem, scoreSample, type LlmOpts, type ScoreInput, type ScoreResult, type SelectContext } from "./select.js";
+import {
+  MAP_PROMPT_VERSION,
+  SCORE_PROMPT_VERSION,
+  aggregateScores,
+  chunkTranscript,
+  extractJson,
+  mapChunk,
+  normalizeCandidate,
+  scoreBatches,
+  scoreItem,
+  scoreSample,
+  type LlmOpts,
+  type ScoreInput,
+  type ScoreResult,
+  type SelectContext,
+} from "./select.js";
 import type { Logger } from "../log.js";
 import { mapLimit } from "../lib/batch.js";
 import { isSelfHostedModel } from "../ai/self-hosted.js";
@@ -53,7 +68,14 @@ Write:
 
 Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":["..."]}`;
   try {
-    const { output } = await generateText({ model: o.model, prompt, ...abortOpt(callSignal(o.signal, o.timeoutMs)), maxRetries: 2, temperature: 0.5, output: Output.object({ schema: describeSchema, name: "describe" }) });
+    const { output } = await generateText({
+      model: o.model,
+      prompt,
+      ...abortOpt(callSignal(o.signal, o.timeoutMs)),
+      maxRetries: 2,
+      temperature: 0.5,
+      output: Output.object({ schema: describeSchema, name: "describe" }),
+    });
     return output;
   } catch (err) {
     if (!NoObjectGeneratedError.isInstance(err)) throw err;
@@ -69,7 +91,12 @@ Respond with JSON only: {"title":"...","hook":"...","caption":"...","hashtags":[
 
 /** The title / hook / caption call as one saved clip-scoped step. */
 export function describeStep(ctx: Pick<StageContext, "step">, clipId: string, o: LlmOpts, modelId: string, unitMs: number, title: string, text: string) {
-  return ctx.step("describe", { input: { title, text }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION }, (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text), { schema: describeSchema, timeoutMs: unitMs, model: modelId, clipId });
+  return ctx.step(
+    "describe",
+    { input: { title, text }, model: modelId, promptVersion: DESCRIBE_PROMPT_VERSION },
+    (sig) => describe({ ...o, signal: sig, timeoutMs: undefined }, title, text),
+    { schema: describeSchema, timeoutMs: unitMs, model: modelId, clipId },
+  );
 }
 
 /**
@@ -101,7 +128,16 @@ export function preparedPatch(started: Packaging, current: Packaging, prepared: 
  * Rubric scores for candidates as one saved step (clip-scoped): the batches' raw answers are what is stored, and the
  * totals are worked out from them. A cancelled or timed-out call is never swallowed (scoreSample rethrows it).
  */
-export async function scoreStep(ctx: Pick<StageContext, "step">, name: string, clipId: string, o: LlmOpts, modelId: string, unitMs: number, items: ScoreInput[], sc: SelectContext): Promise<Map<number, ScoreResult>> {
+export async function scoreStep(
+  ctx: Pick<StageContext, "step">,
+  name: string,
+  clipId: string,
+  o: LlmOpts,
+  modelId: string,
+  unitMs: number,
+  items: ScoreInput[],
+  sc: SelectContext,
+): Promise<Map<number, ScoreResult>> {
   const batches = scoreBatches(items);
   const answers = await ctx.step(
     name,
@@ -132,13 +168,21 @@ export async function mapSelection(
   const perChunk = await mapLimit(chunks, a.concurrency, async (ch, i) => {
     ctx.signal.throwIfAborted();
     const found = await ctx
-      .step(`map:${i}`, { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: a.modelId, promptVersion: MAP_PROMPT_VERSION, params: a.sc }, (sig) => mapChunk({ ...o, signal: sig, timeoutMs: undefined }, ch, a.sc), { schema: candidatesSchema, timeoutMs: a.unitMs, model: a.modelId, clipId: a.clipId })
+      .step(
+        `map:${i}`,
+        { input: { lines: ch.lines, start: ch.start, end: ch.end }, model: a.modelId, promptVersion: MAP_PROMPT_VERSION, params: a.sc },
+        (sig) => mapChunk({ ...o, signal: sig, timeoutMs: undefined }, ch, a.sc),
+        { schema: candidatesSchema, timeoutMs: a.unitMs, model: a.modelId, clipId: a.clipId },
+      )
       .catch((err: unknown): ClipCandidate[] => {
-        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted) throw err;
+        if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted)
+          throw err;
         a.log.warn({ err, window: i }, "candidate search failed for a window");
         return [];
       });
-    await ctx.progress(0.1 + 0.4 * (++mapped / chunks.length), `Looking for the best moment in your selection (${mapped}/${chunks.length})`, { clipId: a.clipId }).catch(() => {});
+    await ctx
+      .progress(0.1 + 0.4 * (++mapped / chunks.length), `Looking for the best moment in your selection (${mapped}/${chunks.length})`, { clipId: a.clipId })
+      .catch(() => {});
     return found;
   });
   return perChunk.flat();
@@ -163,7 +207,16 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   const concurrency = svc.config.ANALYZE_CONCURRENCY || (selfHosted ? 1 : 4);
   const selLen = clip.endSec - clip.startSec;
 
-  let pick: ClipCandidate = { title: clip.title, hook: clip.hook, startSec: clip.startSec, endSec: clip.endSec, score: 50, reasoning: clip.reasoning, caption: "", hashtags: [] };
+  let pick: ClipCandidate = {
+    title: clip.title,
+    hook: clip.hook,
+    startSec: clip.startSec,
+    endSec: clip.endSec,
+    score: 50,
+    reasoning: clip.reasoning,
+    caption: "",
+    hashtags: [],
+  };
   let note = "Created from a transcript selection.";
 
   if (mode === "ai") {
@@ -175,12 +228,23 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     const found = await mapSelection(ctx, o, { inside, sc, clipId, modelId, unitMs, concurrency, log });
     const local = { ...settings, minClipSeconds: minSec, maxClipSeconds: maxSec };
     const snapped = found
-      .map((c) => snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, { words: transcript.words, log, bounds: [clip.startSec, clip.endSec] }))
+      .map((c) =>
+        snapCandidate(c, inside, transcript.sceneCuts ?? [], local, durationSec, { words: transcript.words, log, bounds: [clip.startSec, clip.endSec] }),
+      )
       .filter((c): c is ClipCandidate => !!c && c.startSec >= clip.startSec - 1 && c.endSec <= clip.endSec + 1);
-    log.info({ selection: [clip.startSec, clip.endSec], minSec, maxSec, modelPicks: found.map((c) => [c.startSec, c.endSec]), usable: snapped.length }, "searched selection");
+    log.info(
+      { selection: [clip.startSec, clip.endSec], minSec, maxSec, modelPicks: found.map((c) => [c.startSec, c.endSec]), usable: snapped.length },
+      "searched selection",
+    );
     if (snapped.length) {
       await ctx.progress(0.5, `Scoring ${snapped.length} option(s)`, { clipId });
-      const texts = snapped.map((c, id) => ({ id, durationSec: c.endSec - c.startSec, text: segmentsIn(segments, c.startSec, c.endSec).map((s) => s.text.trim()).join(" ") }));
+      const texts = snapped.map((c, id) => ({
+        id,
+        durationSec: c.endSec - c.startSec,
+        text: segmentsIn(segments, c.startSec, c.endSec)
+          .map((s) => s.text.trim())
+          .join(" "),
+      }));
       const scored = await scoreStep(ctx, "pick-score", clipId, o, modelId, unitMs, texts, sc);
       const best = snapped.map((c, id) => ({ c, t: scored.get(id)?.total ?? c.score })).sort((a, b) => b.t - a.t)[0]!;
       pick = best.c;
@@ -217,7 +281,11 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
   // packaging written, announced and the render queued in one commit
   await svc.tx(async (u) => {
     // the row as it is now, locked: the user's edits since this job read it win (preparedPatch)
-    const [cur] = await u.db.select().from(schema.clips).where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt))).for("update");
+    const [cur] = await u.db
+      .select()
+      .from(schema.clips)
+      .where(and(eq(schema.clips.id, clipId), isNull(schema.clips.deletedAt)))
+      .for("update");
     if (!cur || !needsPrepare(cur)) return log.info("clip deleted or prepared meanwhile; nothing to write");
     const patch = preparedPatch(clip, cur, prepared);
     const bounds = { startSec: patch.startSec ?? cur.startSec, endSec: patch.endSec ?? cur.endSec };
@@ -225,8 +293,18 @@ export async function prepareClip(ctx: StageContext, clipId: string, mode: "exac
     // an intro / outro the user already chose for it wins over the template's
     const layers = clipLayers(cur).length ? null : layersForNewClip(template, bounds);
     const bumpers = template?.bumpers ? bumpersForNewClip(template, cur.bumpers) : undefined;
-    await requestRender(svc, u, projectId, clipId, { ...patch, score: scored?.total ?? 50, scores: scored?.scores ?? null, reasoning: note.slice(0, 1000), ...(layers ? { layers } : {}), ...(bumpers !== undefined ? { bumpers } : {}) });
-    if (layers || bumpers !== undefined) await syncClipsRefs(u.db, projectId, [{ id: clipId, bumpers: bumpers !== undefined ? bumpers : cur.bumpers, layers: layers ?? cur.layers, overlays: cur.overlays, audio: cur.audio }]);
+    await requestRender(svc, u, projectId, clipId, {
+      ...patch,
+      score: scored?.total ?? 50,
+      scores: scored?.scores ?? null,
+      reasoning: note.slice(0, 1000),
+      ...(layers ? { layers } : {}),
+      ...(bumpers !== undefined ? { bumpers } : {}),
+    });
+    if (layers || bumpers !== undefined)
+      await syncClipsRefs(u.db, projectId, [
+        { id: clipId, bumpers: bumpers !== undefined ? bumpers : cur.bumpers, layers: layers ?? cur.layers, overlays: cur.overlays, audio: cur.audio },
+      ]);
     await u.emit(projectId, "clip.created", { clipId, index: cur.index, title: patch.title ?? cur.title });
   });
   void db;

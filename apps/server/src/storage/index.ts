@@ -31,10 +31,24 @@ export interface Storage {
 
 /** Content types for the files this server streams (uploads, library assets, renders); anything else is an octet stream. */
 const MIME: Record<string, string> = {
-  ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
-  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
-  ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
-  ".json": "application/json", ".zip": "application/zip",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".flac": "audio/flac",
+  ".json": "application/json",
+  ".zip": "application/zip",
 };
 export function contentTypeFor(file: string) {
   return MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
@@ -160,7 +174,9 @@ class S3Storage implements Storage {
       await client.send(new sdk.PutObjectCommand({ Bucket: this.bucket, Key: probe, Body: "ok" }));
       await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: probe }));
     } catch (err) {
-      throw new Error(`S3 bucket "${this.bucket}" is readable but not writable (put/delete of a probe object failed): ${(err as Error).name}: ${(err as Error).message}`);
+      throw new Error(
+        `S3 bucket "${this.bucket}" is readable but not writable (put/delete of a probe object failed): ${(err as Error).name}: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -172,7 +188,9 @@ class S3Storage implements Storage {
       region: config.S3_REGION,
       ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
       forcePathStyle: config.S3_FORCE_PATH_STYLE,
-      ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY ? { credentials: { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY } } : {}),
+      ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
+        ? { credentials: { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY } }
+        : {}),
     });
     this.client = client;
     this.sdk = sdk;
@@ -214,7 +232,8 @@ class S3Storage implements Storage {
     const tmp = `${localPath}.${process.pid}.${randomUUID()}.part`;
     try {
       await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
-      if (await fileExists(localPath)) await fsp.rm(tmp, { force: true }); // another process got there first
+      if (await fileExists(localPath))
+        await fsp.rm(tmp, { force: true }); // another process got there first
       else await fsp.rename(tmp, localPath);
     } catch (err) {
       await fsp.rm(tmp, { force: true }).catch(() => {});
@@ -273,7 +292,14 @@ class S3Storage implements Storage {
     const out: Array<{ key: string; modifiedAt: Date }> = [];
     let token: string | undefined;
     do {
-      const page = await client.send(new sdk.ListObjectsV2Command({ Bucket: this.bucket, Prefix: this.k(prefix).replace(/\/?$/, "/"), MaxKeys: Math.min(1000, limit - out.length), ContinuationToken: token }));
+      const page = await client.send(
+        new sdk.ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: this.k(prefix).replace(/\/?$/, "/"),
+          MaxKeys: Math.min(1000, limit - out.length),
+          ContinuationToken: token,
+        }),
+      );
       for (const o of page.Contents ?? []) if (o.Key && o.LastModified) out.push({ key: o.Key.slice(root.length), modifiedAt: o.LastModified });
       token = page.IsTruncated && out.length < limit ? page.NextContinuationToken : undefined;
     } while (token);
@@ -320,7 +346,10 @@ async function touched(file: string) {
 }
 
 export function createStorage(config: Config, paths: Paths, log?: Logger): Storage {
-  const inner: Storage = config.STORAGE_DRIVER === "s3" ? new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "") : new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
+  const inner: Storage =
+    config.STORAGE_DRIVER === "s3"
+      ? new S3Storage(config, config.S3_BUCKET!, config.S3_PREFIX ?? "")
+      : new LocalStorage(config.STORAGE_LOCAL_DIR ?? paths.storage);
   return log ? withStorageLogging(inner, log) : inner;
 }
 

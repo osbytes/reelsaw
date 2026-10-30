@@ -51,41 +51,49 @@ export function ConsentPage() {
     );
   if (!data) return <Navigate to={`/login${loc.search}`} replace />;
 
-  const what: Record<string, string> = { openid: "know who you are", profile: "see your name", email: "see your email address", offline_access: "stay connected without signing in again" };
+  const what: Record<string, string> = {
+    openid: "know who you are",
+    profile: "see your name",
+    email: "see your email address",
+    offline_access: "stay connected without signing in again",
+  };
   return (
     <ScrollArea className="h-dvh">
-    <div className="relative flex min-h-dvh items-center justify-center p-6">
-      <ThemeToggle className="absolute right-4 top-4" />
-      <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
-        <AuthCardHeader title="Allow access?" titleClassName="text-[22px]" />
-        <p className="text-sm leading-relaxed text-ink2">
-          <b>{client?.name ?? "An application"}</b>
-          {client?.uri ? <span className="text-ink3"> ({client.uri})</span> : null} wants to use Reelsaw as <b>{data.user.email}</b>: create projects, read transcripts, edit and download clips.
-        </p>
-        <div className="rounded-[10px] border border-line bg-bg p-3 text-sm">
-          <div className="text-xs text-ink3">After you allow, you go back to</div>
-          <div className="break-all font-mono text-[15px] font-bold">{redirectHost || "an address we could not read"}</div>
-          <div className="mt-1 text-xs text-ink2">{redirectHost ? `Only continue if you started this from ${redirectHost}.` : "Only continue if you started this yourself."}</div>
+      <div className="relative flex min-h-dvh items-center justify-center p-6">
+        <ThemeToggle className="absolute right-4 top-4" />
+        <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[18px] border border-line bg-panel p-7 shadow-pop">
+          <AuthCardHeader title="Allow access?" titleClassName="text-[22px]" />
+          <p className="text-sm leading-relaxed text-ink2">
+            <b>{client?.name ?? "An application"}</b>
+            {client?.uri ? <span className="text-ink3"> ({client.uri})</span> : null} wants to use Reelsaw as <b>{data.user.email}</b>: create projects, read
+            transcripts, edit and download clips.
+          </p>
+          <div className="rounded-[10px] border border-line bg-bg p-3 text-sm">
+            <div className="text-xs text-ink3">After you allow, you go back to</div>
+            <div className="break-all font-mono text-[15px] font-bold">{redirectHost || "an address we could not read"}</div>
+            <div className="mt-1 text-xs text-ink2">
+              {redirectHost ? `Only continue if you started this from ${redirectHost}.` : "Only continue if you started this yourself."}
+            </div>
+          </div>
+          {scopes.length > 0 && (
+            <ul className="list-disc pl-5 text-sm text-ink2">
+              {scopes.map((s) => (
+                <li key={s}>{what[s] ?? s}</li>
+              ))}
+            </ul>
+          )}
+          <p className="min-h-5 text-sm text-err">{decide.error?.message ?? ""}</p>
+          <div className="flex gap-2">
+            <button className="btn-primary min-w-[6rem]" disabled={decide.isPending || !clientId} onClick={() => decide.mutate(true)}>
+              Allow
+            </button>
+            <button className="btn-ghost" disabled={decide.isPending} onClick={() => decide.mutate(false)}>
+              Deny
+            </button>
+          </div>
+          <p className="text-xs text-ink3">You can remove this later under Settings → Connected apps.</p>
         </div>
-        {scopes.length > 0 && (
-          <ul className="list-disc pl-5 text-sm text-ink2">
-            {scopes.map((s) => (
-              <li key={s}>{what[s] ?? s}</li>
-            ))}
-          </ul>
-        )}
-        <p className="min-h-5 text-sm text-err">{decide.error?.message ?? ""}</p>
-        <div className="flex gap-2">
-          <button className="btn-primary min-w-[6rem]" disabled={decide.isPending || !clientId} onClick={() => decide.mutate(true)}>
-            Allow
-          </button>
-          <button className="btn-ghost" disabled={decide.isPending} onClick={() => decide.mutate(false)}>
-            Deny
-          </button>
-        </div>
-        <p className="text-xs text-ink3">You can remove this later under Settings → Connected apps.</p>
       </div>
-    </div>
     </ScrollArea>
   );
 }

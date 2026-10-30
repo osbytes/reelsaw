@@ -10,7 +10,20 @@ import { fixContext, flagSnapshot, sourceRefOf } from "../src/decisions/service.
 import { caseKey, disfluencyCaseOf, disfluencyCases, parseExport, splitOf, type ExportedDecision } from "../src/decisions/cases.js";
 
 const words: Word[] = Array.from({ length: 100 }, (_, i) => ({ text: `w${i}`, start: i, end: i + 0.5 }));
-const flag = (o: Partial<TranscriptFlag> = {}): TranscriptFlag => ({ id: "f1", kind: "disfluency", subkind: "repetition", wordIndex: 50, span: 2, start: 50, end: 51.5, heard: "w50 w51", suggested: "", confidence: 0.8, status: "pending", ...o });
+const flag = (o: Partial<TranscriptFlag> = {}): TranscriptFlag => ({
+  id: "f1",
+  kind: "disfluency",
+  subkind: "repetition",
+  wordIndex: 50,
+  span: 2,
+  start: 50,
+  end: 51.5,
+  heard: "w50 w51",
+  suggested: "",
+  confidence: 0.8,
+  status: "pending",
+  ...o,
+});
 
 function decision(o: Partial<ExportedDecision> & { flag?: TranscriptFlag } = {}): ExportedDecision {
   const f = o.flag ?? flag();
@@ -49,10 +62,33 @@ describe("fix context", () => {
 
 describe("source snapshot", () => {
   it("reads the ingest fingerprint and the canonical link", () => {
-    const ref = sourceRefOf({ sourceType: "url", sourceUrl: "https://youtu.be/abc", durationSec: 600, title: "T", sourceMeta: { webpage_url: "https://www.youtube.com/watch?v=abc", extractor: "Youtube", videoId: "abc", formatId: "137+140", sha256: "ff", uploader: "Chan" } });
+    const ref = sourceRefOf({
+      sourceType: "url",
+      sourceUrl: "https://youtu.be/abc",
+      durationSec: 600,
+      title: "T",
+      sourceMeta: {
+        webpage_url: "https://www.youtube.com/watch?v=abc",
+        extractor: "Youtube",
+        videoId: "abc",
+        formatId: "137+140",
+        sha256: "ff",
+        uploader: "Chan",
+      },
+    });
     assert.deepEqual(
       { ...ref },
-      { type: "url", url: "https://www.youtube.com/watch?v=abc", extractor: "Youtube", videoId: "abc", formatId: "137+140", durationSec: 600, sha256: "ff", title: "T", uploader: "Chan" },
+      {
+        type: "url",
+        url: "https://www.youtube.com/watch?v=abc",
+        extractor: "Youtube",
+        videoId: "abc",
+        formatId: "137+140",
+        durationSec: 600,
+        sha256: "ff",
+        title: "T",
+        uploader: "Chan",
+      },
     );
   });
   it("gives an upload no url", () => {
@@ -104,7 +140,14 @@ describe("disfluency cases from decisions", () => {
     const auto = flag({ status: "auto" });
     assert.equal(disfluencyCases([decision({ id: 1, kind: "fix.delete", flag: auto }), decision({ id: 2, kind: "fix.restore", flag: auto })]).length, 0);
     // a decision after the undo labels again
-    assert.equal(disfluencyCases([decision({ id: 1, kind: "fix.delete", flag: auto }), decision({ id: 2, kind: "fix.restore", flag: auto }), decision({ id: 3, kind: "fix.reject", flag: auto })])[0]?.expect, "keep");
+    assert.equal(
+      disfluencyCases([
+        decision({ id: 1, kind: "fix.delete", flag: auto }),
+        decision({ id: 2, kind: "fix.restore", flag: auto }),
+        decision({ id: 3, kind: "fix.reject", flag: auto }),
+      ])[0]?.expect,
+      "keep",
+    );
   });
   it("parses an export, counting lines that are not decisions", () => {
     const text = [JSON.stringify(decision()), "not json", JSON.stringify({ id: 2 }), ""].join("\n");

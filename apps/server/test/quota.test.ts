@@ -88,14 +88,20 @@ describe("upgradeCapacityLabel", () => {
 describe("job limits", () => {
   it("the hourly cap names re-renders and re-runs", () => {
     const l = { ...limits, MAX_RERENDERS_PER_HOUR: 5, MAX_LIVE_JOBS_PER_USER: 0 };
-    assert.throws(() => checkJobLimits(l, { userId: "u", live: 0, userLive: 0, userRendersLastHour: 5 }, true), /5 re-renders and re-runs requested in the last hour/);
+    assert.throws(
+      () => checkJobLimits(l, { userId: "u", live: 0, userLive: 0, userRendersLastHour: 5 }, true),
+      /5 re-renders and re-runs requested in the last hour/,
+    );
     assert.doesNotThrow(() => checkJobLimits(l, { userId: "u", live: 0, userLive: 0, userRendersLastHour: 5 }, false));
   });
   it("the at-once cap counts only what the user asked for, not the pipeline's own jobs", () => {
     const l = { ...limits, MAX_RERENDERS_PER_HOUR: 0, MAX_LIVE_JOBS_PER_USER: 5 };
     // a new project's 20 renders are hand-offs: the user's next request still goes through
     assert.doesNotThrow(() => checkJobLimits(l, { userId: "u", live: 20, userLive: 1, userRendersLastHour: 0 }, false));
-    assert.throws(() => checkJobLimits(l, { userId: "u", live: 20, userLive: 5, userRendersLastHour: 0 }, false), /You have 5 requests queued or running, the most this account may have at once \(5\)/);
+    assert.throws(
+      () => checkJobLimits(l, { userId: "u", live: 20, userLive: 5, userRendersLastHour: 0 }, false),
+      /You have 5 requests queued or running, the most this account may have at once \(5\)/,
+    );
   });
 });
 

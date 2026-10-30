@@ -69,18 +69,25 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
     parts.push(f);
     long.push(`Framing: ${f}`);
   }
-  for (const [slot, has] of [["intro", o.projectHasIntro], ["outro", o.projectHasOutro]] as const) {
+  for (const [slot, has] of [
+    ["intro", o.projectHasIntro],
+    ["outro", o.projectHasOutro],
+  ] as const) {
     const b = bumperPart(c, slot, has);
     if (!b) continue;
     parts.push(b.text);
-    long.push(`${slot === "intro" ? "Intro" : "Outro"}: ${b.text}${b.skipped ? ` (${c.diagnostics?.bumpers?.skipped?.filter((s) => s.startsWith(slot)).join("; ")})` : ""}`);
+    long.push(
+      `${slot === "intro" ? "Intro" : "Outro"}: ${b.text}${b.skipped ? ` (${c.diagnostics?.bumpers?.skipped?.filter((s) => s.startsWith(slot)).join("; ")})` : ""}`,
+    );
     if (b.skipped) warn = true;
   }
   const d = c.diagnostics;
   if (d) {
     const cuts = d.cuts.applied.length;
     const kept = d.cuts.skipped.length;
-    const unverified = d.cuts.applied.flatMap((a) => (a && typeof a === "object" && (a as { verified?: boolean }).verified === false ? [String((a as { reason?: string }).reason ?? "")] : []));
+    const unverified = d.cuts.applied.flatMap((a) =>
+      a && typeof a === "object" && (a as { verified?: boolean }).verified === false ? [String((a as { reason?: string }).reason ?? "")] : [],
+    );
     const trimmed = d.pauses?.cuts ? d.pauses.removedSec : 0;
     if (trimmed > 0) {
       parts.push(`${trimmed.toFixed(1)} s trimmed`);
@@ -92,7 +99,10 @@ export function clipMeta(c: MetaClip, o: MetaOptions): Meta {
     }
     if (unverified.length) {
       parts.push(`▲ ${unverified.length} cut${unverified.length === 1 ? "" : "s"} unverified`);
-      long.push(`Applied where you set ${unverified.length === 1 ? "it" : "them"}, without a seam check (the audio around ${unverified.length === 1 ? "it" : "them"} couldn’t be matched):`, ...unverified.map((r) => `  ${r}`));
+      long.push(
+        `Applied where you set ${unverified.length === 1 ? "it" : "them"}, without a seam check (the audio around ${unverified.length === 1 ? "it" : "them"} couldn’t be matched):`,
+        ...unverified.map((r) => `  ${r}`),
+      );
       warn = true;
     }
     if (kept) {
