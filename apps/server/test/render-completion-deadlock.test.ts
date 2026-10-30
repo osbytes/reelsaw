@@ -18,7 +18,7 @@ import type { Services } from "../src/services.js";
 import { db, signUp } from "./helpers.js";
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, trace() {}, child() { return quiet; } } as never;
-const noQueue = { enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false, admission: async () => ({ userId: null, live: 0, userRendersLastHour: 0 }) } as unknown as Queue;
+const noQueue = { enqueue: async () => null, cancelLiveJobs: async () => {}, hasLiveJob: async () => false, admission: async () => ({ userId: null, live: 0, userLive: 0, userRendersLastHour: 0 }) } as unknown as Queue;
 // finalize only touches svc for the after-commit workdir cleanup, which the unit of work logs and swallows
 const svc = {} as Services;
 

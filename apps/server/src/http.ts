@@ -23,7 +23,7 @@ import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, exportPlan, parseClipIds } from "./export.js";
-import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, API_KEY_PREFIX } from "./auth.js";
+import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, withClientIp, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { handleMcp } from "./mcp.js";
@@ -139,7 +139,7 @@ export function createApp(svc: Services) {
         return c.redirect(`${to.pathname}${to.search}`);
       }
     }
-    const res = await auth.handler(c.req.raw);
+    const res = await auth.handler(withClientIp(c.req.raw, config));
     logAuth(c, res.status);
     return res;
   });
@@ -156,7 +156,7 @@ export function createApp(svc: Services) {
   };
   // OAuth discovery lives at the origin root (RFC 8414 / 9728). The plugin matches the request's
   // own pathname (root well-known paths, with the resource path suffix), so the raw request goes through.
-  if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(c.req.raw));
+  if (config.MCP_OAUTH) app.get("/.well-known/*", (c) => auth.handler(withClientIp(c.req.raw, config)));
   // Stripe webhooks (ee): raw body (bounded: events are a few hundred KB at most, and the signature is checked only after
   // the body is read), 2xx only once the event and its sync job committed
   if (svc.ee) app.post("/api/billing/webhook", bodyLimit({ maxSize: 1024 * 1024 }), (c) => svc.ee!.webhook(c));

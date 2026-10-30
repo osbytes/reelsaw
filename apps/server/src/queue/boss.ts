@@ -43,12 +43,16 @@ export interface TxOpts {
 
 /**
  * What the queue knows about a job's owner at enqueue time, from one statement: the owner, how many of
- * their jobs are queued or running (any queue), and how many renders, new clips and re-runs (analysis, refinement) they
- * asked for in the last hour. Jobs enqueued before `userId` was carried in job data are not counted.
+ * their jobs are queued or running (any queue), how many of those they asked for themselves, and how many renders, new
+ * clips and re-runs (analysis, refinement) they asked for in the last hour. Jobs enqueued before `userId` was carried in
+ * job data are not counted.
  */
 export interface Admission {
   userId: string | null;
+  /** every live job of the owner, pipeline hand-offs included: the fair-share priority */
   live: number;
+  /** live jobs tagged `by: "user"`: what MAX_LIVE_JOBS_PER_USER counts, so a project's own renders never block the next request */
+  userLive: number;
   userRendersLastHour: number;
 }
 
@@ -148,13 +152,16 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     const res = await exec.executeSql(
       `with o as (select coalesce($2::text, (select user_id from projects where id = $1)) as uid)
        select o.uid as "userId",
-         (select count(*)::int from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid) as live,
+         l.live, l."userLive",
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
-       from o`,
+       from o, lateral (
+         select count(*)::int as live, (count(*) filter (where j.data->>'by' = 'user'))::int as "userLive"
+         from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid
+       ) l`,
       [data.projectId, data.userId ?? null, USER_RERUN_QUEUES],
     );
     const r = res.rows[0] as Admission | undefined;
-    return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };
+    return { userId: r?.userId ?? null, live: Number(r?.live ?? 0), userLive: Number(r?.userLive ?? 0), userRendersLastHour: Number(r?.userRendersLastHour ?? 0) };
   };
 
   return {

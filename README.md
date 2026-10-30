@@ -312,9 +312,10 @@ them), so a single-user box stays as it is:
   with per-user overrides on the Users page. Storage counts sources, uploads (an upload already copied into
   a project counts once), rendered clips and intros/outros, and is checked on every way a file arrives. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
-  plan, else the UTC calendar month. A link's length is checked before it is downloaded when the
-  site reports it, and again once the file is probed, so an over-long video fails the project with that
-  reason, once, without being fetched again. The first video of a plan with a free allowance is the first
+  plan, else the UTC calendar month. On an account with a minutes limit, a link whose site reports its
+  length is refused when the project is created (with the upgrade offer), so no project is made for it.
+  Otherwise the length is checked again before the download and once the file is probed, so an over-long
+  video fails the project with that reason, once, without being fetched again. The first video of a plan with a free allowance is the first
   one whose length is known.
 - **Watermark**: `WATERMARK_NON_ADMINS` (default on) burns the logo (`WATERMARK_LOGO_PATH`) with
   `WATERMARK_TEXT` ("reelsaw.com") under it into the clips of accounts that are not admins; a paid plan

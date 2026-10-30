@@ -3,11 +3,11 @@ import fs from "node:fs/promises";
 import { QuotaExceededError, recordSourceDuration, sourceMinutesExceeded } from "../quota.js";
 import { takeTxLock, txLock } from "../locks.js";
 import { eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
 import { assertPublicHttpUrl } from "../lib/safe-url.js";
+import { announcedDuration } from "../projects/peek.js";
 import { StageContext, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
@@ -41,7 +41,7 @@ export async function ingest(ctx: StageContext) {
       // web and MCP both land here, so one check covers every way of adding a link
       await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
       // refuse an over-limit video before fetching it, when the site tells us its length up front
-      const announced = await announcedDuration(ctx, project.sourceUrl ?? "");
+      const announced = await announcedDurationOrNull(ctx, project.sourceUrl ?? "");
       if (announced) {
         const over = await svc.tx(async (u) => {
           await takeTxLock(u.db, txLock.quota(project.userId));
@@ -160,18 +160,10 @@ export async function ingest(ctx: StageContext) {
   void svc;
 }
 
-/**
- * The length yt-dlp reports for a link without downloading it, in seconds; null when it does not say (live streams, some
- * sites) or the lookup fails. The binding check still runs on the probed file, so this only saves a doomed download.
- */
-async function announcedDuration(ctx: StageContext, url: string): Promise<number | null> {
+/** `announcedDuration` for the stage: null when the lookup fails, so only a cancelled stage stops here. */
+async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<number | null> {
   try {
-    const { stdout } = await ctx.svc.media.ytdlp(["--no-playlist", "--no-warnings", "--no-download", "--ignore-no-formats-error", "--dump-single-json", "--", url], { signal: ctx.signal });
-    const jsonLine = stdout.split("\n").reverse().find((l) => l.trim().startsWith("{"));
-    if (!jsonLine) return null;
-    const info: unknown = JSON.parse(jsonLine);
-    const duration = z.object({ duration: z.number().positive() }).safeParse(info);
-    return duration.success ? duration.data.duration : null;
+    return await announcedDuration(ctx.svc.media, url, ctx.signal);
   } catch (err) {
     ctx.signal.throwIfAborted();
     ctx.log.debug({ err }, "could not look up the video's length before downloading");
