@@ -35,6 +35,10 @@ COPY --from=models /models /app/server/models
 
 # ---------- build: once, natively ----------
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS build
+# the slim image has no CA bundle: Node carries its own, but native tools (sentry-cli below) use the system's
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
 WORKDIR /app
 # pnpm fetch reads only the lockfile, so a version bump in a package.json (every Release PR) keeps
@@ -48,7 +52,8 @@ COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile --offline
 COPY . .
 # Release builds (release.yml) pass a Sentry token as a build secret: the bundles get debug ids and their source maps
-# go to Sentry, so production stacks read as source. Without the secret (local, CI, self-built) this is skipped.
+# go to Sentry, so production stacks read as source. Without the secret (local, CI, self-built) this is skipped;
+# a failed upload (Sentry down, a bad token) warns and the release goes on without maps.
 # Either way no map reaches the image: the web maps are deleted here, the server's with the rest below.
 ARG REELSAW_VERSION=dev
 ARG SENTRY_ORG
@@ -59,7 +64,8 @@ RUN --mount=type=secret,id=sentry_auth_token,required=false \
  && if [ -s /run/secrets/sentry_auth_token ] && [ -n "$SENTRY_ORG" ] && [ -n "$SENTRY_PROJECT" ]; then \
       export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)" \
       && npx --yes @sentry/cli@2.39.1 sourcemaps inject apps/server/dist-bundle apps/web/dist \
-      && npx --yes @sentry/cli@2.39.1 sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "reelsaw@${REELSAW_VERSION}" apps/server/dist-bundle apps/web/dist; \
+      && { npx --yes @sentry/cli@2.39.1 sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "reelsaw@${REELSAW_VERSION}" apps/server/dist-bundle apps/web/dist \
+           || echo "WARNING: source map upload to Sentry failed; this release ships with minified stacks"; }; \
     fi \
  && find apps/web/dist -name "*.map" -delete \
  && pnpm --filter @reelsaw/server --prod deploy --legacy /out/server \
