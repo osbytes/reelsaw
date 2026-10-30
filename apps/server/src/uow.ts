@@ -133,7 +133,7 @@ export function createUnitOfWork(pool: pg.Pool, queue: Queue, log: Logger, insta
               try {
                 checkJobLimits(limits, a, USER_RERUN_QUEUES.includes(q));
               } catch (err) {
-                log.warn({ userId: a.userId, queue: q, live: a.live, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
+                log.warn({ userId: a.userId, queue: q, live: a.live, userLive: a.userLive, rendersLastHour: a.userRendersLastHour, reason: (err as Error).message }, "job limit reached");
                 throw err;
               }
             }

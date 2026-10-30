@@ -1,7 +1,7 @@
 /**
  * Fair share between accounts: a job's pg-boss priority is minus its owner's live jobs, so someone with nothing in
  * flight is served before the backlog of someone who queued many; and MAX_LIVE_JOBS_PER_USER refuses a user's own
- * request (never a pipeline hand-off) with a sentence.
+ * request (never a pipeline hand-off) with a sentence, counting only the jobs they asked for.
  *
  * Runs this checkout's unit of work and queue code in-process against the local stack's Postgres (TEST_DATABASE_URL)
  * on a throwaway pg-boss queue no worker listens on; the running app is only used for sign-up (REELSAW_URL).
@@ -54,7 +54,8 @@ describe("fair share between users", () => {
   const jobs = async () => (await pool.query<{ project: string; user: string; priority: number; by: string | null }>(`select data->>'projectId' as project, data->>'userId' as user, priority, data->>'by' as by from pgboss.job where name = $1 order by priority desc, created_on`, [name])).rows;
 
   it("serves a user with nothing in flight before another user's backlog", async () => {
-    for (const p of projects.heavy!.slice(0, 5)) await enqueue(0, p);
+    // the heavy user's five are their own requests (no limit yet); the light user's one is a pipeline hand-off
+    for (const p of projects.heavy!.slice(0, 5)) await asUserRequest(users[0]!, () => enqueue(0, p));
     await enqueue(0, projects.light![0]!);
     const order = await jobs();
     assert.equal(order.length, 6);
@@ -72,14 +73,15 @@ describe("fair share between users", () => {
   it("refuses a user's own request past MAX_LIVE_JOBS_PER_USER with a sentence", async () => {
     await assert.rejects(
       asUserRequest(users[0]!, () => enqueue(5, projects.heavy![5]!)),
-      (err: unknown) => err instanceof QuotaError && /You have 5 jobs queued or running, the most this account may have at once \(5\)/.test((err as Error).message),
+      (err: unknown) => err instanceof QuotaError && /You have 5 requests queued or running, the most this account may have at once \(5\)/.test((err as Error).message),
     );
     assert.equal((await jobs()).length, 6, "nothing was queued");
   });
 
-  it("never refuses a pipeline hand-off, and admits other users", async () => {
+  it("never refuses a pipeline hand-off, and does not count hand-offs against the next request", async () => {
     await enqueue(5, projects.heavy![5]!); // no requesting user: a worker or the reconciler
-    await asUserRequest(users[1]!, () => enqueue(5, projects.light![0]!)); // deduped by singletonKey, but admitted
+    // the light user has one hand-off in flight and a limit of 1: their own request is still admitted (deduped by singletonKey)
+    await asUserRequest(users[1]!, () => enqueue(1, projects.light![0]!));
     const all = await jobs();
     assert.equal(all.length, 7);
     assert.equal(all.find((j) => j.project === projects.heavy![5])!.by, null, "a hand-off is not tagged as the user's request");

@@ -25,6 +25,23 @@ export const mcpResource = (config: Config) => new URL("/api/mcp", config.APP_UR
 /** API keys look like `rs_…`; agents send them as `Authorization: Bearer rs_…` (or `x-api-key`). */
 export const API_KEY_PREFIX = "rs_";
 
+/** The one header Better Auth reads the client's address from (rate limits, session rows). Set by `withClientIp`, never by the client. */
+export const CLIENT_IP_HEADER = "x-reelsaw-client-ip";
+
+/**
+ * The request as Better Auth should see it: the address resolved the way every other guard resolves it (abuse.ts `clientIp`,
+ * TRUST_PROXY and the hop count) on CLIENT_IP_HEADER, and whatever the client sent there dropped. Better Auth on its own
+ * only trusts a single-value X-Forwarded-For; behind a proxy that appends (Railway, Caddy) it found no address and put every
+ * sign-in in one shared rate-limit bucket, so one noisy client could lock everyone out.
+ */
+export function withClientIp(req: Request, trust: Pick<Config, "TRUST_PROXY" | "TRUSTED_PROXY_HEADER" | "TRUSTED_PROXY_HOPS">): Request {
+  const headers = new Headers(req.headers);
+  headers.delete(CLIENT_IP_HEADER);
+  const ip = clientIp(req.headers, trust);
+  if (ip) headers.set(CLIENT_IP_HEADER, ip);
+  return new Request(req, { headers });
+}
+
 
 export function createAuth(config: Config, db: Db, email: Email, log: Logger, settings: InstanceSettings, telemetry?: Telemetry) {
   // SIGNUP_MODE, REQUIRE_EMAIL_VERIFICATION and the captcha are runtime settings (instance-settings.ts):
@@ -211,6 +228,8 @@ export function createAuth(config: Config, db: Db, email: Email, log: Logger, se
       }),
     },
     session: { cookieCache: { enabled: true, maxAge: 60 } },
+    // http.ts hands every request over through `withClientIp`
+    advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
     plugins: [
       captchaGate,
       // MCP over OAuth 2.1: Reelsaw is the authorization server; connectors register themselves (DCR), the

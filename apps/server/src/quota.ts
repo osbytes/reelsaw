@@ -4,7 +4,7 @@
  * provided by ee/ on a hosted instance; null self-hosted), then an admin's per-user override
  * (`user_settings.limits`). 0 = unlimited. Refusals are sentences the user can act on, with the plan's
  * upgrade hint when there is one. Checked where the number is known: project count and rate at creation,
- * source minutes once ffprobe has run, storage at upload. The watermark follows the same chain.
+ * source minutes at creation when the link announces its length and bound once ffprobe has run, storage at upload. The watermark follows the same chain.
  */
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -231,13 +231,14 @@ export async function monthlyMinutes(db: Db, userId: string, start: Date, grants
 }
 
 /**
- * Before work a person asked for is queued (uow.ts `enqueue`, under the user's job lock): jobs in flight
- * across every queue, and renders, new clips and re-runs (analysis, refinement) asked for in the last hour. `admission` already counts the
+ * Before work a person asked for is queued (uow.ts `enqueue`, under the user's job lock): jobs they asked for that are
+ * still in flight across every queue (the pipeline's own hand-offs, such as a new project's renders, do not count), and
+ * renders, new clips and re-runs (analysis, refinement) asked for in the last hour. `admission` already counts the
  * unit's own earlier enqueues, so a bulk re-render that would pass the limit is refused whole.
  */
 export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
-  if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.live >= l.MAX_LIVE_JOBS_PER_USER)
-    throw new QuotaError(`You have ${a.live} jobs queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`);
+  if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.userLive >= l.MAX_LIVE_JOBS_PER_USER)
+    throw new QuotaError(`You have ${a.userLive} requests queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`);
   if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR)
     throw new QuotaError(`${a.userRendersLastHour} re-renders and re-runs requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`);
 }
@@ -311,26 +312,48 @@ export async function recordSourceDuration(db: Db, projectId: string, durationSe
   await db.update(schema.sourceUsage).set({ durationSec }).where(eq(schema.sourceUsage.projectId, projectId));
 }
 
-/** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
-export async function sourceMinutesExceeded(db: Db, instance: InstanceLimits, userId: string, projectId: string, durationSec: number, ent?: Entitlements | null): Promise<string | null> {
+/** Which minutes limit a video of `durationSec` would pass, with the sentence; `projectId` (when it exists) is left out of the counts. */
+async function minutesOver(db: Db, instance: InstanceLimits, userId: string, projectId: string | null, durationSec: number, ent?: Entitlements | null): Promise<{ d: LimitsDetail; key: LimitKey; message: string } | null> {
   const d = await limitsDetail(db, instance, userId, ent);
   const l = d.limits;
   const mins = Math.round(durationSec / 60);
+  const except = projectId ?? undefined;
   if (l.MAX_SOURCE_MINUTES_PER_DAY > 0) {
-    const used = await minutesToday(db, userId, projectId);
-    if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY) return `This video is ${mins} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.`;
+    const used = await minutesToday(db, userId, except);
+    if (used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_DAY)
+      return { d, key: "MAX_SOURCE_MINUTES_PER_DAY", message: `This video is ${mins} minutes; with ${Math.round(used)} already used today that passes the daily limit of ${l.MAX_SOURCE_MINUTES_PER_DAY} minutes. Resets at ${hhmm(nextMidnightUtc())}.` };
   }
   if (l.MAX_SOURCE_MINUTES_PER_MONTH > 0) {
     const period = periodFor(d.grants);
-    const m = await monthlyMinutes(db, userId, period.start, d.grants, projectId);
+    const m = await monthlyMinutes(db, userId, period.start, d.grants, except);
     // the account's first video is on the house up to the plan's allowance
     if (m.firstPending && durationSec / 60 <= m.firstFree) return null;
     if (m.used + durationSec / 60 > l.MAX_SOURCE_MINUTES_PER_MONTH) {
       const firstNote = m.firstPending ? ` (a first video is free up to ${m.firstFree} minutes; this one is longer)` : "";
-      return `This video is ${mins} minutes; with ${Math.round(m.used)} already used this period that passes the monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes${firstNote}. Resets on ${dayOf(period.end)}.${hint(d, "MAX_SOURCE_MINUTES_PER_MONTH")}`;
+      return { d, key: "MAX_SOURCE_MINUTES_PER_MONTH", message: `This video is ${mins} minutes; with ${Math.round(m.used)} already used this period that passes the monthly limit of ${l.MAX_SOURCE_MINUTES_PER_MONTH} minutes${firstNote}. Resets on ${dayOf(period.end)}.${hint(d, "MAX_SOURCE_MINUTES_PER_MONTH")}` };
     }
   }
   return null;
+}
+
+/** After ffprobe, when the length is known. Returns a sentence to fail the project with, or null. */
+export async function sourceMinutesExceeded(db: Db, instance: InstanceLimits, userId: string, projectId: string, durationSec: number, ent?: Entitlements | null): Promise<string | null> {
+  return (await minutesOver(db, instance, userId, projectId, durationSec, ent))?.message ?? null;
+}
+
+/** Does a minutes limit apply to this account at all (so a link's length is worth looking up before creating)? */
+export async function hasMinuteLimits(db: Db, instance: InstanceLimits, userId: string, ent?: Entitlements | null): Promise<boolean> {
+  const { limits: l } = await limitsDetail(db, instance, userId, ent);
+  return l.MAX_SOURCE_MINUTES_PER_DAY > 0 || l.MAX_SOURCE_MINUTES_PER_MONTH > 0;
+}
+
+/**
+ * Before creating a project from a link whose length the site announced: refuse now, as a quota refusal with the upgrade
+ * offer, instead of creating a project that ingest would fail. Advisory (no lock): ingest checks again, bound, on the file.
+ */
+export async function checkAnnouncedMinutes(db: Db, instance: InstanceLimits, userId: string, durationSec: number, ent?: Entitlements | null): Promise<void> {
+  const over = await minutesOver(db, instance, userId, null, durationSec, ent);
+  if (over) refuse(over.d, over.key, over.message);
 }
 
 const minutesToday = (db: Db, userId: string, exceptProjectId?: string) => minutesSince(db, userId, new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z"), exceptProjectId);
@@ -354,7 +377,7 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
   const [jobs] = (
     await db.execute<{ live: number; renders: number }>(sql`
     select
-      (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'userId' = ${userId}) as live,
+      (select count(*)::int from pgboss.job where state in ('created','retry','active') and data->>'by' = 'user' and data->>'userId' = ${userId}) as live,
       (select count(*)::int from pgboss.job where name in ('clip.render','clip.prepare','project.analyze','refine.entities','refine.disfluency','refine.scenes') and data->>'by' = 'user' and data->>'userId' = ${userId} and created_on > now() - interval '1 hour') as renders`)
   ).rows;
   const [rate] = (await db.execute<{ minute: number; hour: number }>(sql`select coalesce(sum(n) filter (where bucket = date_trunc('minute', now())), 0)::int as minute, coalesce(sum(n), 0)::int as hour from user_rate where user_id = ${userId} and bucket > now() - interval '1 hour'`)).rows;

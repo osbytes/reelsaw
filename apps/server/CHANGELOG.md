@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.28.2
+
+### Patch Changes
+
+- [#204](https://github.com/osbytes/reelsaw/pull/204) [`7bf7789`](https://github.com/osbytes/reelsaw/commit/7bf7789a95f2c2a7b90501d33725345315a0a9f6) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Sign-in and sign-up rate limits now key on each visitor's own address behind a reverse proxy (Railway, Caddy), instead of one bucket shared by everyone. A link longer than the account's remaining minutes is refused when the project is created, with the upgrade offer, instead of becoming a failed project. "Jobs at once" now counts only what the user asked for, so a project's own renders no longer block the next request. Sign-ups that must confirm their email are now counted in product analytics.
+
 ## 0.28.1
 
 ### Patch Changes
