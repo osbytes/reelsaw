@@ -13,6 +13,8 @@
  *  - errors go in `err` so pino serialises the stack: `log.error({ err }, "render failed")`
  *  - levels: fatal = cannot continue; error = a person must act; warn = degraded or recovered;
  *    info = one countable line per milestone; debug = decisions and inputs; trace = per-item loops
+ *  - an `error` or `fatal` line with an `err` is also an error report: when Sentry is on (telemetry.ts sets the
+ *    sink), it goes there with the line's ids as tags. So a retry that will be tried again is `warn`, not `error`.
  *
  * Levels are a spec, `info,render=debug,http=warn`: a global level plus per-module overrides (the
  * `module` binding). The spec can be changed while running (`reelsaw log-level`), see LogControl.
@@ -40,6 +42,67 @@ export interface LogConfig {
 export interface LogLevels {
   global: LogLevel;
   modules: Record<string, LogLevel>;
+}
+
+/** An error line handed to error reporting: the error, the line's constant message and its id fields. */
+export interface ErrorReport {
+  err: unknown;
+  message: string;
+  level: "error" | "fatal";
+  tags: Record<string, string>;
+}
+export type ErrorSink = (report: ErrorReport) => void;
+
+let errorSink: ErrorSink | null = null;
+/** Where `error` and `fatal` lines with an `err` also go (telemetry.ts, when SENTRY_DSN is set); null for nowhere. */
+export function setErrorSink(sink: ErrorSink | null): void {
+  errorSink = sink;
+}
+
+/**
+ * The fields of a line (its own and its logger's bindings) that may become error-report tags: ids, names and
+ * counts. Anything else on the line (an address, a subject, a reason sentence) stays in the log.
+ */
+const REPORT_TAG_KEYS = [
+  "module",
+  "requestId",
+  "userId",
+  "projectId",
+  "clipId",
+  "jobId",
+  "queue",
+  "stage",
+  "step",
+  "attempt",
+  "tool",
+  "route",
+  "method",
+  "procedure",
+  "type",
+  "code",
+  "where",
+  "driver",
+  "status",
+  "requeues",
+  "uploadId",
+  "subscriptionId",
+  "priceId",
+] as const;
+
+/** Pure: the report for a logged line, or null when the line is not one (no `err`). */
+export function errorReportOf(bindings: Record<string, unknown>, args: readonly unknown[], level: number): ErrorReport | null {
+  const [first, second] = args;
+  const fields: Record<string, unknown> =
+    first instanceof Error ? { err: first } : first && typeof first === "object" ? (first as Record<string, unknown>) : {};
+  if (fields.err === undefined || fields.err === null) return null;
+  const message = typeof second === "string" ? second : typeof first === "string" ? first : "";
+  const tags: Record<string, string> = {};
+  for (const k of REPORT_TAG_KEYS) {
+    const v = fields[k] ?? bindings[k];
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") tags[k] = String(v).slice(0, 200);
+  }
+  if (message) tags.log = message.slice(0, 200);
+  return { err: fields.err, message, level: level >= 60 ? "fatal" : "error", tags };
 }
 
 const isLevel = (s: string): s is LogLevel => (LOG_LEVELS as readonly string[]).includes(s);
@@ -129,6 +192,18 @@ export function createLogger(env: LogConfig, base: Record<string, unknown> = {},
     },
     serializers: { err: pino.stdSerializers.err },
     hooks: {
+      // runs only for a level the logger lets through; the original error object goes to the sink, not its JSON
+      logMethod(args, method, level) {
+        if (level >= 50 && errorSink) {
+          try {
+            const report = errorReportOf(this.bindings(), args, level);
+            if (report) errorSink(report);
+          } catch {
+            /* reporting an error must not stop the line */
+          }
+        }
+        return method.apply(this, args);
+      },
       // `s` is the line after redaction and err serialisation, and only if the level allowed it.
       // Return it unchanged so the local line still has prompts.
       streamWrite(s) {

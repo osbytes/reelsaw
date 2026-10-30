@@ -446,7 +446,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
         await u.db.insert(schema.adminEvents).values({ ...base, type: "billing.unknown_price", payload: { ...ids, priceId: next.priceId, message } });
-        u.afterCommit(() => svc.telemetry.captureException(new Error(message), { userId, subscriptionId, priceId: next!.priceId }));
+        u.afterCommit(() => slog.error({ err: new Error(message), userId, priceId: next!.priceId }, "subscription price unknown"));
       }
       await markProcessed(u, subscriptionId, readAt);
       u.afterCommit(() =>
@@ -582,10 +582,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       try {
         await sync(job.data.subscriptionId, job.data.reason ?? "webhook");
       } catch (err) {
-        jlog.error({ err, attempt: job.retryCount + 1 }, "billing sync failed");
-        // the last attempt: the account's plan is now out of step with Stripe until someone looks
-        if (job.retryCount >= SYNC_RETRY_LIMIT)
-          svc.telemetry.captureException(err, { queue: SYNC_QUEUE, subscriptionId: job.data.subscriptionId, reason: job.data.reason });
+        // the last attempt is an error (reported, log.ts): the account's plan is out of step with Stripe until someone looks
+        jlog[job.retryCount >= SYNC_RETRY_LIMIT ? "error" : "warn"]({ err, queue: SYNC_QUEUE, attempt: job.retryCount + 1 }, "billing sync failed");
         await db()
           .update(schema.billingEvents)
           .set({ error: String((err as Error).message ?? err).slice(0, 500) })

@@ -5,6 +5,8 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
+import { createLogger, errorReportOf, setErrorSink, type ErrorReport } from "../src/log.js";
 import { SpanKind } from "@opentelemetry/api";
 import { productEvent } from "../src/uow.js";
 import { errorKind } from "../src/pipeline/common.js";
@@ -102,5 +104,64 @@ describe("dropOrphanClientSpans", () => {
     assert.deepEqual(s.shouldSample({}, "t", "S3.GetObject", SpanKind.CLIENT, {}, []), { decision: 0 });
     assert.deepEqual(s.shouldSample({}, "t", "GET /api/trpc/projects.list", SpanKind.SERVER, {}, []), { decision: 2 });
     assert.deepEqual(s.shouldSample({}, "t", "pipeline.render", SpanKind.INTERNAL, {}, []), { decision: 2 });
+  });
+});
+
+describe("error reports from the logger", () => {
+  const capture = () => {
+    const sink = new Writable({ write: (_c, _e, cb) => cb() });
+    return createLogger({ LOG_LEVEL: "info", LOG_FORMAT: "json" }, {}, sink);
+  };
+
+  it("an error line with an err is reported with the line's ids, never its other fields", () => {
+    const reports: ErrorReport[] = [];
+    setErrorSink((r) => void reports.push(r));
+    try {
+      const log = capture().child({ module: "email", requestId: "r1" });
+      const err = new Error("SMTP 550");
+      log.error({ err, driver: "smtp", to: "someone@example.com", subject: "Verify your email" }, "email failed");
+      assert.equal(reports.length, 1);
+      assert.equal(reports[0]?.err, err);
+      assert.equal(reports[0]?.level, "error");
+      assert.deepEqual(reports[0]?.tags, { module: "email", requestId: "r1", driver: "smtp", log: "email failed" });
+    } finally {
+      setErrorSink(null);
+    }
+  });
+
+  it("warn lines, error lines without an err, and lines with no sink are not reported", () => {
+    const reports: ErrorReport[] = [];
+    const log = capture().child({ module: "worker", projectId: "p1" });
+    log.error({ err: new Error("before the sink") }, "job failed");
+    setErrorSink((r) => void reports.push(r));
+    try {
+      log.warn({ err: new Error("will retry") }, "job failed");
+      log.error({ priceId: "price_1" }, "subscription price has no plan");
+      log.fatal(new Error("boom"), "uncaught exception");
+      assert.deepEqual(
+        reports.map((r) => [r.level, r.tags]),
+        [["fatal", { module: "worker", projectId: "p1", log: "uncaught exception" }]],
+      );
+    } finally {
+      setErrorSink(null);
+    }
+  });
+
+  it("a throwing sink does not stop the line", () => {
+    setErrorSink(() => {
+      throw new Error("sentry down");
+    });
+    try {
+      assert.doesNotThrow(() => capture().error({ err: new Error("x") }, "failed"));
+    } finally {
+      setErrorSink(null);
+    }
+  });
+
+  it("errorReportOf reads the err from the fields or the first argument", () => {
+    const err = new Error("e");
+    assert.equal(errorReportOf({ jobId: "j1" }, [{ err, attempt: 3 }, "job failed"], 50)?.tags.attempt, "3");
+    assert.equal(errorReportOf({}, [err, "failed"], 60)?.level, "fatal");
+    assert.equal(errorReportOf({}, ["no err here"], 50), null);
   });
 });

@@ -740,9 +740,10 @@ worker heartbeat is fresh; each check has a 2 s timeout. Otherwise it answers `5
 short reason per failing check (`db`, `events`, `queue`, `workers`), and the log has the detail. The Docker
 `HEALTHCHECK` and any load balancer pointed at it restart or drain a process that is up but cannot work.
 
-**Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports boot
-failures, 5xx responses (API and file routes), unexpected MCP tool errors, a job's final failed
-attempt, a job the reconciler gave up on, failed emails and billing syncs; the web app reports
+**Errors and product analytics (optional).** `SENTRY_DSN` turns on Sentry: the server reports
+every `error` or `fatal` log line that carries an error, tagged with the line's ids (5xx
+responses, unexpected MCP tool errors, a job's final failed attempt, a job the reconciler gave up
+on, failed emails and billing syncs, process crashes; a retry still to come is a warning); the web app reports
 render errors and unhandled rejections, but not the 4xx refusals it already shows the person. The
 worker heartbeat (`heartbeat-<WORKER_ID or role>`), the reconciler and the daily billing reconcile
 check in as Sentry cron monitors, so a stopped worker or a loop that no longer runs raises an alert.

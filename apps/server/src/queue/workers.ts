@@ -170,7 +170,6 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
         if (err instanceof ProjectGoneError) return log.warn({ reason: err.message }, "job skipped");
         // cancelling a pg-boss job does not stop a running handler: the superseded one ends here, writing nothing
         if (err instanceof StaleJobError) return log.info({ reason: err.message, seq }, "job skipped: superseded");
-        log.error({ err, attempt, maxAttempts: max + 1 }, "job failed");
         // disk will not free itself on the next attempt here: fail the run, unless another worker has the room
         const handOff = err instanceof ResourceExhaustedError && job.retryCount < max ? await diskHandOff(gate, queue, err, log) : null;
         const noDisk = err instanceof ResourceExhaustedError && !handOff;
@@ -180,8 +179,9 @@ function projectStage(svc: Services, gate: DiskGate, queue: QueueName, stage: Pi
         const outcome = attemptOutcome({ progressed, retryable: !permanent && !noDisk, nonRetryable: permanent });
         const limit = permanent || noDisk ? max : await jobRetryLimit(svc, job.id, max);
         const last = permanent || noDisk || (outcome !== "requeue" && job.retryCount >= limit);
+        // a fault on its last attempt is an error (log.ts reports it); a retry still to come, or a refusal, is not
+        log[last && !permanent ? "error" : "warn"]({ err, attempt, maxAttempts: max + 1 }, "job failed");
         if (last) {
-          if (!permanent) svc.telemetry.captureException(err, { queue, stage, projectId, jobId: job.id });
           await failProject(svc, projectId, stage, err, seq);
         } else {
           if (outcome === "requeue") {
@@ -256,9 +256,8 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           await refineStepFailed(svc, projectId, step, err, seq);
           return;
         }
-        log.error({ err, attempt: job.retryCount + 1 }, "job failed");
+        log[job.retryCount >= max ? "error" : "warn"]({ err, step, attempt: job.retryCount + 1 }, "job failed");
         if (job.retryCount >= max) {
-          svc.telemetry.captureException(err, { queue, step, projectId, jobId: job.id });
           await refineStepFailed(svc, projectId, step, err, seq);
           return; // handled: don't make pg-boss retry further
         }
@@ -313,11 +312,10 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           await markClipFailed(svc, projectId, clipId, err);
           return; // handled: retrying cannot bring the source back
         }
-        log.error({ err, attempt: job.retryCount + 1 }, "job failed");
+        log[job.retryCount >= max ? "error" : "warn"]({ err, attempt: job.retryCount + 1 }, "job failed");
         // short of disk even after eviction: with another worker that has room, pause this one so the retry lands there
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.prepare, err.requiredMB);
         if (job.retryCount >= max) {
-          svc.telemetry.captureException(err, { queue: QUEUES.prepare, projectId, clipId, jobId: job.id });
           await markClipFailed(svc, projectId, clipId, err, undefined, { ifStatus: "preparing" });
         }
         throw err;
@@ -370,10 +368,9 @@ export async function startWorkers(svc: Services): Promise<{ diskGate: DiskGate 
           await markClipFailed(svc, projectId, clipId, err, gen);
           return; // handled: retrying cannot bring the source back
         }
-        log.error({ err, attempt: job.retryCount + 1 }, "job failed");
+        log[job.retryCount >= max ? "error" : "warn"]({ err, attempt: job.retryCount + 1 }, "job failed");
         if (err instanceof ResourceExhaustedError) await diskGate.handOff(QUEUES.render, err.requiredMB);
         if (job.retryCount >= max) {
-          svc.telemetry.captureException(err, { queue: QUEUES.render, projectId, clipId, jobId: job.id });
           await markClipFailed(svc, projectId, clipId, err, gen);
         }
         throw err;

@@ -113,7 +113,8 @@ export function logTrpcError(
     code: e.code,
     requestId: e.requestId,
     userId: e.userId,
-    ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }),
+    // our bug: the cause tRPC wrapped is what the stack (and the error report, log.ts) should show
+    ...(level === "error" ? { err: e.err.cause instanceof Error ? e.err.cause : e.err } : { reason: e.err.message.slice(0, 300) }),
   };
   log[level](fields, "trpc error");
 }

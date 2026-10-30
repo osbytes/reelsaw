@@ -353,7 +353,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   SENTRY_DSN: [
     "observability",
-    "Sentry DSN. Set, the server reports boot failures, 5xx responses, unexpected MCP tool errors, a job's final failed attempt, jobs the reconciler gave up on, failed emails and billing syncs, and checks in the worker heartbeat, reconciler and billing reconcile as cron monitors; the web app reports render errors and unhandled rejections other than 4xx refusals (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent.",
+    "Sentry DSN. Set, the server reports every `error` or `fatal` log line that carries an error (5xx responses, unexpected MCP tool errors, a job's final failed attempt, jobs the reconciler gave up on, failed emails and billing syncs), tagged with the line's ids, and checks in the worker heartbeat, reconciler and billing reconcile as cron monitors; the web app reports render errors and unhandled rejections other than 4xx refusals (the DSN is public and handed to the browser). Does not configure the OTLP exporter. When OTEL is on, the endpoint is Sentry, and metrics are left on, Node runtime gauges and the application metrics (README, Metrics) are sent through this DSN, because Sentry does not ingest OTLP metrics. Unset, nothing is sent.",
   ],
   SENTRY_ENVIRONMENT: ["observability", "Sentry environment tag. Default: `production` under NODE_ENV=production, else `development`."],
   SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: [

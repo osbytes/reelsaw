@@ -37,7 +37,8 @@ const IDLE_IN_TRANSACTION_MS = 5 * 60_000;
 
 function makePool(connectionString: string, max: number, log: Logger): pg.Pool {
   const pool = new pg.Pool({ connectionString, max, connectionTimeoutMillis: CONNECT_TIMEOUT_MS });
-  pool.on("error", (err) => log.error({ err }, "pg pool error"));
+  // an idle client's connection dropped; the pool discards it and opens another, so this recovers by itself
+  pool.on("error", (err) => log.warn({ err }, "pg pool error"));
   // queued ahead of the first query the pool hands out on this connection
   pool.on("connect", (client) => {
     client

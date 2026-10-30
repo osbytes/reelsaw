@@ -9,7 +9,6 @@
 import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
-import type { Telemetry } from "./telemetry.js";
 
 export interface Mail {
   to: string;
@@ -26,7 +25,7 @@ export interface Email {
   send(mail: Mail): Promise<void>;
 }
 
-export function createEmail(config: Config, log: Logger, telemetry?: Pick<Telemetry, "captureException">): Email {
+export function createEmail(config: Config, log: Logger): Email {
   const from = config.EMAIL_FROM ?? "";
   const driver = config.EMAIL_DRIVER;
   let transport: import("nodemailer").Transporter | null = null;
@@ -73,9 +72,9 @@ export function createEmail(config: Config, log: Logger, telemetry?: Pick<Teleme
         await deliver(mail);
         log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
-        log.error({ err, to: mail.to, subject: mail.subject }, "email failed");
-        // a sign-up waiting on its verification or reset mail is stuck until someone looks; never the address or subject
-        telemetry?.captureException(err, { where: "email", driver });
+        // reported (log.ts): a sign-up waiting on its verification or reset mail is stuck until someone looks.
+        // Only `driver` becomes a tag; the address and subject stay in the log.
+        log.error({ err, driver, to: mail.to, subject: mail.subject }, "email failed");
       }
     },
   };

@@ -127,7 +127,7 @@ export function createEventBus(config: Config, db: Db, pool: pg.Pool, log: Logge
       if (notice) emitter.emit(`project:${notice.projectId}`, notice);
     });
     c.on("error", (err) => {
-      log.error({ err }, "listener error, reconnecting");
+      log.warn({ err }, "listener error, reconnecting");
       reconnect();
     });
     c.on("end", () => {

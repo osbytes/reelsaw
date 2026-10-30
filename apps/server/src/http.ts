@@ -87,13 +87,9 @@ export function createApp(svc: Services) {
       afterHeaders(c, { "X-Reelsaw-Build": webBuild });
     });
   }
-  // an exception in a handler: the access line above logs it with `err`, Sentry gets it (tRPC reports its own in onError
-  // below); the client gets the request id to quote
-  app.onError((err, c) => {
-    if (err instanceof HTTPException) return err.getResponse();
-    svc.telemetry.captureException(err, { route: c.req.routePath, method: c.req.method, requestId: c.get("requestId"), userId: c.get("userId") });
-    return c.json({ error: "internal error", requestId: c.get("requestId") }, 500);
-  });
+  // an exception in a handler: the access line above logs it at error with `err` (so it is reported, log.ts); the
+  // client gets the request id to quote
+  app.onError((err, c) => (err instanceof HTTPException ? err.getResponse() : c.json({ error: "internal error", requestId: c.get("requestId") }, 500)));
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
     const who = await activeRequester(auth, db, c.req.raw.headers);
@@ -230,8 +226,6 @@ export function createApp(svc: Services) {
           userId: c?.who?.user.id,
           err: error,
         });
-        if (error.code === "INTERNAL_SERVER_ERROR")
-          svc.telemetry.captureException(error.cause ?? error, { procedure: path, type, requestId: c?.requestId, userId: c?.who?.user.id });
         if (error instanceof QuotaError && c?.who)
           trackQuotaRefusal(svc.telemetry, c.who.user.id, error, c.surface ?? (c.who.via === "session" ? "web" : "api"));
       },
@@ -342,7 +336,6 @@ export function createApp(svc: Services) {
         return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
-      svc.telemetry.captureException(err, { route: c.req.routePath, uploadId: id, requestId: c.get("requestId"), userId: session.user.id });
       return c.json({ error: (err as Error).message }, 500);
     } finally {
       await fsp.rm(dest, { force: true });

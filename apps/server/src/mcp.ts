@@ -101,7 +101,6 @@ export function createMcpServer(
       }
       if (err instanceof TRPCError) return fail(`${err.code}: ${err.message}`);
       log.error({ err }, "mcp tool failed");
-      svc.telemetry.captureException(err, { surface: "mcp", userId: user.id, requestId });
       return fail(err instanceof Error ? err.message : String(err));
     }
   };

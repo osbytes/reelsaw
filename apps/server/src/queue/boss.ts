@@ -149,7 +149,8 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     instanceName: config.RUN_WORKERS ? "reelsaw-worker" : "reelsaw-api",
     openTelemetry: { enabled: otelEnabled, propagateContext: true },
   });
-  boss.on("error", (err) => log.error({ err }, "pg-boss error"));
+  // a failed poll or maintenance pass is retried on the next tick; one that keeps failing shows as stalled jobs
+  boss.on("error", (err) => log.warn({ err }, "pg-boss error"));
   boss.on("warning", (w) => log.warn({ warning: w }, "pg-boss warning"));
   let started = false;
 

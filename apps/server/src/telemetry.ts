@@ -3,19 +3,20 @@
  * nothing is initialised, nothing is sent, no code path changes. When OpenTelemetry is aimed at Sentry and
  * metrics are on, this also sends Sentry Application Metrics (Sentry has no OTLP metrics ingest): runtime
  * gauges, and everything metrics.ts records.
- * One service, used from the few places where the facts are known: boot and process-level failures (main.ts), 5xx tRPC errors (http.ts), a job's final
- * failed attempt (queue/workers.ts), committed project events (uow.ts), sign-ups (auth.ts), billing
- * transitions (ee/billing) and abuse flags (abuse.ts). The browser gets the public keys from `system.status`
- * and its own init (apps/web/src/lib/telemetry.ts).
+ * Errors reach Sentry through the logger: every `error` or `fatal` line with an `err` is reported, tagged with
+ * the line's ids (log.ts, setErrorSink), so "a person must act" is one decision, made where the line is logged.
+ * Product events are explicit `capture` calls where the facts are known: committed project events (uow.ts),
+ * sign-ups and approvals (auth.ts, accounts.ts), requests, refusals, downloads and MCP calls (http.ts, mcp.ts),
+ * billing transitions (ee/billing) and abuse flags (abuse.ts). The browser gets the public keys from
+ * `system.status` and its own init (apps/web/src/lib/telemetry.ts).
  *
- * Identity: the user id is the distinct id; email and name go to PostHog's person profile (it is the
- * operator's own analytics of their own users), never to Sentry (no PII is attached: user id only). Prompts, transcripts
- * and media never leave through here; event properties are ids, counts and names.
+ * Identity: the user id is the distinct id, with role and plan as person properties; no email or name goes to
+ * either service. Prompts, transcripts and media never leave through here; event properties are ids, counts and names.
  */
 import * as Sentry from "@sentry/node";
 import { PostHog } from "posthog-node";
 import type { Config } from "./config.js";
-import type { Logger } from "./log.js";
+import { setErrorSink, type Logger } from "./log.js";
 import { readGauges, setMetricSink, type MetricSink } from "./metrics.js";
 import { otel } from "./otel.js";
 
@@ -32,8 +33,6 @@ export interface Telemetry {
   enabled: { sentry: boolean; posthog: boolean };
   /** what the browser needs: public values only */
   public: TelemetryPublic;
-  /** an error a person must look at (also logged by the caller); tags are ids and names, never bodies */
-  captureException(err: unknown, tags?: Record<string, string | number | boolean | null | undefined>): void;
   /** a product event for one account */
   capture(event: string, distinctId: string, properties?: Record<string, unknown>): void;
   identify(distinctId: string, properties: Record<string, unknown>): void;
@@ -106,6 +105,14 @@ export function createTelemetry(
   } else {
     setMetricSink(null);
   }
+  // error and fatal lines with an `err` (log.ts) become Sentry events; the line's message and ids are the tags
+  setErrorSink(
+    sentry
+      ? ({ err, level, tags }) => {
+          Sentry.captureException(err, { level, tags });
+        }
+      : null,
+  );
   const posthog = config.POSTHOG_KEY ? new PostHog(config.POSTHOG_KEY, { host: config.POSTHOG_HOST, flushAt: 20, flushInterval: 10_000 }) : null;
   if (posthog) posthog.on("error", (err: unknown) => log.warn({ err }, "posthog send failed"));
   if (sentry || posthog) log.info({ sentry, posthog: !!posthog, environment, release, sentryMetrics }, "telemetry on");
@@ -114,15 +121,6 @@ export function createTelemetry(
     public: {
       sentry: sentry ? { dsn: config.SENTRY_DSN!, environment, release, replaysOnErrorSampleRate: config.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE } : null,
       posthog: posthog ? { key: config.POSTHOG_KEY!, host: config.POSTHOG_HOST } : null,
-    },
-    captureException(err, tags) {
-      if (!sentry) return;
-      const clean = Object.fromEntries(
-        Object.entries(tags ?? {})
-          .filter(([, v]) => v !== undefined && v !== null)
-          .map(([k, v]) => [k, String(v)]),
-      );
-      Sentry.captureException(err, { tags: clean });
     },
     capture(event, distinctId, properties) {
       posthog?.capture({ distinctId, event, properties: { ...properties, $lib_custom: "reelsaw-server", release } });
@@ -145,6 +143,7 @@ export function createTelemetry(
     },
     async shutdown() {
       setMetricSink(null);
+      setErrorSink(null);
       if (gaugeTimer) clearInterval(gaugeTimer);
       await posthog?.shutdown().catch(() => {});
       if (sentry) await Sentry.close(2000).catch(() => {});

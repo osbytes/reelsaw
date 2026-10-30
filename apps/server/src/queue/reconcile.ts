@@ -177,16 +177,14 @@ export async function reconcile(svc: Services): Promise<{ requeued: number }> {
 }
 
 async function giveUpProject(svc: Services, projectId: string, status: ProjectStatus, requeues: number) {
-  svc.log.child({ module: "reconcile" }).error({ projectId, status, requeues }, "gave up re-enqueueing a project whose job keeps getting lost");
   const err = new JobInterruptedError();
-  svc.telemetry.captureException(err, { projectId, status, requeues });
+  svc.log.child({ module: "reconcile" }).error({ err, projectId, status, requeues }, "gave up re-enqueueing a project whose job keeps getting lost");
   await failProject(svc, projectId, stageOfStatus[status] ?? "ingest", err);
 }
 
 async function giveUpClip(svc: Services, projectId: string, clipId: string, requeues: number) {
-  svc.log.child({ module: "reconcile" }).error({ projectId, clipId, requeues }, "gave up re-enqueueing a clip whose job keeps getting lost");
   const err = new JobInterruptedError();
-  svc.telemetry.captureException(err, { projectId, clipId, requeues });
+  svc.log.child({ module: "reconcile" }).error({ err, projectId, clipId, requeues }, "gave up re-enqueueing a clip whose job keeps getting lost");
   await markClipFailed(svc, projectId, clipId, err);
 }
 
@@ -207,7 +205,6 @@ export function startReconciler(svc: Services, intervalMs = 5 * 60_000) {
       })
       .catch((err) => {
         log.error({ err }, "reconcile failed");
-        svc.telemetry.captureException(err, { where: "reconcile" });
         monitor("error");
       });
   const run = () =>
