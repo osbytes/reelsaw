@@ -11,5 +11,6 @@ export default defineConfig({
       "/media": { target: "http://localhost:3000", changeOrigin: false },
     },
   },
-  build: { outDir: "dist", sourcemap: false },
+  // maps with no sourceMappingURL: a release build uploads them to Sentry and deletes them (Dockerfile); none are served
+  build: { outDir: "dist", sourcemap: "hidden" },
 });

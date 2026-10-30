@@ -72,7 +72,9 @@ export function createEmail(config: Config, log: Logger): Email {
         await deliver(mail);
         log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
-        log.error({ err, to: mail.to, subject: mail.subject }, "email failed");
+        // reported (log.ts): a sign-up waiting on its verification or reset mail is stuck until someone looks.
+        // Only `driver` becomes a tag; the address and subject stay in the log.
+        log.error({ err, driver, to: mail.to, subject: mail.subject }, "email failed");
       }
     },
   };

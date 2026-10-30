@@ -47,8 +47,21 @@ COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile --offline
 COPY . .
-RUN pnpm -r build \
+# Release builds (release.yml) pass a Sentry token as a build secret: the bundles get debug ids and their source maps
+# go to Sentry, so production stacks read as source. Without the secret (local, CI, self-built) this is skipped.
+# Either way no map reaches the image: the web maps are deleted here, the server's with the rest below.
+ARG REELSAW_VERSION=dev
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+RUN --mount=type=secret,id=sentry_auth_token,required=false \
+    pnpm -r build \
  && pnpm --filter @reelsaw/server bundle \
+ && if [ -s /run/secrets/sentry_auth_token ] && [ -n "$SENTRY_ORG" ] && [ -n "$SENTRY_PROJECT" ]; then \
+      export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)" \
+      && npx --yes @sentry/cli@2.39.1 sourcemaps inject apps/server/dist-bundle apps/web/dist \
+      && npx --yes @sentry/cli@2.39.1 sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "reelsaw@${REELSAW_VERSION}" apps/server/dist-bundle apps/web/dist; \
+    fi \
+ && find apps/web/dist -name "*.map" -delete \
  && pnpm --filter @reelsaw/server --prod deploy --legacy /out/server \
  # ship the minified bundle only: no tsc output, sources, maps, or the inlined workspace package
  && rm -rf /out/server/dist /out/server/dist-bundle /out/server/src /out/server/test /out/server/scripts /out/server/tsconfig*.json /out/server/node_modules/@reelsaw \

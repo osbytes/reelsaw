@@ -2264,6 +2264,7 @@ async function bumperApi(svc: Services, projectId: string | undefined) {
       req,
       requestId: "cli",
       log: svc.log.child({ module: "cli", userId: user.id }),
+      surface: "cli",
     }),
   };
 }

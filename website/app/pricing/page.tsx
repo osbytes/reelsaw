@@ -4,7 +4,7 @@ import { PRICING } from "@/content/pricing";
 import { Breadcrumbs } from "@/components/seo";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
-import { SITE } from "@/lib/site";
+import { SITE, appLink } from "@/lib/site";
 
 const title = "Pricing: self-host for free, or let us host it";
 const description =
@@ -66,7 +66,7 @@ export default function PricingPage() {
                   ))}
                 </ul>
                 <a
-                  href={`${SITE.app}/signup?plan=${p.name}`}
+                  href={appLink("/signup", `pricing_${p.name}`, { plan: p.name })}
                   className={`${p.name === "creator" ? "btn-primary" : "btn-ghost"} mt-auto h-[42px] justify-center`}
                 >
                   {p.price ? `Start with ${p.label}` : "Start for free"}

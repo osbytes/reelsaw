@@ -15,6 +15,7 @@ import type { Admission } from "./queue/boss.js";
 import type { UserRole } from "./db/schema.js";
 import { takeTxLock, txLock } from "./locks.js";
 import { NonRetryableError } from "./pipeline/common.js";
+import type { Telemetry } from "./telemetry.js";
 
 export const LIMIT_KEYS = [
   "MAX_PROJECTS_PER_USER",
@@ -106,10 +107,18 @@ export async function watermarkFor(
 
 export class QuotaError extends TRPCError {
   readonly quota?: QuotaRefusal | undefined;
-  constructor(message: string, quota?: QuotaRefusal) {
+  /** the limit that refused (a LimitKey), for analytics; the refusal's own key when it has one */
+  readonly limit: string;
+  constructor(message: string, quota?: QuotaRefusal, limit?: string) {
     super({ code: "TOO_MANY_REQUESTS", message });
     this.quota = quota;
+    this.limit = limit ?? quota?.key ?? "unknown";
   }
+}
+
+/** A refusal as a product event (`quota.refused`): which limit, the surface, and the offer shown; never the message. */
+export function trackQuotaRefusal(telemetry: Pick<Telemetry, "capture">, userId: string, err: QuotaError, surface: string) {
+  telemetry.capture("quota.refused", userId, { key: err.limit, surface, ...(err.quota?.primary ? { offer: err.quota.primary.kind } : {}) });
 }
 
 /**
@@ -307,10 +316,14 @@ export function checkJobLimits(l: Limits, a: Admission, isRender: boolean) {
   if (l.MAX_LIVE_JOBS_PER_USER > 0 && a.userLive >= l.MAX_LIVE_JOBS_PER_USER)
     throw new QuotaError(
       `You have ${a.userLive} requests queued or running, the most this account may have at once (${l.MAX_LIVE_JOBS_PER_USER}). Try again when some have finished.`,
+      undefined,
+      "MAX_LIVE_JOBS_PER_USER",
     );
   if (isRender && l.MAX_RERENDERS_PER_HOUR > 0 && a.userRendersLastHour >= l.MAX_RERENDERS_PER_HOUR)
     throw new QuotaError(
       `${a.userRendersLastHour} re-renders and re-runs requested in the last hour, the most allowed (${l.MAX_RERENDERS_PER_HOUR}). Try again in a while.`,
+      undefined,
+      "MAX_RERENDERS_PER_HOUR",
     );
 }
 

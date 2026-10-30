@@ -27,3 +27,12 @@ export const SITE = {
   installSh: "curl -fsSL https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.sh | bash",
   installPs1: "irm https://raw.githubusercontent.com/osbytes/reelsaw/main/deploy/install.ps1 | iex",
 } as const;
+
+/**
+ * A link into the hosted app, tagged with where on the site it was clicked. The site and the app are separate
+ * analytics projects, so the UTM tags (kept as the app's first-touch properties) are what ties a sign-up to the site.
+ */
+export function appLink(path: string, cta: string, params: Record<string, string> = {}): string {
+  const q = new URLSearchParams({ ...params, utm_source: "reelsaw.com", utm_medium: "website", utm_content: cta });
+  return `${SITE.app}${path}?${q}`;
+}

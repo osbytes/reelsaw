@@ -7,7 +7,7 @@ import type { Transcript } from "../db/schema.js";
 import { keys } from "../storage/index.js";
 import { removeScratchClip } from "../storage/sweep.js";
 import type { Services } from "../services.js";
-import type { StageContext } from "./common.js";
+import { errorKind, type StageContext } from "./common.js";
 import { finalizeProjectIfDone as finalizeInTx, requestPrepare } from "./lifecycle.js";
 import { watermarkFor } from "../quota.js";
 import { buildAss, renderedCaptions } from "./captions.js";
@@ -1055,7 +1055,7 @@ export async function renderClip(ctx: StageContext, clipId: string, jobGen?: num
       .update(schema.clips)
       .set({ status: "done", outputKey, outputBytes, thumbnailKey, watermark: watermark.on, error: null, diagnostics, captions, updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
-    await u.emit(projectId, "clip.done", { clipId, index: clip.index });
+    await u.emit(projectId, "clip.done", { clipId, index: clip.index, renderSec: Math.round((Date.now() - renderStarted) / 1000) });
     await finalizeInTx(svc, u, projectId);
     // a previous output of this clip (other generation) is superseded
     for (const k of [cur.outputKey, cur.thumbnailKey]) {
@@ -1507,7 +1507,7 @@ export async function markClipFailed(
       .update(schema.clips)
       .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
       .where(eq(schema.clips.id, clipId));
-    await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000) });
+    await u.emit(projectId, "clip.failed", { clipId, error: message.slice(0, 1000), errorKind: errorKind(err) });
     await finalizeInTx(svc, u, projectId);
   });
 }

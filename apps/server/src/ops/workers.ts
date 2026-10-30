@@ -258,9 +258,27 @@ export async function forget(svc: Services): Promise<void> {
  * shutdown grace keeps its claim and other processes on the volume do not take its bytes. Callers await `beat`
  * once at boot so the first HTTP request already sees this process.
  */
+/**
+ * The Sentry cron monitor a process checks into: `heartbeat-<WORKER_ID>` when the id is pinned (one monitor per
+ * worker service, so one dead worker alerts), else `heartbeat-<role>` (api, worker, app).
+ */
+export function heartbeatMonitor(c: Pick<Config, "WORKER_ID" | "RUN_HTTP" | "RUN_WORKERS">): string {
+  return `heartbeat-${c.WORKER_ID?.trim() || processRole(c)}`;
+}
+
 export function startHeartbeat(svc: Services): () => Promise<void> {
   const log = svc.log.child({ module: "ops" });
-  const tick = () => beat(svc).catch((err) => log.warn({ err }, "worker heartbeat failed"));
+  const monitor = heartbeatMonitor(svc.config);
+  let lastCheckIn = 0;
+  const tick = () =>
+    beat(svc)
+      .then(() => {
+        // the monitor is per minute; the database beat stays every 15 s
+        if (Date.now() - lastCheckIn < 60_000) return;
+        lastCheckIn = Date.now();
+        svc.telemetry.checkIn(monitor, "ok", { type: "interval", minutes: 1 });
+      })
+      .catch((err) => log.warn({ err }, "worker heartbeat failed"));
   const t = setInterval(tick, WORKER_HEARTBEAT_MS);
   t.unref();
   return async () => {

@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { trace } from "@opentelemetry/api";
 import type { Logger } from "./log.js";
 
 export type AppEnv = { Variables: { requestId: string; log: Logger; userId?: string } };
@@ -49,6 +50,12 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
     c.header(REQUEST_ID_HEADER, requestId);
     await next();
     const path = redactPath(c.req.path);
+    // the HTTP server span is named for the route ("GET /media/clips/:projectId/:file", "POST /api/trpc/projects.create"),
+    // not just "GET", and typed for Sentry's request views; tRPC paths name procedures, never ids
+    const route = path.startsWith("/api/trpc/") ? path : c.req.routePath;
+    const span = trace.getActiveSpan();
+    span?.updateName(`${c.req.method} ${route}`);
+    span?.setAttributes({ "http.route": route, "sentry.op": "http.server" });
     const status = c.res.status;
     const ms = Math.round(performance.now() - t0);
     const level = accessLevel(c.req.method, path, status, ms);
@@ -106,7 +113,8 @@ export function logTrpcError(
     code: e.code,
     requestId: e.requestId,
     userId: e.userId,
-    ...(level === "error" ? { err: e.err } : { reason: e.err.message.slice(0, 300) }),
+    // our bug: the cause tRPC wrapped is what the stack (and the error report, log.ts) should show
+    ...(level === "error" ? { err: e.err.cause instanceof Error ? e.err.cause : e.err } : { reason: e.err.message.slice(0, 300) }),
   };
   log[level](fields, "trpc error");
 }

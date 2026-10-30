@@ -165,6 +165,7 @@ export const envSchema = z.object({
   // error reporting and product analytics (telemetry.ts); off unless set, the browser gets the public keys via system.status
   SENTRY_DSN: z.string().url().optional(),
   SENTRY_ENVIRONMENT: z.string().max(60).optional(),
+  SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   POSTHOG_KEY: z.string().max(200).optional(),
   POSTHOG_HOST: z.string().url().default("https://us.i.posthog.com"),
   // quotas (0 = unlimited); admins can override per user in Users → Limits

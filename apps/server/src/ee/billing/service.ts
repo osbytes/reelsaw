@@ -31,7 +31,10 @@ import { ALL_LOOKUP_KEYS, PAID_PLANS, PLANS, planByLookupKey, planOf, publicPlan
 import { createEntitlements, effectivePlan, LIVE_STATUSES } from "./entitlements.js";
 
 export const SYNC_QUEUE = "billing.sync";
+const SYNC_RETRY_LIMIT = 8;
 export const RECONCILE_QUEUE = "billing.reconcile";
+/** daily, UTC; also the Sentry cron monitor's schedule */
+const RECONCILE_CRON = "17 4 * * *";
 export interface SyncJob {
   subscriptionId: string;
   /** the webhook event that asked for it, for the log */
@@ -426,7 +429,11 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
         payload: Record<string, unknown>,
       ) => {
         await u.db.insert(schema.adminEvents).values({ ...base, type, payload });
-        u.afterCommit(() => svc.telemetry.capture(type, userId, { plan: next!.plan, interval: next!.interval, status: next!.status }));
+        u.afterCommit(() => {
+          svc.telemetry.capture(type, userId, { plan: next!.plan, interval: next!.interval, status: next!.status });
+          // the plan in force as a person property, so every event segments by plan (Free once a cancellation ends it)
+          svc.telemetry.identify(userId, { plan: isLive(next!.status) ? next!.plan : "free" });
+        });
       };
       if ((!cur || !isLive(cur.status)) && isLive(next.status)) await audit("billing.subscribed", ids);
       else if (cur && isLive(cur.status) && isLive(next.status) && (cur.plan !== next.plan || cur.interval !== next.interval))
@@ -439,7 +446,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       if (mapped?.unknownPrice && next === mapped && (!cur || cur.stripeSubscriptionId !== subscriptionId || cur.priceId !== next.priceId)) {
         const message = `Subscription ${subscriptionId} uses a price Reelsaw does not know (${next.priceId ?? "none"}); the account is on Free until a plan matches.`;
         await u.db.insert(schema.adminEvents).values({ ...base, type: "billing.unknown_price", payload: { ...ids, priceId: next.priceId, message } });
-        u.afterCommit(() => svc.telemetry.captureException(new Error(message), { userId, subscriptionId, priceId: next!.priceId }));
+        u.afterCommit(() => slog.error({ err: new Error(message), userId, priceId: next!.priceId }, "subscription price unknown"));
       }
       await markProcessed(u, subscriptionId, readAt);
       u.afterCommit(() =>
@@ -542,7 +549,7 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
     // next one (which reads Stripe afterwards); a second webhook while one is queued is covered by that one.
     const syncQueue = {
       policy: "stately" as const,
-      retryLimit: 8,
+      retryLimit: SYNC_RETRY_LIMIT,
       retryDelay: 30,
       retryBackoff: true,
       expireInSeconds: 300,
@@ -575,7 +582,8 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       try {
         await sync(job.data.subscriptionId, job.data.reason ?? "webhook");
       } catch (err) {
-        jlog.error({ err, attempt: job.retryCount + 1 }, "billing sync failed");
+        // the last attempt is an error (reported, log.ts): the account's plan is out of step with Stripe until someone looks
+        jlog[job.retryCount >= SYNC_RETRY_LIMIT ? "error" : "warn"]({ err, queue: SYNC_QUEUE, attempt: job.retryCount + 1 }, "billing sync failed");
         await db()
           .update(schema.billingEvents)
           .set({ error: String((err as Error).message ?? err).slice(0, 500) })
@@ -584,9 +592,15 @@ export function createBilling(svc: Pick<Services, "config" | "database" | "tx" |
       }
     });
     await boss.work(RECONCILE_QUEUE, { pollingIntervalSeconds: 30 }, async () => {
-      await reconcile();
+      try {
+        await reconcile();
+        svc.telemetry.checkIn("billing-reconcile", "ok", { type: "crontab", value: RECONCILE_CRON });
+      } catch (err) {
+        svc.telemetry.checkIn("billing-reconcile", "error", { type: "crontab", value: RECONCILE_CRON });
+        throw err;
+      }
     });
-    await boss.schedule(RECONCILE_QUEUE, "17 4 * * *", {}, { tz: "UTC" });
+    await boss.schedule(RECONCILE_QUEUE, RECONCILE_CRON, {}, { tz: "UTC" });
     log.info({ queues: [SYNC_QUEUE, RECONCILE_QUEUE] }, "billing workers listening");
   }
 

@@ -17,7 +17,7 @@ import { isSpaIndexPath } from "./spa-index.js";
 import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
-import { assertStorageRoom, checkStorageQuota, QuotaError } from "./quota.js";
+import { assertStorageRoom, checkStorageQuota, QuotaError, trackQuotaRefusal } from "./quota.js";
 import { keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
@@ -87,7 +87,8 @@ export function createApp(svc: Services) {
       afterHeaders(c, { "X-Reelsaw-Build": webBuild });
     });
   }
-  // an exception in a handler: the access line above logs it with `err`; the client gets the request id to quote
+  // an exception in a handler: the access line above logs it at error with `err` (so it is reported, log.ts); the
+  // client gets the request id to quote
   app.onError((err, c) => (err instanceof HTTPException ? err.getResponse() : c.json({ error: "internal error", requestId: c.get("requestId") }, 500)));
   /** the signed-in, allowed account behind a request; also stamps the user on the access line */
   const actor = async (c: Context<AppEnv>) => {
@@ -225,8 +226,8 @@ export function createApp(svc: Services) {
           userId: c?.who?.user.id,
           err: error,
         });
-        if (error.code === "INTERNAL_SERVER_ERROR")
-          svc.telemetry.captureException(error.cause ?? error, { procedure: path, type, requestId: c?.requestId, userId: c?.who?.user.id });
+        if (error instanceof QuotaError && c?.who)
+          trackQuotaRefusal(svc.telemetry, c.who.user.id, error, c.surface ?? (c.who.via === "session" ? "web" : "api"));
       },
     }),
   );
@@ -282,6 +283,7 @@ export function createApp(svc: Services) {
     } catch (err) {
       c.get("log").warn({ bytes: length, reason: (err as Error).message }, "upload rejected: storage limit");
       const quota = err instanceof QuotaError ? err.quota : undefined;
+      if (err instanceof QuotaError) trackQuotaRefusal(svc.telemetry, session.user.id, err, session.via === "session" ? "web" : "api");
       return c.json({ error: (err as Error).message, ...(quota ? { quota } : {}) }, 429);
     }
     // refuse before writing a byte rather than fill the disk the pipeline needs (a read, not a lease: the file is gone after the copy to the store)
@@ -330,6 +332,7 @@ export function createApp(svc: Services) {
       }
       if (err instanceof QuotaError) {
         c.get("log").warn({ uploadId: id, bytes: received, reason: err.message }, "upload rejected: storage limit");
+        trackQuotaRefusal(svc.telemetry, session.user.id, err, session.via === "session" ? "web" : "api");
         return c.json({ error: err.message, ...(err.quota ? { quota: err.quota } : {}) }, 413);
       }
       c.get("log").error({ err, uploadId: id }, "upload failed");
@@ -456,6 +459,9 @@ export function createApp(svc: Services) {
       .replace(/\s+/g, "-")
       .slice(0, 60)}.mp4`;
     const loc = await storage.resolve(key, { downloadName: download ? name : undefined });
+    // a download (not playback or a thumbnail) is the end of the funnel: the clip left Reelsaw
+    if (download && !file.endsWith(".jpg"))
+      svc.telemetry.capture("clip.downloaded", session.user.id, { projectId, clipId, surface: session.via === "session" ? "web" : "api" });
     if ("url" in loc) return c.redirect(loc.url, 302);
     return sendFile(c.req.raw, loc.file, download ? name : undefined, { revalidate: true });
   });
@@ -472,6 +478,12 @@ export function createApp(svc: Services) {
       if (!(err instanceof TRPCError)) throw err;
       return c.text(err.message, err.code === "BAD_REQUEST" ? 400 : err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" ? 409 : 500);
     }
+    svc.telemetry.capture("project.exported", session.user.id, {
+      projectId,
+      clips: plan.clips.length,
+      subset: plan.subset,
+      surface: session.via === "session" ? "web" : "api",
+    });
     const { stream, filename } = await createExportZip(
       { storage, paths, log: c.get("log") },
       { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },

@@ -250,7 +250,7 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
       .update(schema.projects)
       .set({ status: "failed", error: "Every clip failed to render", updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", ...facts });
+    await u.emit(projectId, "project.failed", { stage: "render", error: "Every clip failed to render", errorKind: "AllClipsFailed", ...facts });
     return;
   }
   // no live clips left (the last one was deleted while rendering) finishes as done with nothing, rather than stranding the status

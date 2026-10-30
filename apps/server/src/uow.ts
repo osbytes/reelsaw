@@ -29,10 +29,13 @@ import { checkJobLimits, limitsFor } from "./quota.js";
  * Jobs a unit enqueues for that user's own projects are their requests: tagged `by: "user"` and admitted against
  * MAX_LIVE_JOBS_PER_USER / MAX_RERENDERS_PER_HOUR. Pipeline hand-offs are never refused.
  */
-const requestedBy = new AsyncLocalStorage<{ userId: string }>();
-export function asUserRequest<T>(userId: string, fn: () => T): T {
-  return requestedBy.run({ userId }, fn);
+const requestedBy = new AsyncLocalStorage<{ userId: string; surface: Surface }>();
+export function asUserRequest<T>(userId: string, surface: Surface, fn: () => T): T {
+  return requestedBy.run({ userId, surface }, fn);
 }
+
+/** Where a person's request came in: the browser, an API key over tRPC, an MCP client, or the operator CLI. */
+export type Surface = "web" | "api" | "mcp" | "cli";
 
 export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
@@ -96,8 +99,39 @@ export function isRetryableTxError(err: unknown): boolean {
 
 const TX_ATTEMPTS = 3;
 
-/** Committed project events that are product events too (telemetry.ts); the owner is the distinct id. */
-const PRODUCT_EVENTS = new Set<string>(["project.created", "project.done", "project.failed"]);
+/**
+ * A committed project event as a product event (telemetry.ts), or null when it is not one. Each event names the
+ * properties PostHog may see: ids, counts, durations and enum values, never a title or an error message (those
+ * stay in the event feed and the log). A run stopped by deleting the project is `project.cancelled`, not a failure.
+ */
+export function productEvent(type: string, payload: Record<string, unknown>): { event: string; properties: Record<string, string | number | boolean> } | null {
+  const pick = (...keys: string[]) => {
+    const out: Record<string, string | number | boolean> = {};
+    for (const k of keys) {
+      const v = payload[k];
+      // strings here are enums and ids (stage, runReason, errorKind); a long one is not, so it stays out
+      if (typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length <= 64)) out[k] = v;
+    }
+    return out;
+  };
+  switch (type) {
+    case "project.created":
+      return { event: type, properties: pick("sourceType") };
+    case "project.done":
+      return { event: type, properties: pick("clips", "failed", "runSec", "renderSec", "runReason", "runSeq") };
+    case "project.failed":
+      return {
+        event: payload.cancelled === true ? "project.cancelled" : type,
+        properties: pick("stage", "errorKind", "runSec", "renderSec", "runReason", "runSeq"),
+      };
+    case "clip.done":
+      return { event: type, properties: pick("clipId", "renderSec") };
+    case "clip.failed":
+      return { event: type, properties: pick("clipId", "errorKind") };
+    default:
+      return null;
+  }
+}
 
 export function createUnitOfWork(
   pool: pg.Pool,
@@ -111,6 +145,8 @@ export function createUnitOfWork(
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
     const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
+    /** jobs a person asked for in this unit (product analytics, sent after commit) */
+    const requested: Array<{ queue: QueueName; projectId: string; clipId?: string }> = [];
     let result;
     try {
       await client.query("BEGIN");
@@ -148,6 +184,7 @@ export function createUnitOfWork(
               }
             }
           }
+          requested.push({ queue: q, projectId: data.projectId, ...("clipId" in data && typeof data.clipId === "string" ? { clipId: data.clipId } : {}) });
           return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost, ...opts });
         },
         send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
@@ -167,16 +204,22 @@ export function createUnitOfWork(
       client.release();
     }
     // committed: every state transition is also a log line carrying the ids, so a log alone tells the story
+    const who = requestedBy.getStore();
     for (const e of emitted) {
       const level = EVENT_LEVEL[e.type] ?? "debug";
       log[level]({ projectId: e.projectId, event: e.type, ...eventFields(e.payload) }, "project event");
-      if (telemetry?.enabled.posthog && PRODUCT_EVENTS.has(e.type)) {
+      const product = telemetry?.enabled.posthog ? productEvent(e.type, e.payload) : null;
+      if (telemetry && product) {
+        // the owner is the distinct id (an admin acting on someone's project is not them); the surface is the request's
+        const properties = { projectId: e.projectId, ...product.properties, ...(who ? { surface: who.surface } : {}) };
         void pool
           .query<{ user_id: string }>("select user_id from projects where id = $1", [e.projectId])
-          .then((r) => r.rows[0] && telemetry.capture(e.type, r.rows[0].user_id, { projectId: e.projectId, ...eventFields(e.payload) }))
+          .then((r) => r.rows[0] && telemetry.capture(product.event, r.rows[0].user_id, properties))
           .catch(() => {});
       }
     }
+    // the user's own jobs only (admission above checked the owner), so the requester is the distinct id
+    if (who) for (const j of requested) telemetry?.capture("job.requested", who.userId, { ...j, surface: who.surface });
     for (const f of after) {
       try {
         await f();

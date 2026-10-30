@@ -140,7 +140,10 @@ are not the metrics.
 - **Levels mean one thing each.**
   - `fatal`: the process cannot continue (a boot self-check failed, uncaught exception).
   - `error`: an operation failed and a person must act, or a user saw a failure (clip failed,
-    request 5xx, job dead-lettered, project failed). Always with `err`.
+    request 5xx, job dead-lettered, project failed). Always with `err`. An `error` (or `fatal`)
+    line with `err` is also the error report: with `SENTRY_DSN` set it goes to Sentry, tagged
+    with the line's ids (`log.ts`), so there is no separate capture call to forget. A failure
+    that will be retried is therefore `warn` until its last attempt.
   - `warn`: degraded or recovered automatically, a limit hit, something skipped (retry,
     fallback model, bumper skipped, truncated list, slow request, 4xx that is not routine).
   - `info`: one line per state transition or milestone, countable: project events (run started,

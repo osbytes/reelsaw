@@ -25,6 +25,12 @@ import {
  */
 export class NonRetryableError extends Error {}
 
+/** A failure's class for analytics and alerts (`QuotaExceededError`, `StageTimeoutError`): a name, never the message. */
+export function errorKind(err: unknown): string {
+  if (!(err instanceof Error)) return "unknown";
+  return err.name !== "Error" ? err.name : err.constructor.name || "Error";
+}
+
 /** A stage ran out of time: one model call past its limit, or no unit of work finished for the idle limit. */
 export class StageTimeoutError extends Error {
   readonly stage: string;
@@ -387,7 +393,7 @@ export async function failProject(svc: Services, projectId: string, stage: Pipel
       .update(schema.projects)
       .set({ status: "failed", error: message.slice(0, 4000), updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
-    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), ...facts });
+    await u.emit(projectId, "project.failed", { stage, error: message.slice(0, 1000), errorKind: errorKind(err), ...facts });
   });
 }
 
