@@ -61,19 +61,27 @@ describe("webhook outbox", { skip: notReady ?? false }, () => {
     assert.equal(jobs[0].name, "webhooks.deliver");
   });
 
-  it("a unit that emits and then throws leaves no delivery", async () => {
+  it("a unit that emits and then throws leaves no delivery and no job", async () => {
     await endpoint(owner, ["clip.failed"]);
     let eventId = 0;
+    let deliveryIds: number[] = [];
     await assert.rejects(
       h.tx(async (u) => {
         eventId = await u.emit(projectId, "clip.failed", { clipId: "c-x", error: "x" });
-        const inside = (await u.db.execute<{ n: number }>(sql`select count(*)::int as n from webhook_deliveries where event_id = ${eventId}`)).rows[0]!;
-        assert.ok(inside.n >= 1, "written inside the unit");
+        const inside = (await u.db.execute<{ id: string }>(sql`select id from webhook_deliveries where event_id = ${eventId}`)).rows;
+        assert.ok(inside.length >= 1, "written inside the unit");
+        deliveryIds = inside.map((r) => Number(r.id));
+        const jobs = (await u.db.execute(sql`select 1 from pgboss.job where name = 'webhooks.deliver' and (data->>'deliveryId')::bigint in ${deliveryIds}`))
+          .rows;
+        assert.equal(jobs.length, deliveryIds.length, "each job is visible inside the unit");
         throw new Error("boom");
       }),
       /boom/,
     );
     assert.equal((await h.pool.query(`select 1 from webhook_deliveries where event_id = $1`, [eventId])).rowCount, 0);
+    // the jobs went down with it: pg-boss wrote them on the unit's connection
+    const jobs = await h.pool.query(`select 1 from pgboss.job where name = 'webhooks.deliver' and (data->>'deliveryId')::bigint = any($1)`, [deliveryIds]);
+    assert.equal(jobs.rowCount, 0, "no job outlives the rollback");
   });
 
   it("events that are not subscribable write nothing", async () => {

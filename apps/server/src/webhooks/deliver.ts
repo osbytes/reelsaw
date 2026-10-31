@@ -244,22 +244,31 @@ export async function recordSendError(svc: Services, deliveryId: number, err: un
 }
 
 /**
- * Deliveries whose job was lost (a process died mid-send, a job expired) go back to pending and get a job. Run by the
- * worker every few minutes; the claim keeps it from double-sending anything a live job will pick up.
+ * Deliveries whose job was lost (a process died mid-send, a job expired) go back to pending and get a job, in one
+ * transaction, so a row is never reset without its job. A test that was lost fails instead: it was answered (or not)
+ * in its request, and is not sent again later. Run by the worker every few minutes; the claim keeps it from
+ * double-sending anything a live job will pick up; `skip locked` keeps two processes' sweeps off the same rows.
  */
 export async function requeueStuckDeliveries(svc: Services): Promise<number> {
-  const { rows } = await svc.database.pool.query<{ id: string }>(
-    `update webhook_deliveries set status = 'pending', next_attempt_at = now()
-     where id in (
-       select id from webhook_deliveries
-       where status in ('pending', 'sending') and next_attempt_at < now() - $1::interval
-       order by id limit 500)
-     returning id`,
-    [`${STUCK_MS / 1000} seconds`],
-  );
-  for (const r of rows) await svc.queue.send(WEBHOOK_QUEUE, { deliveryId: Number(r.id) }, { singletonKey: `delivery:${r.id}:requeue:${Date.now()}` });
-  if (rows.length) svc.log.child({ module: "webhooks" }).warn({ deliveries: rows.length }, "requeued webhook deliveries whose job was lost");
-  return rows.length;
+  const rows = await svc.tx(async (u) => {
+    const { rows } = await u.db.execute<{ id: string; test: boolean }>(sql`
+      with stuck as (
+        select id, type = 'webhook.test' as test from webhook_deliveries
+        where status in ('pending', 'sending') and next_attempt_at < now() - ${`${STUCK_MS / 1000} seconds`}::interval
+        order by id limit 500
+        for update skip locked)
+      update webhook_deliveries d
+      set status = case when stuck.test then 'failed' else 'pending' end,
+          next_attempt_at = case when stuck.test then null else now() end,
+          last_error = case when stuck.test then coalesce(d.last_error, 'The test was interrupted before it was sent.') else d.last_error end
+      from stuck where d.id = stuck.id
+      returning d.id, stuck.test`);
+    for (const r of rows) if (!r.test) await u.send(WEBHOOK_QUEUE, { deliveryId: Number(r.id) }, { singletonKey: `delivery:${r.id}:requeue:${Date.now()}` });
+    return rows;
+  });
+  const requeued = rows.filter((r) => !r.test).length;
+  if (requeued) svc.log.child({ module: "webhooks" }).warn({ deliveries: requeued }, "requeued webhook deliveries whose job was lost");
+  return requeued;
 }
 
 /** The worker side: deliver jobs, plus the sweep for lost ones. Returns a stop function. */

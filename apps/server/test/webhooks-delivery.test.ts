@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createSecretBox } from "../src/ai/crypto.js";
 import type { PublicResponse } from "../src/lib/safe-url.js";
-import { deliverOnce, MAX_ATTEMPTS, recordSendError, testEndpoint } from "../src/webhooks/deliver.js";
+import { deliverOnce, MAX_ATTEMPTS, recordSendError, requeueStuckDeliveries, testEndpoint } from "../src/webhooks/deliver.js";
 import { rotateSecret, updateEndpoint } from "../src/webhooks/service.js";
 import { getOrCreateLink, listLinks } from "../src/media-links/service.js";
 import { lifecycleHarness } from "./lifecycle-harness.js";
@@ -113,6 +113,36 @@ describe("webhook delivery", { skip: notReady ?? false }, () => {
     assert.deepEqual(r.changed, ["url"]);
     assert.equal(r.endpoint.failingSince, null);
     assert.equal(r.endpoint.status, "active");
+  });
+
+  it("the sweep resets a lost delivery together with its job, and fails a lost test", async () => {
+    const e = await endpoint();
+    const lost = await delivery(e, { status: "sending", attempt: 1 });
+    const test = Number(
+      (
+        await h.pool.query(
+          `insert into webhook_deliveries (endpoint_id, user_id, type, status, attempt, next_attempt_at) values ($1, $2, 'webhook.test', 'pending', 0, now()) returning id`,
+          [e, owner],
+        )
+      ).rows[0].id,
+    );
+    await h.pool.query(`update webhook_deliveries set next_attempt_at = now() - interval '10 minutes' where id = any($1)`, [[lost, test]]);
+    await requeueStuckDeliveries(h.svc);
+    assert.equal((await row(lost)).status, "pending");
+    const jobs = await h.pool.query(`select 1 from pgboss.job where name = 'webhooks.deliver' and (data->>'deliveryId')::bigint = $1`, [lost]);
+    assert.equal(jobs.rowCount, 1);
+    const t = await row(test);
+    assert.equal(t.status, "failed");
+    assert.match(t.last_error, /interrupted/);
+  });
+
+  it("two rotations at once: one wins, the other is refused", async () => {
+    const e = await endpoint();
+    const results = await Promise.allSettled([rotateSecret(h.svc, owner, e), rotateSecret(h.svc, owner, e)]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    const won = results.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ secret: string }>;
+    const stored = (await h.pool.query(`select secret_sealed from webhook_endpoints where id = $1`, [e])).rows[0].secret_sealed;
+    assert.equal(createSecretBox(AUTH_SECRET, "webhooks").decrypt(stored), won.value.secret);
   });
 
   it("a second rotation inside the overlap is refused", async () => {

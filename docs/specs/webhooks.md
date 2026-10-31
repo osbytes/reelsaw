@@ -174,6 +174,14 @@ about 22 h). Each retry is a new `webhooks.deliver` job with `startAfter` (statu
 pg-boss's own retry is set to 0 for this queue, so the schedule lives in one place and is
 visible in the row. After the last attempt the row is `failed`.
 
+Every state change that schedules a send writes the row and its job in one transaction: the
+outbox (above), a retry, Resend, an attempt that threw inside Reelsaw (back on the same schedule,
+`failed` after the last attempt), and the sweep. The sweep runs every 5 minutes for rows whose job
+was lost (a process died mid-send): it resets them to `pending` and queues their job in one unit,
+`for update skip locked` so two processes never take the same rows, and fails a lost
+`webhook.test` rather than sending it later. Rotating a secret reads and writes the endpoint
+under its row lock.
+
 **Auto-disable.** When a delivery fails and `failing_since` is more than 3 days old (with at least 5
 failed deliveries since then), the endpoint is disabled in the same unit. `disabled_reason` is set,
 the owner gets an email (`email.ts` template "A webhook was turned off") and its pending deliveries

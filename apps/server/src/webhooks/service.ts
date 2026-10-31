@@ -114,14 +114,6 @@ function endpointView(svc: Pick<Services, "config">, e: WebhookEndpointRow, last
   };
 }
 
-async function ownEndpoint(svc: Services, userId: string, id: string): Promise<WebhookEndpointRow> {
-  const e = await svc.database.db.query.webhookEndpoints.findFirst({
-    where: and(eq(schema.webhookEndpoints.id, id), eq(schema.webhookEndpoints.userId, userId)),
-  });
-  if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
-  return e;
-}
-
 /** The account's endpoints (at most MAX_WEBHOOKS_PER_USER, so not paginated beyond a bound), each with its last delivery. */
 export async function listEndpoints(svc: Services, userId: string): Promise<EndpointView[]> {
   const db = svc.database.db;
@@ -241,21 +233,31 @@ export async function deleteEndpoint(svc: Services, userId: string, id: string) 
   return { ok: true as const, message: "Webhook deleted; nothing more is sent to it." };
 }
 
-/** A new secret; the previous one keeps signing for 24 h so the receiver can switch. */
+/**
+ * A new secret; the previous one keeps signing for 24 h so the receiver can switch. Read and written under the row's
+ * lock, so two rotations at once cannot both pass the check and hand out a secret that is never stored.
+ */
 export async function rotateSecret(svc: Services, userId: string, id: string) {
-  const e = await ownEndpoint(svc, userId, id);
-  // a second rotation would drop the secret receivers were promised 24 h with
-  if (e.prevSecretSealed && e.prevSecretUntil && e.prevSecretUntil.getTime() > Date.now())
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: `A rotation is already under way: the previous secret keeps signing until ${e.prevSecretUntil.toISOString()}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
-    });
   const secret = newSecret();
   const until = new Date(Date.now() + ROTATION_OVERLAP_MS);
-  await svc.database.db
-    .update(schema.webhookEndpoints)
-    .set({ secretSealed: box(svc).encrypt(secret), prevSecretSealed: e.secretSealed, prevSecretUntil: until, updatedAt: new Date() })
-    .where(eq(schema.webhookEndpoints.id, id));
+  await svc.tx(async (u) => {
+    const [e] = await u.db
+      .select()
+      .from(schema.webhookEndpoints)
+      .where(and(eq(schema.webhookEndpoints.id, id), eq(schema.webhookEndpoints.userId, userId)))
+      .for("update");
+    if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
+    // a second rotation would drop the secret receivers were promised 24 h with
+    if (e.prevSecretSealed && e.prevSecretUntil && e.prevSecretUntil.getTime() > Date.now())
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: `A rotation is already under way: the previous secret keeps signing until ${e.prevSecretUntil.toISOString()}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
+      });
+    await u.db
+      .update(schema.webhookEndpoints)
+      .set({ secretSealed: box(svc).encrypt(secret), prevSecretSealed: e.secretSealed, prevSecretUntil: until, updatedAt: new Date() })
+      .where(eq(schema.webhookEndpoints.id, id));
+  });
   svc.log.child({ module: "webhooks" }).info({ userId, endpointId: id }, "webhook secret rotated");
   return {
     secret,
