@@ -27,6 +27,9 @@ function normalizeBaseUrl(raw) {
   } catch {
     throw new Error(`"${raw}" is not a web address. Use your Reelsaw address, for example https://app.reelsaw.com.`);
   }
+  // the address is typed by the user (D026): only a plain http(s) origin and path, never credentials, a query or a fragment
+  if (url.username || url.password || url.search || url.hash)
+    throw new Error(`Use just your Reelsaw address, for example https://app.reelsaw.com, without a user name, password, "?" or "#".`);
   return `${url.origin}${trimSlashes(url.pathname)}`;
 }
 

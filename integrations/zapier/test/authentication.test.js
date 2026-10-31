@@ -31,6 +31,13 @@ describe("authentication", () => {
     expect(normalizeBaseUrl("https://example.com/reelsaw/api/mcp")).toBe("https://example.com/reelsaw");
   });
 
+  it("refuses an address with credentials, a query or a fragment, and survives a long run of slashes", () => {
+    expect(() => normalizeBaseUrl("https://user:pw@reelsaw.test")).toThrow(/just your Reelsaw address/);
+    expect(() => normalizeBaseUrl("https://reelsaw.test/?x=1")).toThrow(/just your Reelsaw address/);
+    expect(() => normalizeBaseUrl("https://reelsaw.test/#a")).toThrow(/just your Reelsaw address/);
+    expect(normalizeBaseUrl(`reelsaw.test/api/mcp${"/".repeat(50_000)}`)).toBe("https://reelsaw.test");
+  });
+
   it("fails with a sentence when the key is refused (401)", async () => {
     mockTool("list_projects", { error: "unauthorized", hint: "Send an API key" }, { status: 401 });
     await expect(appTester(App.authentication.test, { authData: { ...authData, apiKey: "rs_bad" } })).rejects.toThrow(

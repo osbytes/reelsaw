@@ -100,8 +100,9 @@ describe("trigger perform (a delivery arrives)", () => {
     expect(await appTester(op("project_done").perform, { authData, cleanedRequest: SAMPLE_BODIES["clip.done"] })).toEqual([]);
   });
 
-  it("every trigger's static sample has an id and the shape perform returns", () => {
-    for (const key of Object.keys(App.triggers)) {
+  it("every event trigger's static sample has an id and the shape perform returns", () => {
+    // the hidden dropdown triggers (project_list, clip_list) are lists, not events
+    for (const key of Object.keys(App.triggers).filter((k) => !App.triggers[k].display.hidden)) {
       const { sample } = op(key);
       expect(sample.id).toBeTruthy();
       expect(sample.project).toBeTruthy();

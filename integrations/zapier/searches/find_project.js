@@ -29,8 +29,9 @@ module.exports = {
     inputFields: [
       {
         key: "projectId",
-        label: "Project ID",
+        label: "Project",
         required: true,
+        dynamic: "project_list.id.title",
         helpText: "The project's ID, for example from **Create Project** or a Reelsaw trigger (Project ID).",
       },
     ],

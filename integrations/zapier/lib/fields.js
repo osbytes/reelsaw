@@ -19,7 +19,7 @@ const clip = (prefix, labelPrefix) => [
   { key: `${prefix}title`, label: `${labelPrefix}Title` },
   { key: `${prefix}hook`, label: `${labelPrefix}Hook` },
   { key: `${prefix}caption`, label: `${labelPrefix}Caption` },
-  { key: `${prefix}hashtags`, label: `${labelPrefix}Hashtags` },
+  { key: `${prefix}hashtags`, label: `${labelPrefix}Hashtags`, list: true },
   { key: `${prefix}score`, label: `${labelPrefix}Score`, type: "number" },
   { key: `${prefix}durationSec`, label: `${labelPrefix}Duration (s)`, type: "number" },
   { key: `${prefix}status`, label: `${labelPrefix}Status` },
