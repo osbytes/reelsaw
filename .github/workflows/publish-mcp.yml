@@ -1,15 +1,21 @@
 # Publish this release to the official MCP registry (registry.modelcontextprotocol.io) as
-# io.github.osbytes/reelsaw. Runs when the release workflow has published the GitHub release, so the
-# image the server.json points at (ghcr.io/osbytes/reelsaw:<version>) already exists; the registry
-# verifies it by the io.modelcontextprotocol.server.name label the Dockerfile sets.
+# io.github.osbytes/reelsaw. release.yml calls it after the image is pushed and the GitHub release is
+# created, so the image the server.json points at (ghcr.io/osbytes/reelsaw:<version>) already exists;
+# the registry verifies it by the io.modelcontextprotocol.server.name label the Dockerfile sets.
+# Not `on: release`: release.yml creates the release with GITHUB_TOKEN, and events from GITHUB_TOKEN
+# never start other workflows. Run it by hand (workflow_dispatch) to backfill a version.
 #
 # Authentication is GitHub OIDC (no secret): the registry grants the io.github.<owner> namespace to
-# workflows of that owner's repositories. Pre-releases are skipped.
+# workflows of that owner's repositories. release.yml skips pre-releases.
 name: publish-mcp
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to publish (an existing image tag, e.g. 0.18.1)"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -21,7 +27,6 @@ permissions:
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,10 +39,9 @@ jobs:
       - name: Version
         id: v
         env:
-          INPUT_VERSION: ${{ github.event.inputs.version }}
-          TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          v="${INPUT_VERSION:-${TAG#v}}"
+          v="${INPUT_VERSION#v}"
           # versions only: nothing else ever reaches the JSON
           case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a version: $v"; exit 1 ;; esac
           echo "version=$v" >> "$GITHUB_OUTPUT"

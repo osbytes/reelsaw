@@ -1,6 +1,7 @@
 # Release: on a version tag (v1.2.3), build the image for amd64 + arm64, check it carries no
 # source, push it to GHCR (always) and Docker Hub (when configured), and attach the install
-# folder (deploy/) to the GitHub release.
+# folder (deploy/) to the GitHub release; then publish the version to the MCP registry
+# (publish-mcp.yml, skipped for pre-releases).
 #
 # Configure (Settings → Secrets and variables → Actions):
 #   vars.GHCR_IMAGE        optional, default ghcr.io/<owner>/reelsaw
@@ -23,6 +24,8 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     permissions:
       contents: write      # create the GitHub release
       packages: write      # push to GHCR
@@ -200,3 +203,15 @@ jobs:
             out/reelsaw-${{ steps.v.outputs.version }}.zip
             out/reelsaw-${{ steps.v.outputs.version }}.zip.intoto.jsonl
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # a reusable workflow, not `on: release` in publish-mcp.yml: the release above is created with
+  # GITHUB_TOKEN, and events from GITHUB_TOKEN never start other workflows
+  mcp-registry:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    permissions:
+      contents: read
+      id-token: write # OIDC login to the registry
+    uses: $/.github/workflows/publish-mcp.yml
+    with:
+      version: ${{ needs.image.outputs.version }}
