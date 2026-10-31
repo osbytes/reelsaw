@@ -95,9 +95,12 @@ pricing, terms and privacy are always on the site.
 ## IndexNow
 
 `.github/workflows/indexnow.yml` tells Bing, Yandex and the other IndexNow engines which pages
-changed. It runs after a successful production deployment (Vercel reports one as a GitHub
-`deployment_status` event) or by hand from the Actions tab, reads the live `sitemap.xml` and submits
-every URL.
+changed. It runs on every push to `main` that touches `website/` and by hand from the Actions tab.
+A push first waits until the production deploy of that commit is live: `/version.txt`
+(`app/version.txt/route.ts`) serves the commit the deployment was built from (Vercel's
+`VERCEL_GIT_COMMIT_SHA`, so the project must expose system environment variables). Then it reads
+the live `sitemap.xml` and submits every URL. (Vercel does not report its deploys to GitHub here, so
+a `deployment_status` trigger never fired.)
 
 The key is `public/indexnow-key.txt`. It is public by design: the engines fetch it from the site to
 verify that the submitter controls the host, and knowing it only lets someone submit URLs on this

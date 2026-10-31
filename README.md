@@ -434,6 +434,10 @@ can install the bridge from the image without a running container to exec into:
 { "mcpServers": { "reelsaw": { "command": "docker", "args": ["run", "-i", "--rm", "-e", "REELSAW_URL=https://your-host", "-e", "REELSAW_API_KEY=rs_…", "ghcr.io/osbytes/reelsaw", "reelsaw", "mcp"] } } }
 ```
 
+Automation tools can call the same endpoint without an MCP client: it is stateless and answers plain
+JSON, so a `tools/call` POST is one HTTP request. [docs/n8n](docs/n8n/README.md) has a ready-made n8n
+workflow that clips every new upload on a YouTube channel.
+
 The tools (generated from `apps/server/src/mcp-tools.ts`; each tool's full description and input
 schema say what it returns, whether it runs in the background and which neighbour to use instead):
 

@@ -1,13 +1,17 @@
 # Tell Bing, Yandex, Naver, Seznam and the other IndexNow engines which reelsaw.com pages changed.
-# Runs after a successful production deployment (Vercel reports one through the GitHub
-# deployment_status event), or by hand. It reads the live sitemap and submits every URL in it;
+# Runs on every push to main that touches website/, or by hand. A push first waits until Vercel's
+# production deploy of that commit is live (/version.txt serves the commit, see
+# website/app/version.txt/route.ts); Vercel does not report its deploys to GitHub, so a
+# deployment_status trigger never fired. It then reads the live sitemap and submits every URL in it;
 # IndexNow ignores URLs that did not change. The key is website/public/indexnow-key.txt: it is public
 # by design (the engines fetch it from the site to verify the host), so it lives in the repo, not in
 # a secret. Knowing it only lets someone submit URLs on this host.
 name: indexnow
 
 on:
-  deployment_status:
+  push:
+    branches: [main]
+    paths: ["website/**"]
   workflow_dispatch:
     inputs:
       urls:
@@ -18,14 +22,15 @@ on:
 permissions:
   contents: read
 
+# a newer push supersedes a run still waiting for an older deploy
+concurrency:
+  group: indexnow
+  cancel-in-progress: true
+
 jobs:
   submit:
-    # deployment_status fires for every state; only act on a finished production deploy
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' &&
-       contains(github.event.deployment.environment, 'roduction'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       SITE_URL: ${{ vars.SITE_URL || 'https://reelsaw.com' }}
     steps:
@@ -34,6 +39,25 @@ jobs:
           sparse-checkout: website/public/indexnow-key.txt
           sparse-checkout-cone-mode: false
           persist-credentials: false
+
+      - name: Wait for the production deploy of this commit
+        if: github.event_name == 'push'
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          # Vercel builds main in a few minutes; give it 20
+          for i in $(seq 1 40); do
+            live=$(curl -fsSL --max-time 20 "$SITE_URL/version.txt?ts=$(date +%s)" | tr -d '[:space:]' || true)
+            if [ "$live" = "$SHA" ]; then echo "Deploy of $SHA is live"; exit 0; fi
+            if [ "$live" = "unknown" ]; then
+              echo "::error::$SITE_URL/version.txt says unknown: expose Vercel's system environment variables (VERCEL_GIT_COMMIT_SHA) to the build"
+              exit 1
+            fi
+            echo "Live: ${live:-nothing yet}; waiting for $SHA ($i/40)"
+            sleep 30
+          done
+          echo "::error::$SITE_URL did not serve $SHA within 20 minutes (did the Vercel build fail or get skipped?)"
+          exit 1
 
       - name: Check the key is live
         run: |
