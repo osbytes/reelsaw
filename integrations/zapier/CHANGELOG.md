@@ -1,3 +1,7 @@
+## 1.1.1
+
+- Trigger descriptions start with "Triggers when" (Zapier's style check D021).
+
 ## 1.1.0
 
 - Project and Clip dropdowns on Get Share Links and Find Project (the 100 most recent projects; a project's rendered clips).
