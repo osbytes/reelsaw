@@ -92,6 +92,8 @@ A self-hosted n8n on the same machine or LAN needs the admin to allow webhooks t
 (`ALLOW_PRIVATE_WEBHOOK_URLS`, Settings → System → Limits). Deliveries are retried for about a day,
 and each one is in the webhook's delivery log with what n8n answered.
 
+On Zapier instead of n8n, [integrations/zapier](../../integrations/zapier/README.md) wraps the same tools and webhooks as a Zapier app.
+
 ## Notes
 
 - The RSS trigger fires once per new feed entry. Shorts and live streams on the channel appear in
