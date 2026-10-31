@@ -66,6 +66,13 @@ async function clipPayload(svc: Services, userId: string, c: Clip) {
   };
 }
 
+/** One clip after another: each takes a share link under the account's lock, so fanning out would only queue on it. */
+async function clipsPayload(svc: Services, userId: string, clips: Clip[]) {
+  const out = [];
+  for (const c of clips) out.push(await clipPayload(svc, userId, c));
+  return out;
+}
+
 const runOf = (payload: Record<string, unknown>) => ({
   seq: typeof payload.runSeq === "number" ? payload.runSeq : null,
   reason: typeof payload.runReason === "string" ? payload.runReason : null,
@@ -115,7 +122,7 @@ export async function buildBody(svc: Services, d: WebhookDeliveryRow): Promise<s
       data = {
         project: summary,
         run: runOf(payload),
-        clips: await Promise.all(clips.map((c) => clipPayload(svc, project.userId, c))),
+        clips: await clipsPayload(svc, project.userId, clips),
         exportUrl: done.length ? abs(svc, `/api/projects/${project.id}/export.zip`) : null,
         exportShareUrl: done.length && !project.deletedAt ? await shareUrl(svc, project.userId, { kind: "export", projectId: project.id }) : null,
       };

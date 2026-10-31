@@ -57,9 +57,10 @@ ALTER TABLE "media_links" ADD CONSTRAINT "media_links_project_id_projects_id_fk"
 ALTER TABLE "media_links" ADD CONSTRAINT "media_links_clip_id_clips_id_fk" FOREIGN KEY ("clip_id") REFERENCES "public"."clips"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_endpoint_id_webhook_endpoints_id_fk" FOREIGN KEY ("endpoint_id") REFERENCES "public"."webhook_endpoints"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "media_links_user_idx" ON "media_links" USING btree ("user_id","id");--> statement-breakpoint
+CREATE INDEX "media_links_user_idx" ON "media_links" USING btree ("user_id","created_at","id");--> statement-breakpoint
 CREATE INDEX "media_links_project_idx" ON "media_links" USING btree ("project_id");--> statement-breakpoint
 CREATE INDEX "media_links_clip_kind_idx" ON "media_links" USING btree ("clip_id","kind") WHERE "media_links"."revoked_at" is null;--> statement-breakpoint
 CREATE INDEX "webhook_deliveries_endpoint_idx" ON "webhook_deliveries" USING btree ("endpoint_id","id");--> statement-breakpoint
 CREATE INDEX "webhook_deliveries_user_idx" ON "webhook_deliveries" USING btree ("user_id","id");--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_due_idx" ON "webhook_deliveries" USING btree ("next_attempt_at") WHERE "webhook_deliveries"."status" in ('pending', 'sending');--> statement-breakpoint
 CREATE INDEX "webhook_endpoints_user_idx" ON "webhook_endpoints" USING btree ("user_id","id");

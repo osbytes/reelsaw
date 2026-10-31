@@ -929,7 +929,8 @@ export const mediaLinks = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    index("media_links_user_idx").on(t.userId, t.id),
+    // the owner's list, newest first (listLinks pages by created_at, id)
+    index("media_links_user_idx").on(t.userId, t.createdAt, t.id),
     index("media_links_project_idx").on(t.projectId),
     // reuse lookup (getOrCreateLink) and per-clip revoke
     index("media_links_clip_kind_idx").on(t.clipId, t.kind).where(sql`${t.revokedAt} is null`),
@@ -998,6 +999,11 @@ export const webhookDeliveries = pgTable(
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.id), index("webhook_deliveries_user_idx").on(t.userId, t.id)],
+  (t) => [
+    index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.id),
+    index("webhook_deliveries_user_idx").on(t.userId, t.id),
+    // the sweep for deliveries whose job was lost (deliver.ts requeueStuckDeliveries)
+    index("webhook_deliveries_due_idx").on(t.nextAttemptAt).where(sql`${t.status} in ('pending', 'sending')`),
+  ],
 );
 export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;

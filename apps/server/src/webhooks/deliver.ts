@@ -18,6 +18,7 @@ import { cancelPending, maskWebhookUrl, signingSecrets, webhookEventId } from ".
 
 /** Seconds before attempt 2, 3, …; 8 attempts over about 22 h. */
 export const RETRY_DELAYS_SEC = [30, 120, 600, 3600, 3 * 3600, 6 * 3600, 12 * 3600] as const;
+export const MAX_ATTEMPTS = RETRY_DELAYS_SEC.length + 1;
 export const SEND_TIMEOUT_MS = 10_000;
 const RESPONSE_EXCERPT = 2048;
 /** an endpoint failing this long, with at least this many failed deliveries, is turned off */
@@ -119,6 +120,16 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
     )
     .returning();
   if (!d) return null;
+  // attempts that threw (see recordSendError) or were requeued by the sweep still count: give up like any other
+  if (d.attempt > MAX_ATTEMPTS) {
+    const [row] = await db
+      .update(schema.webhookDeliveries)
+      .set({ status: "failed", nextAttemptAt: null, lastError: d.lastError ?? `Gave up after ${MAX_ATTEMPTS} attempts.` })
+      .where(eq(schema.webhookDeliveries.id, d.id))
+      .returning();
+    log.warn({ endpointId: d.endpointId, userId: d.userId, attempt: d.attempt }, "webhook delivery given up");
+    return row ?? null;
+  }
   const e = await db.query.webhookEndpoints.findFirst({ where: eq(schema.webhookEndpoints.id, d.endpointId) });
   if (!e?.enabled) {
     await db.update(schema.webhookDeliveries).set({ status: "cancelled", nextAttemptAt: null }).where(eq(schema.webhookDeliveries.id, d.id));
@@ -139,7 +150,7 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
     const [row] = await svc.tx(async (u) => {
       const out = await u.db
         .update(schema.webhookDeliveries)
-        .set({ status: "delivered", deliveredAt: new Date(), lastStatusCode: r.code, lastError: null, lastResponse: r.response, nextAttemptAt: null })
+        .set({ status: "delivered", deliveredAt: now, lastStatusCode: r.code, lastError: null, lastResponse: r.response, nextAttemptAt: null })
         .where(eq(schema.webhookDeliveries.id, d.id))
         .returning();
       await u.db.update(schema.webhookEndpoints).set({ failingSince: null }).where(eq(schema.webhookEndpoints.id, e.id));
@@ -154,9 +165,10 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
   let disabled: string | null = null;
   const [row] = await svc.tx(async (u) => {
     const [ep] = await u.db.select().from(schema.webhookEndpoints).where(eq(schema.webhookEndpoints.id, e.id)).for("update");
-    const failingSince = ep?.failingSince ?? (test ? null : new Date());
+    const failingSince = ep?.failingSince ?? (test ? null : now);
     if (gone) disabled = "The receiver said this URL is gone (410).";
-    else if (ep?.enabled && failingSince && Date.now() - failingSince.getTime() >= DISABLE_AFTER_MS) {
+    // a test never turns an endpoint off (nor counts toward it); only real deliveries do
+    else if (!test && ep?.enabled && failingSince && now.getTime() - failingSince.getTime() >= DISABLE_AFTER_MS) {
       const [{ n } = { n: 0 }] = await u.db
         .select({ n: count() })
         .from(schema.webhookDeliveries)
@@ -177,14 +189,14 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
         lastStatusCode: r.code,
         lastError: r.error,
         lastResponse: r.response,
-        nextAttemptAt: delay !== null && !disabled ? new Date(Date.now() + delay * 1000) : null,
+        nextAttemptAt: delay !== null && !disabled ? new Date(now.getTime() + delay * 1000) : null,
       })
       .where(eq(schema.webhookDeliveries.id, d.id))
       .returning();
     if (ep && !test) {
       await u.db
         .update(schema.webhookEndpoints)
-        .set({ failingSince, ...(disabled ? { enabled: false, disabledReason: disabled, updatedAt: new Date() } : {}) })
+        .set({ failingSince, ...(disabled ? { enabled: false, disabledReason: disabled, updatedAt: now } : {}) })
         .where(eq(schema.webhookEndpoints.id, e.id));
       if (disabled) {
         await cancelPending(u.db, e.id);
@@ -204,6 +216,34 @@ export async function deliverOnce(svc: Services, deliveryId: number, opts: Deliv
 }
 
 /**
+ * An attempt that threw (a bug, the database, a secret that no longer decrypts) rather than reaching the receiver:
+ * the claimed row goes back to pending with the same backoff, or fails once the attempts are used up, so it neither
+ * sits in `sending` nor loops through the sweep forever. A test is never retried.
+ */
+export async function recordSendError(svc: Services, deliveryId: number, err: unknown): Promise<void> {
+  const message = `Reelsaw could not send this delivery: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+  await svc.tx(async (u) => {
+    const [d] = await u.db
+      .select()
+      .from(schema.webhookDeliveries)
+      .where(and(eq(schema.webhookDeliveries.id, deliveryId), eq(schema.webhookDeliveries.status, "sending")))
+      .for("update");
+    if (!d) return;
+    const delay = d.type === "webhook.test" ? null : nextDelaySec(d.attempt);
+    await u.db
+      .update(schema.webhookDeliveries)
+      .set({
+        status: delay === null ? "failed" : "pending",
+        lastError: message,
+        lastStatusCode: null,
+        nextAttemptAt: delay === null ? null : new Date(Date.now() + delay * 1000),
+      })
+      .where(eq(schema.webhookDeliveries.id, d.id));
+    if (delay !== null) await u.send(WEBHOOK_QUEUE, { deliveryId: d.id }, { singletonKey: `delivery:${d.id}:a${d.attempt + 1}`, startAfterSeconds: delay });
+  });
+}
+
+/**
  * Deliveries whose job was lost (a process died mid-send, a job expired) go back to pending and get a job. Run by the
  * worker every few minutes; the claim keeps it from double-sending anything a live job will pick up.
  */
@@ -212,8 +252,7 @@ export async function requeueStuckDeliveries(svc: Services): Promise<number> {
     `update webhook_deliveries set status = 'pending', next_attempt_at = now()
      where id in (
        select id from webhook_deliveries
-       where (status = 'sending' and next_attempt_at < now() - $1::interval)
-          or (status = 'pending' and next_attempt_at < now() - $1::interval)
+       where status in ('pending', 'sending') and next_attempt_at < now() - $1::interval
        order by id limit 500)
      returning id`,
     [`${STUCK_MS / 1000} seconds`],
@@ -232,8 +271,9 @@ export async function startWebhookWorker(svc: Services): Promise<() => void> {
     try {
       await deliverOnce(svc, job.data.deliveryId);
     } catch (err) {
-      // a bug or the database, not the receiver: the row stays `sending`, and the sweep retries it
+      // a bug or the database, not the receiver: retried on the same schedule (or by the sweep, if this fails too)
       log.error({ err, deliveryId: job.data.deliveryId, jobId: job.id }, "webhook delivery failed");
+      await recordSendError(svc, job.data.deliveryId, err).catch((e) => log.warn({ err: e, deliveryId: job.data.deliveryId }, "webhook failure not recorded"));
     }
   });
   const timer = setInterval(() => void requeueStuckDeliveries(svc).catch((err) => log.warn({ err }, "webhook sweep failed")), STUCK_MS);
@@ -252,7 +292,14 @@ export async function testEndpoint(svc: Services, userId: string, endpointId: st
     .insert(schema.webhookDeliveries)
     .values({ endpointId, userId, type: "webhook.test", status: "pending", nextAttemptAt: new Date() })
     .returning({ id: schema.webhookDeliveries.id });
-  const row = await deliverOnce(svc, d!.id, opts);
+  let row: WebhookDeliveryRow | null;
+  try {
+    row = await deliverOnce(svc, d!.id, opts);
+  } catch (err) {
+    // marked failed, so the sweep does not send the test again later
+    await recordSendError(svc, d!.id, err);
+    throw err;
+  }
   const ok = row?.status === "delivered";
   return {
     ok,

@@ -24,6 +24,8 @@ export const txLock = {
   sharedAsset: (provider: string, externalId: string, variant: string) => `shared-asset:${provider}:${externalId}:${variant}`,
   /** an account's webhook endpoints, counted against MAX_WEBHOOKS_PER_USER when one is added (webhooks/service.ts) */
   webhooks: (userId: string) => `webhooks:${userId}`,
+  /** an account's share links: the reuse lookup and the insert it falls back to (media-links/service.ts getOrCreateLink) */
+  mediaLinks: (userId: string) => `media-links:${userId}`,
   /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
   diskVolume: (volume: string) => `disk:${volume}`,
 } as const;

@@ -198,7 +198,8 @@ receiver order events, and `clip.done` carries `renderGen`.
   trust. With it off, `https` is required.
 - **Secrets.** Generated server-side (`whsec_` plus 32 random bytes) and stored with
   `createSecretBox(…, "webhooks")`. The secret is shown in full once, at creation and at rotation,
-  and after that only its first characters. Rotation keeps the previous secret signing for 24 h.
+  and after that only its first characters. Rotation keeps the previous secret signing for 24 h;
+  a second rotation is refused until that window closes, so the promised overlap always holds.
 - **Logs.** Hook URLs carry secrets in their path (Zapier's catch hooks are
   `hooks.zapier.com/hooks/catch/<account>/<secret>/`), so logs and the UI show the origin and a
   masked path (`hooks.zapier.com/…/3f2a`). `webhook-signature` and the secret are added to the

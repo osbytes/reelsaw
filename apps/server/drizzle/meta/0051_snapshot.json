@@ -1,5 +1,5 @@
 {
-  "id": "39160dbc-9317-4b56-b441-8cfffe230b3b",
+  "id": "3ce3877b-b33c-454e-b8a8-3fbac01c3c58",
   "prevId": "f421fb99-3f4b-4c82-9176-b92a5b3024e4",
   "version": "7",
   "dialect": "postgresql",
@@ -2007,6 +2007,12 @@
               "nulls": "last"
             },
             {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "id",
               "isExpression": false,
               "asc": true,
@@ -3898,6 +3904,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "webhook_deliveries_due_idx": {
+          "name": "webhook_deliveries_due_idx",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"webhook_deliveries\".\"status\" in ('pending', 'sending')",
           "concurrently": false,
           "method": "btree",
           "with": {}

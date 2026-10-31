@@ -192,7 +192,8 @@ export async function updateEndpoint(svc: Services, userId: string, id: string, 
     if (!e) throw new TRPCError({ code: "NOT_FOUND", message: "No such webhook" });
     const set: Partial<WebhookEndpointRow> = {};
     if (url !== undefined && url !== e.url) {
-      set.url = url;
+      // a new receiver starts with a clean record: the old URL's failures do not count toward turning it off
+      Object.assign(set, { url, failingSince: null });
       changed.push("url");
     }
     if (patch.events && patch.events.join() !== e.events.join()) {
@@ -243,6 +244,12 @@ export async function deleteEndpoint(svc: Services, userId: string, id: string) 
 /** A new secret; the previous one keeps signing for 24 h so the receiver can switch. */
 export async function rotateSecret(svc: Services, userId: string, id: string) {
   const e = await ownEndpoint(svc, userId, id);
+  // a second rotation would drop the secret receivers were promised 24 h with
+  if (e.prevSecretSealed && e.prevSecretUntil && e.prevSecretUntil.getTime() > Date.now())
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `A rotation is already under way: the previous secret keeps signing until ${e.prevSecretUntil.toISOString()}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
+    });
   const secret = newSecret();
   const until = new Date(Date.now() + ROTATION_OVERLAP_MS);
   await svc.database.db

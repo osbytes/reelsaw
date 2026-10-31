@@ -100,7 +100,9 @@ Until then the list can still say "Revoked on …" when someone asks why a link 
 
 - With no `label`, it returns the owner's active link for the same target (`clip_id` + `kind`, or
   the project and subset for `export`), from the same `source` family, if one exists with at least
-  7 days left (or no expiry). Otherwise it inserts one. Copying a share link twice, an agent
+  7 days left (or no expiry; half of `MEDIA_LINK_TTL_DAYS` where links last a week or less). The
+  lookup and the insert run under the account's lock, so two requests at once agree on one link.
+  Otherwise it inserts one. Copying a share link twice, an agent
   calling `get_media_links` in a loop, or webhooks for every re-render all reuse one link. That
   keeps the table small and the URL stable, which a scheduler queue needs.
 - With a `label`, it always creates a new link. This is for "a separate link for Buffer that I can

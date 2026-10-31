@@ -421,7 +421,7 @@ export const TOOLS = {
   rotate_webhook_secret: {
     title: "Rotate webhook secret",
     description:
-      "A new signing secret for a webhook. Deliveries are signed with both the new and the old one for 24 h, so the receiver can switch. Returns { secret, previousStopsAt, message }.",
+      "A new signing secret for a webhook. Deliveries are signed with both the new and the old one for 24 h, so the receiver can switch; refused while a rotation is still open. Returns { secret, previousStopsAt, message }.",
     inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
   },
   test_webhook: {

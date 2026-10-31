@@ -6,12 +6,13 @@
  * (get_media_links / list_media_links / revoke_media_link), `reelsaw media-links` and webhook bodies call this module.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, desc, eq, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createSecretBox } from "../ai/crypto.js";
 import { schema, type Db } from "../db/index.js";
 import { MEDIA_LINK_KINDS, type MediaLinkKind, type MediaLinkRow, type MediaLinkSource } from "../db/schema.js";
 import { exportPlan, slugify } from "../export.js";
+import { takeTxLock, txLock } from "../locks.js";
 import type { Services } from "../services.js";
 
 export { MEDIA_LINK_KINDS };
@@ -19,6 +20,9 @@ export type { MediaLinkKind };
 
 /** A link with less life than this is not handed out again: a scheduler queue needs the URL to outlive the post. */
 export const REUSE_MIN_REMAINING_MS = 7 * 86_400_000;
+
+/** The life a link needs left to be reused: 7 days, or half the instance's ceiling where links last a week or less. */
+export const reuseMinRemainingMs = (ttlDays: number) => Math.min(REUSE_MIN_REMAINING_MS, (ttlDays * 86_400_000) / 2);
 export const LINK_LIST_MAX = 100;
 /** `use_count` / `last_used_at` move at most this often per link, so a video fetched in Range parts is one write */
 const USE_WRITE_EVERY_MS = 60_000;
@@ -164,16 +168,21 @@ const sameIds = (a: string[] | null, b: string[] | null) => (a ?? []).join(",") 
 /**
  * The owner's active link for a target, or a new one. Reused when the caller asked for nothing specific (no label,
  * no expiry) and an unlabelled link from the same family (webhook, or the owner's own surfaces) has at least 7 days
- * left, so copying twice, an agent asking in a loop or a webhook per re-render all hand out one stable URL.
+ * left (reuseMinRemainingMs), so copying twice, an agent asking in a loop or a webhook per re-render all hand out one
+ * stable URL. The lookup and the insert run under the account's lock, so two at once still agree on one link.
  */
 export async function getOrCreateLink(svc: Services, userId: string, target: LinkTarget, opts: LinkOptions): Promise<MediaLinkView> {
-  const db = svc.database.db;
   const t = await resolveTarget(svc, userId, target);
   const names = { projectTitle: t.projectTitle, clipIndex: t.clipIndex, clipTitle: t.clipTitle };
   const label = opts.label?.trim() || null;
-  if (!label && opts.ttlDays === undefined) {
+  const reuse = !label && opts.ttlDays === undefined;
+  const expiresAt = expiryFor(svc, opts.ttlDays);
+  const row = await svc.tx(async (u) => {
+    if (!reuse) return insertLink(svc, u.db, userId, t, target.kind, opts.source, label, expiresAt);
+    await takeTxLock(u.db, txLock.mediaLinks(userId));
     const family: MediaLinkSource[] = opts.source === "webhook" ? ["webhook"] : ["ui", "mcp", "cli"];
-    const candidates = await db.query.mediaLinks.findMany({
+    const minLeft = reuseMinRemainingMs(svc.settings.get().MEDIA_LINK_TTL_DAYS);
+    const candidates = await u.db.query.mediaLinks.findMany({
       where: and(
         eq(schema.mediaLinks.userId, userId),
         eq(schema.mediaLinks.kind, target.kind),
@@ -181,14 +190,29 @@ export async function getOrCreateLink(svc: Services, userId: string, target: Lin
         isNull(schema.mediaLinks.revokedAt),
         isNull(schema.mediaLinks.label),
         inArray(schema.mediaLinks.source, family),
-        or(isNull(schema.mediaLinks.expiresAt), sql`${schema.mediaLinks.expiresAt} > now() + ${`${REUSE_MIN_REMAINING_MS / 1000} seconds`}::interval`),
+        or(isNull(schema.mediaLinks.expiresAt), sql`${schema.mediaLinks.expiresAt} > now() + ${`${Math.floor(minLeft / 1000)} seconds`}::interval`),
       ),
       orderBy: desc(schema.mediaLinks.createdAt),
       limit: 20,
     });
-    const hit = candidates.find((r) => target.kind !== "export" || sameIds(r.clipIds, t.clipIds));
-    if (hit) return view(svc, hit, names);
-  }
+    return (
+      candidates.find((r) => target.kind !== "export" || sameIds(r.clipIds, t.clipIds)) ??
+      insertLink(svc, u.db, userId, t, target.kind, opts.source, label, expiresAt)
+    );
+  });
+  return view(svc, row, names);
+}
+
+async function insertLink(
+  svc: Services,
+  db: Db,
+  userId: string,
+  t: Resolved,
+  kind: MediaLinkKind,
+  source: MediaLinkSource,
+  label: string | null,
+  expiresAt: Date | null,
+): Promise<MediaLinkRow> {
   const token = newToken();
   const [row] = await db
     .insert(schema.mediaLinks)
@@ -197,19 +221,17 @@ export async function getOrCreateLink(svc: Services, userId: string, target: Lin
       userId,
       projectId: t.projectId,
       clipId: t.clipId,
-      kind: target.kind,
+      kind,
       clipIds: t.clipIds,
       tokenHash: hashToken(token),
       tokenSealed: box(svc).encrypt(token),
-      source: opts.source,
+      source,
       label,
-      expiresAt: expiryFor(svc, opts.ttlDays),
+      expiresAt,
     })
     .returning();
-  svc.log
-    .child({ module: "media-links" })
-    .info({ linkId: row!.id, userId, projectId: t.projectId, clipId: t.clipId, kind: target.kind, source: opts.source }, "media link created");
-  return view(svc, row!, names);
+  svc.log.child({ module: "media-links" }).info({ linkId: row!.id, userId, projectId: t.projectId, clipId: t.clipId, kind, source }, "media link created");
+  return row!;
 }
 
 export interface ListLinksInput {
@@ -237,8 +259,12 @@ export async function listLinks(svc: Services, userId: string, input: ListLinksI
       .from(schema.mediaLinks)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.mediaLinks.projectId))
       .leftJoin(schema.clips, eq(schema.clips.id, schema.mediaLinks.clipId))
-      .where(input.cursor ? and(where, lt(schema.mediaLinks.id, input.cursor)) : where)
-      .orderBy(desc(schema.mediaLinks.id))
+      .where(
+        input.cursor
+          ? and(where, sql`(${schema.mediaLinks.createdAt}, ${schema.mediaLinks.id}) < (select created_at, id from media_links where id = ${input.cursor})`)
+          : where,
+      )
+      .orderBy(desc(schema.mediaLinks.createdAt), desc(schema.mediaLinks.id))
       .limit(limit + 1),
     db.select({ total: count() }).from(schema.mediaLinks).where(where),
   ]);
