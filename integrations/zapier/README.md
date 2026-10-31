@@ -73,15 +73,14 @@ To try it against a running instance without uploading anything, put `authData_b
 
 ## Publish (maintainers)
 
-Nothing here has been registered or pushed. To do it, a maintainer signed in to the Reelsaw Zapier
-account runs:
+The app is registered on Zapier as a private integration (`.zapierapprc`, App248947), and version 1.0.0 is
+pushed. To push a new version, a maintainer signed in to the Reelsaw Zapier account runs:
 
 ```bash
 cd integrations/zapier
 npm ci && npm test && zapier-platform validate
 zapier-platform login                    # once per machine
-zapier-platform register "Reelsaw"       # once: creates the app and writes .zapierapprc (commit it)
-zapier-platform push                     # uploads version 1.0.0 (from package.json) as a private version
+zapier-platform push                     # uploads the version in package.json as a private version
 ```
 
 Then test it in the Zap editor with a real account. Invite testers with `zapier-platform users:add` or
