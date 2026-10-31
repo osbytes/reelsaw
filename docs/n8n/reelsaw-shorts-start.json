@@ -1,0 +1,194 @@
+{
+  "name": "Reelsaw shorts 1/2: new YouTube upload → start a project",
+  "nodes": [
+    {
+      "id": "b9240b45-3a3e-4735-ae9f-0d085c129db7",
+      "name": "New YouTube upload",
+      "type": "n8n-nodes-base.rssFeedReadTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "feedUrl": "https://www.youtube.com/feeds/videos.xml?channel_id=YOUR_CHANNEL_ID"
+      }
+    },
+    {
+      "id": "a612d551-59e5-4d0a-bd41-ef96daa36524",
+      "name": "Test with one video",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "8fdeb929-1b97-4d64-b9b7-2cac3e471709",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "74e94103-42d9-4db0-b11b-867aa4929967",
+              "name": "reelsawUrl",
+              "value": "https://app.reelsaw.com",
+              "type": "string"
+            },
+            {
+              "id": "14746795-2261-42e8-ab25-72ae5d686e38",
+              "name": "videoUrl",
+              "value": "={{ $json.link ?? 'https://www.youtube.com/watch?v=PASTE_A_VIDEO_ID' }}",
+              "type": "string"
+            },
+            {
+              "id": "627c5bfb-7a66-4319-a190-06ac513b747b",
+              "name": "maxClips",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "c1c9ffda-8161-46d1-b2bf-8fe08e51f354",
+              "name": "focus",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c6494b6f-f0e6-4ec4-b08e-073243986b11",
+              "name": "workflowTag",
+              "value": "n8n-shorts",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1716b63a-8132-43b9-9292-a6bb10c6e90d",
+      "name": "Create project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_project', arguments: { sourceUrl: $json.videoUrl, settings: Object.assign({ maxClips: $json.maxClips }, $json.focus ? { focus: $json.focus } : {}), metadata: { source: 'youtube', videoId: ($json.videoUrl.split('v=')[1] ?? '').split('&')[0], workflow: $json.workflowTag } } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "098857d8-d354-46cc-b4a1-03e4464328c7",
+      "name": "Read project",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// MCP tools/call answers { result: { content: [{ type: 'text', text }], isError? } }.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nconst p = JSON.parse(text);\n// The clips arrive at the publish workflow when Reelsaw sends project.done.\nreturn { json: { id: p.id, title: p.title, status: p.status, url: p.url, metadata: p.metadata } };"
+      }
+    },
+    {
+      "id": "d6cec0c8-3bbb-40da-a8ac-23705a550107",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -400
+      ],
+      "parameters": {
+        "width": 820,
+        "height": 360,
+        "content": "## 1/2 New YouTube upload → Reelsaw project\n\nStarts a Reelsaw project for each new upload and ends there. Reelsaw sends `project.done` to the **publish** workflow (2/2) when the clips are rendered, so nothing here waits.\n\n1. API key: Reelsaw **Settings → API keys and MCP**. Add an n8n **Header Auth** credential (name `Authorization`, value `Bearer rs_…`) and pick it in **Create project**.\n2. **Settings**: `reelsawUrl`, `maxClips`, optional `focus`. `workflowTag` goes into the project's `metadata.workflow`; the publish workflow only posts projects with the same tag.\n3. Put your channel id in the RSS trigger (`youtube.com/feeds/videos.xml?channel_id=UC…`), or run **Test with one video**.\n\nn8n not reachable from the internet? Use `reelsaw-youtube-to-shorts.json` (waits with polling) instead."
+      }
+    }
+  ],
+  "connections": {
+    "New YouTube upload": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with one video": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Create project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create project": {
+      "main": [
+        [
+          {
+            "node": "Read project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

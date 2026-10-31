@@ -282,7 +282,8 @@ secret, the signature or the body.
 
 - **n8n**: a second workflow in `docs/n8n` that starts at an n8n **Webhook** trigger on
   `project.done`, with no wait loop. The RSS workflow keeps `create_project` and ends there. It
-  ships with a Code node that verifies the signature.
+  ships with a Code node that verifies the signature. Shipped as `reelsaw-shorts-start.json` and
+  `reelsaw-shorts-publish.json` (routes on `metadata.workflow`, posts to Buffer by default).
 - **Zapier / Make apps**: instant triggers ("New finished project", "New rendered clip") whose
   subscribe step calls `create_webhook` through `/api/mcp` and whose unsubscribe step calls
   `delete_webhook`. Actions: create project, export. The app listings are their own task. This

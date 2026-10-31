@@ -326,39 +326,40 @@ export const GUIDES: Guide[] = [
   },
   {
     slug: "automate-youtube-shorts-n8n",
-    metaTitle: "Automate YouTube Shorts with n8n: clip every new upload",
+    metaTitle: "Automate YouTube Shorts with n8n: clip and post every new upload",
     metaDescription:
-      "A free n8n workflow that turns every new YouTube upload into vertical clips with captions. Stock HTTP nodes, self-hosted or hosted Reelsaw, no per-clip fees.",
-    h1: "Automate YouTube Shorts with n8n: clip every new upload",
+      "Free n8n workflows that turn every new YouTube upload into vertical clips with captions and queue them in Buffer. Signed webhooks, no polling, self-hosted or hosted Reelsaw.",
+    h1: "Automate YouTube Shorts with n8n: clip and post every new upload",
     intro: [
       "Most Shorts automations stop at the hard part. Downloading a video and uploading a file is easy in n8n; picking the 30 seconds worth posting, reframing a landscape shot to 9:16 and timing captions to the words is not. Hosted clippers do that step, but their APIs usually sit on higher plans and charge by the minute.",
-      "Reelsaw does that step inside a workflow. A ready-made n8n workflow watches your channel, sends each new upload to Reelsaw, waits for the clips and hands back titles, scores, video links and an export zip. It runs against a Reelsaw you host yourself or the hosted service, including the Free plan.",
+      "Reelsaw does that step inside a pipeline. Two ready-made n8n workflows watch your channel, send each new upload to Reelsaw, and when Reelsaw signals that the clips are rendered, queue each one in Buffer with its caption and hashtags. Nothing waits in between. It runs against a Reelsaw you host yourself or the hosted service, including the Free plan.",
     ],
     sections: [
       {
-        heading: "What the workflow does",
+        heading: "What the workflows do",
         bullets: [
-          "Trigger: an RSS Feed Trigger on your channel's YouTube feed fires for each new upload. A manual trigger runs it on one video while you set it up.",
-          "Create: one request starts a Reelsaw project from the video link, with an optional clip cap and a focus such as 'Find clips about pricing'.",
-          "Wait: the workflow asks Reelsaw for the project's state in a loop, up to two minutes per call, until the clips are rendered or the run failed. A failure stops the execution with Reelsaw's reason.",
-          "Collect: it reads the finished clips (title, hook, score, length, layout, video link) and requests the export zip, which carries a paste-ready caption, a YouTube Data API body and a TikTok body per clip.",
-          "Notify: a summary item feeds a Discord post, switched off by default. Swap it for Slack, Telegram, email or an upload step.",
+          "Start (1/2): an RSS Feed Trigger on your channel's YouTube feed fires for each new upload and creates a Reelsaw project from the link, with an optional clip cap and a focus such as 'Find clips about pricing'. It tags the project with metadata (the video id and the workflow's name) and ends.",
+          "Signal: when the clips are rendered, Reelsaw sends a signed project.done webhook to the second workflow with every clip's title, caption, hashtags, score and a share link that downloads without a credential. Deliveries are retried for about a day if n8n is down.",
+          "Verify (2/2): a Code node checks the Standard Webhooks signature and refuses forged or replayed deliveries, then answers Reelsaw at once.",
+          "Route: only projects tagged by the start workflow are posted, so a project you start by hand is not. The best clips by score go on, and each clip is posted once even if the project is re-run.",
+          "Publish: each clip goes to Buffer's queue (or in as a draft to review) on the channels you list, YouTube included. Disabled alternatives upload straight to YouTube Shorts with n8n's YouTube node or POST each clip to your own endpoint.",
         ],
       },
       {
-        heading: "Why it needs no MCP client or community node",
+        heading: "Why it needs no MCP client, community node or wait loop",
         paragraphs: [
-          "Reelsaw's automation surface is an MCP server at /api/mcp, the same tools Claude and Cursor use. The endpoint is stateless and answers plain JSON, so calling a tool is one HTTP POST with an Authorization header and a tools/call body. The workflow uses n8n's built-in HTTP Request and Code nodes only, so it runs on n8n Cloud and self-hosted n8n alike, and any other tool (restyle captions, re-render, fetch SRT files) can be added the same way.",
+          "Reelsaw's automation surface is an MCP server at /api/mcp, the same tools Claude and Cursor use. The endpoint is stateless and answers plain JSON, so calling a tool is one HTTP POST with an Authorization header and a tools/call body. Finished projects arrive as webhooks, so the workflows use n8n's built-in Webhook, HTTP Request and Code nodes only and run on n8n Cloud and self-hosted n8n alike.",
+          "An n8n behind NAT or on a laptop cannot receive webhooks. For that case a third, single workflow creates the project and asks Reelsaw for its state until the clips are ready, up to two minutes per call.",
         ],
       },
       {
-        heading: "Set it up in five steps",
+        heading: "Set it up",
         bullets: [
-          "Create an API key in Reelsaw under Settings, API keys and MCP.",
-          "Import reelsaw-youtube-to-shorts.json into n8n (Workflows, Import from file).",
-          "Add a Header Auth credential: name Authorization, value Bearer followed by your key, and pick it in the four Reelsaw nodes.",
-          "In the Settings node, set your Reelsaw address (or keep app.reelsaw.com), the most clips per video and an optional focus.",
-          "Put your channel id in the RSS trigger's feed URL, run Test with one video, then activate the workflow.",
+          "Create an API key in Reelsaw under Settings, API keys and MCP, and add it to n8n as a Header Auth credential (Authorization, Bearer followed by the key).",
+          "Import reelsaw-shorts-start.json and reelsaw-shorts-publish.json into n8n (Workflows, Import from file).",
+          "In the start workflow, set your Reelsaw address (or keep app.reelsaw.com), the most clips per video and your channel id in the RSS trigger.",
+          "Copy the publish workflow's webhook URL and add it in Reelsaw under Settings, Webhooks (or run the workflow's create_webhook branch). Paste the signing secret Reelsaw shows once into the Verify signature node.",
+          "Add a Buffer API key as a second Header Auth credential, list your Buffer channel ids, activate the workflow and press Send test in Reelsaw: the delivery log should show 200.",
         ],
       },
       {
@@ -368,21 +369,26 @@ export const GUIDES: Guide[] = [
           rows: [
             ["Price", "$0 self-hosted; hosted Free, then $12 to $59 a month", "API access on higher plans, metered per minute or credit"],
             ["Where the video goes", "Your machine (self-hosted) or Reelsaw's hosted service", "The vendor's servers"],
-            ["n8n setup", "Import one file; stock HTTP Request and Code nodes", "HTTP nodes against each vendor's REST API, or a community node"],
+            ["n8n setup", "Import two files; stock Webhook, HTTP Request and Code nodes", "HTTP nodes against each vendor's REST API, or a community node"],
+            ["Clips-ready trigger", "Signed webhooks on every plan, Free included", "Polling, or webhooks on some plans"],
             ["Models", "Any provider, or fully local with Ollama and Whisper", "The vendor's choice"],
-            ["Publishing", "Export with YouTube and TikTok API bodies; add your own upload node", "Built-in scheduling on some plans"],
+            ["Publishing", "Buffer queue by default; YouTube upload or your own endpoint as alternatives", "Built-in scheduling on some plans"],
           ],
         },
       },
     ],
     faqs: [
       {
-        q: "Does the workflow upload the clips to YouTube?",
-        a: "Not by itself. The export zip carries a YouTube Data API v3 videos.insert body per clip (private by default) and a TikTok Content Posting API body, so you can add n8n's YouTube node or an HTTP upload after the Summary node and review the clips first. To hand clips to a scheduler such as Buffer or Metricool, use the share link Reelsaw gives each clip: it downloads without a credential, lasts 90 days by default and can be revoked.",
+        q: "Does it post the clips for me?",
+        a: "Yes, through Buffer by default: each clip is added to your Buffer queue (or saved as a draft to review) with its caption and hashtags, on the channels you list. Buffer fetches the video from the clip's share link when the post goes out; links last 90 days by default and can be revoked. A disabled branch uploads to YouTube Shorts directly with n8n's YouTube node (private until you change it), and another POSTs each clip to your own endpoint.",
       },
       {
-        q: "Can Reelsaw tell the workflow when clips are ready instead of it waiting?",
-        a: "Yes. Add a webhook in Reelsaw (Settings → Webhooks, or the create_webhook tool) pointing at an n8n Webhook trigger. Reelsaw sends a signed project.done event with every clip, its share link and the zip, retried for about a day if n8n is down. Pass your own ids in create_project's metadata and they come back in the webhook.",
+        q: "Why Buffer and not Metricool?",
+        a: "Buffer's API takes a video URL in one createPost call with a personal API key and no app review. Metricool also takes a URL but needs a second call to copy the file first; the setup guide on GitHub says which two nodes to swap in for it.",
+      },
+      {
+        q: "My n8n is not reachable from the internet. Can I still use it?",
+        a: "Yes, with the polling workflow (reelsaw-youtube-to-shorts.json): it creates the project and asks Reelsaw for its state in a loop until the clips are rendered. If Reelsaw and n8n are self-hosted on the same network, the admin can allow private webhook URLs instead.",
       },
       {
         q: "Will it clip my Shorts and live streams too?",
@@ -390,16 +396,18 @@ export const GUIDES: Guide[] = [
       },
       {
         q: "Can I use it with Make, Zapier or a script instead of n8n?",
-        a: "Yes. The workflow is plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly. For instant triggers, Zapier and Make can subscribe a catch hook with the create_webhook tool (delete_webhook unsubscribes); deliveries are signed with the Standard Webhooks scheme.",
+        a: "Yes. The workflows are plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly. For instant triggers, Zapier and Make can subscribe a catch hook with the create_webhook tool (delete_webhook unsubscribes); deliveries are signed with the Standard Webhooks scheme.",
       },
     ],
     sources: [
       {
         href: "https://github.com/osbytes/reelsaw/blob/main/docs/n8n/README.md",
-        label: "Reelsaw n8n workflow: setup, request format and output",
+        label: "Reelsaw n8n workflows: setup, routing and troubleshooting",
       },
       { href: "https://github.com/osbytes/reelsaw#mcp-drive-reelsaw-from-an-agent", label: "Reelsaw README: MCP server and tools" },
-      { href: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/", label: "n8n docs: HTTP Request node" },
+      { href: "https://developers.buffer.com/examples/create-video-post.html", label: "Buffer API: create a video post" },
+      { href: "https://www.standardwebhooks.com", label: "Standard Webhooks specification" },
+      { href: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/", label: "n8n docs: Webhook node" },
     ],
   },
 ];
