@@ -358,6 +358,13 @@
       "when": 1793242803971,
       "tag": "0050_layer_template_bumpers",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793463884648,
+      "tag": "0051_integrations",
+      "breakpoints": true
     }
   ]
 }

@@ -165,6 +165,14 @@ either; `pnpm docs:check` fails when this file is stale.
 | --- | --- | --- |
 | `MAX_REQUESTS_PER_MINUTE` | `0` | Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_REQUESTS_PER_HOUR` | `0` | Changes an account may make per hour. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MEDIA_LINK_TTL_DAYS` | `90` | Days a share link works unless the owner picks fewer (1-3650). Runtime setting: admins can change it under Settings → System without a restart. |
+| `MEDIA_LINK_ALLOW_NEVER` | `true` | `true` lets owners make a share link that never expires (they can still revoke it). Hosted sets `false`. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MEDIA_LINK_RETENTION_DAYS` | `30` | Days a revoked or expired share link stays listed (so the owner can see why it stopped) before it is deleted. 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `MEDIA_LINKS_REDIRECT` | `false` | S3 only: answer a share link with a 302 to a presigned URL instead of streaming the object through the app. Off by default because schedulers and Instagram document only a direct public URL; turn on after checking yours follow redirects. |
+| `MAX_WEBHOOKS_PER_USER` | `10` | Webhook endpoints an account may add. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |
+| `ALLOW_PRIVATE_WEBHOOK_URLS` | `false` | `true` lets webhook URLs point at LAN or loopback hosts (a self-hosted n8n next to Reelsaw), over http too. Off, they must be public https; every delivery is checked again and pinned to the checked address. Runtime setting: admins can change it under Settings → System without a restart. |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | `14` | Days the webhook delivery log keeps a row (request, answer, attempts). 0 = keep. Runtime setting: admins can change it under Settings → System without a restart. |
+| `WEBHOOK_CONCURRENCY` | `8` | Webhook deliveries in flight per worker process (each waits at most 10 s for the receiver). |
 | `EVENT_REPLAY_LIMIT` | `300` | Events a project page replays when it connects (progress ticks never replay); older ones load on request. |
 | `MAX_PROJECTS_PER_USER` | `0` | Quota: projects per account. 0 = unlimited. Admins can override per user on the Users page. Runtime setting: admins can change it under Settings → System without a restart. |
 | `MAX_SOURCE_MINUTES_PER_DAY` | `0` | Quota: minutes of source video per account per day. 0 = unlimited. Runtime setting: admins can change it under Settings → System without a restart. |

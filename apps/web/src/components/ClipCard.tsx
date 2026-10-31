@@ -18,6 +18,7 @@ import { useMe } from "../lib/account";
 import { clipMeta, clipText } from "../lib/clipMeta";
 import { summarizeError } from "../lib/errors";
 import { MODE_LABEL } from "./Timeline";
+import { ShareLinkDialog, useCopyShareLink } from "./ShareLinks";
 
 export interface ClipView {
   id: string;
@@ -96,6 +97,8 @@ export function ClipCard({
   const [bumpersOpen, setBumpersOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const copyShareLink = useCopyShareLink();
   const keepWindow = useRestoreWindow("clip", confirmDelete);
   const trpc = useTRPC();
   const del = useMutation(trpc.clips.delete.mutationOptions());
@@ -285,6 +288,17 @@ export function ClipCard({
                   Copy link
                 </DropdownMenu.Item>
               )}
+              <DropdownMenu.Item
+                className="menu-item"
+                disabled={!done}
+                title={done ? "A link anyone can download this clip from, without signing in" : "Available once the clip is rendered"}
+                onSelect={() => copyShareLink({ kind: "clip", clipId: clip.id })}
+              >
+                Copy share link
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="menu-item" disabled={!done} onSelect={() => setShareOpen(true)}>
+                Share link options…
+              </DropdownMenu.Item>
               {clip.hasCaptions &&
                 (["srt", "vtt"] as const).map((f) => (
                   <DropdownMenu.Item key={f} className="menu-item" asChild>
@@ -337,6 +351,7 @@ export function ClipCard({
           </button>
         </div>
       </Modal>
+      {shareOpen && <ShareLinkDialog open={shareOpen} onOpenChange={setShareOpen} target={{ kind: "clip", clipId: clip.id }} what="this clip" />}
       <ClipBumpersDialog
         open={bumpersOpen}
         onOpenChange={setBumpersOpen}

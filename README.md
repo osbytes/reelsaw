@@ -61,6 +61,8 @@ Pure TypeScript. Any AI vendor via the [AI SDK](https://ai-sdk.dev). One-step de
 - **Deletes can be undone** – deleting a project or a clip (card ⋯, the selection bar, the editor, ⌘K) stops its work and hides it. The toast always offers **Undo**, **Delete forever**, and **See deletions**. Everything restorable lives on **Deleted** (account menu) as one selectable list: each row says when it was deleted and when it is deleted forever, and a compact bar restores the selection or deletes it forever. Storage still counts until you delete it forever (MCP `list_deleted` plus `purge_project` / `purge_clip` / `purge_asset` / `purge_layer_template`; `reelsaw purge-project`, `purge-clip`, `library purge`, `templates purge`). Minutes, hourly creates and first-video-free are never refunded. Re-picking moments keeps every clip you made or edited (text, bounds, framing, style, intro/outro) and only replaces untouched AI picks, which can be restored too. The same through MCP (`delete_clip`, `delete_clips`, `restore_project`, `restore_clip`, `list_deleted`) and the CLI (`reelsaw deleted`, `restore`, `delete-clip`, `delete-clips`, `restore-clip`, `purge`, `purge-project`, `purge-clip`).
 - **Learns from your decisions** – what you accept, reject, cut, correct and edit is kept in a decision log (with the words or clip text it was about, the models that proposed it and a fingerprint of the source video) that outlives deleted projects: cuts you rejected are shown to the filler detector as examples to keep, and an export turns your decisions into eval cases (`reelsaw decisions export`, `export_decisions`, the `decisions` suite). Settings → Learning turns it off or forgets everything; deleting a project (or "Delete forever") can forget what it learned from that project, applied when it is purged, even automatically. It never leaves your instance. See [docs/specs/decision-log.md](docs/specs/decision-log.md).
 - **Command palette and bulk export** – ⌘K searches projects and clips with status, length and age, opens a row's actions (open, export, resume, retry failed clips, re-run refine, re-render, download, delete project or clip), takes pasted links (one project each, or opens the existing one) and offers retry-all shortcuts. "Export all" zips every rendered clip with platform-ready metadata: a paste-ready `.txt` (title, description, tags, caption), a `.youtube.json` (YouTube Data API v3 `videos.insert` body, private by default) and a `.tiktok.json` (Content Posting API `post_info`, `SELF_ONLY`) per clip, plus `manifest.json`, `clips.csv` (with rendered duration) and a README. Descriptions carry a timestamped link to the exact moment in the parent video.
+- **Share links** – a clip's ⋯ menu copies a link anyone can download it from without signing in (the project and selection menus do the same for the zip), for schedulers (Buffer, Metricool), Instagram's `video_url`, Zapier/Make file fields or a person. The link answers with the file itself (a plain 200, no redirect), serves the clip's latest render, lasts 90 days by default (`MEDIA_LINK_TTL_DAYS`; "Never" where `MEDIA_LINK_ALLOW_NEVER`), and can be revoked one at a time, per clip or project, or all at once under Settings → Share links. MCP `get_media_links`, `list_media_links`, `revoke_media_link`; `reelsaw media-links`. See [docs/specs/media-links.md](docs/specs/media-links.md).
+- **Webhooks** – Settings → Webhooks sends signed JSON ([Standard Webhooks](https://www.standardwebhooks.com): `webhook-id`, `webhook-timestamp`, `webhook-signature`) to your URLs on `project.created`, `project.done` (every clip with share links and the zip), `project.failed`, `clip.done` and `clip.failed`, so n8n, Zapier, Make or a script can act the moment clips are ready instead of polling. Deliveries commit with the event, are retried 8 times over about 22 hours, and an endpoint that fails for 3 days is turned off with an email; each has a delivery log with the request, the answer and Resend. A project's `metadata` (create_project) comes back in every webhook for it. MCP `create_webhook` / `delete_webhook` (how a Zapier or Make app subscribes), `list_webhooks`, `update_webhook`, `rotate_webhook_secret`, `test_webhook`, `list_webhook_deliveries`, `resend_webhook_delivery`; `reelsaw webhooks`. See [docs/specs/webhooks.md](docs/specs/webhooks.md).
 - **SRT / VTT in and out** – every rendered clip's ⋯ menu offers its captions as `.srt` or `.vtt` (the same lines and times as the video, intro included, even when the style has captions off), and "Export all" adds them next to each clip as `clips/NN-title.srt` and `.vtt`; clips rendered before this feature need a re-render first. The project's ⋯ menu ("Transcript files…") downloads the transcript the same way (VTT can carry a timestamp before every word) and imports a subtitle file you already have: right after creating a project (only the video is fetched) or on a done or failed one (it cleans the transcript up and picks clips again). Imported cues become segments and their words are spread over the cue by length; the render re-aligns words to the audio. Also `GET /api/clips/:id/captions.srt|vtt`, `GET /api/projects/:id/transcript.srt|vtt` (`?words=1` for VTT word times), the MCP tools `get_clip_captions`, `get_project_transcript_file` and `import_transcript`, and `reelsaw captions`, `transcript-file` and `import-transcript`.
 
 **Library, layers and templates**
@@ -308,7 +310,7 @@ them), so a single-user box stays as it is:
 - **Quotas**: `MAX_PROJECTS_PER_USER`, `MAX_SOURCE_MINUTES_PER_DAY`, `MAX_SOURCE_MINUTES_PER_MONTH`,
   `MAX_NEW_PROJECTS_PER_HOUR`, `MAX_STORAGE_MB`, `MAX_LIVE_JOBS_PER_USER` (jobs queued or running from
   one account's own requests), `MAX_RERENDERS_PER_HOUR` (re-renders, hand-made clips and re-runs such as
-  re-analyze and refine, per hour), `MAX_REQUESTS_PER_MINUTE` and `MAX_REQUESTS_PER_HOUR` (0 = unlimited),
+  re-analyze and refine, per hour), `MAX_REQUESTS_PER_MINUTE`, `MAX_REQUESTS_PER_HOUR` and `MAX_WEBHOOKS_PER_USER` (0 = unlimited),
   with per-user overrides on the Users page. Storage counts sources, uploads (an upload already copied into
   a project counts once), rendered clips and intros/outros, and is checked on every way a file arrives. A refusal is a sentence that says what to do ("Monthly limit of 300 minutes reached (312
   used); resets on 1 November"). The monthly window is the account's billing period when it has a
@@ -436,7 +438,15 @@ can install the bridge from the image without a running container to exec into:
 
 Automation tools can call the same endpoint without an MCP client: it is stateless and answers plain
 JSON, so a `tools/call` POST is one HTTP request. [docs/n8n](docs/n8n/README.md) has a ready-made n8n
-workflow that clips every new upload on a YouTube channel.
+workflow that clips every new upload on a YouTube channel. To be told when clips are ready instead of
+waiting, add a webhook (`create_webhook`, or Settings → Webhooks) and verify each delivery with any
+Standard Webhooks library:
+
+```js
+import { Webhook } from "standardwebhooks";
+const event = new Webhook(process.env.REELSAW_WEBHOOK_SECRET).verify(rawBody, request.headers); // throws if forged or stale
+if (event.type === "project.done") for (const clip of event.data.clips) console.log(clip.title, clip.shareUrl);
+```
 
 The tools (generated from `apps/server/src/mcp-tools.ts`; each tool's full description and input
 schema say what it returns, whether it runs in the background and which neighbour to use instead):
@@ -462,6 +472,17 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `delete_clips` | Delete several clips of one live project in one step (the selection bar's Delete); renders in progress stop. |
 | `rerender_clip` | Queue one clip for rendering again (after rerender: false edits, a failure, or an intro/outro change). |
 | `rerender_clips` | Queue several clips of one project for rendering again in one step (after edits or failures). |
+| `get_media_links` | Links anyone can download without an Authorization header, for a scheduler (Buffer, Metricool), Instagram's video_url, Zapier/Make or a person. |
+| `list_media_links` | Your share links, newest first. |
+| `revoke_media_link` | Turn share links off now: one (linkId), a clip's (clipId), a project's (projectId) or all of yours (all: true). |
+| `list_webhooks` | Your webhook endpoints. |
+| `create_webhook` | Subscribe a URL to events: project.created, project.done (with every clip, share links and the zip), project.failed, clip.done (also re-renders), clip.failed. |
+| `update_webhook` | Change a webhook's url, events or description, or turn it on or off (enabled). |
+| `delete_webhook` | Remove a webhook (unsubscribe); nothing more is sent to it and its delivery log goes with it. |
+| `rotate_webhook_secret` | A new signing secret for a webhook. |
+| `test_webhook` | Send a webhook.test delivery now and wait for the answer. |
+| `list_webhook_deliveries` | The delivery log, newest first. |
+| `resend_webhook_delivery` | Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). |
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
@@ -567,6 +588,12 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw decisions forget <email> [--project id]` | delete the account's decisions, or one project's (forget_decisions) |
 | `reelsaw decisions learning <email> on\|off` | record the account's decisions or stop (Settings → Learning / set_learning) |
 | `reelsaw decisions backfill [--dry-run]` | write decisions still held in transcripts from before the log existed |
+| `reelsaw media-links <email> [--project id] [--json] [--active]` | the account's share links: target, state, expiry, last use (Settings → Share links / list_media_links) |
+| `reelsaw media-links create <projectId> [clipId…] [--kind clip\|thumb\|srt\|vtt\|export] [--ttl days] [--label text]` | a share link per clip (or one for the zip) that needs no sign-in (get_media_links); reuses the active one unless --ttl or --label |
+| `reelsaw media-links revoke <linkId> \| --project <id> \| --clip <id> \| --all <email>` | turn share links off now (revoke_media_link) |
+| `reelsaw webhooks <email> [--json]` | the account's webhook endpoints: masked URL, events, status, last delivery (Settings → Webhooks / list_webhooks) |
+| `reelsaw webhooks deliveries <endpointId> [--status failed] [--json]` | an endpoint's delivery log (list_webhook_deliveries) |
+| `reelsaw webhooks resend <deliveryId> \| test <endpointId> \| enable <endpointId> \| disable <endpointId>` | send one again, send a test now, or turn an endpoint on / off (resend_webhook_delivery, test_webhook, update_webhook) |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -623,6 +650,8 @@ Where a value comes from, from the weakest source to the strongest (a later link
 | Framing | `auto` (face detection decides), then the project's `reframe` with its `reframeAdjust` (a nudge, subject or crop; `apply_framing` sets both from one clip), then the clip's `layoutOverride`, then a section of the clip (`layoutSections[i]`, mode and adjustment). |
 | Quotas | `.env` `MAX_*` (0 = unlimited), then the instance setting an admin saved under Settings → System → Limits, then what the account's plan grants (hosted, `REELSAW_EE`), then a per-user limit set on the Users page. The Users page says which applies. |
 | Watermark | An admin's per-user choice (Users → Limits), else the plan (a paid plan removes it), else `WATERMARK_NON_ADMINS` for everyone who is not an admin. |
+| Share links | `.env` `MEDIA_LINK_TTL_DAYS` (default 90) and `MEDIA_LINK_ALLOW_NEVER` (default true; hosted sets false), then the instance setting (Settings → System → Limits). A link may ask for less, never more. `MEDIA_LINKS_REDIRECT` (`.env` only, S3) answers with a redirect to a presigned URL instead of the file. |
+| Webhooks | `MAX_WEBHOOKS_PER_USER` follows the quota chain (default 10). `ALLOW_PRIVATE_WEBHOOK_URLS` (default false: public https only) and `WEBHOOK_DELIVERY_RETENTION_DAYS` (default 14) are instance settings; `WEBHOOK_CONCURRENCY` is `.env` only. |
 | Learning (the decision log) | On for every account; the user's Settings → Learning switch (or `set_learning`) turns recording off. `DECISION_RETENTION_DAYS` (instance setting, default 0 = keep) prunes old decisions; a purge keeps a project's decisions unless the user ticked "Also forget what Reelsaw learned from it" when deleting it (honoured by every purge, the retention sweep included) or in the Delete forever dialog. |
 
 Two things to know:

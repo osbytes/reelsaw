@@ -444,7 +444,8 @@ type LimitKey =
   | "MAX_RERENDERS_PER_HOUR"
   | "MAX_STORAGE_MB"
   | "MAX_REQUESTS_PER_MINUTE"
-  | "MAX_REQUESTS_PER_HOUR";
+  | "MAX_REQUESTS_PER_HOUR"
+  | "MAX_WEBHOOKS_PER_USER";
 const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string }> = [
   { key: "MAX_PROJECTS_PER_USER", label: "Projects kept", window: "all projects the account has now", unit: "projects" },
   { key: "MAX_SOURCE_MINUTES_PER_DAY", label: "Minutes of video per day", window: "since 00:00 UTC today", unit: "minutes" },
@@ -455,6 +456,7 @@ const LIMITS: Array<{ key: LimitKey; label: string; window: string; unit: string
   { key: "MAX_STORAGE_MB", label: "Storage", window: "sources, uploads, renders and intros/outros kept now", unit: "MB" },
   { key: "MAX_REQUESTS_PER_MINUTE", label: "Changes per minute", window: "API mutations and MCP tool calls, this minute", unit: "requests" },
   { key: "MAX_REQUESTS_PER_HOUR", label: "Changes per hour", window: "the last 60 minutes", unit: "requests" },
+  { key: "MAX_WEBHOOKS_PER_USER", label: "Webhooks", window: "endpoints the account has now", unit: "webhooks" },
 ];
 
 const WATERMARK_OPTIONS = [

@@ -86,6 +86,23 @@ export const DOCS: Record<string, [GroupId, string]> = {
   BLOCK_DISPOSABLE_EMAILS: ["accounts", "Refuse sign-ups from known temporary-address domains."],
   MAX_REQUESTS_PER_MINUTE: ["limits", "Changes (API mutations, MCP tool calls) an account may make per minute. 0 = unlimited."],
   MAX_REQUESTS_PER_HOUR: ["limits", "Changes an account may make per hour. 0 = unlimited."],
+  MAX_WEBHOOKS_PER_USER: ["limits", "Webhook endpoints an account may add. 0 = unlimited."],
+  ALLOW_PRIVATE_WEBHOOK_URLS: [
+    "limits",
+    "`true` lets webhook URLs point at LAN or loopback hosts (a self-hosted n8n next to Reelsaw), over http too. Off, they must be public https; every delivery is checked again and pinned to the checked address.",
+  ],
+  WEBHOOK_DELIVERY_RETENTION_DAYS: ["limits", "Days the webhook delivery log keeps a row (request, answer, attempts). 0 = keep."],
+  WEBHOOK_CONCURRENCY: ["limits", "Webhook deliveries in flight per worker process (each waits at most 10 s for the receiver)."],
+  MEDIA_LINK_TTL_DAYS: ["limits", "Days a share link works unless the owner picks fewer (1-3650)."],
+  MEDIA_LINK_ALLOW_NEVER: ["limits", "`true` lets owners make a share link that never expires (they can still revoke it). Hosted sets `false`."],
+  MEDIA_LINK_RETENTION_DAYS: [
+    "limits",
+    "Days a revoked or expired share link stays listed (so the owner can see why it stopped) before it is deleted. 0 = keep.",
+  ],
+  MEDIA_LINKS_REDIRECT: [
+    "limits",
+    "S3 only: answer a share link with a 302 to a presigned URL instead of streaming the object through the app. Off by default because schedulers and Instagram document only a direct public URL; turn on after checking yours follow redirects.",
+  ],
   TERMS_URL: ["accounts", "Terms of service link shown on the sign-up form when set."],
   PRIVACY_URL: ["accounts", "Privacy policy link shown on the sign-up form when set."],
   CAPTCHA_PROVIDER: [

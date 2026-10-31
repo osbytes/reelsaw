@@ -1,5 +1,5 @@
 /**
- * History pruning: project_events, llm_usage, stt_usage, admin_events and user_decisions older than their retention are deleted
+ * History pruning: project_events, llm_usage, stt_usage, admin_events, user_decisions, media_links and webhook_deliveries older than their retention are deleted
  * in batches by id (keyset), from the reconciler, at most once a day per table.
  *
  * `planPruneBatch` is the pure part: given one page of rows in id order it says which ids to delete
@@ -59,6 +59,15 @@ const TABLES = {
   stt: { table: "stt_usage", typed: false, days: (c: RuntimeSettings) => c.LLM_USAGE_RETENTION_DAYS },
   admin: { table: "admin_events", typed: false, days: (c: RuntimeSettings) => c.ADMIN_EVENT_RETENTION_DAYS },
   decisions: { table: "user_decisions", typed: false, byTime: true, days: (c: RuntimeSettings) => c.DECISION_RETENTION_DAYS },
+  // share links are pruned by when they stopped working (revoked, or expired), not when they were made
+  mediaLinks: {
+    table: "media_links",
+    typed: false,
+    byTime: true,
+    timeExpr: "coalesce(revoked_at, expires_at)",
+    days: (c: RuntimeSettings) => c.MEDIA_LINK_RETENTION_DAYS,
+  },
+  webhookDeliveries: { table: "webhook_deliveries", typed: false, days: (c: RuntimeSettings) => c.WEBHOOK_DELIVERY_RETENTION_DAYS },
 } as const;
 type Which = keyof typeof TABLES;
 interface PruneState {
@@ -80,7 +89,8 @@ async function pruneTable(
   if ("byTime" in TABLES[which]) {
     for (;;) {
       if (expired(deadline)) return { deleted, cursor, done: false };
-      const r = await pool.query(`delete from ${table} where id in (select id from ${table} where created_at < $1 limit ${PRUNE_BATCH})`, [cutoff]);
+      const when = "timeExpr" in TABLES[which] ? TABLES[which].timeExpr : "created_at";
+      const r = await pool.query(`delete from ${table} where id in (select id from ${table} where ${when} < $1 limit ${PRUNE_BATCH})`, [cutoff]);
       deleted += r.rowCount ?? 0;
       if ((r.rowCount ?? 0) < PRUNE_BATCH) return { deleted, cursor, done: true };
     }

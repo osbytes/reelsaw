@@ -29,6 +29,7 @@ import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
+import { linkSummary } from "./media-links/service.js";
 
 /** The product token of a User-Agent, lower-cased and bounded: a name for analytics, never the full header. */
 export function mcpClientName(ua: string | null): string {
@@ -184,25 +185,28 @@ export function createMcpServer(
     }),
   );
 
-  server.registerTool("create_project", TOOLS.create_project, ({ sourceUrl, uploadId, title, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
-    run(async () => {
-      // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
-      const merged = {
-        ...settings,
-        ...(introAssetId !== undefined ? { introAssetId } : {}),
-        ...(outroAssetId !== undefined ? { outroAssetId } : {}),
-        ...(introSec !== undefined ? { introSec } : {}),
-        ...(outroSec !== undefined ? { outroSec } : {}),
-      };
-      return {
-        ...(await api.projects.create({ sourceUrl, uploadId, title, settings: Object.keys(merged).length ? merged : undefined })),
-        next: "wait_for_project",
-      };
-    }),
+  server.registerTool(
+    "create_project",
+    TOOLS.create_project,
+    ({ sourceUrl, uploadId, title, metadata, settings, introAssetId, outroAssetId, introSec, outroSec }) =>
+      run(async () => {
+        // the bumper fields are project settings: omitted = snapshot your defaults, null = none, id = that asset (must be yours and not removed, else NOT_FOUND)
+        const merged = {
+          ...settings,
+          ...(introAssetId !== undefined ? { introAssetId } : {}),
+          ...(outroAssetId !== undefined ? { outroAssetId } : {}),
+          ...(introSec !== undefined ? { introSec } : {}),
+          ...(outroSec !== undefined ? { outroSec } : {}),
+        };
+        return {
+          ...(await api.projects.create({ sourceUrl, uploadId, title, metadata, settings: Object.keys(merged).length ? merged : undefined })),
+          next: "wait_for_project",
+        };
+      }),
   );
 
-  server.registerTool("update_project", TOOLS.update_project, ({ id, title, settings, clear }) =>
-    run(() => api.projects.update({ id, title, settings, clear })),
+  server.registerTool("update_project", TOOLS.update_project, ({ id, title, settings, clear, metadata }) =>
+    run(() => api.projects.update({ id, title, settings, clear, metadata })),
   );
 
   server.registerTool("wait_for_project", TOOLS.wait_for_project, ({ id, timeoutSeconds }, extra) =>
@@ -411,6 +415,83 @@ export function createMcpServer(
       };
     }),
   );
+
+  server.registerTool("get_media_links", TOOLS.get_media_links, ({ projectId, clipIds, kinds, export: zip, ttlDays, label }) =>
+    run(async () => {
+      const project = await api.projects.get({ id: projectId });
+      const want = clipIds?.length ? new Set(clipIds) : null;
+      const picked = project.clips.filter((c) => !want || want.has(c.id));
+      const unknown = clipIds?.filter((x) => !project.clips.some((c) => c.id === x)) ?? [];
+      if (unknown.length) throw new TRPCError({ code: "NOT_FOUND", message: `Not clips of this project: ${unknown.join(", ")}. get_project lists its clips.` });
+      const clips = [];
+      for (const c of picked) {
+        if (c.status !== "done") {
+          if (want) clips.push({ clipId: c.id, title: c.title, notReady: `Not rendered (${c.status}); wait for it, then ask again.` });
+          continue;
+        }
+        const links: Record<string, { linkId: string; url: string; expiresAt: Date | null }> = {};
+        for (const kind of kinds?.length ? kinds : (["clip"] as const)) {
+          try {
+            const l = await api.mediaLinks.get({ kind, clipId: c.id, ttlDays, label });
+            links[kind] = { linkId: l.id, url: l.url, expiresAt: l.expiresAt };
+          } catch (err) {
+            if (!(err instanceof TRPCError) || err.code !== "CONFLICT") throw err;
+          }
+        }
+        clips.push({ clipId: c.id, title: c.title, links });
+      }
+      const exportLink = zip ? await api.mediaLinks.get({ kind: "export", projectId, clipIds, ttlDays, label }) : null;
+      return {
+        clips,
+        ...(exportLink ? { export: { linkId: exportLink.id, url: exportLink.url, expiresAt: exportLink.expiresAt } } : {}),
+        hint: "Anyone with a link can download the file until it expires; revoke_media_link turns it off.",
+      };
+    }),
+  );
+
+  server.registerTool("list_media_links", TOOLS.list_media_links, (input) =>
+    run(async () => {
+      const page = await api.mediaLinks.list(input);
+      return { items: page.items.map((v) => linkSummary(v, true)), nextCursor: page.nextCursor, total: page.total };
+    }),
+  );
+
+  server.registerTool("revoke_media_link", TOOLS.revoke_media_link, ({ linkId, clipId, projectId, all }) =>
+    run(async () => {
+      const given = [linkId, clipId, projectId, all].filter((v) => v !== undefined).length;
+      if (given !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Give exactly one of linkId, clipId, projectId or all: true" });
+      return api.mediaLinks.revoke(linkId ? { linkId } : clipId ? { clipId } : projectId ? { projectId } : { all: true });
+    }),
+  );
+
+  const endpointSummary = (e: Awaited<ReturnType<typeof api.webhooks.list>>[number]) => {
+    const { url: _full, ...rest } = e;
+    return { ...rest, url: e.urlMasked };
+  };
+  server.registerTool("list_webhooks", TOOLS.list_webhooks, () => run(async () => (await api.webhooks.list()).map(endpointSummary)));
+  server.registerTool("create_webhook", TOOLS.create_webhook, (input) =>
+    run(async () => {
+      const r = await api.webhooks.create(input);
+      return { endpoint: endpointSummary(r.endpoint), secret: r.secret, hint: "Keep the secret: it is not shown again. test_webhook sends a test delivery." };
+    }),
+  );
+  server.registerTool("update_webhook", TOOLS.update_webhook, (input) =>
+    run(async () => {
+      const r = await api.webhooks.update(input);
+      return { ...r, endpoint: endpointSummary(r.endpoint) };
+    }),
+  );
+  server.registerTool("delete_webhook", TOOLS.delete_webhook, ({ id }) => run(() => api.webhooks.delete({ id })));
+  server.registerTool("rotate_webhook_secret", TOOLS.rotate_webhook_secret, ({ id }) => run(() => api.webhooks.rotateSecret({ id })));
+  server.registerTool("test_webhook", TOOLS.test_webhook, ({ id }) => run(() => api.webhooks.test({ id })));
+  server.registerTool("list_webhook_deliveries", TOOLS.list_webhook_deliveries, (input) =>
+    run(async () => {
+      const page = await api.webhooks.deliveries(input);
+      // the bodies are in the app's log view; the list stays small
+      return { ...page, items: page.items.map(({ body: _b, lastResponse: _r, ...d }) => d) };
+    }),
+  );
+  server.registerTool("resend_webhook_delivery", TOOLS.resend_webhook_delivery, ({ deliveryId }) => run(() => api.webhooks.resend({ deliveryId })));
 
   server.registerTool("export_project", TOOLS.export_project, ({ id, clipIds }) =>
     run(async () => {

@@ -10,6 +10,7 @@ import { BulkBumpersPopover } from "./BumperField";
 import { SelectionBar } from "./SelectionBar";
 import { BulkTemplateButton } from "./TemplatePicker";
 import { ConfirmDialog, MoreButton } from "./ui";
+import { useCopyShareLink } from "./ShareLinks";
 
 interface BatchClip {
   id: string;
@@ -68,6 +69,7 @@ export function BatchBar({
       .then(() => toast(`Title, caption + hashtags of ${selected.length} clip${selected.length === 1 ? "" : "s"} copied`))
       .catch(() => toast.error("Couldn’t copy"));
   const n = (k: number) => `${k} clip${k === 1 ? "" : "s"}`;
+  const copyShareLink = useCopyShareLink();
   const exportHref = `/api/projects/${projectId}/export.zip?clips=${done.map((c) => c.id).join(",")}`;
   const later = (fn: () => void) => window.setTimeout(fn, 0);
 
@@ -98,6 +100,14 @@ export function BatchBar({
           <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
             <DropdownMenu.Item className="menu-item" onSelect={() => void copyAll()}>
               Copy text
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className="menu-item"
+              disabled={!done.length}
+              title={done.length ? "A link anyone can download the zip of these clips from, without signing in" : "None of the selected clips is rendered yet"}
+              onSelect={() => copyShareLink({ kind: "export", projectId, clipIds: done.map((c) => c.id) }, `a zip of ${n(done.length)}`)}
+            >
+              Copy link to zip
             </DropdownMenu.Item>
             <DropdownMenu.Item className="menu-item" onSelect={() => later(() => setBumpersOpen(true))}>
               Intro / outro…

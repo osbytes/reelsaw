@@ -22,6 +22,7 @@ import type { Telemetry } from "./telemetry.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
+import { isWebhookEvent, writeDeliveries } from "./webhooks/outbox.js";
 
 /**
  * Who asked for the work running now. Set around every approved user's tRPC call (protectedProcedure, which MCP
@@ -45,7 +46,7 @@ export interface UnitOfWork {
   /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
   enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
-  send(queue: string, data: object, opts?: { singletonKey?: string }): Promise<string | null>;
+  send(queue: string, data: object, opts?: { singletonKey?: string; startAfterSeconds?: number }): Promise<string | null>;
   cancelLiveJobs(queue: QueueName, key: string): Promise<void>;
   hasLiveJob(queue: QueueName, key: string): Promise<boolean>;
   /** record what a stage decided and which models ran (see schema.stageArtifacts) */
@@ -158,6 +159,8 @@ export function createUnitOfWork(
           emitted.push({ projectId, type, payload });
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
+          // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
+          if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, row!.id, projectId, type);
           return row!.id;
         },
         async enqueue(q, data, opts) {
@@ -187,7 +190,7 @@ export function createUnitOfWork(
           requested.push({ queue: q, projectId: data.projectId, ...("clipId" in data && typeof data.clipId === "string" ? { clipId: data.clipId } : {}) });
           return queue.enqueue(q, { ...data, by: "user" }, { ...exec, admission: a, priorityBoost, ...opts });
         },
-        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey }),
+        send: (q, data, opts) => queue.send(q, data, { ...exec, singletonKey: opts?.singletonKey, startAfterSeconds: opts?.startAfterSeconds }),
         cancelLiveJobs: (q, key) => queue.cancelLiveJobs(q, key, exec),
         hasLiveJob: (q, key) => queue.hasLiveJob(q, key, exec),
         async artifact(projectId, stage, kind, data, models = {}) {

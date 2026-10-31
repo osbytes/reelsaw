@@ -487,6 +487,8 @@ export const projects = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     /** the owner asked, when deleting it, to forget its decisions too: every purge (theirs or the retention sweep) does; a restore clears it */
     forgetDecisionsOnPurge: boolean("forget_decisions_on_purge").notNull().default(false),
+    /** the creator's own key/value pairs (create_project `metadata`), never interpreted; echoed in every webhook for the project */
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
   },
   (t) => [
     // the hourly purge looks for deleted projects across all users
@@ -885,3 +887,117 @@ export const diskLeases = pgTable(
   (t) => [index("disk_leases_volume_idx").on(t.volume, t.expiresAt), index("disk_leases_worker_idx").on(t.workerId)],
 );
 export type DiskLeaseRow = typeof diskLeases.$inferSelect;
+
+// ---------- Integrations: share links and webhooks (docs/specs/media-links.md, docs/specs/webhooks.md) ----------
+
+export const MEDIA_LINK_KINDS = ["clip", "thumb", "srt", "vtt", "export"] as const;
+export type MediaLinkKind = (typeof MEDIA_LINK_KINDS)[number];
+export const MEDIA_LINK_SOURCES = ["ui", "mcp", "cli", "webhook"] as const;
+export type MediaLinkSource = (typeof MEDIA_LINK_SOURCES)[number];
+
+/**
+ * A share link: anyone with its URL (`/m/<token>/<name>.<ext>`) can fetch the clip's current render, thumbnail, captions
+ * or the project's export zip, until it expires or is revoked. Looked up by the token's hash; the token is also kept
+ * sealed so the owner can copy the link again. media-links/service.ts.
+ */
+export const mediaLinks = pgTable(
+  "media_links",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** null for kind export */
+    clipId: text("clip_id").references(() => clips.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<MediaLinkKind>().notNull(),
+    /** export only: the subset, as for ?clips=; null = every rendered clip */
+    clipIds: text("clip_ids").array(),
+    /** sha256 of the token, hex */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** the token, sealed with the "media-links" secret box */
+    tokenSealed: text("token_sealed").notNull(),
+    source: text("source").$type<MediaLinkSource>().notNull(),
+    label: text("label"),
+    /** null = never expires (only where MEDIA_LINK_ALLOW_NEVER) */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    useCount: integer("use_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("media_links_user_idx").on(t.userId, t.id),
+    index("media_links_project_idx").on(t.projectId),
+    // reuse lookup (getOrCreateLink) and per-clip revoke
+    index("media_links_clip_kind_idx").on(t.clipId, t.kind).where(sql`${t.revokedAt} is null`),
+  ],
+);
+export type MediaLinkRow = typeof mediaLinks.$inferSelect;
+
+/** Events a webhook endpoint may subscribe to; `webhook.test` is sent by Send test only. */
+export const WEBHOOK_EVENT_TYPES = ["project.created", "project.done", "project.failed", "clip.done", "clip.failed"] as const;
+export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
+
+/** Where an account's events are POSTed, signed with the Standard Webhooks scheme. webhooks/service.ts. */
+export const webhookEndpoints = pgTable(
+  "webhook_endpoints",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    description: text("description"),
+    events: text("events").array().$type<WebhookEventType[]>().notNull(),
+    /** whsec_… sealed with the "webhooks" secret box */
+    secretSealed: text("secret_sealed").notNull(),
+    /** a rotation keeps the previous secret signing until prev_secret_until */
+    prevSecretSealed: text("prev_secret_sealed"),
+    prevSecretUntil: timestamp("prev_secret_until", { withTimezone: true }),
+    enabled: boolean("enabled").notNull().default(true),
+    /** why it was turned off, as the UI says it; null when the owner turned it off or it is on */
+    disabledReason: text("disabled_reason"),
+    /** first failed delivery of the current streak; null when healthy */
+    failingSince: timestamp("failing_since", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("webhook_endpoints_user_idx").on(t.userId, t.id)],
+);
+export type WebhookEndpointRow = typeof webhookEndpoints.$inferSelect;
+
+export const WEBHOOK_DELIVERY_STATUSES = ["pending", "sending", "delivered", "failed", "cancelled"] as const;
+export type WebhookDeliveryStatus = (typeof WEBHOOK_DELIVERY_STATUSES)[number];
+
+/**
+ * One event for one endpoint (the outbox): inserted in the unit of work that emitted the event (uow.ts), sent by the
+ * `webhooks.deliver` job, retried on a schedule. `body` is built at the first attempt and resent byte for byte.
+ */
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    endpointId: text("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    /** project_events.id; no FK: events are pruned and projects purged. null for webhook.test */
+    eventId: bigint("event_id", { mode: "number" }),
+    projectId: text("project_id"),
+    type: text("type").notNull(),
+    status: text("status").$type<WebhookDeliveryStatus>().notNull().default("pending"),
+    attempt: integer("attempt").notNull().default(0),
+    body: text("body"),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    lastResponse: text("last_response"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.id), index("webhook_deliveries_user_idx").on(t.userId, t.id)],
+);
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;

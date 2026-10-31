@@ -18,11 +18,12 @@ import { appRouter } from "./trpc/router.js";
 import { contextFactory, type Context as Ctx } from "./trpc/context.js";
 import { schema } from "./db/index.js";
 import { assertStorageRoom, checkStorageQuota, QuotaError, trackQuotaRefusal } from "./quota.js";
-import { keys } from "./storage/index.js";
+import { contentTypeFor, keys } from "./storage/index.js";
 import { sendFile } from "./send-file.js";
 import { ensureBumperThumb } from "./pipeline/bumpers.js";
 import { DEFAULT_BUNDLED_DIR } from "./library/catalog.js";
 import { createExportZip, exportPlan, parseClipIds } from "./export.js";
+import { LINK_NOT_FOUND, recordUse, resolveToken } from "./media-links/service.js";
 import { requester, activeRequester, bearerToken, cannotUseApp, mcpResource, withClientIp, API_KEY_PREFIX } from "./auth.js";
 import { gateEmailVerification } from "./email-verify.js";
 import { requireMcpAuth } from "@better-auth/mcp";
@@ -464,6 +465,77 @@ export function createApp(svc: Services) {
       svc.telemetry.capture("clip.downloaded", session.user.id, { projectId, clipId, surface: session.via === "session" ? "web" : "api" });
     if ("url" in loc) return c.redirect(loc.url, 302);
     return sendFile(c.req.raw, loc.file, download ? name : undefined, { revalidate: true });
+  });
+
+  // Share links (media-links/service.ts): no session, no cookie; the file itself with a 200, never a redirect unless the
+  // operator turned MEDIA_LINKS_REDIRECT on (consumers such as Instagram and Buffer document only "a public URL").
+  app.get("/m/:token/:file", async (c) => {
+    const { token, file } = c.req.param();
+    const mlog = c.get("log").child({ module: "media-links" });
+    const shared = { "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" };
+    const hit = await resolveToken(svc, token, path.extname(file).slice(1));
+    if (!hit.ok) {
+      mlog.debug({ status: hit.status }, "media link refused");
+      return c.text(hit.message, hit.status, { ...shared, "Cache-Control": "no-store" });
+    }
+    const { link } = hit;
+    c.set("userId", hit.ownerId);
+    const range = c.req.header("range");
+    // one line per fetch, not per Range part of the same fetch
+    if (!range || /^bytes=0-/.test(range))
+      mlog.info({ linkId: link.id, userId: hit.ownerId, projectId: link.projectId, clipId: link.clipId, kind: link.kind }, "media link served");
+    recordUse(db, link.id).catch((err) => mlog.warn({ err, linkId: link.id }, "media link use not recorded"));
+    const owner = { id: hit.ownerId, admin: false };
+    const headers = { ...shared, "Cache-Control": "private, max-age=300" };
+    const attachment = (name: string) => `attachment; filename="${name.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+    try {
+      if (link.kind === "export") {
+        const plan = await exportPlan(svc, owner, link.projectId, link.clipIds ?? []);
+        const { stream } = await createExportZip(
+          { storage, paths, log: mlog },
+          { project: plan.project, clips: plan.clips, language: plan.language, subset: plan.subset },
+        );
+        return c.body(Readable.toWeb(stream) as ReadableStream, 200, {
+          ...headers,
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachment(hit.fileName),
+        });
+      }
+      if (link.kind === "srt" || link.kind === "vtt") {
+        const f = await clipCaptionsFile(svc, owner, link.clipId!, { format: link.kind });
+        return c.body(f.text, 200, {
+          ...headers,
+          "Content-Type": link.kind === "vtt" ? "text/vtt; charset=utf-8" : "application/x-subrip; charset=utf-8",
+          "Content-Disposition": attachment(hit.fileName),
+        });
+      }
+      const key = hit.key!;
+      if (storage.driver === "s3" && config.MEDIA_LINKS_REDIRECT) {
+        const loc = await storage.resolve(key);
+        if ("url" in loc) return c.redirect(loc.url, 302);
+      }
+      const obj = await storage.openRead(key, range);
+      const inline = `inline; filename="${hit.fileName.replace(/"/g, "")}"`;
+      if ("file" in obj) {
+        const res = await sendFile(c.req.raw, obj.file, undefined, { inlineName: hit.fileName, cacheControl: headers["Cache-Control"] });
+        for (const [k, v] of Object.entries(shared)) res.headers.set(k, v);
+        return res;
+      }
+      return c.body(Readable.toWeb(obj.body) as ReadableStream, obj.status, {
+        ...headers,
+        ...obj.headers,
+        "Content-Type": contentTypeFor(key),
+        "Content-Disposition": inline,
+      });
+    } catch (err) {
+      // the target changed between the lookup and the read (deleted, nothing rendered any more): the owner's sentence
+      if (err instanceof TRPCError && (err.code === "NOT_FOUND" || err.code === "CONFLICT"))
+        return c.text(err.code === "CONFLICT" ? err.message : LINK_NOT_FOUND, err.code === "CONFLICT" ? 409 : 404, {
+          ...shared,
+          "Cache-Control": "no-store",
+        });
+      throw err;
+    }
   });
 
   // Bulk export: zip of all rendered clips + YouTube/TikTok metadata

@@ -74,9 +74,9 @@ export function requestLogger(root: Logger): MiddlewareHandler<AppEnv> {
   };
 }
 
-/** Reset and verification links carry their token in the path; the access log keeps the route, not the secret. */
+/** Reset, verification and share links carry their token in the path; the access log keeps the route, not the secret. */
 export function redactPath(p: string): string {
-  return p.replace(/(\/(?:reset-password|verify-email)\/)[^/]+/g, "$1…");
+  return p.replace(/(\/(?:reset-password|verify-email|m)\/)[^/]+/g, "$1…");
 }
 
 /** tRPC error code -> level: our bugs at error, forbidden/limits at warn, ordinary client mistakes at debug. */

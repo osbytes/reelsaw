@@ -76,7 +76,7 @@ media_links
   clip_id       text → clips.id on delete cascade   (null for kind export)
   kind          text not null           (clip | thumb | srt | vtt | export)
   clip_ids      text[]                  (export only: the subset, ≤50, as for ?clips=; null = every rendered clip)
-  token_hash    bytea not null unique   (sha256 of the token)
+  token_hash    text not null unique    (sha256 of the token, hex)
   token_sealed  text not null           (createSecretBox(…, "media-links")), so the owner can copy it again
   source        text not null           (ui | mcp | cli | webhook)
   label         text                    (≤120 chars, optional: "Buffer queue")
@@ -86,6 +86,7 @@ media_links
   use_count     int not null default 0
   created_at    timestamptz not null
 index (user_id, id), (project_id), (clip_id, kind) where revoked_at is null
+(migration 0051_integrations)
 ```
 
 Size: about 300 bytes a row. Links are reused (below), so there are a few per clip, not one per

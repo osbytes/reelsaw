@@ -4,6 +4,8 @@ import { NavLink, useLocation } from "react-router";
 import { useTRPC } from "../lib/trpc";
 import { ScrollArea } from "../components/scroll-area";
 import { ApiKeysSection } from "../components/ApiKeys";
+import { ShareLinksSection } from "../components/ShareLinks";
+import { WebhooksSection } from "../components/Webhooks";
 import { AccountSection } from "../components/AccountSection";
 import { ConnectedAppsSection } from "../components/ConnectedApps";
 import { ProjectDefaultsSection } from "../components/ProjectDefaults";
@@ -131,6 +133,8 @@ export function SettingsPage() {
             <ProjectDefaultsSection />
             <LearningSection />
             <ApiKeysSection mcpUrl={`${window.location.origin}/api/mcp`} />
+            <WebhooksSection />
+            <ShareLinksSection />
             <ConnectedAppsSection />
           </>
         )}

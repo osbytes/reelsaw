@@ -19,11 +19,13 @@ import {
   assetTagsSchema,
   MAX_CLIP_LAYERS,
   REFINE_STEPS,
+  projectMetadataSchema,
 } from "@reelsaw/shared";
 import { applyLayerTemplateInput, saveLayerTemplateInput, templateIdSchema } from "./library/templates.js";
 import { addAssetInput, bumperNameSchema, setClipBumpersInput, setProjectBumpersInput } from "./library/service.js";
 import { templateBumpersSchema } from "@reelsaw/shared";
 import { settingsPatchSchema } from "./instance-settings.js";
+import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from "./db/schema.js";
 
 export const INSTRUCTIONS = `Reelsaw turns long-form videos into vertical short clips (transcribe → find moments → reframe, caption, render).
 Workflow: create_project(sourceUrl, or uploadId from POST /api/upload) → wait_for_project (call again until done; a 30-min video takes several minutes) → get_project for the clips → get_clip for download links.
@@ -37,7 +39,7 @@ Your library (search_assets, add_asset, update_asset, delete_asset, restore_asse
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip), optionally with an intro and outro: save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers and get the template's intro / outro as their own choice), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
 Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 Reelsaw learns from what you decide: accepts, rejects, cuts, corrections and clip edits go in your decision log (list_decisions, export_decisions for evals), which outlives deleted projects; forget_decisions or purge_project forgetDecisions: true removes entries, set_learning turns recording off.
-You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server.`;
+You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs need the same Authorization header as this server; get_media_links gives share links that need none (for schedulers, Instagram, Zapier).`;
 
 const projectDefaultsShape = userProjectDefaultsSchema.omit({ introAssetId: true, outroAssetId: true }).shape;
 const projectDefaultsInput = z
@@ -125,6 +127,9 @@ export const TOOLS = {
         .optional()
         .describe("Id returned by POST /api/upload (the file body, x-filename header, API key as Bearer); give this or sourceUrl"),
       title: z.string().min(1).max(200).optional().describe("Project title (default: the video's own title)"),
+      metadata: projectMetadataSchema
+        .optional()
+        .describe('Your own key/value strings (≤20 keys, 1 KB), returned by get_project and sent in every webhook for this project, e.g. { runId: "n8n-123" }'),
       settings: settingsInput.optional(),
       introAssetId: z
         .string()
@@ -153,6 +158,7 @@ export const TOOLS = {
         .max(CLEARABLE_SETTINGS.length)
         .optional()
         .describe("Optional settings to reset to their default, e.g. maxClips (back to automatic) or focus"),
+      metadata: projectMetadataSchema.optional().describe("Replace the project's metadata (the whole map; {} clears it)"),
     },
     annotations: { idempotentHint: true },
   },
@@ -326,6 +332,121 @@ export const TOOLS = {
       clipIds: z.array(z.string()).min(1).max(200).describe("Clip ids of that project (get_project), 1-200"),
     },
     annotations: { idempotentHint: true },
+  },
+  get_media_links: {
+    title: "Get share links",
+    description:
+      "Links anyone can download without an Authorization header, for a scheduler (Buffer, Metricool), Instagram's video_url, Zapier/Make or a person. Returns { clips: [{ clipId, links: { clip, thumb, srt, vtt } }], export } with each link's { linkId, url, expiresAt }; unrendered clips say why. The active link is reused unless label or ttlDays ask for a separate one. A link serves the current render until it expires or revoke_media_link turns it off.",
+    inputSchema: {
+      projectId: projectId(),
+      clipIds: z.array(z.string()).max(50).optional().describe("Only these clips; omitted = every rendered clip"),
+      kinds: z
+        .array(z.enum(["clip", "thumb", "srt", "vtt"]))
+        .max(4)
+        .optional()
+        .describe("Which files (default: clip): clip = the MP4, thumb = its JPEG, srt / vtt = its captions"),
+      export: z.boolean().optional().describe("Also a link to the zip of these clips with YouTube/TikTok metadata"),
+      ttlDays: z
+        .number()
+        .int()
+        .min(1)
+        .max(3650)
+        .nullable()
+        .optional()
+        .describe("Days the links last (capped by the instance); null = never expires where allowed"),
+      label: z.string().trim().max(120).optional().describe('A name for a separate link you can revoke on its own, e.g. "Buffer queue"'),
+    },
+  },
+  list_media_links: {
+    title: "List share links",
+    description:
+      "Your share links, newest first. Returns { items: [{ id, kind, projectId, clipId, title, url (masked), label, source, state (active | expired | revoked), expiresAt, lastUsedAt, useCount }], nextCursor, total }. Use get_media_links for a full URL.",
+    inputSchema: {
+      projectId: z.string().optional().describe("Only this project's links"),
+      clipId: z.string().optional().describe("Only this clip's links"),
+      active: z.boolean().optional().describe("Only links that still work"),
+      cursor: z.string().optional().describe("nextCursor from the previous page"),
+      limit: z.number().int().min(1).max(100).default(50).describe("Links per page (1-100)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  revoke_media_link: {
+    title: "Revoke share links",
+    description:
+      "Turn share links off now: one (linkId), a clip's (clipId), a project's (projectId) or all of yours (all: true). Give exactly one. Returns { revoked, message }. Anyone holding a revoked link gets a 404 from then on.",
+    inputSchema: {
+      linkId: z.string().optional().describe("Link id (from get_media_links or list_media_links)"),
+      clipId: z.string().optional().describe("Every link to this clip"),
+      projectId: z.string().optional().describe("Every link to this project's clips and zip"),
+      all: z.literal(true).optional().describe("Every share link you have"),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  list_webhooks: {
+    title: "List webhooks",
+    description:
+      "Your webhook endpoints. Returns [{ id, url (masked), description, events, status (active | failing | off), disabledReason, failingSince, lastDelivery }]. Reelsaw POSTs signed JSON (Standard Webhooks headers webhook-id, webhook-timestamp, webhook-signature) to each when a subscribed event happens.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  create_webhook: {
+    title: "Create webhook",
+    description:
+      "Subscribe a URL to events: project.created, project.done (with every clip, share links and the zip), project.failed, clip.done (also re-renders), clip.failed. This is how a Zapier or Make app subscribes (delete_webhook unsubscribes). Returns { endpoint, secret }: the whsec_ signing secret is shown only here; verify deliveries with any Standard Webhooks library. The URL must be public https unless the admin allows private networks.",
+    inputSchema: {
+      url: z.string().min(1).max(2000).describe("Where to POST (https)"),
+      events: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1).describe("Events to send"),
+      description: z.string().trim().max(120).optional().describe('Your label, e.g. "n8n clips workflow"'),
+    },
+  },
+  update_webhook: {
+    title: "Update webhook",
+    description:
+      "Change a webhook's url, events or description, or turn it on or off (enabled). Turning it on clears a failure streak; turning it off cancels deliveries waiting to be sent (resend_webhook_delivery brings them back). Returns { endpoint, changed, message }.",
+    inputSchema: {
+      id: z.string().describe("Webhook id (from list_webhooks)"),
+      url: z.string().min(1).max(2000).optional().describe("New URL to POST to (https)"),
+      events: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1).optional().describe("Replace the events it gets"),
+      description: z.string().trim().max(120).nullable().optional().describe("New label; null clears it"),
+      enabled: z.boolean().optional().describe("Turn it on (true) or off (false)"),
+    },
+    annotations: { idempotentHint: true },
+  },
+  delete_webhook: {
+    title: "Delete webhook",
+    description: "Remove a webhook (unsubscribe); nothing more is sent to it and its delivery log goes with it. Returns { ok, message }.",
+    inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
+    annotations: { destructiveHint: true },
+  },
+  rotate_webhook_secret: {
+    title: "Rotate webhook secret",
+    description:
+      "A new signing secret for a webhook. Deliveries are signed with both the new and the old one for 24 h, so the receiver can switch. Returns { secret, previousStopsAt, message }.",
+    inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
+  },
+  test_webhook: {
+    title: "Test webhook",
+    description: "Send a webhook.test delivery now and wait for the answer. Returns { ok, code, message, response (first 2 KB of what the receiver said) }.",
+    inputSchema: { id: z.string().describe("Webhook id (from list_webhooks)") },
+  },
+  list_webhook_deliveries: {
+    title: "List webhook deliveries",
+    description:
+      "The delivery log, newest first. Returns { items: [{ id, endpointId, eventId, type, projectId, status (pending | sending | delivered | failed | cancelled), attempt, lastStatusCode, lastError, nextAttemptAt, deliveredAt }], nextCursor, total }. Failed deliveries were retried 8 times over about 22 h.",
+    inputSchema: {
+      endpointId: z.string().optional().describe("Only this webhook's deliveries (from list_webhooks)"),
+      status: z.enum(WEBHOOK_DELIVERY_STATUSES).optional().describe("Only deliveries in this state"),
+      projectId: z.string().optional().describe("Only deliveries about this project"),
+      cursor: z.number().int().positive().optional().describe("nextCursor from the previous page"),
+      limit: z.number().int().min(1).max(100).default(50).describe("Deliveries per page (1-100)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  resend_webhook_delivery: {
+    title: "Resend webhook delivery",
+    description:
+      "Send a delivery again (a new series of attempts, same webhook-id and body, signed afresh). The webhook must be on. Returns { ok, deliveryId, message }.",
+    inputSchema: { deliveryId: z.number().int().positive().describe("Delivery id (from list_webhook_deliveries)") },
   },
   export_project: {
     title: "Export clips",

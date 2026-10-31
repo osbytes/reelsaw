@@ -378,7 +378,11 @@ export const GUIDES: Guide[] = [
     faqs: [
       {
         q: "Does the workflow upload the clips to YouTube?",
-        a: "Not by itself. The export zip carries a YouTube Data API v3 videos.insert body per clip (private by default) and a TikTok Content Posting API body, so you can add n8n's YouTube node or an HTTP upload after the Summary node and review the clips first.",
+        a: "Not by itself. The export zip carries a YouTube Data API v3 videos.insert body per clip (private by default) and a TikTok Content Posting API body, so you can add n8n's YouTube node or an HTTP upload after the Summary node and review the clips first. To hand clips to a scheduler such as Buffer or Metricool, use the share link Reelsaw gives each clip: it downloads without a credential, lasts 90 days by default and can be revoked.",
+      },
+      {
+        q: "Can Reelsaw tell the workflow when clips are ready instead of it waiting?",
+        a: "Yes. Add a webhook in Reelsaw (Settings → Webhooks, or the create_webhook tool) pointing at an n8n Webhook trigger. Reelsaw sends a signed project.done event with every clip, its share link and the zip, retried for about a day if n8n is down. Pass your own ids in create_project's metadata and they come back in the webhook.",
       },
       {
         q: "Will it clip my Shorts and live streams too?",
@@ -386,7 +390,7 @@ export const GUIDES: Guide[] = [
       },
       {
         q: "Can I use it with Make, Zapier or a script instead of n8n?",
-        a: "Yes. The workflow is plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly.",
+        a: "Yes. The workflow is plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly. For instant triggers, Zapier and Make can subscribe a catch hook with the create_webhook tool (delete_webhook unsubscribes); deliveries are signed with the Standard Webhooks scheme.",
       },
     ],
     sources: [

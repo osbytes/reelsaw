@@ -47,12 +47,13 @@ export const FEATURES: { key: FeatureKey; label: string; reelsaw: string }[] = [
   {
     key: "publishing",
     label: "Direct social publishing",
-    reelsaw: "No. Export zip with paste-ready text, a YouTube Data API body and a TikTok post body per clip",
+    reelsaw:
+      "No. Export zip with paste-ready text, a YouTube Data API body and a TikTok post body per clip, plus share links a scheduler (Buffer, Metricool) can fetch",
   },
   {
     key: "agents",
     label: "Agent and API access",
-    reelsaw: "MCP server (Streamable HTTP, OAuth optional) and an operator CLI, on every plan including hosted Free",
+    reelsaw: "MCP server (Streamable HTTP, OAuth optional), signed webhooks and an operator CLI, on every plan including hosted Free",
   },
   { key: "cap", label: "Usage cap", reelsaw: "None self-hosted. Hosted plans meter minutes of source video per month, never per-clip credits" },
   { key: "accounts", label: "Accounts and teams", reelsaw: "Multi-user with admin approval, per-user quotas and usage" },

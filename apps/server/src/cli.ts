@@ -59,6 +59,14 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   decisions forget <email> [--project id]          delete the account's decisions, or one project's (forget_decisions)
  *   decisions learning <email> on|off                record the account's decisions or stop (Settings → Learning / set_learning)
  *   decisions backfill [--dry-run]                   write decisions still held in transcripts from before the log existed
+ *   media-links <email> [--project id] [--json] [--active]   the account's share links: target, state, expiry, last use (Settings → Share links / list_media_links)
+ *   media-links create <projectId> [clipId…] [--kind clip|thumb|srt|vtt|export] [--ttl days] [--label text]
+ *                                           a share link per clip (or one for the zip) that needs no sign-in (get_media_links); reuses the active one unless --ttl or --label
+ *   media-links revoke <linkId> | --project <id> | --clip <id> | --all <email>   turn share links off now (revoke_media_link)
+ *   webhooks <email> [--json]               the account's webhook endpoints: masked URL, events, status, last delivery (Settings → Webhooks / list_webhooks)
+ *   webhooks deliveries <endpointId> [--status failed] [--json]   an endpoint's delivery log (list_webhook_deliveries)
+ *   webhooks resend <deliveryId> | test <endpointId> | enable <endpointId> | disable <endpointId>
+ *                                           send one again, send a test now, or turn an endpoint on / off (resend_webhook_delivery, test_webhook, update_webhook)
  *   machine [--json]                        this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why,
  *                                           where each on-device model runs (same as Settings → System → Overview)
  *   ytdlp-proxies [--json]                  yt-dlp egress pool: operator priority vs circuit (reliability), never URLs
@@ -153,7 +161,10 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  */
 import { projectBumperSummaries } from "./library/service.js";
 import { describeCoverage } from "./library/summary.js";
-import { eq, desc, and, inArray, or, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, isNull, or, sql } from "drizzle-orm";
+import { listDeliveries, listEndpoints, resendDelivery, updateEndpoint, WEBHOOK_DELIVERY_STATUSES } from "./webhooks/service.js";
+import { testEndpoint } from "./webhooks/deliver.js";
+import { getOrCreateLink, linkSummary, listLinks, maskLinkUrl, MEDIA_LINK_KINDS, revokeLinks, revokeMessage, type RevokeScope } from "./media-links/service.js";
 import { needsPrepare } from "./pipeline/manual.js";
 import { sampleFaces, dropStaticFaces, decideLayout, segmentLayouts, newLayoutDiag } from "./pipeline/layout.js";
 import { attachText, voteTrace } from "./pipeline/content-region.js";
@@ -672,6 +683,174 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     if (!pos[0]) throw new Error("usage: reelsaw purge-project <projectId> [--forget-decisions]   (reelsaw deleted lists them; they must already be deleted)");
     const r = await purgeOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.message);
+  },
+  /** Webhooks (docs/specs/webhooks.md), the same service as Settings → Webhooks and the *_webhook(s) tools. */
+  async webhooks(svc) {
+    const db = svc.database.db;
+    const usage =
+      "usage: reelsaw webhooks <email> [--json] | deliveries <endpointId> [--status s] [--json] | resend <deliveryId> | test <endpointId> | enable <endpointId> | disable <endpointId>";
+    const sub = ["deliveries", "resend", "test", "enable", "disable"].includes(pos[0] ?? "") ? pos[0] : undefined;
+    const ownerOfEndpoint = async (id: string | undefined) => {
+      if (!id) throw new Error(usage);
+      const e = await db.query.webhookEndpoints.findFirst({ where: eq(schema.webhookEndpoints.id, id), columns: { userId: true } });
+      if (!e) throw new Error("no such webhook");
+      return e.userId;
+    };
+    if (sub === "resend") {
+      const deliveryId = Number(pos[1]);
+      if (!Number.isInteger(deliveryId) || deliveryId <= 0) throw new Error(usage);
+      const d = await db.query.webhookDeliveries.findFirst({ where: eq(schema.webhookDeliveries.id, deliveryId), columns: { userId: true } });
+      if (!d) throw new Error("no such delivery");
+      console.log((await resendDelivery(svc, d.userId, deliveryId)).message);
+      return;
+    }
+    if (sub === "test") {
+      const r = await testEndpoint(svc, await ownerOfEndpoint(pos[1]), pos[1]!);
+      console.log(r.message);
+      if (r.response) console.log(r.response);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+    if (sub === "enable" || sub === "disable") {
+      const r = await updateEndpoint(svc, await ownerOfEndpoint(pos[1]), pos[1]!, { enabled: sub === "enable" });
+      console.log(r.message);
+      return;
+    }
+    if (sub === "deliveries") {
+      const userId = await ownerOfEndpoint(pos[1]);
+      const status = flag("status");
+      const s = WEBHOOK_DELIVERY_STATUSES.find((x) => x === status);
+      if (status && !s) throw new Error(`--status must be one of ${WEBHOOK_DELIVERY_STATUSES.join(", ")}`);
+      const page = await listDeliveries(svc, userId, { endpointId: pos[1], status: s, limit: 100 });
+      if (args.includes("--json")) return console.log(JSON.stringify(page, null, 2));
+      console.log(`${page.total} deliver${page.total === 1 ? "y" : "ies"}${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
+      table(
+        page.items.map((d) => ({
+          id: d.id,
+          type: d.type,
+          status: d.status,
+          attempt: d.attempt,
+          code: d.lastStatusCode ?? "",
+          error: d.lastError ?? "",
+          next: d.nextAttemptAt ? d.nextAttemptAt.toISOString().slice(0, 16) : "",
+          at: d.createdAt.toISOString().slice(0, 16),
+          project: d.projectId ?? "",
+        })),
+      );
+      return;
+    }
+    if (!pos[0]) throw new Error(usage);
+    const u = await userByEmail(svc, pos[0]);
+    const list = await listEndpoints(svc, u.id);
+    if (args.includes("--json"))
+      return console.log(
+        JSON.stringify(
+          list.map(({ url: _u, ...e }) => e),
+          null,
+          2,
+        ),
+      );
+    console.log(`${u.email}: ${list.length} webhook(s)`);
+    table(
+      list.map((e) => ({
+        id: e.id,
+        url: e.urlMasked,
+        events: e.events.join(","),
+        status: e.status === "off" && e.disabledReason ? `off: ${e.disabledReason}` : e.status,
+        last: e.lastDelivery ? `${e.lastDelivery.status} ${e.lastDelivery.code ?? ""} ${e.lastDelivery.at.toISOString().slice(0, 16)}` : "",
+      })),
+    );
+  },
+  /** Share links (docs/specs/media-links.md), the same service as Settings → Share links and the *_media_link(s) tools. */
+  async "media-links"(svc) {
+    const db = svc.database.db;
+    const usage =
+      "usage: reelsaw media-links <email> [--project id] [--json] [--active] | create <projectId> [clipId…] [--kind k] [--ttl days] [--label text] | revoke <linkId> | revoke --project <id> | revoke --clip <id> | revoke --all <email>";
+    if (pos[0] === "create") {
+      const projectId = pos[1];
+      if (!projectId) throw new Error(usage);
+      const project = await db.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { userId: true } });
+      if (!project) throw new Error("project not found");
+      const kindArg = flag("kind") ?? "clip";
+      const kind = MEDIA_LINK_KINDS.find((k) => k === kindArg);
+      if (!kind) throw new Error(`--kind must be one of ${MEDIA_LINK_KINDS.join(", ")}`);
+      const ttl = flag("ttl");
+      const opts = { source: "cli" as const, ttlDays: ttl === "never" ? null : ttl ? Number(ttl) : undefined, label: flag("label") };
+      if (opts.ttlDays !== undefined && opts.ttlDays !== null && !(Number.isInteger(opts.ttlDays) && opts.ttlDays > 0))
+        throw new Error("--ttl must be a whole number of days, or never");
+      const clipIds = pos.slice(2);
+      if (kind === "export") {
+        const l = await getOrCreateLink(svc, project.userId, { kind, projectId, clipIds }, opts);
+        console.log(`${l.url}  (${l.id}, ${l.expiresAt ? `until ${l.expiresAt.toISOString()}` : "never expires"})`);
+        return;
+      }
+      const ids = clipIds.length
+        ? clipIds
+        : (
+            await db.query.clips.findMany({
+              where: and(eq(schema.clips.projectId, projectId), isNull(schema.clips.deletedAt), eq(schema.clips.status, "done")),
+              columns: { id: true },
+              orderBy: schema.clips.index,
+            })
+          ).map((c) => c.id);
+      if (!ids.length) throw new Error("no rendered clips in this project");
+      for (const clipId of ids) {
+        const l = await getOrCreateLink(svc, project.userId, { kind, clipId }, opts);
+        console.log(`${l.clipTitle ?? clipId}	${l.url}	${l.expiresAt ? `until ${l.expiresAt.toISOString()}` : "never expires"}`);
+      }
+      return;
+    }
+    if (pos[0] === "revoke") {
+      let userId: string;
+      let scope: RevokeScope;
+      if (args.includes("--all")) {
+        const email = flag("all");
+        userId = (await userByEmail(svc, email)).id;
+        scope = { all: true };
+      } else if (flag("project") || flag("clip")) {
+        const pid = flag("project");
+        const cid = flag("clip");
+        const owner = pid
+          ? await db.query.projects.findFirst({ where: eq(schema.projects.id, pid), columns: { userId: true } })
+          : await db
+              .select({ userId: schema.projects.userId })
+              .from(schema.clips)
+              .innerJoin(schema.projects, eq(schema.projects.id, schema.clips.projectId))
+              .where(eq(schema.clips.id, cid!))
+              .then((r) => r[0]);
+        if (!owner) throw new Error(pid ? "project not found" : "clip not found");
+        userId = owner.userId;
+        scope = pid ? { projectId: pid } : { clipId: cid! };
+      } else {
+        const linkId = pos[1];
+        if (!linkId) throw new Error(usage);
+        const row = await db.query.mediaLinks.findFirst({ where: eq(schema.mediaLinks.id, linkId), columns: { userId: true } });
+        if (!row) throw new Error("no such share link");
+        userId = row.userId;
+        scope = { linkId };
+      }
+      console.log(revokeMessage(await revokeLinks(svc, userId, scope)));
+      return;
+    }
+    if (!pos[0]) throw new Error(usage);
+    const u = await userByEmail(svc, pos[0]);
+    const page = await listLinks(svc, u.id, { projectId: flag("project"), active: args.includes("--active"), limit: 100 });
+    if (args.includes("--json")) return console.log(JSON.stringify({ ...page, items: page.items.map((v) => linkSummary(v, true)) }, null, 2));
+    console.log(`${u.email}: ${page.total} share link(s)${page.total > page.items.length ? `, showing the newest ${page.items.length}` : ""}`);
+    table(
+      page.items.map((v) => ({
+        id: v.id,
+        kind: v.kind,
+        title: v.clipTitle ?? v.projectTitle,
+        state: v.state,
+        source: v.source,
+        label: v.label ?? "",
+        expires: v.expiresAt ? v.expiresAt.toISOString().slice(0, 10) : "never",
+        uses: v.useCount,
+        lastUsed: v.lastUsedAt ? v.lastUsedAt.toISOString().slice(0, 16) : "",
+        url: maskLinkUrl(v.url),
+      })),
+    );
   },
   /**
    * The decision log (docs/specs/decision-log.md), same service as Settings → Learning and the *_decisions tools:
@@ -2334,7 +2513,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

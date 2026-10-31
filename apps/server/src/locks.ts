@@ -22,6 +22,8 @@ export const txLock = {
   asset: (owner: string, contentHash: string) => `asset:${owner}:${contentHash}`,
   /** one import of the same catalog / provider item at a time, instance-wide, so two accounts converge on one shared row (library/service.ts createAsset) */
   sharedAsset: (provider: string, externalId: string, variant: string) => `shared-asset:${provider}:${externalId}:${variant}`,
+  /** an account's webhook endpoints, counted against MAX_WEBHOOKS_PER_USER when one is added (webhooks/service.ts) */
+  webhooks: (userId: string) => `webhooks:${userId}`,
   /** the disk leases of one volume: a job's claim is checked against the live total and recorded under it (disk-leases.ts) */
   diskVolume: (volume: string) => `disk:${volume}`,
 } as const;

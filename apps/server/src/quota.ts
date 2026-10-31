@@ -27,6 +27,7 @@ export const LIMIT_KEYS = [
   "MAX_STORAGE_MB",
   "MAX_REQUESTS_PER_MINUTE",
   "MAX_REQUESTS_PER_HOUR",
+  "MAX_WEBHOOKS_PER_USER",
 ] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
@@ -520,6 +521,7 @@ export async function limitUsage(db: Db, userId: string, grants: Grants | null =
     MAX_LIVE_JOBS_PER_USER: Number(jobs?.live ?? 0),
     MAX_RERENDERS_PER_HOUR: Number(jobs?.renders ?? 0),
     MAX_STORAGE_MB: Math.round((await storedBytes(db, userId)) / 1_048_576),
+    MAX_WEBHOOKS_PER_USER: await db.$count(schema.webhookEndpoints, eq(schema.webhookEndpoints.userId, userId)),
   };
 }
 
