@@ -28,6 +28,8 @@ export type { WebhookEventType };
 export const DELIVERY_LIST_MAX = 100;
 /** a rotation keeps the previous secret signing this long, so receivers can switch without dropping deliveries */
 export const ROTATION_OVERLAP_MS = 24 * 3600_000;
+/** "2026-11-01 21:57 UTC": a time people (and agents) read in a sentence; the field next to it carries the exact value */
+const utc = (d: Date) => `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 const box = (svc: Pick<Services, "config">) => createSecretBox(svc.config.BETTER_AUTH_SECRET, "webhooks");
 const newSecret = () => `whsec_${randomBytes(32).toString("base64")}`;
@@ -251,7 +253,7 @@ export async function rotateSecret(svc: Services, userId: string, id: string) {
     if (e.prevSecretSealed && e.prevSecretUntil && e.prevSecretUntil.getTime() > Date.now())
       throw new TRPCError({
         code: "CONFLICT",
-        message: `A rotation is already under way: the previous secret keeps signing until ${e.prevSecretUntil.toISOString()}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
+        message: `A rotation is already under way: the previous secret keeps signing until ${utc(e.prevSecretUntil)}. Rotate again after that, or delete this webhook and add it again to drop both secrets now.`,
       });
     await u.db
       .update(schema.webhookEndpoints)
@@ -262,7 +264,7 @@ export async function rotateSecret(svc: Services, userId: string, id: string) {
   return {
     secret,
     previousStopsAt: until,
-    message: `New secret made. Deliveries are signed with both secrets until ${until.toISOString()}; switch your receiver before then.`,
+    message: `New secret made. Deliveries are signed with both secrets until ${utc(until)}; switch your receiver before then.`,
   };
 }
 

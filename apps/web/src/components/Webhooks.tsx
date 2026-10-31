@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
+import { copyText } from "../lib/clipboard";
 import { useTRPC } from "../lib/trpc";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
 import { ConfirmDialog, Modal, MoreButton, Skeleton, SkeletonRegion } from "./ui";
@@ -26,6 +27,10 @@ const DELIVERY = {
   failed: { glyph: "✕", word: "Failed", cls: "text-err" },
   cancelled: { glyph: "○", word: "Cancelled", cls: "text-ink3" },
 } as const;
+
+function statusWord(e: Pick<Endpoint, "status" | "failingSince">) {
+  return e.status === "failing" && e.failingSince ? `Failing since ${when(e.failingSince).split(",")[0]}` : STATUS[e.status].word;
+}
 
 function when(d: Date | string | null | undefined) {
   if (!d) return "";
@@ -113,7 +118,7 @@ function EndpointDialog({ open, onOpenChange, edit }: { open: boolean; onOpenCha
           </p>
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-[8px] bg-sunk px-2 py-1 font-mono text-xs">{secret.secret}</code>
-            <button className="btn-ghost text-xs" onClick={() => void navigator.clipboard.writeText(secret.secret).then(() => toast("Secret copied"))}>
+            <button className="btn-ghost text-xs" onClick={() => copyText(secret.secret, "Secret copied")}>
               Copy
             </button>
           </div>
@@ -227,7 +232,7 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
           {items.map((d) => (
             <li key={d.id} className="py-1.5">
               <button
-                className="grid w-full grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem] items-center gap-x-3 text-left"
+                className="grid w-full grid-cols-[6rem_minmax(0,1fr)_2.5rem] items-center gap-x-3 text-left md:grid-cols-[6.5rem_minmax(0,1fr)_3.5rem_8rem]"
                 onClick={() => setOpen(open === d.id ? null : d.id)}
                 aria-expanded={open === d.id}
               >
@@ -236,7 +241,7 @@ function DeliveryLog({ endpoint, onClose }: { endpoint: Endpoint; onClose: () =>
                 </span>
                 <span className="truncate font-mono text-xs">{d.type}</span>
                 <span className="text-right text-xs tabular-nums text-ink2">{d.lastStatusCode ?? "–"}</span>
-                <span className="text-right text-xs text-ink3">{when(d.createdAt)}</span>
+                <span className="col-span-2 col-start-2 text-xs text-ink3 md:col-span-1 md:col-start-auto md:text-right">{when(d.createdAt)}</span>
               </button>
               {open === d.id && (
                 <div className="mt-2 flex flex-col gap-2 text-xs">
@@ -345,7 +350,7 @@ export function WebhooksSection() {
           </div>
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-[8px] bg-panel px-2 py-1 font-mono text-xs">{rotated.secret}</code>
-            <button className="btn-ghost text-xs" onClick={() => void navigator.clipboard.writeText(rotated.secret).then(() => toast("Secret copied"))}>
+            <button className="btn-ghost text-xs" onClick={() => copyText(rotated.secret, "Secret copied")}>
               Copy
             </button>
           </div>
@@ -385,17 +390,17 @@ export function WebhooksSection() {
                   <span className="truncate text-xs text-ink3">
                     {e.description ? `${e.urlMasked} · ` : ""}
                     {e.events.length > 2 ? `${e.events.length} events` : e.events.join(", ")}
-                    <span className="md:hidden"> · {STATUS[e.status].word.toLowerCase()}</span>
+                  </span>
+                  <span className="text-xs text-ink3 md:hidden">
+                    <span className={STATUS[e.status].cls}>{STATUS[e.status].glyph}</span> <span className="text-ink2">{statusWord(e)}</span>
+                    {e.lastDelivery ? ` · last: ${DELIVERY[e.lastDelivery.status].word.toLowerCase()} ${e.lastDelivery.code ?? ""}` : ""}
                   </span>
                 </button>
                 <span
                   className={`hidden text-xs md:block ${STATUS[e.status].cls}`}
                   title={e.disabledReason ?? (e.failingSince ? `Failing since ${when(e.failingSince)}` : undefined)}
                 >
-                  {STATUS[e.status].glyph}{" "}
-                  <span className="text-ink2">
-                    {e.status === "failing" && e.failingSince ? `Failing since ${when(e.failingSince).split(",")[0]}` : STATUS[e.status].word}
-                  </span>
+                  {STATUS[e.status].glyph} <span className="text-ink2">{statusWord(e)}</span>
                 </span>
                 <span className="hidden truncate text-xs text-ink3 md:block">
                   {e.lastDelivery ? `${DELIVERY[e.lastDelivery.status].word} ${e.lastDelivery.code ?? ""} · ${when(e.lastDelivery.at)}` : "none yet"}
@@ -421,8 +426,14 @@ export function WebhooksSection() {
                         <DropdownMenu.Item className="menu-item" onSelect={() => window.setTimeout(() => setDialog({ edit: e }), 0)}>
                           Edit…
                         </DropdownMenu.Item>
-                        <DropdownMenu.Item className="menu-item" onSelect={() => rotate.mutate({ id: e.id })}>
+                        {/* one rotation at a time: the server refuses a second one while the previous secret still signs */}
+                        <DropdownMenu.Item
+                          className="menu-item flex-col items-start gap-0"
+                          disabled={!!e.rotationEndsAt}
+                          onSelect={() => rotate.mutate({ id: e.id })}
+                        >
                           Rotate secret
+                          {e.rotationEndsAt && <span className="text-xs text-ink3">Old secret signs until {when(e.rotationEndsAt)}</span>}
                         </DropdownMenu.Item>
                         <DropdownMenu.Item className="menu-item" onSelect={() => update.mutate({ id: e.id, enabled: !e.enabled })}>
                           {e.enabled ? "Turn off" : "Turn on"}
