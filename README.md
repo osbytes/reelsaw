@@ -438,7 +438,8 @@ can install the bridge from the image without a running container to exec into:
 
 Automation tools can call the same endpoint without an MCP client: it is stateless and answers plain
 JSON, so a `tools/call` POST is one HTTP request. [docs/n8n](docs/n8n/README.md) has a ready-made n8n
-workflow that clips every new upload on a YouTube channel. To be told when clips are ready instead of
+workflow that clips every new upload on a YouTube channel, and [integrations/zapier](integrations/zapier/README.md)
+is the source of a Zapier app built on the same tools (instant triggers through `create_webhook`). To be told when clips are ready instead of
 waiting, add a webhook (`create_webhook`, or Settings → Webhooks) and verify each delivery with any
 Standard Webhooks library:
 
