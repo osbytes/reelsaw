@@ -10,4 +10,5 @@ export const GUIDE_NAV: Link[] = [
   { href: "/open-source-video-clipper", label: "Open-source video clippers" },
   { href: "/youtube-to-shorts-converter", label: "YouTube to Shorts converter" },
   { href: "/podcast-to-shorts", label: "Podcast to shorts" },
+  { href: "/automate-youtube-shorts-n8n", label: "Automate Shorts with n8n" },
 ];

@@ -324,6 +324,80 @@ export const GUIDES: Guide[] = [
       { href: "https://github.com/osbytes/reelsaw/blob/main/docs/LAYOUTS.md", label: "Reelsaw layouts reference" },
     ],
   },
+  {
+    slug: "automate-youtube-shorts-n8n",
+    metaTitle: "Automate YouTube Shorts with n8n: clip every new upload",
+    metaDescription:
+      "A free n8n workflow that turns every new YouTube upload into vertical clips with captions. Stock HTTP nodes, self-hosted or hosted Reelsaw, no per-clip fees.",
+    h1: "Automate YouTube Shorts with n8n: clip every new upload",
+    intro: [
+      "Most Shorts automations stop at the hard part. Downloading a video and uploading a file is easy in n8n; picking the 30 seconds worth posting, reframing a landscape shot to 9:16 and timing captions to the words is not. Hosted clippers do that step, but their APIs usually sit on higher plans and charge by the minute.",
+      "Reelsaw does that step inside a workflow. A ready-made n8n workflow watches your channel, sends each new upload to Reelsaw, waits for the clips and hands back titles, scores, video links and an export zip. It runs against a Reelsaw you host yourself or the hosted service, including the Free plan.",
+    ],
+    sections: [
+      {
+        heading: "What the workflow does",
+        bullets: [
+          "Trigger: an RSS Feed Trigger on your channel's YouTube feed fires for each new upload. A manual trigger runs it on one video while you set it up.",
+          "Create: one request starts a Reelsaw project from the video link, with an optional clip cap and a focus such as 'Find clips about pricing'.",
+          "Wait: the workflow asks Reelsaw for the project's state in a loop, up to two minutes per call, until the clips are rendered or the run failed. A failure stops the execution with Reelsaw's reason.",
+          "Collect: it reads the finished clips (title, hook, score, length, layout, video link) and requests the export zip, which carries a paste-ready caption, a YouTube Data API body and a TikTok body per clip.",
+          "Notify: a summary item feeds a Discord post, switched off by default. Swap it for Slack, Telegram, email or an upload step.",
+        ],
+      },
+      {
+        heading: "Why it needs no MCP client or community node",
+        paragraphs: [
+          "Reelsaw's automation surface is an MCP server at /api/mcp, the same tools Claude and Cursor use. The endpoint is stateless and answers plain JSON, so calling a tool is one HTTP POST with an Authorization header and a tools/call body. The workflow uses n8n's built-in HTTP Request and Code nodes only, so it runs on n8n Cloud and self-hosted n8n alike, and any other tool (restyle captions, re-render, fetch SRT files) can be added the same way.",
+        ],
+      },
+      {
+        heading: "Set it up in five steps",
+        bullets: [
+          "Create an API key in Reelsaw under Settings, API keys and MCP.",
+          "Import reelsaw-youtube-to-shorts.json into n8n (Workflows, Import from file).",
+          "Add a Header Auth credential: name Authorization, value Bearer followed by your key, and pick it in the four Reelsaw nodes.",
+          "In the Settings node, set your Reelsaw address (or keep app.reelsaw.com), the most clips per video and an optional focus.",
+          "Put your channel id in the RSS trigger's feed URL, run Test with one video, then activate the workflow.",
+        ],
+      },
+      {
+        heading: "How it compares to clipping APIs",
+        table: {
+          columns: ["", "Reelsaw + n8n", "Hosted clipping APIs"],
+          rows: [
+            ["Price", "$0 self-hosted; hosted Free, then $12 to $59 a month", "API access on higher plans, metered per minute or credit"],
+            ["Where the video goes", "Your machine (self-hosted) or Reelsaw's hosted service", "The vendor's servers"],
+            ["n8n setup", "Import one file; stock HTTP Request and Code nodes", "HTTP nodes against each vendor's REST API, or a community node"],
+            ["Models", "Any provider, or fully local with Ollama and Whisper", "The vendor's choice"],
+            ["Publishing", "Export with YouTube and TikTok API bodies; add your own upload node", "Built-in scheduling on some plans"],
+          ],
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: "Does the workflow upload the clips to YouTube?",
+        a: "Not by itself. The export zip carries a YouTube Data API v3 videos.insert body per clip (private by default) and a TikTok Content Posting API body, so you can add n8n's YouTube node or an HTTP upload after the Summary node and review the clips first.",
+      },
+      {
+        q: "Will it clip my Shorts and live streams too?",
+        a: "The channel feed lists every upload, including Shorts and finished streams. Add an IF node on the title or link before the Settings node to skip what you do not want clipped.",
+      },
+      {
+        q: "Can I use it with Make, Zapier or a script instead of n8n?",
+        a: "Yes. The workflow is plain HTTP: POST a JSON-RPC tools/call to /api/mcp with your API key as a Bearer token. The same calls work from any tool that can send an HTTP request, and agents can use the MCP server directly.",
+      },
+    ],
+    sources: [
+      {
+        href: "https://github.com/osbytes/reelsaw/blob/main/docs/n8n/README.md",
+        label: "Reelsaw n8n workflow: setup, request format and output",
+      },
+      { href: "https://github.com/osbytes/reelsaw#mcp-drive-reelsaw-from-an-agent", label: "Reelsaw README: MCP server and tools" },
+      { href: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/", label: "n8n docs: HTTP Request node" },
+    ],
+  },
 ];
 
 export const guideBySlug = (slug: string) => GUIDES.find((g) => g.slug === slug);
