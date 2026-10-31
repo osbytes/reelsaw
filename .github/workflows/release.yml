@@ -212,6 +212,6 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC login to the registry
-    uses: ./.github/workflows/publish-mcp.yml
+    uses: $/.github/workflows/publish-mcp.yml
     with:
       version: ${{ needs.image.outputs.version }}
