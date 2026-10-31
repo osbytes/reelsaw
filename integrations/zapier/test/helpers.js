@@ -3,7 +3,8 @@
 const nock = require("nock");
 
 const BASE = "https://reelsaw.test";
-const KEY = "rs_test_0123456789abcdef";
+// not secret-shaped on purpose, so the secret scan has nothing to flag
+const KEY = "test-api-key";
 const authData = { baseUrl: BASE, apiKey: KEY };
 
 /** A tool answer as /api/mcp sends it: JSON in result.content[0].text. */

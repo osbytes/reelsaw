@@ -25,7 +25,7 @@ describe("REST hook subscribe / unsubscribe", () => {
       "create_webhook",
       ok({
         endpoint: { id: "whk_1", url: "hooks.zapier.com/…/abc", description, events: [event], status: "active" },
-        secret: "whsec_c2VjcmV0",
+        secret: `whsec_${Buffer.from("secret").toString("base64")}`,
         hint: "Keep the secret",
       }),
     );

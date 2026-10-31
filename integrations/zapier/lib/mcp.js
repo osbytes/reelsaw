@@ -7,19 +7,27 @@
  * that sentence becomes the Zapier error the user sees.
  */
 
+/** Drops trailing slashes in one pass, without a regex that backtracks on a long run of "/" (CodeQL). */
+function trimSlashes(s) {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === "/") end--;
+  return s.slice(0, end);
+}
+
 /** The instance's origin from what the user typed: trims, adds https://, and drops a pasted /api/mcp or trailing slash. */
 function normalizeBaseUrl(raw) {
   let s = String(raw ?? "").trim();
   if (!s) return "https://app.reelsaw.com";
   if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
-  s = s.replace(/\/+$/, "").replace(/\/api\/mcp$/i, "");
+  s = trimSlashes(s);
+  if (s.toLowerCase().endsWith("/api/mcp")) s = s.slice(0, -"/api/mcp".length);
   let url;
   try {
     url = new URL(s);
   } catch {
     throw new Error(`"${raw}" is not a web address. Use your Reelsaw address, for example https://app.reelsaw.com.`);
   }
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  return `${url.origin}${trimSlashes(url.pathname)}`;
 }
 
 const mcpUrl = (bundle) => `${normalizeBaseUrl(bundle.authData && bundle.authData.baseUrl)}/api/mcp`;

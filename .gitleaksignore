@@ -1,2 +1,5 @@
 # A made-up Standard Webhooks test secret committed in apps/server/test/webhooks.test.ts; the test now builds it at runtime.
 01322ee0f15b7a583c157faf122c9ca60acbb001:apps/server/test/webhooks.test.ts:generic-api-key:19
+# Made-up test credentials committed in the Zapier app's tests (2805484); the tests no longer carry secret-shaped values.
+28054844949a03198243ad01e8fae7b3e29cb4a1:integrations/zapier/test/helpers.js:generic-api-key:6
+28054844949a03198243ad01e8fae7b3e29cb4a1:integrations/zapier/test/triggers.test.js:generic-api-key:28
