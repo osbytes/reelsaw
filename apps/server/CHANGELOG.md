@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.29.2
+
+### Patch Changes
+
+- [#214](https://github.com/osbytes/reelsaw/pull/214) [`2ab9563`](https://github.com/osbytes/reelsaw/commit/2ab95635f8c6c9f3fed440e3f18cc7d318dbf1c0) Thanks [@dillonstreator](https://github.com/dillonstreator)! - The server no longer ships the `glob` and `minimatch` versions named in GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249: pnpm overrides move the copies pulled in by OpenTelemetry, Sentry and archiver to glob 14 and minimatch 11.
+
 ## 0.29.1
 
 ### Patch Changes
