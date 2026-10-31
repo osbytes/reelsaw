@@ -23,3 +23,7 @@ overrides:
   # better-auth 1.7.12 pins better-call 1.4.2 while @better-auth/core 1.7.12 wants 1.4.4; one version
   # keeps a single core instance (two break the plugin types in auth.ts)
   better-call: 1.4.4
+  # GHSA-3g3m-2fjr-6pw4, GHSA-g3hv-75wg-m249: rimraf 5 (via the OTel GCP detector), @sentry/bundler-plugins
+  # and archiver's readdir-glob pin glob/minimatch majors below the fixes; their APIs are unchanged
+  "glob@>=9.0.0 <14.0.2": "^14.0.3"
+  "minimatch@<11.0.1": "^11.0.3"
