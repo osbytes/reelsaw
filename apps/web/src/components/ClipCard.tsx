@@ -285,7 +285,7 @@ export function ClipCard({
               </DropdownMenu.Item>
               {onCopyLink && (
                 <DropdownMenu.Item className="menu-item" onSelect={onCopyLink}>
-                  Copy link
+                  Copy page link
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item

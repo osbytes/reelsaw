@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2 } from "lucide-react";
+import { Moon, Sun, LogOut, LifeBuoy, Settings as SettingsIcon, ExternalLink, Sparkles, Trash2, Users } from "lucide-react";
 import { ReportDialog } from "./components/ReportDialog";
 import { openReportHere } from "./lib/report";
 import { useSession, signOut } from "./lib/auth";
@@ -77,9 +77,10 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   );
 }
 
-/** Account menu: settings (with the update hint for admins), report, sign out. Theme and Report live here on a 390 px bar so the header keeps nav + search. */
+/** Account menu: settings (with the update hint for admins), report, sign out. Theme, Report and an admin's Users live here on a 390 px bar so the header keeps nav + search. */
 function Avatar() {
   const { data } = useSession();
+  const me = useMe();
   const navigate = useNavigate();
   const [theme, toggleTheme] = useTheme();
   const u = data?.user;
@@ -109,6 +110,11 @@ function Avatar() {
             <SettingsIcon className="h-4 w-4" /> Settings
             <UpdateMenuHint />
           </DropdownMenu.Item>
+          {me.data?.role === "admin" && (
+            <DropdownMenu.Item className="menu-item sm:hidden" onSelect={() => navigate("/admin/users")}>
+              <Users className="h-4 w-4" /> Users
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item className="menu-item" onSelect={() => navigate(DELETED_PATH)}>
             <Trash2 className="h-4 w-4" /> Deleted
           </DropdownMenu.Item>
@@ -137,7 +143,7 @@ function Avatar() {
   );
 }
 
-/** Admins only: link to user management, with the number waiting for approval. */
+/** Admins only: link to user management, with the number waiting for approval. Below sm it is in the account menu instead. */
 function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const me = useMe();
   const trpc = useTRPC();
@@ -145,7 +151,7 @@ function UsersLink({ nav }: { nav: (a: { isActive: boolean }) => string }) {
   const pending = useQuery({ ...trpc.admin.users.pendingCount.queryOptions(), enabled: isAdmin, refetchInterval: 30_000 });
   if (!isAdmin) return null;
   return (
-    <NavLink to="/admin/users" className={nav}>
+    <NavLink to="/admin/users" className={(a) => `${nav(a)} hidden sm:inline-block`}>
       Users
       {pending.data ? (
         <span className="ml-1.5 rounded-full bg-warn-soft px-1.5 py-0.5 font-mono text-[11px] text-ink" title="Waiting for approval">
