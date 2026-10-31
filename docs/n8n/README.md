@@ -67,8 +67,30 @@ The **Summary** node emits one item per video:
 
 `videoUrl` and `exportUrl` need the same `Authorization` header to download: use an HTTP Request
 node with the same credential and **Response format: File** to fetch the MP4s or the zip and hand
-them to an upload node. The zip carries a `.youtube.json` (YouTube Data API `videos.insert` body,
+them to an upload node. To give a URL to something that cannot send that header (Buffer, Metricool,
+Instagram's `video_url`), call `get_media_links` for share links instead; webhook deliveries already
+carry them. The zip carries a `.youtube.json` (YouTube Data API `videos.insert` body,
 private by default) and a `.tiktok.json` per clip.
+
+## Webhook instead of the wait loop
+
+Instead of looping on `wait_for_project`, let Reelsaw tell the workflow when it is done:
+
+1. In n8n, start a second workflow with a **Webhook** trigger (POST, respond immediately) and copy its
+   production URL.
+2. In Reelsaw, **Settings → Webhooks → Add webhook** with that URL and the `project.done` event (or
+   call the `create_webhook` tool). Copy the signing secret it shows once.
+3. In the first workflow, end after **Create project**, and pass your own ids in `create_project`'s
+   `metadata` (for example `{ "videoId": "{{$json.id}}" }`): every webhook for that project carries
+   them back, so the second workflow knows which upload a delivery belongs to.
+
+The delivery body has `data.project`, `data.clips` (title, hook, caption, hashtags, score, and a
+`shareUrl` per clip that downloads without a credential) and `data.exportShareUrl` for the zip.
+Check the signature in a Code node (`webhook-id`, `webhook-timestamp`, `webhook-signature`, HMAC-SHA256
+of `id.timestamp.body` with the base64 part of the `whsec_` secret) or behind a reverse proxy that does.
+A self-hosted n8n on the same machine or LAN needs the admin to allow webhooks to private networks
+(`ALLOW_PRIVATE_WEBHOOK_URLS`, Settings → System → Limits). Deliveries are retried for about a day,
+and each one is in the webhook's delivery log with what n8n answered.
 
 ## Notes
 

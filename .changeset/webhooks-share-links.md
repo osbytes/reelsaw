@@ -1,0 +1,5 @@
+---
+"@reelsaw/server": minor
+---
+
+Outbound webhooks, share links and project metadata. Webhooks POST `project.created`, `project.done`, `project.failed`, `clip.done` and `clip.failed` to your URLs, signed the Standard Webhooks way, written in the same transaction as the event, retried for about a day and turned off (with an email) when an endpoint keeps failing; Settings → Webhooks has a test button, secret rotation and a delivery log with Resend. Share links are revocable public URLs to a clip, thumbnail, captions or a project's zip that expire after 90 days by default and serve the file directly with Range support; `project.done` carries them, so a pipeline can hand a clip to a scheduler without downloading it. Projects take up to 20 `metadata` keys that come back on every webhook. Each ships with MCP tools (`create_webhook`, `get_media_links`, …) and `reelsaw webhooks` / `reelsaw media-links` commands. New settings: `MAX_WEBHOOKS_PER_USER`, `ALLOW_PRIVATE_WEBHOOK_URLS`, `MEDIA_LINK_TTL_DAYS`, `MEDIA_LINK_ALLOW_NEVER`, `MEDIA_LINK_RETENTION_DAYS`, `MEDIA_LINKS_REDIRECT`, `WEBHOOK_DELIVERY_RETENTION_DAYS`, `WEBHOOK_CONCURRENCY`.

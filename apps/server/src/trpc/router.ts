@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { TRPCError, tracked } from "@trpc/server";
 import { router, mergeRouters, protectedProcedure, publicProcedure, signedInProcedure, adminProcedure } from "./context.js";
+import { mediaLinksRouter, webhooksRouter } from "./integrations.js";
 import { approveUser, banUser, removeUser, setUserLimits, setUserPassword, setUserRole, setUserWatermark, unbanUser } from "../accounts.js";
 import {
   decisionSummary,
@@ -62,6 +63,7 @@ import { FAILURE_STAGES, getFailure, listFailures, retryFailures } from "../ops/
 import { schema, type Db } from "../db/index.js";
 import {
   CLEARABLE_SETTINGS,
+  projectMetadataSchema,
   createProjectInputSchema,
   projectSettingsPatchSchema,
   defaultProjectSettings,
@@ -223,6 +225,8 @@ function publicProject(p: schema.Project) {
     stageDetail: p.stageDetail,
     error: p.error,
     settings: p.settings,
+    /** the creator's own key/value pairs (create_project metadata), echoed in webhooks */
+    metadata: p.metadata,
     sourceVideoUrl: p.sourceKey && !p.sourceExpiredAt ? `/media/source/${p.id}` : null,
     /** retention removed the stored source; Retry downloads it again */
     sourceExpiredAt: p.sourceExpiredAt?.toISOString() ?? null,
@@ -1526,6 +1530,7 @@ const restRouter = router({
           title: z.string().trim().min(1).max(200).optional(),
           settings: projectSettingsPatchSchema.optional(),
           clear: z.array(z.enum(CLEARABLE_SETTINGS)).max(CLEARABLE_SETTINGS.length).optional(),
+          metadata: projectMetadataSchema.optional(),
         }),
       )
       .mutation(({ ctx, input }) => updateProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, input)),
@@ -1866,5 +1871,9 @@ const layerTemplatesRouter = router({
   applyToClips: protectedProcedure.input(z.object(applyLayerTemplateInput)).mutation(({ ctx, input }) => applyLayerTemplate(ctx.svc, ctx.user.id, input)),
 });
 
-export const appRouter = mergeRouters(headRouter, router({ library: libraryRouter, layerTemplates: layerTemplatesRouter }), restRouter);
+export const appRouter = mergeRouters(
+  headRouter,
+  router({ library: libraryRouter, layerTemplates: layerTemplatesRouter, mediaLinks: mediaLinksRouter, webhooks: webhooksRouter }),
+  restRouter,
+);
 export type AppRouter = typeof appRouter;

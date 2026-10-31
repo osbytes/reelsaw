@@ -15,6 +15,12 @@ export const QUEUES = {
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+/**
+ * Webhook deliveries (webhooks/deliver.ts): outside the pipeline, no admission. pg-boss retries are off: the retry
+ * schedule is the delivery row's (each attempt is a new job with startAfter), so it is visible in the delivery log.
+ */
+export const WEBHOOK_QUEUE = "webhooks.deliver";
+
 export interface ProjectJob {
   projectId: string;
   /** the project's owner, written by `enqueue` (fairness: live jobs are counted per user) */
@@ -123,7 +129,7 @@ export interface Queue {
    */
   enqueue(queue: QueueName, data: JobData, opts?: TxOpts & { admission?: Admission; priorityBoost?: number; expireInSeconds?: number }): Promise<string | null>;
   /** A job on any queue the caller created itself (ee/ billing): plain pg-boss send on the transaction's connection when given. */
-  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string | undefined }): Promise<string | null>;
+  send(queue: string, data: object, opts?: TxOpts & { singletonKey?: string | undefined; startAfterSeconds?: number | undefined }): Promise<string | null>;
   /** The job owner's in-flight work (see `Admission`), on the transaction's connection when given. */
   admission(data: JobData, opts?: TxOpts): Promise<Admission>;
   /** True if a job for this key is created, retrying, or active. */
@@ -202,6 +208,8 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
           .updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit })
           .catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
+      // the http process sends to it too (test, resend), so it exists wherever the queue starts
+      await boss.createQueue(WEBHOOK_QUEUE, { policy: "standard", retryLimit: 0, expireInSeconds: 120, deleteAfterSeconds: 3 * 24 * 3600 });
       started = true;
     },
     started: () => started,
@@ -213,7 +221,11 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
     },
     admission,
     send: (queue, data, opts) =>
-      boss.send(queue, data, { ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}), ...(opts?.db ? { db: opts.db } : {}) }),
+      boss.send(queue, data, {
+        ...(opts?.singletonKey ? { singletonKey: opts.singletonKey } : {}),
+        ...(opts?.startAfterSeconds ? { startAfter: opts.startAfterSeconds } : {}),
+        ...(opts?.db ? { db: opts.db } : {}),
+      }),
     async enqueue(queue, data, opts) {
       const singletonKey = "clipId" in data ? data.clipId : data.projectId;
       const a = opts?.admission ?? (await admission(data, opts));

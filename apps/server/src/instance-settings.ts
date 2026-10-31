@@ -111,6 +111,14 @@ export const RUNTIME_SETTINGS = {
   MAX_UPLOAD_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest accepted file upload, in MB."),
   MAX_SOURCE_FILE_MB: def("limits", z.number().int().min(1).max(1_000_000), "Largest file a link source may download (yt-dlp --max-filesize), in MB."),
   ALLOW_PRIVATE_SOURCE_URLS: def("limits", z.boolean(), "Let link sources point at LAN or loopback hosts (a NAS). Off, they are blocked (SSRF guard)."),
+  MAX_WEBHOOKS_PER_USER: def("limits", int0, "Webhook endpoints an account may add. 0 = unlimited. Admins can override per user on the Users page."),
+  ALLOW_PRIVATE_WEBHOOK_URLS: def(
+    "limits",
+    z.boolean(),
+    "Let webhook URLs point at LAN or loopback hosts (a self-hosted n8n next to Reelsaw), over http too. Off, they must be public https (SSRF guard).",
+  ),
+  MEDIA_LINK_TTL_DAYS: def("limits", z.number().int().min(1).max(3650), "Share links last this many days unless the owner picks less."),
+  MEDIA_LINK_ALLOW_NEVER: def("limits", z.boolean(), "Owners may make a share link that never expires (they can still revoke it)."),
 
   TRANSCRIPT_CORRECTION: def(
     "pipeline",
@@ -154,6 +162,8 @@ export const RUNTIME_SETTINGS = {
   EVENT_RETENTION_DAYS: def("retention", int0, days("Prune project events older than this; each project keeps its run skeleton.")),
   LLM_USAGE_RETENTION_DAYS: def("retention", int0, days("Prune model and transcription usage rows older than this.")),
   ADMIN_EVENT_RETENTION_DAYS: def("retention", int0, days("Prune the admin event log after this many days.")),
+  MEDIA_LINK_RETENTION_DAYS: def("retention", int0, days("Delete revoked and expired share links this many days after they stopped working.")),
+  WEBHOOK_DELIVERY_RETENTION_DAYS: def("retention", int0, days("Delete webhook delivery log rows older than this.")),
   DECISION_RETENTION_DAYS: def(
     "retention",
     int0,

@@ -91,6 +91,12 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | `reelsaw decisions forget <email> [--project id]` | delete the account's decisions, or one project's (forget_decisions) |
 | `reelsaw decisions learning <email> on\|off` | record the account's decisions or stop (Settings → Learning / set_learning) |
 | `reelsaw decisions backfill [--dry-run]` | write decisions still held in transcripts from before the log existed |
+| `reelsaw media-links <email> [--project id] [--json] [--active]` | the account's share links: target, state, expiry, last use (Settings → Share links / list_media_links) |
+| `reelsaw media-links create <projectId> [clipId…] [--kind clip\|thumb\|srt\|vtt\|export] [--ttl days] [--label text]` | a share link per clip (or one for the zip) that needs no sign-in (get_media_links); reuses the active one unless --ttl or --label |
+| `reelsaw media-links revoke <linkId> \| --project <id> \| --clip <id> \| --all <email>` | turn share links off now (revoke_media_link) |
+| `reelsaw webhooks <email> [--json]` | the account's webhook endpoints: masked URL, events, status, last delivery (Settings → Webhooks / list_webhooks) |
+| `reelsaw webhooks deliveries <endpointId> [--status failed] [--json]` | an endpoint's delivery log (list_webhook_deliveries) |
+| `reelsaw webhooks resend <deliveryId> \| test <endpointId> \| enable <endpointId> \| disable <endpointId>` | send one again, send a test now, or turn an endpoint on / off (resend_webhook_delivery, test_webhook, update_webhook) |
 | `reelsaw machine [--json]` | this box: cpus, memory, disk, GPU, ffmpeg encoder in use and why, where each on-device model runs (same as Settings → System → Overview) |
 | `reelsaw ytdlp-proxies [--json]` | yt-dlp egress pool: operator priority vs circuit (reliability), never URLs |
 | `reelsaw workers [--json]` | every process that has checked in: role, specs, last seen, current jobs (same as Settings → System → Workers) |
@@ -298,6 +304,23 @@ whisper-1 on a 10-minute chunk looped `"no"` 2,270 times after a spoken "No, no,
 
 ## 5. Lessons: operations
 
+- **A webhook isn't arriving.** Open Settings → Webhooks and the endpoint's delivery log (or
+  `reelsaw webhooks <email>`, then `reelsaw webhooks deliveries <endpointId> --status failed`). Each row
+  says what happened: "Answered 401" (the receiver rejected it: check its signature step and secret),
+  "Timed out after 10 s" (it must answer within 10 s; do the work after replying), "Answered with a
+  redirect" (use the final URL: deliveries never follow redirects), "That address points inside this
+  server's network" (a LAN or loopback URL needs `ALLOW_PRIVATE_WEBHOOK_URLS`). Nothing in the log means
+  the endpoint is not subscribed to that event, or was off when it happened. Failed deliveries are retried
+  8 times over about 22 hours; after 3 days of failures the endpoint is turned off and the owner emailed.
+  Fix the receiver, turn it on, and Resend (`reelsaw webhooks resend <deliveryId>`). Logs: `module=webhooks`
+  ("webhook attempt failed" has the reason and the next attempt).
+- **A share link stopped working.** 404 "invalid, expired or was turned off" covers every miss on purpose
+  (a revoked or expired link, a deleted clip or project, a banned owner): check Settings → Share links or
+  `reelsaw media-links <email>` for its state. 409 means the clip is rendering right now; 410 means
+  retention removed its files (`CLIP_RETENTION_DAYS`) and a re-render brings the link back. A scheduler
+  that says it could not fetch the media: `curl -sI <link>` should answer 200 and `video/mp4` with no
+  redirect (`MEDIA_LINKS_REDIRECT=false`, the default). Rotating `BETTER_AUTH_SECRET` makes every stored
+  link unreadable: copy new ones.
 - **Deploys interrupt jobs.** Rebuilding the app container kills in-flight renders; pg-boss retries them, and each
   interruption consumes a retry (render limit is 4 for this reason; `updateQueue` syncs limits on boot). Check
   `reelsaw status` for live jobs before deploying while someone is watching a project.

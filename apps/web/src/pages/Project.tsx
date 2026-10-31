@@ -24,6 +24,7 @@ import { ProjectBumpersModal } from "../components/BumperField";
 import { ProjectTemplateModal } from "../components/TemplatePicker";
 import { TranscriptFileModal } from "../components/TranscriptFileModal";
 import { BatchBar } from "../components/BatchBar";
+import { useCopyShareLink } from "../components/ShareLinks";
 import { TranscriptPanel } from "../components/TranscriptPanel";
 import { usePlayback } from "../lib/playback";
 import { openReport } from "../lib/report";
@@ -93,6 +94,16 @@ export function ProjectPage() {
   const notifyDeleted = useDeletedToast();
   const rerender = useMutation(trpc.clips.rerender.mutationOptions());
   const rerenderMany = useMutation(trpc.clips.rerenderMany.mutationOptions());
+  const copyShareLink = useCopyShareLink();
+  const revokeLinks = useMutation(
+    trpc.mediaLinks.revoke.mutationOptions({
+      onSuccess: (r) => {
+        toast(r.message);
+        void qc.invalidateQueries({ queryKey: trpc.mediaLinks.list.pathKey() });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const setSourceText = useMutation(trpc.projects.setSourceText.mutationOptions());
 
   const [log, setLog] = useState<ProjectEvent[]>([]);
@@ -570,6 +581,23 @@ export function ProjectPage() {
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="menu w-[270px]">
+              <DropdownMenu.Item
+                className="menu-item block"
+                disabled={!readyCount}
+                title={readyCount ? "A link anyone can download the zip from, without signing in" : "No clip is rendered yet"}
+                onSelect={() => copyShareLink({ kind: "export", projectId: id }, "the zip of every rendered clip")}
+              >
+                Copy link to zip
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="menu-item block"
+                disabled={revokeLinks.isPending}
+                title="Turn off every share link to this project's clips and zip"
+                onSelect={() => revokeLinks.mutate({ projectId: id })}
+              >
+                Revoke this project’s share links
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="mx-1.5 my-1 h-px bg-line" />
               {failedClips.length > 0 && (
                 <DropdownMenu.Item
                   className="menu-item block"

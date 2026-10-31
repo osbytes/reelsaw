@@ -23,10 +23,22 @@ export interface Storage {
   exists(key: string): Promise<boolean>;
   /** Either a local file path to stream, or a URL to redirect the client to. */
   resolve(key: string, opts?: { downloadName?: string | undefined }): Promise<{ file: string } | { url: string }>;
+  /**
+   * The object to stream back from this server (share links: no redirect). Local: the file path, for sendFile. S3: the
+   * GetObject body, with the incoming Range passed on and the status and headers to answer with.
+   */
+  openRead(key: string, range?: string | undefined): Promise<{ file: string } | ObjectRead>;
   delete(key: string): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
   /** Up to `limit` objects under `prefix` (keys as passed to the other methods) with their last-modified time. A bounded listing, not a walk of the bucket. */
   list(prefix: string, limit: number): Promise<Array<{ key: string; modifiedAt: Date }>>;
+}
+
+/** A streamed object: status 200, or 206 for a Range; headers carry Content-Length, Content-Range, ETag, Last-Modified. */
+export interface ObjectRead {
+  body: Readable;
+  status: 200 | 206;
+  headers: Record<string, string>;
 }
 
 /** Content types for the files this server streams (uploads, library assets, renders); anything else is an octet stream. */
@@ -123,6 +135,9 @@ class LocalStorage implements Storage {
     return fileExists(this.abs(key));
   }
   async resolve(key: string) {
+    return { file: this.abs(key) };
+  }
+  async openRead(key: string) {
     return { file: this.abs(key) };
   }
   async delete(key: string) {
@@ -268,6 +283,19 @@ class S3Storage implements Storage {
     return { url };
   }
 
+  async openRead(key: string, range?: string) {
+    const { client, sdk } = await this.s3();
+    const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: this.k(key), ...(range ? { Range: range } : {}) }));
+    if (!res.Body) throw new Error(`storage object missing: ${key}`);
+    const headers: Record<string, string> = { "Accept-Ranges": "bytes" };
+    if (res.ContentLength !== undefined) headers["Content-Length"] = String(res.ContentLength);
+    if (res.ContentRange) headers["Content-Range"] = res.ContentRange;
+    if (res.ETag) headers.ETag = res.ETag;
+    if (res.LastModified) headers["Last-Modified"] = res.LastModified.toUTCString();
+    // the SDK's Node body is a Readable (sdkStreamMixin over IncomingMessage)
+    return { body: res.Body as Readable, status: res.ContentRange ? (206 as const) : (200 as const), headers };
+  }
+
   async delete(key: string) {
     const { client, sdk } = await this.s3();
     await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
@@ -332,6 +360,7 @@ export function withStorageLogging(inner: Storage, log: Logger): Storage {
     ensureLocal: (key, localPath) => timed("ensureLocal", key, () => inner.ensureLocal(key, localPath)),
     exists: (key) => inner.exists(key),
     resolve: (key, opts) => inner.resolve(key, opts),
+    openRead: (key, range) => timed("openRead", key, () => inner.openRead(key, range)),
     delete: (key) => timed("delete", key, () => inner.delete(key)),
     deletePrefix: (prefix) => timed("deletePrefix", prefix, () => inner.deletePrefix(prefix)),
     list: (prefix, limit) => timed("list", prefix, () => inner.list(prefix, limit)),

@@ -954,8 +954,19 @@ export const projectSettingsPatchSchema = withoutDefaults(projectSettingsSchema.
 export const CLEARABLE_SETTINGS = ["maxClips", "focus", "instructions", "language", "vocabulary", "reframeAdjust"] as const;
 export type ClearableSetting = (typeof CLEARABLE_SETTINGS)[number];
 
+/**
+ * The creator's own key/value pairs on a project (docs/specs/webhooks.md): echoed in every webhook for it so a workflow
+ * can match "the project I started" to its result. Never interpreted. At most 20 keys, values up to 500 chars, 1 KB in all.
+ */
+export const projectMetadataSchema = z
+  .record(z.string().regex(/^[A-Za-z0-9_.-]{1,40}$/, "Metadata keys are 1-40 letters, digits, _ . or -"), z.string().max(500))
+  .refine((m) => Object.keys(m).length <= 20, "At most 20 metadata keys")
+  .refine((m) => JSON.stringify(m).length <= 1024, "Metadata is at most 1 KB");
+export type ProjectMetadata = z.infer<typeof projectMetadataSchema>;
+
 export const createProjectInputSchema = z.object({
   title: z.string().min(1).max(200).optional(),
+  metadata: projectMetadataSchema.optional(),
   sourceUrl: z.url({ protocol: /^https?$/, message: "Use a link that starts with http:// or https://" }).optional(),
   uploadId: z.string().optional(),
   settings: projectSettingsPatchSchema.optional(),

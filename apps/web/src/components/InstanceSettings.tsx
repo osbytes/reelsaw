@@ -64,6 +64,10 @@ export const LIMIT_FIELDS: Field[] = [
   { key: "MAX_UPLOAD_MB", label: "Largest upload", kind: "int", min: 1, unit: "MB" },
   { key: "MAX_SOURCE_FILE_MB", label: "Largest link download", kind: "int", min: 1, unit: "MB" },
   { key: "ALLOW_PRIVATE_SOURCE_URLS", label: "Links to private networks", kind: "bool", on: "Allowed", off: "Blocked" },
+  { key: "MAX_WEBHOOKS_PER_USER", label: "Webhooks per account", kind: "int", unit: "webhooks", zero: "unlimited" },
+  { key: "ALLOW_PRIVATE_WEBHOOK_URLS", label: "Webhooks to private networks", kind: "bool", on: "Allowed", off: "Blocked" },
+  { key: "MEDIA_LINK_TTL_DAYS", label: "Share links last", kind: "int", min: 1, unit: "days" },
+  { key: "MEDIA_LINK_ALLOW_NEVER", label: "Share links that never expire", kind: "bool", on: "Allowed", off: "Not allowed" },
 ];
 
 export const RETENTION_FIELDS: Field[] = [
@@ -75,6 +79,8 @@ export const RETENTION_FIELDS: Field[] = [
   { key: "LLM_USAGE_RETENTION_DAYS", label: "Keep usage rows", kind: "int", unit: "days", zero: "forever" },
   { key: "ADMIN_EVENT_RETENTION_DAYS", label: "Keep the admin log", kind: "int", unit: "days", zero: "forever" },
   { key: "DECISION_RETENTION_DAYS", label: "Keep users' decisions", kind: "int", unit: "days", zero: "forever" },
+  { key: "MEDIA_LINK_RETENTION_DAYS", label: "Keep revoked share links listed", kind: "int", unit: "days", zero: "forever" },
+  { key: "WEBHOOK_DELIVERY_RETENTION_DAYS", label: "Keep webhook delivery logs", kind: "int", unit: "days", zero: "forever" },
 ];
 
 export const PIPELINE_FIELDS: Field[] = [

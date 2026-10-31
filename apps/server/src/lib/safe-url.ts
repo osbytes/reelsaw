@@ -159,9 +159,16 @@ export interface FetchPublicOptions extends SafeUrlOptions {
   maxRedirects?: number;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  /** POST with this body (webhooks); a GET without. A POST is never re-sent to a redirect: pass maxRedirects 0. */
+  method?: "GET" | "POST";
+  body?: string;
   /** Injectable for tests: called instead of the network with the validated URL (and the pinned address). */
   fetch?:
-    | ((url: URL, init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string> }, pinned: string | null) => Promise<PublicResponse>)
+    | ((
+        url: URL,
+        init: { redirect: "manual"; signal?: AbortSignal; headers?: Record<string, string>; method?: "GET" | "POST"; body?: string },
+        pinned: string | null,
+      ) => Promise<PublicResponse>)
     | undefined;
 }
 
@@ -192,7 +199,13 @@ export async function fetchPublic(raw: string, opts: FetchPublicOptions = {}): P
   let next = raw;
   for (let hop = 0; ; hop++) {
     const { url, address } = await resolvePublicHttpUrl(next, opts);
-    const init = { redirect: "manual" as const, ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.headers ? { headers: opts.headers } : {}) };
+    const init = {
+      redirect: "manual" as const,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.headers ? { headers: opts.headers } : {}),
+      ...(opts.method ? { method: opts.method } : {}),
+      ...(opts.body !== undefined ? { body: opts.body } : {}),
+    };
     // one agent per hop: close() lets the in-flight request (and the body the caller reads) finish, then frees the sockets
     const agent = !opts.fetch && address ? pinnedAgent(address) : undefined;
     const closeAgent = () => void agent?.close().catch(() => undefined);

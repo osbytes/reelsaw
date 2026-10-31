@@ -534,7 +534,13 @@ export async function updateProject(
   svc: Services,
   actor: Actor,
   projectId: string,
-  input: { title?: string | undefined; settings?: ProjectSettingsPatch | undefined; clear?: ClearableSetting[] | undefined },
+  input: {
+    title?: string | undefined;
+    settings?: ProjectSettingsPatch | undefined;
+    clear?: ClearableSetting[] | undefined;
+    /** replaces the whole map (no merge); {} clears it */
+    metadata?: Record<string, string> | undefined;
+  },
 ) {
   return svc.tx(async (u) => {
     const p = await findProject(u.db, actor, projectId, { deleted: false });
@@ -558,6 +564,8 @@ export async function updateProject(
     const title = input.title?.trim();
     const titleChanged = !!title && title !== p.title;
     if (titleChanged) changed.unshift("title");
+    const metadataChanged = input.metadata !== undefined && JSON.stringify(input.metadata) !== JSON.stringify(p.metadata);
+    if (metadataChanged) changed.push("metadata");
     const needsRerender = changed.some((k) => RENDER_KEYS.has(k));
     const needsReanalyze = changed.some((k) => SELECTION_KEYS.has(k));
     const needsRefine = changed.some((k) => REFINE_KEYS.has(k));
@@ -567,7 +575,12 @@ export async function updateProject(
       const write = Object.fromEntries(Object.keys(patch).map((k) => [k, merged[k as keyof ProjectSettings]]));
       await u.db
         .update(schema.projects)
-        .set({ ...(titleChanged ? { title } : {}), settings: settingsWrite(expr, write), updatedAt: new Date() })
+        .set({
+          ...(titleChanged ? { title } : {}),
+          ...(metadataChanged ? { metadata: input.metadata } : {}),
+          settings: settingsWrite(expr, write),
+          updatedAt: new Date(),
+        })
         .where(eq(schema.projects.id, p.id));
       await u.emit(p.id, "project.updated", { changed });
     }
@@ -854,7 +867,17 @@ export async function createProject(svc: Services, userId: string, input: Create
       throw new TRPCError({ code: "BAD_REQUEST", message: "minClipSeconds must be below maxClipSeconds" });
     const [row] = await u.db
       .insert(schema.projects)
-      .values({ id, userId, title, sourceType: input.uploadId ? "upload" : "url", sourceUrl: input.sourceUrl ?? null, sourceMeta, settings, status: "queued" })
+      .values({
+        id,
+        userId,
+        title,
+        sourceType: input.uploadId ? "upload" : "url",
+        sourceUrl: input.sourceUrl ?? null,
+        sourceMeta,
+        settings,
+        status: "queued",
+        metadata: input.metadata ?? {},
+      })
       .returning();
     if (!row) throw new Error("the project row was not returned");
     await recordProjectCreated(u.db, userId, id, row.createdAt);

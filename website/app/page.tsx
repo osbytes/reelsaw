@@ -112,6 +112,8 @@ const MCP_TOOLS = [
   "search_assets",
   "apply_layer_template",
   "export_project",
+  "get_media_links",
+  "create_webhook",
 ];
 
 function SectionHeading({ eyebrow, title, body, id }: { eyebrow: string; title: string; body?: string; id?: string }) {

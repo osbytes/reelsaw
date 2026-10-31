@@ -98,7 +98,7 @@ export const COMPETITORS: Competitor[] = [
       },
       {
         q: "Can I automate Opus Clip or Reelsaw from an agent?",
-        a: "Both. Opus Clip offers a Video Editing API, an MCP connector and Zapier on its Pro plan. Reelsaw ships an MCP server and an operator CLI on every install, with no plan gate, including the hosted Free plan.",
+        a: "Both. Opus Clip offers a Video Editing API, an MCP connector and Zapier on its Pro plan. Reelsaw ships an MCP server, signed webhooks (which Zapier, Make and n8n can subscribe to) and an operator CLI on every install, with no plan gate, including the hosted Free plan.",
       },
     ],
     sources: [

@@ -79,6 +79,9 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[redacted email]"],
   // presigned URL signatures (S3 / R2 / GCS) and similar tokens in query strings
   [/([?&](?:X-Amz-[A-Za-z-]+|Signature|sig|token|access_token|key|api_key|apikey|expires)=)[^&"'\s]+/gi, "$1[redacted]"],
+  // share links (/m/<token>/…) and webhook signing secrets
+  [/(\/m\/)[A-Za-z0-9_-]{43}(?=\/)/g, "$1[redacted]"],
+  [/\bwhsec_[A-Za-z0-9+/=]{16,}/g, "[redacted key]"],
   [/\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, "[redacted key]"],
   [/\b(sk-ant|sk-proj|gsk|xai|AIza)[A-Za-z0-9_-]{12,}/g, "[redacted key]"],
 ];

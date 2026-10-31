@@ -91,6 +91,23 @@ export const envSchema = z.object({
   MAX_UPLOAD_MB: z.coerce.number().default(4096),
   MAX_SOURCE_FILE_MB: z.coerce.number().int().min(1).default(8192), // yt-dlp --max-filesize for URL sources
   ALLOW_PRIVATE_SOURCE_URLS: boolFalse, // true: URL sources may point at LAN/loopback addresses (e.g. a NAS)
+  // integrations (docs/specs/media-links.md, webhooks.md). Runtime settings except the two process knobs.
+  /** Share links last this many days unless the owner picks less (1-3650). */
+  MEDIA_LINK_TTL_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+  /** The owner may pick "Never expires" for a share link (hosted sets false). */
+  MEDIA_LINK_ALLOW_NEVER: boolTrue,
+  /** Revoked and expired share links are deleted this many days after they stopped working (0 = keep). */
+  MEDIA_LINK_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
+  /** S3 only: answer a share link with a 302 to a presigned URL instead of streaming the object (check your consumers follow redirects). */
+  MEDIA_LINKS_REDIRECT: boolFalse,
+  /** Webhook endpoints an account may have; 0 = unlimited. */
+  MAX_WEBHOOKS_PER_USER: z.coerce.number().int().min(0).default(10),
+  /** true: webhook URLs may point at LAN/loopback hosts (a self-hosted n8n on the same network); also allows http. */
+  ALLOW_PRIVATE_WEBHOOK_URLS: boolFalse,
+  /** Delivery log rows are deleted after this many days (0 = keep). */
+  WEBHOOK_DELIVERY_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
+  /** Webhook deliveries in flight per process. */
+  WEBHOOK_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
 
   AI_MODEL: z.string().default("openai:gpt-4o-mini"),
   TRANSCRIPTION_MODEL: z.string().default("openai:whisper-1"),

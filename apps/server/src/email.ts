@@ -183,6 +183,26 @@ export const templates = {
         linkFallback(url),
     });
   },
+  webhookDisabled: (appUrl: string, endpoint: string, reason: string) => {
+    const url = `${appUrl.replace(/\/$/, "")}/settings#webhooks`;
+    return message({
+      subject: "A Reelsaw webhook was turned off",
+      preheader: `${endpoint} stopped receiving events.`,
+      title: "Webhook turned off",
+      text: `Reelsaw stopped sending events to ${endpoint}.
+
+${reason}
+
+Fix the receiver, then turn the webhook back on and resend what it missed: ${url}
+`,
+      bodyHtml:
+        `<p style="margin:0 0 12px">Reelsaw stopped sending events to <b>${escapeHtml(endpoint)}</b>.</p>` +
+        `<p style="margin:0 0 12px">${escapeHtml(reason)}</p>` +
+        `<p style="margin:0 0 12px">Fix the receiver, then turn the webhook back on and resend what it missed from its delivery log.</p>` +
+        ctaButton(url, "Open webhooks") +
+        linkFallback(url),
+    });
+  },
   approved: (appUrl: string) => {
     const url = `${appUrl.replace(/\/$/, "")}/login`;
     return message({

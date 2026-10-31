@@ -4,6 +4,7 @@ import { createServices, shutdownServices, StartupError } from "./services.js";
 import { createLogger } from "./log.js";
 import { createApp } from "./http.js";
 import { startWorkers } from "./queue/workers.js";
+import { startWebhookWorker } from "./webhooks/deliver.js";
 import { startReconciler, startStallWatch } from "./queue/reconcile.js";
 import { beat, startHeartbeat } from "./ops/workers.js";
 import { trackHttpServer, type HttpCloser } from "./http-shutdown.js";
@@ -49,6 +50,7 @@ async function main() {
   let stopReconciler: (() => void) | undefined;
   let stopHeartbeat: (() => Promise<void>) | undefined;
   let stopDiskGate: (() => void) | undefined;
+  let stopWebhookSweep: (() => void) | undefined;
   let httpCloser: HttpCloser | undefined;
 
   if (config.RUN_HTTP) {
@@ -76,6 +78,7 @@ async function main() {
     const { diskGate } = await startWorkers(svc);
     stopDiskGate = () => diskGate.stop();
     if (svc.ee) await svc.ee.startWorkers();
+    stopWebhookSweep = await startWebhookWorker(svc);
     stopReconciler = startReconciler(svc);
   } else {
     log.warn(
@@ -98,6 +101,7 @@ async function main() {
     setTimeout(() => process.exit(1), (config.SHUTDOWN_GRACE_SECONDS + 15) * 1000).unref();
     stopReconciler?.();
     stopDiskGate?.();
+    stopWebhookSweep?.();
     // stop accepting and end SSE streams now; a request still running gets 10 s, then the job drain below goes on
     if (httpCloser && !(await httpCloser.close(10_000)))
       log.warn({ timeoutSeconds: 10 }, "http connections still open after the close cap; continuing shutdown");
