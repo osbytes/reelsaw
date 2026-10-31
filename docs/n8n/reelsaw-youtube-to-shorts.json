@@ -1,0 +1,533 @@
+{
+  "name": "Reelsaw: new YouTube upload → vertical shorts",
+  "nodes": [
+    {
+      "id": "752ba1eb-9f07-4932-9494-cbd47aa41927",
+      "name": "New YouTube upload",
+      "type": "n8n-nodes-base.rssFeedReadTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "feedUrl": "https://www.youtube.com/feeds/videos.xml?channel_id=YOUR_CHANNEL_ID"
+      }
+    },
+    {
+      "id": "2e124cd8-a953-4832-88fd-fcacc6a8adba",
+      "name": "Test with one video",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "55693b9f-3c70-425d-90a4-ba371d900101",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "466dd044-82d2-4396-9113-a80ba86784ce",
+              "name": "reelsawUrl",
+              "value": "https://app.reelsaw.com",
+              "type": "string"
+            },
+            {
+              "id": "9b5eeb0a-94b4-4c10-8170-831cc3e72f1a",
+              "name": "videoUrl",
+              "value": "={{ $json.link ?? 'https://www.youtube.com/watch?v=PASTE_A_VIDEO_ID' }}",
+              "type": "string"
+            },
+            {
+              "id": "4d5457ac-3f5d-4fca-9af8-766565b43602",
+              "name": "maxClips",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "480c8f51-aca6-4c0c-a8af-59915e934679",
+              "name": "focus",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "558e2108-7a58-4504-ac63-2250bc0d75f3",
+      "name": "Create project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').item.json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_project', arguments: { sourceUrl: $json.videoUrl, settings: Object.assign({ maxClips: $json.maxClips }, $json.focus ? { focus: $json.focus } : {}) } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "0a83f0f3-8f57-48c1-bbfe-3ae98b7f514f",
+      "name": "Read project",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// MCP tools/call answers { result: { content: [{ type: 'text', text }], isError? } }.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nreturn { json: JSON.parse(text) };"
+      }
+    },
+    {
+      "id": "8ae810f2-3d84-44d9-ab9f-442994997ba7",
+      "name": "Wait for project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').item.json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for_project', arguments: { id: $json.id, timeoutSeconds: 110 } } }) }}",
+        "options": {
+          "timeout": 130000
+        }
+      }
+    },
+    {
+      "id": "602698dd-2ff8-4cdc-ab37-df0115cf6833",
+      "name": "Read status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// MCP tools/call answers { result: { content: [{ type: 'text', text }], isError? } }.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nconst p = JSON.parse(text);\n// Each wait blocks up to 110 s; give up after about 3 hours.\nconst finished = p.status === 'done' || p.status === 'failed';\nif (!finished && $runIndex >= 95) throw new Error(`Reelsaw project ${p.id} still at ${p.stage} after 3 hours`);\nreturn { json: { ...p, finished } };"
+      }
+    },
+    {
+      "id": "f035e0aa-7985-426a-8a25-96fe8622854f",
+      "name": "Finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b2ceb2bf-95af-4642-ba42-26cdf32e2caa",
+              "leftValue": "={{ $json.finished }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "71b36373-2533-421e-9bc9-b41fb8171499",
+      "name": "Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "5ca56e10-8bf7-4baf-97f3-13c7c4def29e",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d8d9ffef-5ea9-4265-a66f-5c65a0f6e137",
+      "name": "Project failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        240
+      ],
+      "parameters": {
+        "errorMessage": "={{ `Reelsaw project ${$json.id} failed: ${$json.error ?? 'unknown error'}` }}"
+      }
+    },
+    {
+      "id": "b42e1322-09a1-4657-aabc-6fc3aa425dac",
+      "name": "Get clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').item.json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_project', arguments: { id: $json.id } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "9c00dc13-85e3-4e8a-9d30-377dca1ad2bf",
+      "name": "Read clips",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        60
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// MCP tools/call answers { result: { content: [{ type: 'text', text }], isError? } }.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nreturn { json: JSON.parse(text) };"
+      }
+    },
+    {
+      "id": "d0f46ff2-a638-41b7-a141-92b12a9390ea",
+      "name": "Export zip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').item.json.reelsawUrl.replace(/\\/$/, '') }}/api/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'export_project', arguments: { id: $json.id } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "d6245f65-d3ec-4752-8168-c5c3fea19e87",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        60
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// MCP tools/call answers { result: { content: [{ type: 'text', text }], isError? } }.\nconst r = $json;\nif (r.error) throw new Error(`Reelsaw MCP error: ${r.error.message}`);\nconst text = r.result?.content?.[0]?.text ?? '';\nif (r.result?.isError) throw new Error(`Reelsaw: ${text}`);\nconst zip = JSON.parse(text);\nconst p = $('Read clips').item.json;\nconst clips = (p.clips ?? [])\n  .filter((c) => c.status === 'done')\n  .map((c) => ({ title: c.title, hook: c.hook, score: c.score, durationSec: c.durationSec, layout: c.layout, videoUrl: c.videoUrl }));\nconst lines = clips.map((c, i) => `${i + 1}. ${c.title} (${c.durationSec}s, score ${c.score})`);\nreturn {\n  json: {\n    title: p.title,\n    projectUrl: p.url,\n    exportUrl: zip.url,\n    clips,\n    message: [`Reelsaw cut ${clips.length} clip${clips.length === 1 ? '' : 's'} from \"${p.title}\"`, ...lines, `Review: ${p.url}`].join('\\n'),\n  },\n};"
+      }
+    },
+    {
+      "id": "d3735372-fc24-4c0f-8a5e-5305e9de0905",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        60
+      ],
+      "disabled": true,
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.message.slice(0, 1900) }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b2b94413-cab9-4490-aa20-bbfcbd9f8673",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -380
+      ],
+      "parameters": {
+        "width": 780,
+        "height": 340,
+        "content": "## New YouTube upload → Reelsaw shorts\n\n1. Create an API key in Reelsaw: **Settings → API keys and MCP**.\n2. Add an n8n **Header Auth** credential: name `Authorization`, value `Bearer rs_…`, and pick it in the four Reelsaw nodes.\n3. In **Settings** set `reelsawUrl` (your instance, or https://app.reelsaw.com), `maxClips` and an optional `focus`.\n4. Put your channel id in the RSS trigger (`youtube.com/feeds/videos.xml?channel_id=UC…`), or run **Test with one video**.\n\nEach new upload becomes a Reelsaw project (picked moments, 9:16 reframing, captions). The workflow waits for the render, then outputs the clips and a zip link with YouTube/TikTok metadata. Enable **Post to Discord** or swap it for Slack, Telegram or email.\n\n`videoUrl` and `exportUrl` need the same `Authorization` header to download."
+      }
+    }
+  ],
+  "connections": {
+    "New YouTube upload": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with one video": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Create project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create project": {
+      "main": [
+        [
+          {
+            "node": "Read project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read project": {
+      "main": [
+        [
+          {
+            "node": "Wait for project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for project": {
+      "main": [
+        [
+          {
+            "node": "Read status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read status": {
+      "main": [
+        [
+          {
+            "node": "Finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finished?": {
+      "main": [
+        [
+          {
+            "node": "Done?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Done?": {
+      "main": [
+        [
+          {
+            "node": "Get clips",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Project failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get clips": {
+      "main": [
+        [
+          {
+            "node": "Read clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read clips": {
+      "main": [
+        [
+          {
+            "node": "Export zip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export zip": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
