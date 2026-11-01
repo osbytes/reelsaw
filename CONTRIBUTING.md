@@ -31,9 +31,10 @@ Thanks for helping. A few things keep the project easy to run and easy to licens
 - Typecheck both apps, run `pnpm --filter @reelsaw/server test` against a local stack, and check
   UI changes in the browser at phone width. Desktop device mode does not simulate the URL bar;
   a bottom bar that only fails on a real phone is the `100vh` gap ([docs/UI.md](docs/UI.md)).
-  CI runs only the stack-free tests
-  (`test:unit`) and `eval:offline` (all model-free eval suites against the baselines), so the stack
-  tests and `pnpm eval` with a model are on you.
+  CI runs the stack-free tests (`test:unit`), `eval:offline` (all model-free eval suites against
+  the baselines) and, unless the change is only docs or Markdown, the stack tests against a mock
+  model (`test:stack`, [docs/EVALS.md](docs/EVALS.md#stack-tests-in-ci)), so `pnpm eval` with a
+  model is on you.
 - `pnpm eval <suite> --update` refuses to record regressions; pass `--accept-regressions "<reason>"`
   when a worse number is intended. Never read the `heldout` disfluency cases while tuning (see
   `docs/EVALS.md`).
