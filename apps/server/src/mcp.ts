@@ -29,6 +29,7 @@ import { listReleasesResult } from "./releases.js";
 import { framingOfClip, restorableFor } from "./projects/service.js";
 import { fetchSubtitleText } from "./transcript-files.js";
 import { reportCapabilities } from "./report/capabilities.js";
+import { touchLastActive } from "./presence.js";
 import { linkSummary } from "./media-links/service.js";
 
 /** The product token of a User-Agent, lower-cased and bounded: a name for analytics, never the full header. */
@@ -722,11 +723,20 @@ export function createMcpServer(
 
   server.registerTool("billing_portal_url", TOOLS.billing_portal_url, () => run(() => api.billing.portal()));
 
+  server.registerTool("get_email_preferences", TOOLS.get_email_preferences, () =>
+    run(async () => {
+      const me = await api.me.get();
+      return { emailEnabled: me.emailEnabled, emailPreferences: me.emailPreferences };
+    }),
+  );
+  server.registerTool("set_email_preferences", TOOLS.set_email_preferences, (input) => run(() => api.me.updateEmailPreferences(input)));
+
   return server;
 }
 
 /** Hono handler for `/api/mcp`: one server and transport per request, no session state. */
 export async function handleMcp(c: HonoContext, svc: Services, user: AuthUser, access: Pick<Requester, "via" | "canAdminister">): Promise<Response> {
+  touchLastActive(svc.database.db, svc.log, user.id);
   const server = createMcpServer(svc, user, access, c.req.raw, (c as HonoContext<AppEnv>).get("requestId"));
   const transport = new StreamableHTTPTransport({ enableJsonResponse: true }); // no sessionIdGenerator: stateless;
   await server.connect(transport);

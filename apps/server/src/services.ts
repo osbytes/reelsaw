@@ -19,6 +19,8 @@ import { createEventBus, type EventBus } from "./events.js";
 import { createQueue, type Queue } from "./queue/boss.js";
 import { isSelfHostedModel } from "./ai/self-hosted.js";
 import { createUnitOfWork, type RunInTx } from "./uow.js";
+import { projectEventHandlers } from "./project-event-handlers.js";
+import { eventHandlerQueues } from "./event-handlers.js";
 import { createAuth, type Auth } from "./auth.js";
 import { createEmail, type Email } from "./email.js";
 import { sql } from "drizzle-orm";
@@ -371,8 +373,13 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
   });
 
   const queue = await step("job queue (pg-boss)", async () => {
-    const q = createQueue(config, database.pool, otel.enabled, log.child({ module: "queue" }), () =>
-      isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }),
+    const q = createQueue(
+      config,
+      database.pool,
+      otel.enabled,
+      log.child({ module: "queue" }),
+      () => isSelfHostedModel({ AI_MODEL: models.get().language, OPENAI_BASE_URL: providers.get("openai").baseUrl }),
+      eventHandlerQueues(projectEventHandlers),
     );
     await q.start();
     return q;
@@ -420,6 +427,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     ee: null,
     entitlements: null,
   };
+  // jobs that commit with the event that triggers them (event-handlers.ts)
   svc.tx = createUnitOfWork(
     database.pool,
     queue,
@@ -427,6 +435,7 @@ export async function createServices(env: NodeJS.ProcessEnv = process.env): Prom
     () => settings.get(),
     () => svc.entitlements,
     telemetry,
+    { handlers: projectEventHandlers, deps: () => svc },
   );
   // a job short of disk evicts scratch copies the store still has before it gives up (storage/sweep.ts)
   resources.setReclaimer((needBytes) => reclaimScratch(svc, needBytes));

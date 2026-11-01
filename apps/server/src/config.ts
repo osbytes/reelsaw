@@ -64,8 +64,14 @@ export const envSchema = z.object({
   SIGNUP_MODE: z.enum(["open", "approval", "closed"]).optional(),
   /** @deprecated use SIGNUP_MODE */
   ALLOW_SIGNUP: z.string().optional(),
-  /** Outgoing mail for approvals, password resets and verification. none = those features stay off. */
+  /** Outgoing mail for approvals, password resets, verification and the ready note. none = those features stay off. */
   EMAIL_DRIVER: z.enum(["none", "smtp", "resend"]).default("none"),
+  /**
+   * Minutes to wait after the first project in a batch finishes before the ready email, so several
+   * projects become one note. Sent only when email is on and the account has not come back since.
+   * Runtime setting (Settings → System → Operations).
+   */
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: z.coerce.number().int().min(1).max(180).default(20),
   EMAIL_FROM: z.string().optional(), // "Reelsaw <no-reply@example.com>"
   SMTP_URL: z.string().optional(), // smtps://user:pass@smtp.example.com:465
   RESEND_API_KEY: z.string().optional(),

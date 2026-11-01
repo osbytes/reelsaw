@@ -233,7 +233,11 @@ export async function lockProjectClips(u: UnitOfWork, projectId: string): Promis
  * clip, then project.
  */
 export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projectId: string) {
-  const [project] = await u.db.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, projectId)).for("no key update");
+  const [project] = await u.db
+    .select({ status: schema.projects.status, userId: schema.projects.userId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .for("no key update");
   // only a rendering project finishes here: while a re-analyze is still picking (the clips it kept go on rendering),
   // the analyze hand-off moves it to rendering and the last render finalizes. A rendering project with no live
   // clips (the last one was deleted) is finished too: nothing is left that could finalize it later
@@ -256,7 +260,9 @@ export async function finalizeProjectIfDone(svc: Services, u: UnitOfWork, projec
   // no live clips left (the last one was deleted while rendering) finishes as done with nothing, rather than stranding the status
   const facts = await runFacts(u.db, projectId);
   await u.db.update(schema.projects).set({ status: "done", stage: null, stageProgress: 1, updatedAt: new Date() }).where(eq(schema.projects.id, projectId));
-  await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });
+  const eventId = await u.emit(projectId, "project.done", { clips: doneCount, failed: clips.length - doneCount, ...facts });
+  // the first finish only (a re-render finishes again); survives the project's purge, for milestones
+  await u.db.insert(schema.finishedProjects).values({ projectId, userId: project.userId, firstEventId: eventId }).onConflictDoNothing();
   u.afterCommit(() => cleanupWorkdir(svc, projectId));
 }
 

@@ -320,8 +320,15 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
     // live jobs by (name, singleton_key): enqueue sets the key to the project id (stage jobs) or the clip id (render/prepare),
     // and exclusive-policy queues index exactly that, unlike data->>'projectId' which scans the whole job table
     const clipIds = (await db.select({ id: schema.clips.id }).from(schema.clips).where(eq(schema.clips.projectId, p.id))).map((c) => c.id);
-    const jobs = await svc.database.pool.query<{ name: string; state: string; retry_count: number; started_on: Date | null; singleton_key: string }>(
-      `select name, state, retry_count, started_on, singleton_key from pgboss.job where name = any($1) and singleton_key = any($2) and state in ('created','retry','active') order by created_on`,
+    const jobs = await svc.database.pool.query<{
+      id: string;
+      name: string;
+      state: string;
+      retry_count: number;
+      started_on: Date | null;
+      singleton_key: string;
+    }>(
+      `select id, name, state, retry_count, started_on, singleton_key from pgboss.job where name = any($1) and singleton_key = any($2) and state in ('created','retry','active') order by created_on`,
       [Object.values(QUEUES), [p.id, ...clipIds]],
     );
     const info = {
@@ -353,9 +360,12 @@ export async function detectStalls(svc: Services, minutes: number): Promise<numb
       noWorkerReason ? "queued project and no worker is running" : jobs.rows.length ? "no progress from running job" : "active project has no live job",
     );
     await svc.events.emit(p.id, "job.stalled", {
+      status: p.status,
       idleMinutes: info.idleMinutes,
       lastEvent: last.type,
       liveJobs: info.liveJobs.length,
+      jobIds: jobs.rows.map((j) => j.id),
+      clipIds: [...new Set(jobs.rows.map((j) => j.singleton_key).filter((k) => k !== p.id))],
       ...(p.stage ? { stage: p.stage } : {}),
       ...(detail ? { done: detail.done, total: detail.total, unitMs: detail.unitMs } : {}),
       ...(step ? { lastStepAt: step.updatedAt.toISOString(), lastStepName: step.name } : {}),

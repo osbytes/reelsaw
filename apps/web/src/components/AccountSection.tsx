@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { DEFAULT_EMAIL_PREFERENCES, EMAIL_TOPIC_NAMES, EMAIL_TOPICS, type EmailTopic } from "@reelsaw/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth";
 import { useMe } from "../lib/account";
@@ -39,7 +40,24 @@ export function AccountSection() {
     },
     onError: (e) => toast.error(e.message),
   });
+  const setPrefs = useMutation(
+    trpc.me.updateEmailPreferences.mutationOptions({
+      onSuccess: (r, patch) => {
+        const topic = EMAIL_TOPIC_NAMES.find((t) => patch[t] !== undefined);
+        if (topic) toast(r.emailPreferences[topic] ? "Email turned on" : "Email turned off");
+        void qc.invalidateQueries({ queryKey: trpc.me.pathKey() });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const busy = saveName.isPending || changePassword.isPending;
+  const emailEnabled = !!me.data?.emailEnabled;
+  // `/settings#email` (the ready email's footer): the section renders once me.get resolves, after the browser's own anchor jump
+  useEffect(() => {
+    if (emailEnabled && window.location.hash === "#email") document.getElementById("email")?.scrollIntoView({ block: "start" });
+  }, [emailEnabled]);
+  const pending = setPrefs.isPending ? setPrefs.variables : undefined;
+  const wants = (t: EmailTopic) => pending?.[t] ?? me.data?.emailPreferences[t] ?? DEFAULT_EMAIL_PREFERENCES[t];
 
   return (
     <section className="flex flex-col gap-3 rounded-[16px] border border-line bg-panel p-5">
@@ -100,6 +118,29 @@ export function AccountSection() {
           </div>
         </form>
       </div>
+      {/* only when this instance sends mail; #email is the link in the ready email's footer */}
+      {emailEnabled && (
+        <div id="email" className="flex scroll-mt-4 flex-col gap-2 border-t border-line pt-4">
+          <span className="text-xs text-ink2">Email</span>
+          {EMAIL_TOPIC_NAMES.map((topic) => (
+            <label key={topic} className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 accent-[var(--acc)]"
+                checked={wants(topic)}
+                disabled={setPrefs.isPending}
+                onChange={(e) => setPrefs.mutate({ [topic]: e.target.checked })}
+              />
+              <span>
+                <b className="font-semibold">{EMAIL_TOPICS[topic].label}</b>
+                <br />
+                <span className="text-[13px] font-normal text-ink2">{EMAIL_TOPICS[topic].description}</span>
+              </span>
+            </label>
+          ))}
+          <span className="text-[13px] text-ink2">Password resets and other mail you need always come.</span>
+        </div>
+      )}
     </section>
   );
 }

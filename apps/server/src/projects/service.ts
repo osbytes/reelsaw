@@ -486,7 +486,15 @@ export async function reanalyzeProject(svc: Services, actor: Actor, projectId: s
           ),
         );
     await startRun(u, p.id, { reason: "reanalyze", status: "analyzing", stage: "analyze", set: { settings }, continueActive: true });
-    await u.emit(p.id, "stage.started", { stage: "analyze", status: "analyzing", repick: true, kept: kept.length, replaced: replaced.length });
+    await u.emit(p.id, "stage.started", {
+      stage: "analyze",
+      status: "analyzing",
+      repick: true,
+      kept: kept.length,
+      replaced: replaced.length,
+      keptClipIds: kept.map(({ c }) => c.id),
+      replacedClipIds: replaced.map((c) => c.id),
+    });
     // the user asked for different picks: the replaced ones are weak negatives, not deletes they chose one by one
     if (byOwner(actor, p)) await recordDecisions(svc, u.db, p, () => clipDecisions(u.db, p.id, "clip.replaced", replaced, { explicit: false }));
     await u.artifact(p.id, "analyze", "kept", {

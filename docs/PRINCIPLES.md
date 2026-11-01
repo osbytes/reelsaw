@@ -41,6 +41,21 @@ project already hit the problem it prevents.
   uses `u.db`, `u.emit`, `u.enqueue` and `u.cancelLiveJobs`. Never update with `svc.database.db`
   and then call `svc.events.emit` or `svc.queue.enqueue` afterwards. A crash between them leaves
   an event for a change that didn't happen, or a "pending" clip with no job.
+- **Work that follows an event is a handler on it, not a call at the emit site.** Every handler is
+  listed in one map, `projectEventHandlers` in `project-event-handlers.ts` (event type → handler
+  name → handler), so what follows each event is visible in one place; the handler itself lives with
+  its module (`readyEmail` in `notify/completion.ts`). `event.payload` is inferred from the event's
+  zod schema (`projectEventSchemas` in @reelsaw/shared), which every emit site is type-checked
+  against; each payload names the resources it is about (the project always, plus its clips, assets,
+  layers, uploads or jobs). Each handler has its own pg-boss queue: `key` (select-only reads on the
+  emitting transaction; null skips) picks the job's key, and the unit of work writes the job on the
+  same connection just before COMMIT, so the event and every handler's job commit or roll back
+  together (a transactional outbox whose relay is pg-boss). `handle` runs after commit with retries,
+  idempotent per key. Concurrency is opt-in and enforced by the queue's policy, not by hand:
+  `coalesce` (a waiting job for the key absorbs new ones) and `oneAtATime` (one running job per key,
+  across processes). Don't hand-roll claims or leases for that. Queue and worker options default to
+  `EVENT_HANDLER_DEFAULTS` and are overridden on the handler (`queue: { … }`); a handler's settings
+  are named `EVENT_<EVENT>_<HANDLER>_<NAME>` (`eventHandlerSetting`).
 - **Standalone `svc.events.emit` is only for notifications** that describe no state change, such as
   progress ticks. It is a single atomic statement (insert + NOTIFY).
 - **NOTIFY happens inside the transaction**, so listeners are only woken once the data they will

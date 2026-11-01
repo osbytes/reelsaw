@@ -19,7 +19,7 @@ import {
   recordDecisions,
   setLearning,
 } from "../decisions/service.js";
-import { DECISION_KINDS } from "@reelsaw/shared";
+import { DECISION_KINDS, emailPreferencesPatchSchema } from "@reelsaw/shared";
 import {
   applyProjectFraming,
   createProject,
@@ -138,6 +138,8 @@ import { assetVisibleTo } from "../library/visible.js";
 import { PROJECT_STATUSES } from "@reelsaw/shared";
 import { toSentences } from "../pipeline/transcript.js";
 import { isProgressNotice, progressEvent } from "../events.js";
+import { touchLastActive } from "../presence.js";
+import { emailPreferences, setEmailPreferences } from "../notify/preferences.js";
 import { SEARCH_USERS, setSearchThreshold, userMatch, userScore, words } from "../search.js";
 import { failedCounts, recentProjects, searchLibrary, SEARCH_CLIPS } from "../search.js";
 import { listProjectsPage, projectStats, activeProjects } from "../projects-list.js";
@@ -482,8 +484,15 @@ const headRouter = router({
         report: reportCapabilities(ctx.svc, ctx.user),
         /** whether this account's next render carries the watermark, and why (instance, plan, an admin's choice) */
         watermark: ctx.who.blocked ? null : await watermarkFor(ctx.svc.database.db, s, ctx.user, ctx.svc.entitlements),
+        /** optional mail (notify/preferences.ts); `emailEnabled` false = the instance sends no mail, so there is nothing to choose */
+        emailEnabled: ctx.svc.email.enabled,
+        emailPreferences: await emailPreferences(ctx.svc.database.db, ctx.user.id),
       };
     }),
+    /** Turn optional mail on or off (Settings → Account). Same service as MCP `set_email_preferences` and the unsubscribe link. */
+    updateEmailPreferences: signedInProcedure
+      .input(emailPreferencesPatchSchema)
+      .mutation(({ ctx, input }) => setEmailPreferences(ctx.svc, ctx.user.id, input, "settings")),
     /**
      * After `reelsaw set-password --must-change`: pick a new password without the current one.
      * The session is the proof they knew the temporary password. Other devices stay signed out.
@@ -995,6 +1004,7 @@ const restRouter = router({
                   flags: U.flags,
                   signupIp: U.signupIp,
                   mustChangePassword: U.mustChangePassword,
+                  lastActiveAt: U.lastActiveAt,
                   createdAt: U.createdAt,
                   approved,
                   ts: sql<string>`${U.createdAt}::text`,
@@ -1024,8 +1034,11 @@ const restRouter = router({
           const usageOf = new Map(usage.map((u) => [u.id, u]));
           const lastOf = new Map(sessions.map((s) => [s.userId, s.last]));
           return {
-            items: items.map(({ approved: _a, ts: _t, ...r }) => {
-              const last = lastOf.get(r.id);
+            items: items.map(({ approved: _a, ts: _t, lastActiveAt, ...r }) => {
+              const sessionLast = lastOf.get(r.id);
+              const stamped = lastActiveAt?.getTime() ?? 0;
+              const sessionMs = sessionLast ? new Date(sessionLast).getTime() : 0;
+              const lastMs = Math.max(stamped, sessionMs);
               const { id: _id, projectsTotal, ...u } = usageOf.get(r.id)!;
               return {
                 ...r,
@@ -1036,7 +1049,7 @@ const restRouter = router({
                 plan: ctx.svc.ee ? (plans.get(r.id)?.plan ?? "free") : null,
                 approvedAt: r.approvedAt?.toISOString() ?? null,
                 createdAt: r.createdAt.toISOString(),
-                lastActive: last ? new Date(last).toISOString() : null,
+                lastActive: lastMs ? new Date(lastMs).toISOString() : null,
               };
             }),
             nextCursor,
@@ -1569,36 +1582,49 @@ const restRouter = router({
     events: protectedProcedure.input(z.object({ id: z.string(), lastEventId: z.string().nullish() })).subscription(async function* ({ ctx, input, signal }) {
       const { svc } = ctx;
       await ownedProject(svc.database.db, ctx.user.id, input.id);
-      const after = Number(input.lastEventId ?? 0) || 0;
-      const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
-      const { headId, total } = await svc.events.stats(input.id);
-      const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
-      for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
-      const marker: EventsReplayed = {
-        type: "events.replayed",
-        shown: history.events.length,
-        total,
-        oldestId: history.events[0]?.id ?? null,
-        hasMore: history.hasMore,
-      };
-      let lastId = Math.max(headId, after);
-      yield tracked(String(lastId), marker);
-      // from here on everything newer than the head, in pages: list() returns at most 500 rows
-      const flush = async function* () {
-        for (;;) {
-          const page = await svc.events.list(input.id, lastId, 500);
-          for (const e of page) {
-            lastId = e.id;
-            yield tracked(String(e.id), e satisfies ProjectEvent);
+      // while this stream is open they are here; a done event moves the stamp even inside the coalesce window
+      const isDone = (e: { type: string }) => e.type === "project.done" || e.type === "clip.done";
+      const seen = () => touchLastActive(svc.database.db, svc.log, ctx.user.id, { force: true });
+      const beat = setInterval(() => touchLastActive(svc.database.db, svc.log, ctx.user.id), 30_000);
+      const stopBeat = () => clearInterval(beat);
+      signal?.addEventListener("abort", stopBeat, { once: true });
+      try {
+        const after = Number(input.lastEventId ?? 0) || 0;
+        const live = svc.events.notices(input.id, signal); // subscribe before catch-up so nothing slips through
+        const { headId, total } = await svc.events.stats(input.id);
+        const history = await svc.events.history(input.id, { limit: svc.config.EVENT_REPLAY_LIMIT, after: after || undefined, upTo: headId });
+        // the replay can hold many done events; one forced stamp covers them all
+        if (history.events.some(isDone)) seen();
+        for (const e of history.events) yield tracked(String(e.id), e satisfies ProjectEvent);
+        const marker: EventsReplayed = {
+          type: "events.replayed",
+          shown: history.events.length,
+          total,
+          oldestId: history.events[0]?.id ?? null,
+          hasMore: history.hasMore,
+        };
+        let lastId = Math.max(headId, after);
+        yield tracked(String(lastId), marker);
+        // from here on everything newer than the head, in pages: list() returns at most 500 rows
+        const flush = async function* () {
+          for (;;) {
+            const page = await svc.events.list(input.id, lastId, 500);
+            if (page.some(isDone)) seen();
+            for (const e of page) {
+              lastId = e.id;
+              yield tracked(String(e.id), e satisfies ProjectEvent);
+            }
+            if (page.length < 500) return;
           }
-          if (page.length < 500) return;
+        };
+        yield* flush();
+        for await (const notice of live) {
+          // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
+          if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
+          else if (notice.id > lastId) yield* flush();
         }
-      };
-      yield* flush();
-      for await (const notice of live) {
-        // a progress tick is forwarded as is; it repeats the last stored id, so a reconnect resumes from a real event
-        if (isProgressNotice(notice)) yield tracked(String(lastId), progressEvent(notice));
-        else if (notice.id > lastId) yield* flush();
+      } finally {
+        stopBeat();
       }
     }),
 

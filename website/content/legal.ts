@@ -3,7 +3,7 @@
  * topic. Bracketed values ([…]) are the facts only the operator can fill in; `LEGAL_UPDATED` is shown on both
  * pages. Have counsel read these once before the first paying customer (docs/specs/ee.md).
  */
-export const LEGAL_UPDATED = "2026-10-21";
+export const LEGAL_UPDATED = "2026-10-25";
 export const LEGAL_ENTITY = "osbytes";
 export const LEGAL_CONTACT = "hi+reelsaw@osbytes.io";
 export const LEGAL_LAW = "[the jurisdiction of the operator]";
@@ -91,7 +91,8 @@ export const PRIVACY: LegalSection[] = [
     heading: "What we collect",
     paragraphs: ["Only what the Service needs:"],
     bullets: [
-      "Account: name, email address, a hashed password, when you signed in and from which address and browser.",
+      "Account: name, email address, a hashed password, when you last used the app, and the address and browser of a sign-in.",
+      "Ready email: when email is turned on for the Service, we email you once a batch of projects finishes and you have not come back to see them. The message names those projects and how many clips are ready. It is not sent while you are using the app, and you can turn it off in Settings or with the link in each one.",
       "Content: the videos you upload or link, their transcripts, the clips and files the Service makes, your settings and project history.",
       "Billing: your Stripe customer id, plan and subscription status. Card numbers never reach us; Stripe holds them.",
       "Your decisions: the fixes you accept, reject or make and the clips you edit, create or delete, each with the transcript words or clip text it was about (a few dozen words around a fix, the text of a clip), which models proposed it, and the source's title, link and fingerprint. We use them only to improve what the Service suggests to you (a few of your past rejections are shown to the model checking your next video) and to measure the Service against real choices. We do not sell them or use them for advertising, and model providers do not train on them. Turning off Settings → Learning stops recording; nothing is recorded while it is off.",

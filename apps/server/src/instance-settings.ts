@@ -178,6 +178,11 @@ export const RUNTIME_SETTINGS = {
   ),
 
   STALL_MINUTES: def("operations", z.number().int().min(2).max(1440), "A running job with no progress for this long is reported as stalled (log and UI)."),
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: def(
+    "operations",
+    z.number().int().min(1).max(180),
+    "Minutes to wait after the first project in a batch finishes before emailing that the clips are ready, so several projects land in one note. Sent only when an email driver is set and the account has not come back since those projects finished. A project that finishes while a note is already waiting joins that note.",
+  ),
   UPDATE_CHECK: def(
     "operations",
     z.boolean(),

@@ -14,11 +14,12 @@ import type pg from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema, type Db } from "./db/index.js";
-import type { ProjectEventType } from "@reelsaw/shared";
+import type { ProjectEventPayloadArg, ProjectEventType } from "@reelsaw/shared";
 import { EVENTS_CHANNEL } from "./events.js";
 import { USER_RERUN_QUEUES, type Queue, type QueueName, type JobData } from "./queue/boss.js";
 import type { Logger } from "./log.js";
 import type { Telemetry } from "./telemetry.js";
+import { eventHandlerJobs, type EmittedEvent, type EventHandlerMap, type EventHandlerDeps } from "./event-handlers.js";
 import { TX_LOCK_SQL, txLock } from "./locks.js";
 import type { Entitlements, InstanceLimits } from "./quota.js";
 import { checkJobLimits, limitsFor } from "./quota.js";
@@ -42,7 +43,7 @@ export interface UnitOfWork {
   /** drizzle bound to the transaction's connection */
   db: Db;
   /** persist an event and NOTIFY listeners; both take effect at commit */
-  emit(projectId: string, type: ProjectEventType, payload?: Record<string, unknown>): Promise<number>;
+  emit<T extends ProjectEventType>(projectId: string, type: T, ...payload: ProjectEventPayloadArg<T>): Promise<number>;
   /** `expireInSeconds` overrides the job's hard expiry; by default analyze/refine jobs size it from the project's duration (queue/boss.ts) */
   enqueue(queue: QueueName, data: JobData, opts?: { expireInSeconds?: number }): Promise<string | null>;
   /** a job outside the pipeline (billing sync, …): no owner, no admission; dedup by `singletonKey` per the queue's policy */
@@ -141,11 +142,12 @@ export function createUnitOfWork(
   instanceLimits?: () => InstanceLimits,
   entitlements: () => Entitlements | null = () => null,
   telemetry?: Telemetry,
+  eventHandlers?: { handlers: EventHandlerMap; deps: () => EventHandlerDeps },
 ): RunInTx {
   const once: RunInTx = async (fn) => {
     const client = await pool.connect();
     const after: Array<() => Promise<unknown> | unknown> = [];
-    const emitted: Array<{ projectId: string; type: string; payload: Record<string, unknown> }> = [];
+    const emitted: EmittedEvent[] = [];
     /** jobs a person asked for in this unit (product analytics, sent after commit) */
     const requested: Array<{ queue: QueueName; projectId: string; clipId?: string }> = [];
     let result;
@@ -155,9 +157,11 @@ export function createUnitOfWork(
       const exec = { db: { executeSql: (text: string, values?: unknown[]) => client.query(text, values) } };
       const u: UnitOfWork = {
         db,
-        async emit(projectId, type, payload = {}) {
-          emitted.push({ projectId, type, payload });
+        async emit(projectId, type, ...[rest = {} as never]) {
+          // every payload names its project (projectEventSchemas)
+          const payload = { ...rest, projectId };
           const [row] = await db.insert(schema.projectEvents).values({ projectId, type, payload }).returning({ id: schema.projectEvents.id });
+          emitted.push({ id: row!.id, projectId, type, payload } as unknown as EmittedEvent);
           await client.query("SELECT pg_notify($1, $2)", [EVENTS_CHANNEL, JSON.stringify({ id: row!.id, projectId })]);
           // webhooks: the deliveries and their jobs commit with the event (webhooks/outbox.ts)
           if (isWebhookEvent(type)) await writeDeliveries(exec.db, queue, row!.id, projectId, type);
@@ -199,6 +203,17 @@ export function createUnitOfWork(
         afterCommit: (f) => void after.push(f),
       };
       result = await fn(u);
+      // the outbox: each event handler's job is written on this connection, so it commits with its event (event-handlers.ts)
+      if (eventHandlers && emitted.length) {
+        for (const r of await eventHandlerJobs(eventHandlers.handlers, emitted, db, eventHandlers.deps())) {
+          const jobId = await queue.send(r.queue, r.data, { ...exec, singletonKey: r.data.key, startAfterSeconds: r.startAfter });
+          // null: the handler coalesces and a job is already waiting for this key
+          log.debug(
+            { handler: r.handler, event: r.data.event.type, projectId: r.data.event.projectId, key: r.data.key, jobId },
+            jobId ? "event handler job queued" : "event handler job already queued",
+          );
+        }
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});

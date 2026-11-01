@@ -61,7 +61,11 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ALLOW_SIGNUP: ["accounts", "Deprecated alias: `false` means SIGNUP_MODE=closed. Use SIGNUP_MODE."],
   EMAIL_DRIVER: [
     "accounts",
-    "Outgoing mail for approval notices, password resets and verification: `none`, `smtp` or `resend`. `none` leaves those features off.",
+    "Outgoing mail for approval notices, password resets, verification and the ready note (clips finished while you were away): `none`, `smtp` or `resend`. `none` leaves those features off.",
+  ],
+  EVENT_PROJECT_DONE_READY_EMAIL_DELAY_MINUTES: [
+    "accounts",
+    "Minutes to wait after the first project in a batch finishes before the ready email, so several projects become one note (1–180, default 20). The note is sent only when an email driver is set and the account has not come back since those projects finished.",
   ],
   EMAIL_FROM: ["accounts", "Sender, e.g. `Reelsaw <no-reply@example.com>`. Required with an email driver."],
   SMTP_URL: ["accounts", "SMTP connection, e.g. `smtps://user:pass@smtp.example.com:465`. Required with EMAIL_DRIVER=smtp."],

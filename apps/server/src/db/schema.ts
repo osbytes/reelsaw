@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, bigserial, bigint, numeric, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import type {
+  EmailPrefSource,
+  EmailTopic,
   ProjectSettings,
   UserProjectDefaults,
   ProjectStatus,
@@ -58,6 +60,8 @@ export const user = pgTable(
     flags: jsonb("flags").$type<string[]>().notNull().default([]),
     /** operator set a temporary password (`reelsaw set-password --must-change`); the account must choose theirs before using the app */
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
+    /** last authenticated request, coalesced (presence.ts). Null until the first one after this column existed. */
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -669,6 +673,63 @@ export type Project = typeof projects.$inferSelect;
 export type Clip = typeof clips.$inferSelect;
 export type Transcript = typeof transcripts.$inferSelect;
 export type ProjectEventRow = typeof projectEvents.$inferSelect;
+
+/**
+ * A `project.done` the ready email has covered, so it is not mailed again. Written after the send (a
+ * crash before it re-sends with the same idempotency key). Rows go when the event or the account does.
+ */
+export const completionNotices = pgTable(
+  "completion_notices",
+  {
+    eventId: bigint("event_id", { mode: "number" })
+      .primaryKey()
+      .references(() => projectEvents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("completion_notices_user_id_idx").on(t.userId)],
+);
+
+/**
+ * One row per project that ever finished, written with its first `project.done` in that transaction
+ * (lifecycle.ts `finalizeProjectIfDone`). The ready email's milestones count these (notify/completion.ts).
+ * No foreign key to the project: deleting it forever, or the retention purge, removes its events but
+ * must not lower the count, or "That's 10 projects finished" would be said again. Rows go with the account.
+ */
+export const finishedProjects = pgTable(
+  "finished_projects",
+  {
+    projectId: text("project_id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** the first project.done; a batch whose mailed events include it is this project's first finish */
+    firstEventId: bigint("first_event_id", { mode: "number" }).notNull(),
+    firstDoneAt: timestamp("first_done_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("finished_projects_user_id_idx").on(t.userId)],
+);
+
+/**
+ * An account's choice for one topic of optional mail (notify/preferences.ts). No row = the topic's
+ * default (`EMAIL_TOPICS` in @reelsaw/shared), so a new topic needs no backfill. `source` says where the
+ * choice was made, which is also the consent record an opt-in topic needs (docs/specs/email.md).
+ */
+export const emailTopicPrefs = pgTable(
+  "email_topic_prefs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    topic: text("topic").$type<EmailTopic>().notNull(),
+    enabled: boolean("enabled").notNull(),
+    source: text("source").$type<EmailPrefSource>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.topic] })],
+);
 
 /**
  * What a pipeline stage decided and why, for diagnosis and issue reports: e.g. every candidate

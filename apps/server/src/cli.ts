@@ -1,3 +1,5 @@
+import { EMAIL_TOPIC_NAMES, EMAIL_TOPICS, type EmailTopic } from "@reelsaw/shared";
+import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
  * Operator CLI for troubleshooting. Uses the same composition root as the server (with HTTP and
@@ -145,6 +147,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   limits  <email> [--watermark always|never|follow]
  *                                           an account's quotas: instance value, plan, override, in force, in use now;
  *                                           --watermark sets the per-user override (same as Users → Limits)
+ *   email-prefs <email> [--<topic> on|off]
+ *                                           an account's optional mail by topic (ready: the note when projects finish;
+ *                                           same as their Settings → Account and the email's unsubscribe link)
  *   abuse [--run]                           accounts the hourly abuse pass flagged (shared sign-up address, bursts,
  *                                           temporary domains); --run recomputes the flags now
  *   billing <email> | sync [<email>] | set-plan <email> <plan|none>
@@ -1253,6 +1258,22 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
     const r = await retryFailures(svc, filter, null);
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
     console.log(`retried ${r.retried}, skipped ${r.skipped}${r.nextCursor ? " (more match; run again)" : ""}`);
+  },
+  /** One account's optional mail by topic (notify/preferences.ts): show it, or `--<topic> on|off` (a "stop emailing me" request). */
+  "email-prefs": async (svc) => {
+    const u = await userByEmail(svc, pos[0]);
+    const patch: { [T in EmailTopic]?: boolean } = {};
+    for (const topic of EMAIL_TOPIC_NAMES) {
+      const arg = flag(topic);
+      if (arg === undefined) continue;
+      const on = arg === "on" || arg === "true" ? true : arg === "off" || arg === "false" ? false : undefined;
+      if (on === undefined) throw new Error(`usage: reelsaw email-prefs <email> [--${EMAIL_TOPIC_NAMES.join(" on|off] [--")} on|off]`);
+      patch[topic] = on;
+    }
+    if (Object.keys(patch).length) await setEmailPreferences(svc, u.id, patch, "cli");
+    const p = await emailPreferences(svc.database.db, u.id);
+    console.log(`${u.email}${svc.email.enabled ? "" : " (this instance sends no mail: EMAIL_DRIVER=none)"}`);
+    for (const topic of EMAIL_TOPIC_NAMES) console.log(`  ${topic.padEnd(10)} ${p[topic] ? "on " : "off"}  ${EMAIL_TOPICS[topic].label}`);
   },
   /** One account's quotas (0 = unlimited) and watermark. Change them in Users → Limits, or `--watermark always|never|follow`. */
   async limits(svc) {
@@ -2513,7 +2534,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|approve|make-admin|set-password|usage|limits|email-prefs|abuse|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }

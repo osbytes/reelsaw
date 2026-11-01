@@ -385,7 +385,7 @@ function SystemTab() {
         <InstanceSettingsGroup
           id="operations"
           title="Operations"
-          intro="Watchdog, update checks and what the health endpoint tells anonymous callers."
+          intro="Watchdog, the ready email, update checks and what the health endpoint tells anonymous callers."
           fields={OPERATIONS_FIELDS}
         />
         <InstanceSettingsGroup

@@ -1,11 +1,12 @@
 /**
- * Outgoing mail (approvals, password reset, verification). EMAIL_DRIVER=none (default) keeps every
- * mail-dependent feature off, so a self-hosted box needs no mail setup. smtp uses nodemailer;
- * resend uses the Resend HTTP API. Boot checks the driver so a typo fails fast.
+ * Outgoing mail (approvals, password reset, verification, the ready note). EMAIL_DRIVER=none
+ * (default) keeps every mail-dependent feature off, so a self-hosted box needs no mail setup.
+ * smtp uses nodemailer; resend uses the Resend HTTP API. Boot checks the driver so a typo fails fast.
  *
  * Templates send multipart HTML + plain text. HTML is table-based and inline-styled for mail
  * clients; no remote images or tracking pixels. The plain-text part keeps the same links.
  */
+import { unsubscribeHeaders } from "./notify/preferences.js";
 import { REPO_URL } from "@reelsaw/shared";
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
@@ -15,14 +16,34 @@ export interface Mail {
   subject: string;
   text: string;
   html: string;
+  /** extra headers, e.g. List-Unsubscribe on mail an account can turn off (notify/preferences.ts) */
+  headers?: Record<string, string>;
 }
 
 export interface Email {
   enabled: boolean;
   driver: Config["EMAIL_DRIVER"];
   check(): Promise<void>;
-  /** Sends, or logs at debug when disabled. Never throws into a request: failures are logged. */
-  send(mail: Mail): Promise<void>;
+  /**
+   * Sends, or logs at debug when disabled. Failures are logged. `strict` rethrows so a job can
+   * retry; request-path mail leaves it off and never fails the request.
+   *
+   * `idempotencyKey` (a job that may send the same mail twice): the same key means the same mail.
+   * Resend gets it as `Idempotency-Key` and drops a repeat within 24 hours. SMTP has no dedup, so
+   * the key becomes a fixed Message-ID: some inboxes collapse the repeat, others show it twice.
+   */
+  send(mail: Mail, opts?: { strict?: boolean; idempotencyKey?: string }): Promise<void>;
+}
+
+/** The domain of a Message-ID: the sender's, else the app's host. */
+export function messageIdDomain(from: string, appUrl: string): string {
+  const m = /@([A-Za-z0-9.-]+)>?\s*$/.exec(from);
+  if (m) return m[1]!;
+  try {
+    return new URL(appUrl).hostname || "reelsaw.local";
+  } catch {
+    return "reelsaw.local";
+  }
 }
 
 export function createEmail(config: Config, log: Logger): Email {
@@ -30,21 +51,47 @@ export function createEmail(config: Config, log: Logger): Email {
   const driver = config.EMAIL_DRIVER;
   let transport: import("nodemailer").Transporter | null = null;
 
-  async function deliver(mail: Mail) {
+  /** "sent", or "duplicate" when the provider says this idempotency key already went out */
+  async function deliver(mail: Mail, idempotencyKey?: string): Promise<"sent" | "duplicate"> {
     if (driver === "smtp") {
       if (!transport) transport = (await import("nodemailer")).default.createTransport(config.SMTP_URL!);
-      await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html });
-      return;
+      const messageId = idempotencyKey ? `<${idempotencyKey}@${messageIdDomain(from, config.APP_URL)}>` : undefined;
+      await transport.sendMail({
+        from,
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        ...(messageId ? { messageId } : {}),
+        ...(mail.headers ? { headers: mail.headers } : {}),
+      });
+      return "sent";
     }
     if (driver === "resend") {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
-        headers: { authorization: `Bearer ${config.RESEND_API_KEY}`, "content-type": "application/json" },
-        body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html }),
+        headers: {
+          authorization: `Bearer ${config.RESEND_API_KEY}`,
+          "content-type": "application/json",
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+        },
+        body: JSON.stringify({
+          from,
+          to: [mail.to],
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          ...(mail.headers ? { headers: mail.headers } : {}),
+        }),
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) throw new Error(`resend ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      if (res.ok) return "sent";
+      const body = (await res.text()).slice(0, 300);
+      // same key, different body: the first one was accepted (a re-render changed a clip name since)
+      if (idempotencyKey && res.status === 409 && body.includes("invalid_idempotent_request")) return "duplicate";
+      throw new Error(`resend ${res.status}: ${body}`);
     }
+    return "sent";
   }
 
   return {
@@ -63,18 +110,20 @@ export function createEmail(config: Config, log: Logger): Email {
         if (res.status === 401 || res.status === 403) throw new Error("RESEND_API_KEY was rejected");
       }
     },
-    async send(mail) {
+    async send(mail, opts) {
       if (driver === "none") {
         log.debug({ to: mail.to, subject: mail.subject }, "email disabled; not sent");
         return;
       }
       try {
-        await deliver(mail);
-        log.info({ to: mail.to, subject: mail.subject }, "email sent");
+        const r = await deliver(mail, opts?.idempotencyKey);
+        if (r === "duplicate") log.info({ to: mail.to, subject: mail.subject, idempotencyKey: opts?.idempotencyKey }, "email already sent; repeat dropped");
+        else log.info({ to: mail.to, subject: mail.subject }, "email sent");
       } catch (err) {
         // reported (log.ts): a sign-up waiting on its verification or reset mail is stuck until someone looks.
         // Only `driver` becomes a tag; the address and subject stay in the log.
         log.error({ err, driver, to: mail.to, subject: mail.subject }, "email failed");
+        if (opts?.strict) throw err;
       }
     },
   };
@@ -91,7 +140,7 @@ const acc = "#8460d2";
 const accInk = "#ffffff";
 const accText = "#653eae";
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -237,4 +286,110 @@ Fix the receiver, then turn the webhook back on and resend what it missed: ${url
         ctaButton(url, "Confirm email") +
         linkFallback(url),
     }),
+  /**
+   * Projects that finished while the account was away. One note for the whole batch.
+   * `milestone` 1 is "your first"; higher numbers get a single line. No tracking.
+   */
+  clipsReady: (
+    appUrl: string,
+    opts: {
+      greeting: string | null;
+      projects: Array<{ id: string; title: string; clips: number; failed: number; rerender: boolean; highlights: string[]; more: number }>;
+      hidden: number;
+      milestone: number | null;
+      /** one-click unsubscribe (notify/preferences.ts): a line under the note and the List-Unsubscribe headers */
+      unsubscribeUrl?: string;
+    },
+  ) => {
+    const base = appUrl.replace(/\/$/, "");
+    const n = opts.projects.length;
+    const clips = opts.projects.reduce((sum, p) => sum + p.clips, 0);
+    const allRerender = n > 0 && opts.projects.every((p) => p.rerender);
+    const first = opts.milestone === 1;
+    const subject = first
+      ? "Your first clips are ready"
+      : n === 1 && allRerender
+        ? "A new render is ready"
+        : n === 1
+          ? "Your clips are ready"
+          : `${n} projects are ready`;
+    const one = opts.projects[0];
+    const preheader = n === 1 && one ? `${clipCount(clips)} from ${one.title}` : `${n} projects, ${clipCount(clips)}`;
+    const intro =
+      n === 1
+        ? allRerender
+          ? "A new render finished while you were away."
+          : "This finished while you were away."
+        : allRerender
+          ? "New renders finished while you were away."
+          : "These finished while you were away.";
+    const hi = opts.greeting ? `Hi ${escapeHtml(opts.greeting)} — ` : "";
+    const firstLine = first ? (n === 1 ? "This is the first project you've finished." : "These are the first projects you've finished.") : null;
+    const milestoneLine = opts.milestone && opts.milestone > 1 ? `That's ${opts.milestone} projects finished.` : null;
+    const home = `${base}/`;
+    const open = n === 1 && one ? `${base}/p/${encodeURIComponent(one.id)}` : home;
+    const blocks = opts.projects.map((p) => projectBlock(base, p)).join("");
+    const more =
+      opts.hidden > 0
+        ? `<p style="margin:16px 0 0;font-size:13px;color:${ink3}">And ${opts.hidden} more on your <a href="${escapeHtml(home)}" style="color:${accText};text-decoration:underline">projects page</a>.</p>`
+        : "";
+    const stop = opts.unsubscribeUrl
+      ? `<p style="margin:20px 0 0;font-size:12px;color:${ink3}">You get this because a project finished while you were away. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:${ink3};text-decoration:underline">Stop these emails</a> or change it under <a href="${escapeHtml(`${base}/settings#email`)}" style="color:${ink3};text-decoration:underline">Settings → Account</a>.</p>`
+      : "";
+    const mail = message({
+      subject,
+      preheader,
+      title: subject,
+      text: [
+        `${opts.greeting ? `Hi ${opts.greeting} — ` : ""}${intro}`,
+        firstLine,
+        milestoneLine,
+        ...opts.projects.map((p) => projectText(base, p)),
+        opts.hidden > 0 ? `And ${opts.hidden} more: ${home}` : null,
+        n === 1 ? `Open: ${open}` : `Open your projects: ${home}`,
+        opts.unsubscribeUrl ? `Stop these emails: ${opts.unsubscribeUrl}` : null,
+      ]
+        .filter((s): s is string => !!s)
+        .join("\n\n"),
+      bodyHtml:
+        `<p style="margin:0 0 12px">${hi}${intro}</p>` +
+        (firstLine ? `<p style="margin:0 0 12px">${firstLine}</p>` : "") +
+        (milestoneLine ? `<p style="margin:0 0 16px;color:${accText};font-weight:600">${milestoneLine}</p>` : "") +
+        blocks +
+        more +
+        ctaButton(open, n === 1 ? "Open project" : "Open projects") +
+        linkFallback(open) +
+        stop,
+    });
+    return opts.unsubscribeUrl ? { ...mail, headers: unsubscribeHeaders(opts.unsubscribeUrl) } : mail;
+  },
 };
+
+function clipCount(n: number): string {
+  return n === 1 ? "1 clip" : `${n} clips`;
+}
+
+function failedCount(n: number): string {
+  return n === 1 ? "1 needs another try" : `${n} need another try`;
+}
+
+function projectBlock(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
+  const href = escapeHtml(`${base}/p/${encodeURIComponent(p.id)}`);
+  const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(" · ");
+  const names = p.highlights.map((h) => escapeHtml(h)).join(" · ");
+  const extra = p.more > 0 ? ` and ${p.more} more` : "";
+  return (
+    `<p style="margin:14px 0 0">` +
+    `<a href="${href}" style="color:${ink};font-weight:600;text-decoration:underline">${escapeHtml(p.title)}</a><br>` +
+    `<span style="color:${ink3};font-size:13px">${bits}</span>` +
+    (names ? `<br><span style="font-size:14px">${names}${extra}</span>` : "") +
+    `</p>`
+  );
+}
+
+function projectText(base: string, p: { id: string; title: string; clips: number; failed: number; highlights: string[]; more: number }): string {
+  const bits = [clipCount(p.clips), ...(p.failed > 0 ? [failedCount(p.failed)] : [])].join(", ");
+  const names = p.highlights.join(", ");
+  const extra = p.more > 0 ? ` and ${p.more} more` : "";
+  return `${p.title} — ${bits}${names ? `\n${names}${extra}` : ""}\n${base}/p/${p.id}`;
+}

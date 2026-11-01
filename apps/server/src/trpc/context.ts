@@ -8,6 +8,7 @@ import type { Context as HonoContext } from "hono";
 import { resolveRequestId, type AppEnv } from "../request-log.js";
 import { asUserRequest, type Surface } from "../uow.js";
 import { checkRequestRate } from "../abuse.js";
+import { touchLastActive } from "../presence.js";
 
 export type Context = {
   svc: Services;
@@ -26,7 +27,10 @@ export function contextFactory(svc: Services) {
   return async ({ req }: FetchCreateContextFnOptions, c?: HonoContext<AppEnv>): Promise<Context> => {
     const who = await requester(svc.auth, svc.database.db, req.headers, svc.log.child({ module: "auth" }));
     const requestId = c?.get("requestId") ?? resolveRequestId(req.headers.get("x-request-id"));
-    if (who) c?.set("userId", who.user.id);
+    if (who) {
+      c?.set("userId", who.user.id);
+      touchLastActive(svc.database.db, svc.log, who.user.id);
+    }
     const base = c?.get("log") ?? svc.log.child({ module: "http", requestId });
     return { svc, who, req, requestId, log: who ? base.child({ userId: who.user.id }) : base };
   };

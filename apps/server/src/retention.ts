@@ -84,6 +84,7 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
         for (const r of rows) byProject.set(r.projectId, [...(byProject.get(r.projectId) ?? []), r]);
         for (const [projectId, list] of byProject) {
           await svc.tx(async (u) => {
+            const expired: string[] = [];
             for (const c of list) {
               const [cur] = await u.db
                 .update(schema.clips)
@@ -100,8 +101,9 @@ export async function sweepRetention(svc: Services): Promise<{ sources: number; 
                 }
               });
               clips++;
+              expired.push(c.id);
             }
-            await u.emit(projectId, "clips.expired", { clips: list.length, days: config.CLIP_RETENTION_DAYS });
+            if (expired.length) await u.emit(projectId, "clips.expired", { clips: expired.length, clipIds: expired, days: config.CLIP_RETENTION_DAYS });
           });
         }
       },

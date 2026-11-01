@@ -1029,6 +1029,37 @@ export const clipCandidateSchema = z.object({
 });
 export type ClipCandidate = z.infer<typeof clipCandidateSchema>;
 
+// ---------- Email ----------
+
+/**
+ * Topics of optional mail, each with its own switch and unsubscribe link (docs/specs/email.md). Mail an
+ * account must get (password reset, verification, approval) has no topic. `defaultOn` applies until the
+ * account chooses; an opt-in topic (marketing) must default off.
+ */
+export const EMAIL_TOPIC_NAMES = ["ready"] as const;
+export type EmailTopic = (typeof EMAIL_TOPIC_NAMES)[number];
+/** `label` / `description` are the Settings switch; `stopped` finishes "You will no longer get …" on the unsubscribe page */
+export const EMAIL_TOPICS: Record<EmailTopic, { defaultOn: boolean; label: string; description: string; stopped: string }> = {
+  ready: {
+    defaultOn: true,
+    label: "When projects finish while I'm away",
+    description: "One note for everything that finished since you last opened Reelsaw.",
+    stopped: "an email when your projects finish",
+  },
+};
+export const isEmailTopic = (t: string): t is EmailTopic => EMAIL_TOPIC_NAMES.some((n) => n === t);
+export type EmailPreferences = Record<EmailTopic, boolean>;
+/** each topic's default, for an account that has not chosen */
+export const DEFAULT_EMAIL_PREFERENCES: EmailPreferences = { ready: EMAIL_TOPICS.ready.defaultOn };
+/** A change to some topics; omitted ones stay. tRPC `me.updateEmailPreferences` and MCP `set_email_preferences`. */
+export const emailPreferencesPatchSchema = z.object({
+  ready: z.boolean().optional().describe("the note sent when projects finish while you are away: true to get it, false to stop it"),
+});
+// every topic has a field in the patch (a new topic that is missing here does not compile)
+const _patchCoversTopics: Record<EmailTopic, unknown> = emailPreferencesPatchSchema.shape;
+/** where a choice was made; kept on the row as the record of it */
+export type EmailPrefSource = "settings" | "mcp" | "cli" | "unsubscribe_link";
+
 // ---------- Events ----------
 
 export const PROJECT_EVENT_TYPES = [
@@ -1071,6 +1102,124 @@ export const PROJECT_EVENT_TYPES = [
   "project.failed",
 ] as const;
 export type ProjectEventType = (typeof PROJECT_EVENT_TYPES)[number];
+
+/** How long the run took so far, on project.done / project.failed (runFacts). */
+const runFactsSchema = {
+  runSeq: z.number().int(),
+  runReason: z.string().nullable(),
+  runSec: z.number().optional(),
+  renderSec: z.number().optional(),
+};
+const clipRef = { clipId: z.string(), index: z.number().int(), title: z.string() };
+const skipped = { clipId: z.string(), reason: z.string(), error: z.string().optional() };
+
+/**
+ * The payload of every project event. Each names the resources it is about: the project always
+ * (`projectId`, filled in by the emit), plus the clips, assets, layers, uploads or jobs it concerns, so
+ * a reader or a handler never has to look them up. `u.emit` / `svc.events.emit` take the payload
+ * without `projectId` (ProjectEventPayloadArg), so an emit site cannot drift from its shape, and
+ * handlers (event-handlers.ts) get it inferred. `satisfies` keeps this in step with
+ * PROJECT_EVENT_TYPES: a type without a schema, or a schema without a type, does not compile.
+ * stage.completed carries per-stage stats, so it allows extra keys.
+ */
+const event = <S extends z.ZodRawShape>(shape: S) => z.object({ projectId: z.string(), ...shape });
+
+export const projectEventSchemas = {
+  "project.created": event({ title: z.string(), sourceType: z.string().optional() }),
+  "run.started": event({ seq: z.number().int(), reason: z.enum(RUN_REASONS) }),
+  "stage.started": event({
+    stage: z.string(),
+    status: z.string().optional(),
+    /** render resumed after a restart */
+    resumed: z.boolean().optional(),
+    /** prepare: one clip */
+    clipId: z.string().optional(),
+    mode: z.string().optional(),
+    /** refine: the steps that will run */
+    steps: z.array(z.string()).optional(),
+    /** review: transcript edits and how many clips re-render */
+    changed: z.number().int().optional(),
+    rerendered: z.number().int().optional(),
+    retried: z.boolean().optional(),
+    /** analyze: a re-pick that keeps the clips the user made or edited */
+    repick: z.boolean().optional(),
+    kept: z.number().int().optional(),
+    replaced: z.number().int().optional(),
+    keptClipIds: z.array(z.string()).optional(),
+    replacedClipIds: z.array(z.string()).optional(),
+  }),
+  "stage.progress": event({
+    stage: z.string(),
+    progress: z.number().optional(),
+    message: z.string().optional(),
+    clipId: z.string().optional(),
+    step: z.string().optional(),
+    refine: z.record(z.string(), z.string()).optional(),
+    skipped: z.object({ status: z.literal("skipped"), reason: z.string() }).optional(),
+  }),
+  "stage.completed": z.looseObject({ projectId: z.string(), stage: z.string(), durationSec: z.number().optional() }),
+  "stage.failed": event({
+    stage: z.string(),
+    error: z.string(),
+    attempt: z.number().int(),
+    max: z.number().int(),
+    final: z.boolean().optional(),
+    step: z.string().optional(),
+    durationSec: z.number().optional(),
+  }),
+  "clip.created": event(clipRef),
+  "clip.rendering": event({ clipId: z.string() }),
+  "clip.done": event({ clipId: z.string(), index: z.number().int(), renderSec: z.number().optional() }),
+  "clip.failed": event({ clipId: z.string(), error: z.string(), errorKind: z.string().optional() }),
+  "clip.retrying": event({ clipId: z.string(), step: z.string(), attempt: z.number().int(), max: z.number().int(), reason: z.string() }),
+  /** `both`: joining the intro and outro failed, so the clip went out without either */
+  "clip.bumper_skipped": event({ ...skipped, slot: z.enum(["intro", "outro", "both"]), assetIds: z.array(z.string()) }),
+  /** the clip's overlay or music layers (`layerIds`) and their library assets that were left out */
+  "clip.overlay_skipped": event({ ...skipped, layerIds: z.array(z.string()), assetIds: z.array(z.string()) }),
+  "clip.cut_unverified": event({ clipId: z.string(), at: z.number(), reason: z.string() }),
+  "job.stalled": event({
+    status: z.string(),
+    idleMinutes: z.number(),
+    lastEvent: z.string(),
+    liveJobs: z.number().int(),
+    jobIds: z.array(z.string()),
+    clipIds: z.array(z.string()),
+    stage: z.string().optional(),
+    done: z.number().nullable().optional(),
+    total: z.number().nullable().optional(),
+    unitMs: z.number().nullable().optional(),
+    lastStepAt: z.string().optional(),
+    lastStepName: z.string().optional(),
+    ticking: z.boolean().optional(),
+    message: z.string(),
+    reason: z.string().optional(),
+    hint: z.string(),
+  }),
+  "source.expired": event({ days: z.number() }),
+  "clips.expired": event({ clips: z.number().int(), clipIds: z.array(z.string()), days: z.number() }),
+  "project.deleted": event({ days: z.number(), stopped: z.boolean() }),
+  "project.restored": event({}),
+  "clip.restored": event(clipRef),
+  "clip.deleted": event({ ...clipRef, days: z.number() }),
+  "project.updated": event({ changed: z.array(z.string()), framingCleared: z.number().int().optional() }),
+  "transcript.imported": event({
+    uploadId: z.string().optional(),
+    format: z.string(),
+    cues: z.number().int(),
+    words: z.number().int(),
+    language: z.string().optional(),
+    warnings: z.number().int(),
+  }),
+  "project.done": event({ clips: z.number().int(), failed: z.number().int(), ...runFactsSchema }),
+  "project.failed": event({ stage: z.string(), error: z.string(), errorKind: z.string().optional(), cancelled: z.boolean().optional(), ...runFactsSchema }),
+} satisfies { [T in ProjectEventType]: z.ZodType<Record<string, unknown>> };
+
+export type ProjectEventPayload<T extends ProjectEventType> = z.infer<(typeof projectEventSchemas)[T]>;
+/** An emit's payload argument: optional only for an event whose payload has no required keys. */
+export type ProjectEventPayloadArg<T extends ProjectEventType> =
+  {} extends Omit<ProjectEventPayload<T>, "projectId">
+    ? [payload?: Omit<ProjectEventPayload<T>, "projectId">]
+    : [payload: Omit<ProjectEventPayload<T>, "projectId">];
 
 export interface ProjectEvent {
   id: number;

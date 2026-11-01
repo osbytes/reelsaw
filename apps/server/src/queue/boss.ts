@@ -1,4 +1,5 @@
 import { PgBoss } from "pg-boss";
+import type { EventHandlerQueue } from "../event-handlers.js";
 import type pg from "pg";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
@@ -14,6 +15,12 @@ export const QUEUES = {
   prepare: "clip.prepare",
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
+
+/**
+ * Event handler queues (event-handlers.ts) are named `event.<type>.<handler>`. They are not pipeline
+ * stages, so they stay out of `QUEUES` and out of fair-share admission.
+ */
+export const EVENT_HANDLER_QUEUE_LIKE = "event.%";
 
 /**
  * Webhook deliveries (webhooks/deliver.ts): outside the pipeline, no admission. pg-boss retries are off: the retry
@@ -147,7 +154,14 @@ export interface Queue {
  * `languageSelfHosted`: is the language model that is in force right now (the environment or an admin's override) a
  * self-hosted one? Asked at enqueue time, to size the backstop wall of the long LLM stages.
  */
-export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean, log: Logger, languageSelfHosted: () => boolean = () => false): Queue {
+export function createQueue(
+  config: Config,
+  pool: pg.Pool,
+  otelEnabled: boolean,
+  log: Logger,
+  languageSelfHosted: () => boolean = () => false,
+  handlerQueues: readonly EventHandlerQueue[] = [],
+): Queue {
   const boss = new PgBoss({
     db: { executeSql: (text, values) => pool.query(text, values) },
     schema: "pgboss",
@@ -162,7 +176,8 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
 
   const admission: Queue["admission"] = async (data, opts) => {
     const exec = opts?.db ?? { executeSql: (t: string, v?: unknown[]) => pool.query(t, v) };
-    // one statement; data->>'userId' has no index, but the live states are few rows next to completed history
+    // one statement; data->>'userId' has no index, but the live states are few rows next to completed history.
+    // event handler jobs can carry userId too, and are not pipeline work, so they are left out of the live count ($4).
     const res = await exec.executeSql(
       `with o as (select coalesce($2::text, (select user_id from projects where id = $1)) as uid)
        select o.uid as "userId",
@@ -170,9 +185,9 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
          (select count(*)::int from pgboss.job j where j.name = any($3::text[]) and j.data->>'by' = 'user' and j.data->>'userId' = o.uid and j.created_on > now() - interval '1 hour') as "userRendersLastHour"
        from o, lateral (
          select count(*)::int as live, (count(*) filter (where j.data->>'by' = 'user'))::int as "userLive"
-         from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid
+         from pgboss.job j where j.state in ('created','retry','active') and j.data->>'userId' = o.uid and j.name not like $4
        ) l`,
-      [data.projectId, data.userId ?? null, USER_RERUN_QUEUES],
+      [data.projectId, data.userId ?? null, USER_RERUN_QUEUES, EVENT_HANDLER_QUEUE_LIKE],
     );
     const r = res.rows[0] as Admission | undefined;
     return {
@@ -207,6 +222,20 @@ export function createQueue(config: Config, pool: pg.Pool, otelEnabled: boolean,
         await boss
           .updateQueue(q.name, { expireInSeconds: q.expireInSeconds, retryLimit: q.retryLimit })
           .catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
+      }
+      // one queue per event handler; its policy is the concurrency the handler opted into (policyOf)
+      for (const q of handlerQueues) {
+        const o = q.options;
+        const opts = {
+          retryLimit: o.retryLimit,
+          retryDelay: o.retryDelaySeconds,
+          retryBackoff: o.retryBackoff,
+          expireInSeconds: o.expireInSeconds,
+          deleteAfterSeconds: o.deleteAfterSeconds,
+        };
+        await boss.createQueue(q.name, { policy: q.policy, ...opts });
+        // createQueue is a no-op for an existing queue; keep its options in sync with the definition
+        await boss.updateQueue(q.name, opts).catch((err) => log.warn({ err, queue: q.name }, "updateQueue failed"));
       }
       // the http process sends to it too (test, resend), so it exists wherever the queue starts
       await boss.createQueue(WEBHOOK_QUEUE, { policy: "standard", retryLimit: 0, expireInSeconds: 120, deleteAfterSeconds: 3 * 24 * 3600 });
