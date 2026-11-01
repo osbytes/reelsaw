@@ -6,7 +6,7 @@
 # runs once on the build machine's own architecture ($BUILDPLATFORM).
 
 # ---------- models: downloaded once, natively ----------
-FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS models
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS models
 RUN apk add --no-cache curl
 COPY scripts/download-models.sh /tmp/download-models.sh
 RUN sh /tmp/download-models.sh /models
@@ -76,7 +76,7 @@ RUN --mount=type=secret,id=sentry_auth_token,required=false \
 
 # ---------- server for one target architecture: drop the other platforms' native binaries ----------
 # A separate stage (not a RUN in `runtime`): deleting files in a later layer wouldn't shrink the image.
-FROM --platform=$BUILDPLATFORM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS server
+FROM --platform=$BUILDPLATFORM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS server
 ARG TARGETARCH
 COPY --from=build /out/server /out/server
 RUN set -eu; \
