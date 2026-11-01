@@ -379,7 +379,7 @@ ships in the same image, and runs only with `REELSAW_EE=true` plus `STRIPE_SECRE
   its event row and a `billing.sync` job have committed together; the job rewrites the account's
   row from Stripe, so events that arrive late, twice or out of order converge. A daily reconcile
   and `reelsaw billing sync` repair anything a lost webhook left behind.
-- Settings → Billing shows the plan, the period's usage and the plan grid; Checkout and the
+- Settings → Plan and billing shows the plan, the period's usage and the plan grid; Checkout and the
   Billing Portal are Stripe's pages. `get_billing`, `billing_checkout_url` and `billing_portal_url` do the same over MCP;
   `reelsaw billing <email>` shows the row, Stripe's view and the last webhook events.
 - A failed payment keeps the plan for `BILLING_GRACE_DAYS` (7), then the account is on Free.
@@ -521,7 +521,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `get_instance_settings` | Admins only: the instance settings in force (sign-up mode, email verification, captcha, legal links, quotas, upload limits, retention, stall watchdog, update check, health details) and where each comes from. |
 | `list_workers` | Admins only: every Reelsaw process that has checked in (API, worker, combined app): CPU, memory, disk (free/total MB, -1 = unmeasurable; diskLeasedMB = free space jobs in flight have claimed on its volume), GPU, render slots, the queues it listens on, and its jobs. |
 | `get_failure` | Admins only: one failed project or clip (title, owner email, stage, full recorded reason, when). |
-| `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage, plus the jobs currently in flight (project title, attempt, started). |
+| `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
 | `set_instance_settings` | Admins only: change instance settings without a restart; every process applies them within seconds and the change is audited. |
