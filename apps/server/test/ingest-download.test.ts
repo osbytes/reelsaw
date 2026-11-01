@@ -60,6 +60,17 @@ describe("describeDownloadFailure", () => {
     );
     assert.equal(msg, "Could not download: Something obscure broke");
   });
+  it("says a page 404 / 410 is a dead link", () => {
+    const stderr = "ERROR: [generic] zapier-logo: Unable to download webpage: HTTP Error 404: Not Found (caused by <HTTPError 404: Not Found>)";
+    assert.match(describeDownloadFailure(new Error("x"), stderr), /link no longer exists/i);
+  });
+  it("does not call a 404 on the media URL, or one in a retry notice, a dead link", () => {
+    assert.doesNotMatch(describeDownloadFailure(new Error("x"), "ERROR: unable to download video data: HTTP Error 404: Not Found"), /no longer exists/i);
+    assert.doesNotMatch(
+      describeDownloadFailure(new Error("x"), "[download] Got error: HTTP Error 404: Not Found. Retrying (1/10)...\nERROR: Connection reset by peer"),
+      /no longer exists/i,
+    );
+  });
 });
 
 describe("lineSplitter", () => {

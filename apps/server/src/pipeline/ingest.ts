@@ -6,11 +6,17 @@ import { eq, sql } from "drizzle-orm";
 import { schema } from "../db/index.js";
 import { keys } from "../storage/index.js";
 import { QUEUES } from "../queue/boss.js";
-import { assertPublicHttpUrl } from "../lib/safe-url.js";
+import { UnresolvableHostError, UnsafeUrlError, assertPublicHttpUrl } from "../lib/safe-url.js";
 import { announcedDuration } from "../projects/peek.js";
-import { type StageContext, exists, sourceScratchMB } from "./common.js";
+import { type StageContext, NonRetryableError, SourceUnavailableError, exists, sourceScratchMB } from "./common.js";
 import { histogram, realtimeFactor } from "../metrics.js";
 import { sha256File } from "./bumpers.js";
+import { CommandError } from "../media.js";
+import { isPageMissing, isPermanentDownloadFailure, largestReportedFile } from "../ytdlp-errors.js";
+
+export { isPermanentDownloadFailure } from "../ytdlp-errors.js";
+
+const UPLOAD_MISSING = "Uploaded source file is missing";
 
 /** Scratch MB to copy the source onto this node, on top of MIN_FREE_DISK_MB. Known size (an upload, or a stored source) is the file plus a small probe margin; a link is unknown so we reserve 2 GB. */
 export function ingestScratchMB(knownBytes?: number | null) {
@@ -28,7 +34,8 @@ export async function ingest(ctx: StageContext) {
     !stored && project.sourceType === "upload"
       ? await ctx.db.query.uploads.findFirst({ where: eq(schema.uploads.id, String(project.sourceMeta?.uploadId ?? "")) })
       : undefined;
-  if (!stored && project.sourceType === "upload" && !upload) throw new Error("Uploaded source file is missing");
+  // the upload row is written before the project that names it, so a missing one is gone for good, not late
+  if (!stored && project.sourceType === "upload" && !upload) throw new NonRetryableError(UPLOAD_MISSING);
   await ctx.acquire("ingest", ingestScratchMB(stored ? project.sourceBytes : upload?.sizeBytes));
 
   let meta: Record<string, unknown> = project.sourceMeta ?? {};
@@ -42,7 +49,11 @@ export async function ingest(ctx: StageContext) {
   } else {
     if (project.sourceType === "url") {
       // web and MCP both land here, so one check covers every way of adding a link
-      await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS });
+      await assertPublicHttpUrl(project.sourceUrl ?? "", { allowPrivate: svc.settings.get().ALLOW_PRIVATE_SOURCE_URLS }).catch((err: unknown) => {
+        // a malformed or internal link is refused the same way every time; a DNS lookup that failed may work next time
+        if (err instanceof UnsafeUrlError && !(err instanceof UnresolvableHostError)) throw new NonRetryableError(err.message);
+        throw err;
+      });
       // refuse an over-limit video before fetching it, when the site tells us its length up front
       const announced = await announcedDurationOrNull(ctx, project.sourceUrl ?? "");
       if (announced) {
@@ -56,6 +67,7 @@ export async function ingest(ctx: StageContext) {
         }
       }
       let stderrTail = "";
+      let info: Record<string, unknown> | undefined;
       let downloaded = 0; // fraction so far; video then audio are two downloads, so never let the bar go backwards
       const t0 = performance.now();
       const { stdout, proxyId } = await svc.media
@@ -93,7 +105,10 @@ export async function ingest(ctx: StageContext) {
           },
         )
         .catch((err: Error) => {
-          throw new Error(describeDownloadFailure(err, stderrTail));
+          const message = describeDownloadFailure(err, stderrTail);
+          // a dead or unsupported link answers the same on every attempt: fail the run now rather than retry it
+          if (isPermanentDownloadFailure(`${err.message}\n${stderrTail}`)) throw new SourceUnavailableError(message);
+          throw new Error(message);
         });
       download = { proxy: proxyId, sec: (performance.now() - t0) / 1000 };
       const jsonLine = stdout
@@ -101,7 +116,7 @@ export async function ingest(ctx: StageContext) {
         .reverse()
         .find((l) => l.trim().startsWith("{"));
       if (jsonLine) {
-        const info = JSON.parse(jsonLine) as Record<string, unknown>;
+        info = JSON.parse(jsonLine) as Record<string, unknown>;
         meta = {
           ...meta,
           title: info.title,
@@ -126,10 +141,20 @@ export async function ingest(ctx: StageContext) {
       }
       const files = (await fs.readdir(dir)).filter((f) => f.startsWith("source."));
       const chosen = files.find((f) => f.endsWith(".mp4")) ?? files[0];
-      if (!chosen) throw new Error("yt-dlp finished but no source file was produced");
+      if (!chosen) {
+        // --max-filesize makes yt-dlp skip an over-limit download and still exit 0; the same video is as big next time
+        const limitMB = svc.settings.get().MAX_SOURCE_FILE_MB;
+        const largest = info ? largestReportedFile(info) : null;
+        if (largest !== null && largest > limitMB * 1024 * 1024) {
+          throw new NonRetryableError(
+            `Could not download: the video is larger than the ${limitMB} MB download limit (about ${Math.ceil(largest / 1024 / 1024)} MB). Try a shorter video, or upload the file instead (New project → Upload).`,
+          );
+        }
+        throw new Error("yt-dlp finished but no source file was produced");
+      }
       sourcePath = path.join(dir, chosen);
     } else {
-      if (!upload) throw new Error("Uploaded source file is missing");
+      if (!upload) throw new NonRetryableError(UPLOAD_MISSING);
       const ext = path.extname(upload.storageKey) || ".mp4";
       sourcePath = path.join(dir, `source${ext}`);
       await ctx.progress(0.3, "Copying your upload");
@@ -151,7 +176,7 @@ export async function ingest(ctx: StageContext) {
 
   await ctx.progress(0.9, "Probing media");
   const probe = await svc.media.ffprobe(sourcePath);
-  if (!probe.hasAudio) throw new Error("Source has no audio track; nothing to transcribe");
+  if (!probe.hasAudio) throw new NonRetryableError("Source has no audio track; nothing to transcribe");
   const sourceBytes = (await fs.stat(sourcePath)).size;
   // the exact bytes the transcript's timestamps refer to; a stored source already hashed keeps its hash
   if (!(stored && typeof meta.sha256 === "string")) meta = { ...meta, sha256: await sha256File(sourcePath) };
@@ -208,6 +233,10 @@ async function announcedDurationOrNull(ctx: StageContext, url: string): Promise<
     return await announcedDuration(ctx.svc.media, url, ctx.signal);
   } catch (err) {
     ctx.signal.throwIfAborted();
+    // the lookup already walked every proxy: a permanent answer here would be the download's answer too
+    const stderr = err instanceof CommandError ? err.stderr : "";
+    const text = `${err instanceof Error ? err.message : String(err)}\n${stderr}`;
+    if (err instanceof Error && isPermanentDownloadFailure(text)) throw new SourceUnavailableError(describeDownloadFailure(err, stderr));
     ctx.log.debug({ err }, "could not look up the video's length before downloading");
     return null;
   }
@@ -257,6 +286,9 @@ export function describeDownloadFailure(err: Error, stderr: string): string {
           ? "the video is age-restricted"
           : "the site blocked the download";
     return `Could not download: ${why}. Try uploading the file instead (New project → Upload).`;
+  }
+  if (isPageMissing(text)) {
+    return "Could not download: the link no longer exists (the site answered page not found). Check the URL, or upload the file instead (New project → Upload).";
   }
   if (/Unsupported URL|No video formats|Requested format is not available/i.test(text)) {
     return "Could not download: no usable video was found for this link. Try another URL, or upload the file instead (New project → Upload).";

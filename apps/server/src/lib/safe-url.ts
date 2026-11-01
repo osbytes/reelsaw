@@ -5,6 +5,9 @@ import { Agent, fetch as undiciFetch } from "undici";
 /** Thrown with a sentence a user can act on. */
 export class UnsafeUrlError extends Error {}
 
+/** The host did not resolve. Unlike the other refusals this can be transient (a DNS blip), so callers may retry it. */
+export class UnresolvableHostError extends UnsafeUrlError {}
+
 const INSIDE =
   "That address points inside this server's network, so it was not fetched. Use a public link, or ask the admin to set ALLOW_PRIVATE_SOURCE_URLS=true.";
 
@@ -124,7 +127,7 @@ export async function resolvePublicHttpUrl(raw: string, opts: SafeUrlOptions = {
   try {
     addrs = await lookup(host);
   } catch {
-    throw new UnsafeUrlError(`Could not find the address "${host}".`);
+    throw new UnresolvableHostError(`Could not find the address "${host}".`);
   }
   const first = addrs[0];
   if (!first || addrs.some((a) => isPrivateAddress(a.address))) throw new UnsafeUrlError(INSIDE);

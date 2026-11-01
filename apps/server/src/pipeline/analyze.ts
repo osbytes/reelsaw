@@ -5,7 +5,7 @@ import type { Services } from "../services.js";
 import type { UnitOfWork } from "../uow.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db, type Project } from "../db/index.js";
-import { ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
+import { NonRetryableError, ProjectGoneError, type StageContext, StageTimeoutError, StaleJobError, lockCurrentStage, modelsUsed } from "./common.js";
 import {
   MAP_PROMPT_VERSION,
   SCORE_PROMPT_VERSION,
@@ -407,6 +407,8 @@ export async function analyze(ctx: StageContext) {
   // gleaning: one extra pass when the first pick clustered at the start of a long window (or found ≤1). A window whose
   // extra pass fails (the model answered nonsense) just keeps its first picks; a timeout or a cancel is never skipped.
   const gleanIdx = chunks.map((ch, i) => (needsSecondLook(ch, perChunk[i]!, settings.minClipSeconds) ? i : -1)).filter((i) => i >= 0);
+  /** second passes that failed and were skipped: not saved as steps, so another attempt runs them again and may find more */
+  let gleanFailed = 0;
   await ctx.steps(gleanIdx, { concurrency, range: [0.4, 0.45], message: (d, t) => `Looking again in ${d}/${t} part(s)` }, async (i, _k, signal) => {
     const ch = chunks[i]!;
     const exclude = excludeRanges(perChunk[i]!);
@@ -421,6 +423,7 @@ export async function analyze(ctx: StageContext) {
         if (err instanceof StageTimeoutError || err instanceof StaleJobError || err instanceof ProjectGoneError || isAbortError(err) || ctx.signal.aborted)
           throw err;
         log.warn({ err, chunk: i }, "second map pass failed; keeping the first picks of this window");
+        gleanFailed++;
         return [];
       });
     perChunk[i]!.push(...more);
@@ -501,7 +504,9 @@ export async function analyze(ctx: StageContext) {
   const artifactModels = () => ({ ...modelsUsed(svc, "language"), ...(judgeId ? { judge: judgeId } : {}) });
   const failWithCandidates = async (message: string): Promise<never> => {
     await svc.tx((u) => u.artifact(projectId, "analyze", "candidates", candidatesArtifact({ failed: message }), artifactModels())).catch(() => {});
-    throw new Error(message);
+    // every model answer this verdict rests on is a saved step, so another attempt reaches the same one: fail the run now.
+    // A skipped second pass is the exception: it was not saved, and running it again may turn up a clip.
+    throw gleanFailed ? new Error(message) : new NonRetryableError(message);
   };
   if (!pooled.length) log.warn({ proposed: candidates.length, snapped: snapped.length }, "no usable candidates");
   if (!pooled.length) await failWithCandidates("The model did not return any usable clips. Try widening the clip duration range.");

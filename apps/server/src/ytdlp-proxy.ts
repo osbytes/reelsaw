@@ -43,6 +43,9 @@ import {
 } from "cockatiel";
 import type { Logger } from "./log.js";
 import { count, gauge, histogram } from "./metrics.js";
+import { classifyYtdlpError } from "./ytdlp-errors.js";
+
+export { classifyYtdlpError, type YtdlpErrorKind } from "./ytdlp-errors.js";
 
 const SCHEMES = new Set(["http:", "https:", "socks4:", "socks4a:", "socks5:", "socks5h:"]);
 const NEVER_ABORT = new AbortController().signal;
@@ -191,28 +194,6 @@ export function applyProxySession(url: string, session = newProxySession()): str
 function proxyArgs(url: string | null): string[] {
   if (!url) return [];
   return ["--proxy", applyProxySession(url)];
-}
-
-export type YtdlpErrorKind = "content" | "abort" | "proxy" | "other";
-
-/**
- * content = the video, not the path (private / unavailable / too big): do not try another proxy
- * and do not open this one's circuit. abort = the job was cancelled. proxy = the path failed
- * (bot check, 403, connection): trip the breaker and try the next. other = retry the next
- * without a reliability hit.
- */
-export function classifyYtdlpError(text: string): YtdlpErrorKind {
-  if (/\bAbortError\b|The operation was aborted|aborted by signal/i.test(text)) return "abort";
-  if (/this video is private|video unavailable|confirm your age|age-restricted|file is larger than max-filesize|requested format is not available/i.test(text))
-    return "content";
-  if (
-    /sign in to confirm|not a bot|HTTP Error 403|HTTP Error 429|unable to connect to proxy|\bproxy\b|\bsocks\b|connection (refused|reset|timed out)|timed out|timeout|network is unreachable|no route to host|temporary failure in name resolution|nodename nor servname|ssl|tls handshake/i.test(
-      text,
-    )
-  ) {
-    return "proxy";
-  }
-  return "other";
 }
 
 function errorText(err: unknown): string {

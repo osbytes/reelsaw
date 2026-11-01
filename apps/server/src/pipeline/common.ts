@@ -62,6 +62,12 @@ export class SourceExpiredError extends NonRetryableError {
   }
 }
 
+/**
+ * The link points at nothing downloadable for good (HTTP 404/410, an unsupported URL). Fetching it again returns the
+ * same answer, so the run fails at once with the user-facing reason instead of spending its retries.
+ */
+export class SourceUnavailableError extends NonRetryableError {}
+
 export class ProjectGoneError extends Error {
   constructor(id: string) {
     super(`project ${id} no longer exists`);
