@@ -38,8 +38,21 @@ module.exports = {
   },
   operation: {
     inputFields: [
-      { key: "projectId", label: "Project ID", required: true, helpText: "The clip's project (Project ID from a Reelsaw trigger)." },
-      { key: "clipId", label: "Clip ID", required: true, helpText: "The clip (Clip ID from a Reelsaw trigger or Find Project)." },
+      {
+        key: "projectId",
+        label: "Project",
+        required: true,
+        dynamic: "project_list.id.title",
+        altersDynamicFields: true,
+        helpText: "The clip's project: pick one, or map Project ID from a Reelsaw trigger.",
+      },
+      {
+        key: "clipId",
+        label: "Clip",
+        required: true,
+        dynamic: "clip_list.id.title",
+        helpText: "A rendered clip of that project: pick one, or map Clip ID from a Reelsaw trigger or Find Project.",
+      },
       {
         key: "kinds",
         label: "Files",

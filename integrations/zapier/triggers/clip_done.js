@@ -21,7 +21,7 @@ module.exports = hookTrigger({
   key: "clip_done",
   noun: "Clip",
   label: "Clip Rendered",
-  description: "Triggers each time a clip finishes rendering (clip.done), including re-renders and clips you add by hand.",
+  description: "Triggers when a clip finishes rendering (clip.done), each time: re-renders and clips you add by hand included.",
   event: "clip.done",
   performList,
   outputFields: fields.clipDone,

@@ -19,7 +19,7 @@ module.exports = hookTrigger({
   noun: "Project",
   label: "Project Finished",
   description:
-    "Triggers once when a project finishes (project.done), with every clip as line items, share links that need no sign-in, and the export zip.",
+    "Triggers when a project finishes (project.done), once, with every clip as line items, share links that need no sign-in, and the export zip.",
   event: "project.done",
   performList,
   outputFields: fields.projectDone,

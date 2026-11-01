@@ -26,7 +26,8 @@ module.exports = {
       label: "API Key",
       type: "password",
       required: true,
-      helpText: "In Reelsaw, open **Settings → API keys and MCP** and create a key (it starts with `rs_` and is shown once).",
+      helpText:
+        "In Reelsaw, open [Settings → API keys and MCP](https://app.reelsaw.com/settings) (on your own instance: Settings in its menu) and create a key. It starts with `rs_` and is shown once.",
     },
   ],
   test,

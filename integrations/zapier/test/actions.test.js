@@ -161,3 +161,34 @@ describe("Find Project", () => {
     expect(await appTester(perform, { authData, inputData: { projectId: "nope" } })).toEqual([]);
   });
 });
+
+describe("Dropdowns", () => {
+  it("lists the 100 most recent projects", async () => {
+    const first = mockTool("list_projects", ok({ projects: [{ id: "p1", title: "One", status: "done", clips: "2/2 rendered" }], total: 2, nextCursor: "c1" }));
+    const page0 = await appTester(App.triggers.project_list.operation.perform, { authData });
+    expect(first.arguments).toEqual({ limit: 100 });
+    expect(page0).toEqual([{ id: "p1", title: "One", status: "done", clips: "2/2 rendered" }]);
+  });
+
+  it("lists only the rendered clips of the picked project", async () => {
+    const seen = mockTool(
+      "get_project",
+      ok({
+        id: "p1",
+        clips: [
+          { id: "c1", index: 0, title: "Hook", status: "done", durationSec: 30 },
+          { id: "c2", index: 1, title: "Later", status: "rendering" },
+        ],
+      }),
+    );
+    const clips = await appTester(App.triggers.clip_list.operation.perform, { authData, inputData: { projectId: "p1" } });
+    expect(seen.arguments).toEqual({ id: "p1" });
+    expect(clips).toEqual([{ id: "c1", title: "#1 Hook", index: 0, durationSec: 30 }]);
+  });
+
+  it("lists no clips before a project is picked, or for a project that is gone", async () => {
+    expect(await appTester(App.triggers.clip_list.operation.perform, { authData, inputData: {} })).toEqual([]);
+    mockTool("get_project", toolError("NOT_FOUND: Project not found"));
+    expect(await appTester(App.triggers.clip_list.operation.perform, { authData, inputData: { projectId: "gone" } })).toEqual([]);
+  });
+});
