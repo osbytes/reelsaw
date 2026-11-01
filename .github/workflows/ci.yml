@@ -1,5 +1,6 @@
 # CI on every pull request and on main: typecheck, build the web bundle and the server bundle,
-# run the tests that need no running stack, and make sure the PR carries a changeset.
+# run the tests that need no running stack, and make sure the PR carries a changeset. The tests
+# that need the compose stack are stack.yml.
 name: ci
 
 on:
@@ -9,6 +10,11 @@ on:
 
 permissions:
   contents: read
+
+# a new push to a PR cancels its running checks; pushes to main each run to completion
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -100,74 +106,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
-
-  # Stack tests: the test files that import test/helpers.ts, against the real compose stack. The AI
-  # provider is scripts/mock-ai.mjs on the runner (the app refuses to boot without a reachable
-  # language and transcription model, by design). Separate job so the unit job stays fast; what it
-  # covers and does not is in docs/EVALS.md ("Stack tests in CI").
-  stack:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      # helpers.ts runs `docker compose exec/cp` from the repo root: keep every call on the same files
-      COMPOSE_FILE: docker-compose.yml:.github/compose.ci.yml
-      REELSAW_URL: http://localhost:3100
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # the server imports @reelsaw/shared from its dist, which only a build produces
-      - run: pnpm --filter @reelsaw/shared build
-      - name: mock AI provider (OpenAI-compatible, deterministic)
-        run: |
-          nohup node scripts/mock-ai.mjs > mock-ai.log 2>&1 &
-          for i in $(seq 1 20); do curl -fsS http://localhost:4545/v1/models >/dev/null && exit 0; sleep 1; done
-          cat mock-ai.log; exit 1
-      - name: throwaway .env (no real secrets)
-        run: |
-          {
-            echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"
-            echo "APP_URL=http://localhost:3100"
-            echo "PORT=3100"
-            echo "OPENAI_BASE_URL=http://host.docker.internal:4545/v1"
-            echo "OPENAI_API_KEY=mock"
-            echo "AI_MODEL=openai:mock"
-            echo "TRANSCRIPTION_MODEL=openai:whisper-1"
-          } > .env
-      # the image compose runs (reelsaw:latest), built with buildx so layers come from a cache: pushes
-      # to main write the `stack` scope (PRs can read main's caches, not each other's), and the
-      # release cache in GHCR covers the amd64 layers a release shares with this build. PRs only
-      # read, so they do not fill the 10 GB Actions cache quota.
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: build the image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          target: runtime
-          load: true
-          tags: reelsaw:latest
-          cache-from: |
-            type=gha,scope=stack
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/reelsaw:buildcache
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=stack,mode=max' || '' }}
-      - name: start the stack
-        run: docker compose up -d --no-build --wait --wait-timeout 900 app # Postgres is published on 127.0.0.1:5432
-      - run: curl -fsS http://localhost:3100/api/health
-      - run: pnpm --filter @reelsaw/server test
-      - name: app logs
-        if: failure()
-        run: docker compose logs --no-color app > app.log 2>&1 || true
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
-        with:
-          name: stack-app-logs
-          path: |
-            app.log
-            mock-ai.log
-          if-no-files-found: ignore

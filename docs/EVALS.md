@@ -376,9 +376,10 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
 `.github/workflows/ci.yml` (job `check`) runs, on every PR and on main:
 
 1. `pnpm --filter @reelsaw/server test:unit`: every file in `apps/server/test` that does **not** import
-   `./helpers.js` (`scripts/unit-tests.mjs` filters by that import; today 21 of 31 files). Files that
-   import it need the app at `REELSAW_URL` and Postgres on 127.0.0.1:5432, and drive `docker compose
-   exec`. A new test that needs no stack should simply not import helpers.
+   `./helpers.js`, `./lifecycle-harness.js`, `pg` or `createServices` (`scripts/unit-tests.mjs`
+   filters by those imports; today 81 of 109 files). Files that import them need the app at
+   `REELSAW_URL` and Postgres on 127.0.0.1:5432, and drive `docker compose exec`; they run in the
+   stack workflow below. A new test that needs no stack should simply not import them.
 2. `pnpm --filter @reelsaw/server models:download` (cached by `actions/cache`, keyed on
    `scripts/download-models.sh`), then `pnpm --filter @reelsaw/server eval:offline`: all suites
    with `--offline`. Suites that need an LLM/STT (`cuts`, `selection-model`, `transcription`) are
@@ -395,10 +396,11 @@ from auto-caption word timings (and `>>` speaker marks) checked against lip moti
 
 ### Stack tests in CI
 
-The `stack` job in `ci.yml` runs the test files that import `test/helpers.ts` (accounts, hosted,
+`.github/workflows/stack.yml` runs the test files that `test:unit` leaves out (accounts, hosted,
 import, mcp, project-settings, render-completion-deadlock, report, sampling-concurrency, settings,
-search and the rest) against the real compose stack, separate from the `check` job so unit CI stays
-fast. It:
+search and the rest) against the real compose stack. It is its own workflow so a PR or push that
+only touches `docs/`, `website/` or Markdown skips it, and it is not a required check. A new push
+to a PR cancels the run still going for the previous one. It:
 
 1. starts `scripts/mock-ai.mjs` on the runner (it answers `GET /v1/models`, chat completions and
    transcription with word timestamps), because the app refuses to boot without a reachable language
@@ -412,7 +414,8 @@ fast. It:
    (the override only adds the `host.docker.internal` mapping; the variable is set for the whole job so
    the helpers' `docker compose exec` / `cp` use the same files and project name), then curls
    `/api/health`;
-4. runs `pnpm --filter @reelsaw/server test` with `REELSAW_URL=http://localhost:3100`. `helpers.ts`
+4. runs `pnpm --filter @reelsaw/server test:stack` (only the stack files, two at a time like
+   `pnpm test`; `check` already ran the rest) with `REELSAW_URL=http://localhost:3100`. `helpers.ts`
    reads the Postgres password from `.env` (absent, so the default `reelsaw`) and connects to the
    published `127.0.0.1:5432`;
 5. on failure uploads `docker compose logs app` and the mock's log as the `stack-app-logs` artifact.
@@ -422,10 +425,10 @@ concurrency paths, with the deterministic mock as the model. What it does not: m
 returns fixed clips; that is the evals' job), anything needing a real URL download (`yt-dlp` against a
 live site), S3 storage and the GPU path.
 
-Not yet proven: the job was written without being run on a GitHub runner (the ~10 minute image build,
-`--wait` on the app's health check and the `host-gateway` mapping are the likely places to need a
-tweak on its first run). Treat a red first run as a setup bug before a product bug. Tests that need
-real provider keys or a second compose profile should be split out rather than skipped silently.
+Where the time goes (a PR run, about 5 minutes): the cached image build is about 2.5 minutes (pulling
+the `node_modules` layer, `pnpm -r build`, loading the image into Docker) and the stack tests about
+1.5. Tests that need real provider keys or a second compose profile should be split out rather than
+skipped silently.
 
 ## Fixtures
 

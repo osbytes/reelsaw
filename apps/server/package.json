@@ -19,6 +19,7 @@
     "bundle": "node scripts/bundle.mjs",
     "test": "node --import tsx --test --test-concurrency=2 test/*.test.ts",
     "test:unit": "node scripts/unit-tests.mjs",
+    "test:stack": "node scripts/unit-tests.mjs --stack",
     "eval:offline": "tsx src/eval/run.ts --offline",
     "creator-spans": "tsx src/eval/tools/creator-spans.ts",
     "models:download": "sh ../../scripts/download-models.sh models",
