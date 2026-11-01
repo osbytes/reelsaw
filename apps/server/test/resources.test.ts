@@ -154,7 +154,8 @@ describe("disk leases in acquire", () => {
       RESOURCE_WAIT_MAX_SECONDS: 0.001,
       ...extra,
     } as unknown as Config;
-    return createResourceGovernor(config, process.cwd(), log);
+    // floorMB: the MIN_FREE_DISK_MB staged here; free disk can move between this probe and a later acquire
+    return Object.assign(createResourceGovernor(config, process.cwd(), log), { floorMB: free - room });
   }
 
   it("two jobs cannot both pass on the same free bytes: the second waits for the first's lease, then gets in", async (t) => {
@@ -227,7 +228,7 @@ describe("disk leases in acquire", () => {
     assert.equal(seen[0]!.mb, 1000);
     assert.equal(seen[0]!.jobId, "j1");
     assert.equal(seen[0]!.projectId, "p1");
-    assert.equal(seen[0]!.requiredMB - seen[0]!.mb, seen[0]!.freeMB - 1500, "required = the floor plus the scratch");
+    assert.equal(seen[0]!.requiredMB - seen[0]!.mb, gov.floorMB, "required = the floor plus the scratch");
     assert.equal(gov.leases().ownMB, 1000, "own leases are still counted for the heartbeat");
     await lease.release();
     assert.equal(released, 1);
